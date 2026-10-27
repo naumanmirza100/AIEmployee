@@ -27,22 +27,20 @@ class EmailSwitchTests(TestCase):
         self.settings, _ = RecruiterEmailSettings.objects.update_or_create(
             company_user=self.recruiter, defaults={'followup_delay_hours': 1, 'reminder_hours_before': 5})
         now = timezone.now()
-        with mock.patch('recruitment_agent.signals.threading.Thread'):     # no background checks here
-            self.waiting = Interview.objects.create(
-                candidate_name='Cara', candidate_email='cara@test.local', job_role='Designer',
-                status='PENDING', available_slots_json='[]', company_user=self.recruiter,
-                invitation_sent_at=now - timedelta(hours=3))
-            self.booked = Interview.objects.create(
-                candidate_name='Dev', candidate_email='dev@test.local', job_role='Backend',
-                status='SCHEDULED', available_slots_json='[]', company_user=self.recruiter,
-                scheduled_datetime=now + timedelta(hours=5), timezone_name='UTC')
+        self.waiting = Interview.objects.create(
+            candidate_name='Cara', candidate_email='cara@test.local', job_role='Designer',
+            status='PENDING', available_slots_json='[]', company_user=self.recruiter,
+            invitation_sent_at=now - timedelta(hours=3))
+        self.booked = Interview.objects.create(
+            candidate_name='Dev', candidate_email='dev@test.local', job_role='Backend',
+            status='SCHEDULED', available_slots_json='[]', company_user=self.recruiter,
+            scheduled_datetime=now + timedelta(hours=5), timezone_name='UTC')
 
     def run_job(self):
         agent = mock.Mock()
         agent.send_followup_reminder.return_value = {'success': True}
         agent.send_pre_interview_reminder.return_value = {'success': True}
-        with mock.patch.object(tasks, 'get_interview_agent', return_value=agent), \
-                mock.patch('recruitment_agent.signals.threading.Thread'):
+        with mock.patch.object(tasks, 'get_interview_agent', return_value=agent):
             tasks.check_and_send_followup_emails()
         return agent
 

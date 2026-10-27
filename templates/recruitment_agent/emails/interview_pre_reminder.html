@@ -37,7 +37,7 @@
                     <tr>
                         <td style="padding:20px 40px 4px;">
                             <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#374151;">Dear {{ candidate_name }},</p>
-                            {% if hours_before == 24 %}
+                            {% if tomorrow %}
                             <p style="margin:0 0 8px;font-size:15px;line-height:1.65;color:#374151;">Just a friendly reminder that your interview for the <strong>{{ job_title }}</strong> position is scheduled for <strong>tomorrow</strong>. Here are the details so everything is easy to find.</p>
                             {% else %}
                             <p style="margin:0 0 8px;font-size:15px;line-height:1.65;color:#374151;">Just a friendly reminder that your interview for the <strong>{{ job_title }}</strong> position is coming up in about <strong>{{ hours_before }} hours</strong>. Here are the details so everything is easy to find.</p>
@@ -76,7 +76,7 @@
                     <tr>
                         <td style="padding:16px 40px 4px;">
                             <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.6;padding-left:14px;border-left:2px solid #e5e7eb;">
-                                This is an online interview. Please join a few minutes early using the meeting link, and check that your camera, microphone, and connection are working.
+                                This is an online interview. Please join a few minutes early using the meeting link{% if meeting_link %} (<a href="{{ meeting_link }}" style="color:#4f46e5;">{{ meeting_link }}</a>){% endif %}, and check that your camera, microphone, and connection are working.
                             </p>
                         </td>
                     </tr>

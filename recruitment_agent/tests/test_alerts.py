@@ -10,7 +10,7 @@ from unittest import mock
 from django.test import TestCase
 from django.utils import timezone
 
-from core.models import Company, CompanyUser
+from core.models import Company, CompanyModulePurchase, CompanyUser
 from core.notification_utils import notify_company_user
 from project_manager_agent.models import PMNotification
 from recruitment_agent.agents.interview_scheduling import interview_scheduling_agent as scheduling
@@ -21,6 +21,9 @@ class RecruitmentAlertTests(TestCase):
 
     def setUp(self):
         self.company = Company.objects.create(name='Acme', email='acme@test.local')
+        # Booking is closed for a company without Recruitment (CO-112).
+        CompanyModulePurchase.objects.create(company=self.company, module_name='recruitment_agent',
+                                             status='active', is_complimentary=True)
         self.recruiter = CompanyUser.objects.create(
             company=self.company, email='rae@test.local', full_name='Rae Recruiter',
             role='admin', password_hash='x', is_active=True)

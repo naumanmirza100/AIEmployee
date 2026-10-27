@@ -274,21 +274,6 @@ class InterviewSchedulingAgent:
         # Send invitation email
         email_sent = self.send_invitation_email(interview, available_slots)
         
-        # Trigger an immediate follow-up check (for testing - will skip if not enough time has passed)
-        try:
-            print(f"\n🔄 Triggering immediate follow-up check (for testing)...")
-            from recruitment_agent.tasks import check_and_send_followup_emails
-            import threading
-            def run_check():
-                import time
-                time.sleep(2)  # Wait 2 seconds to ensure interview is saved
-                stats = check_and_send_followup_emails()
-                print(f"✅ Immediate check completed: {stats}")
-            thread = threading.Thread(target=run_check)
-            thread.daemon = True
-            thread.start()
-        except Exception as e:
-            print(f"⚠️  Could not trigger immediate check: {str(e)}")
 
         if not email_sent:
             self._log_error("invitation_email_failed", {
@@ -614,6 +599,20 @@ class InterviewSchedulingAgent:
         try:
             interview = Interview.objects.get(id=interview_id)
 
+            # The checks live here, not only on the page: a second address called this with none of them, so a
+            # candidate's link could move a booked interview again and again, or bring back a cancelled or held
+            # one (CO-112). Only an invitation still waiting for a time can be booked.
+            if interview.status != 'PENDING':
+                return {"success": False, "error": (
+                    f"This interview is {interview.get_status_display().lower()} and can't be booked from this "
+                    "link. Please contact the recruiter.")}
+            from recruitment_agent.views import _BOOKING_CLOSED, _booking_is_closed
+            if _booking_is_closed(interview):
+                return {"success": False, "error": _BOOKING_CLOSED}
+            if interview.is_job_schedule_expired():
+                return {"success": False, "error": ("The scheduling period for this position has ended. "
+                                                    "Please contact the recruiter.")}
+
             from recruitment_agent.models import RecruiterInterviewSettings
             recruiter = interview.recruiter
             settings = interview_time.settings_for(interview)
@@ -640,20 +639,18 @@ class InterviewSchedulingAgent:
             selected_date = local_selected.date()
             now = timezone.now()
 
-            if schedule_from_date:
-                if selected_date < schedule_from_date:
-                    return {
-                        "success": False,
-                        "error": f"Selected date is before the allowed start date ({schedule_from_date})",
-                    }
-            else:
-                # Default: can't select past dates
-                if selected_datetime < now:
-                    return {
-                        "success": False,
-                        "error": "Cannot select a date in the past",
-                    }
-            
+            if schedule_from_date and selected_date < schedule_from_date:
+                return {
+                    "success": False,
+                    "error": f"Selected date is before the allowed start date ({schedule_from_date})",
+                }
+            # A time already gone is never bookable; it was checked only when the job had no start date (CO-112).
+            if selected_datetime < now:
+                return {
+                    "success": False,
+                    "error": "Cannot select a date in the past",
+                }
+
             if schedule_to_date:
                 if selected_date > schedule_to_date:
                     return {
@@ -1067,13 +1064,25 @@ class InterviewSchedulingAgent:
                 interview.selected_slot = selected_slot_display
                 interview.timezone_name = tz
                 interview.confirmation_token = secrets.token_urlsafe(32)
+                # A new time gets its own reminder; the old stamp skipped it (CO-116).
+                interview.pre_interview_reminder_sent_at = None
+                interview.confirmation_sent_at = timezone.now()
                 interview.save(update_fields=['status', 'scheduled_datetime', 'selected_slot', 'timezone_name',
-                                              'confirmation_token', 'updated_at'])
+                                              'confirmation_token', 'pre_interview_reminder_sent_at',
+                                              'confirmation_sent_at', 'updated_at'])
         except ScheduleConflict as clash:
             return {"success": False, "error": clash.text(), "code": clash.code,
                     "conflict": clash.payload()['data']}
 
-        email_sent = self.send_reschedule_email(interview)
+        # A time set by the recruiter for someone who never picked one left an online interview with no link,
+        # though the email promised one (CO-115). Made after the booking, as booking from the link does; an
+        # interview that already has a Google event is not given a second.
+        if (interview.interview_type or 'ONLINE') == 'ONLINE' and not interview.meeting_link:
+            link = None if interview.google_event_id else _create_google_meet_link(interview, interview.duration_minutes)
+            interview.meeting_link = link or _create_jitsi_meet_link(interview)
+            interview.save(update_fields=['meeting_link', 'google_event_id', 'google_event_state'])
+
+        email_sent = self.send_reschedule_email(interview, first_time=old_scheduled_datetime is None)
         from recruitment_agent import interviewer_alerts
         interviewer_alerts.tell(interview, 'moved')
         return {
@@ -1295,14 +1304,15 @@ class InterviewSchedulingAgent:
             self._log_error("confirmation_email_error", error_details)
             return False
 
-    def send_reschedule_email(self, interview: Interview) -> bool:
-        """Send reschedule notification email to candidate with new date/time. Must go to candidate."""
+    def send_reschedule_email(self, interview: Interview, first_time: bool = False) -> bool:
+        """Send reschedule notification email to candidate with new date/time. Must go to candidate.
+        `first_time`: the recruiter set the first time for someone who had not picked one."""
         try:
             job_title = self._get_job_title_for_email(interview)
             clean_job_title = self._clean_email_header(job_title)
             if len(clean_job_title) > 50:
                 clean_job_title = clean_job_title[:47] + "..."
-            subject = f"Interview Rescheduled - {clean_job_title}"
+            subject = f"Interview {'Scheduled' if first_time else 'Rescheduled'} - {clean_job_title}"
             # Include scheduled_datetime so template can show the new time clearly
             scheduled_dt = interview.scheduled_datetime
             scheduled_display = interview_time.when(interview) if scheduled_dt else (interview.selected_slot or '')
@@ -1313,6 +1323,8 @@ class InterviewSchedulingAgent:
                 'selected_slot': interview.selected_slot,
                 'scheduled_datetime': scheduled_dt,
                 'scheduled_display': scheduled_display,
+                'meeting_link': interview.meeting_link or '',
+                'first_time': first_time,
             }
             message = render_to_string('recruitment_agent/emails/interview_rescheduled.txt', context)
             html_message = render_to_string('recruitment_agent/emails/interview_rescheduled.html', context)
@@ -1549,7 +1561,7 @@ class InterviewSchedulingAgent:
     def send_pre_interview_reminder(
         self,
         interview_id: int,
-        hours_before: int = 24,
+        hours_before: int = None,
     ) -> Dict[str, Any]:
         """
         Send automated reminder before the interview.
@@ -1570,17 +1582,10 @@ class InterviewSchedulingAgent:
                     "error": "Interview is not scheduled or missing scheduled datetime",
                 }
             
-            # Calculate when to send reminder
-            reminder_time = interview.scheduled_datetime - timedelta(hours=hours_before)
+            # When to send is decided by tasks.reminder_due. The email says how long is really left: it said
+            # "tomorrow" from the setting, whatever the time (CO-116).
             now = timezone.now()
-
-            # Only send if we're within 2 hours of the reminder time
-            # This must match the window used in tasks.py and signals.py (±7200 seconds)
-            if abs((reminder_time - now).total_seconds()) > 7200:
-                return {
-                    "success": False,
-                    "error": f"Not the right time to send reminder (should be {hours_before} hours before interview)",
-                }
+            hours_before = max(1, round((interview.scheduled_datetime - now).total_seconds() / 3600))
             
             # Send reminder - use job title for subject and body
             job_title = self._get_job_title_for_email(interview)
@@ -1588,7 +1593,8 @@ class InterviewSchedulingAgent:
             if len(clean_job_title) > 40:
                 clean_job_title = clean_job_title[:37] + "..."
             
-            if hours_before == 24:
+            tomorrow = 18 <= hours_before <= 30
+            if tomorrow:
                 subject = f"Reminder: Interview Tomorrow - {clean_job_title}"
             else:
                 subject = f"Reminder: Interview in {hours_before} hours - {clean_job_title}"
@@ -1601,6 +1607,8 @@ class InterviewSchedulingAgent:
                 'scheduled_datetime': interview.scheduled_datetime,
                 'selected_slot': interview.selected_slot,
                 'hours_before': hours_before,
+                'tomorrow': tomorrow,
+                'meeting_link': interview.meeting_link or '',
             }
             
             print("\n" + "="*60)
@@ -1652,9 +1660,7 @@ class InterviewSchedulingAgent:
                 print("="*60 + "\n")
                 raise
             
-            # Update interview record to prevent duplicate reminders
-            interview.pre_interview_reminder_sent_at = timezone.now()
-            interview.save(update_fields=['pre_interview_reminder_sent_at'])
+            # The stamp that stops a second reminder is set by the periodic check, before sending (CO-185).
             
             self._log_step("pre_interview_reminder_sent", {
                 "interview_id": interview.id,

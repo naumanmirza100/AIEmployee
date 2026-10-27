@@ -5,7 +5,6 @@ link, or that an interview was over with no outcome recorded.
 """
 import json
 from datetime import timedelta
-from unittest import mock
 
 from django.db import connection
 from django.test import TestCase
@@ -21,10 +20,6 @@ from recruitment_agent.pipeline_digest import pipeline_items, send_pipeline_dige
 class PipelineDigestTests(TestCase):
 
     def setUp(self):
-        # Saving an interview starts a follow-up check on a thread; it has nothing to do with this.
-        patcher = mock.patch('recruitment_agent.signals._check_and_send_followup_async')
-        patcher.start()
-        self.addCleanup(patcher.stop)
         self.now = timezone.now()
         self.acme = self.company('Acme')
         self.ann = self.login(self.acme, 'ann@acme.test', 'Ann Ahmed')

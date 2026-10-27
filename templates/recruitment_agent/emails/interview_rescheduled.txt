@@ -1,18 +1,17 @@
 Dear {{ candidate_name }},
 
-Your interview has been rescheduled.
+{% if first_time %}Your interview has been scheduled.{% else %}Your interview has been rescheduled.{% endif %}
 
 Interview Details:
 - Position: {{ job_title }}
 - Interview Type: {{ interview_type }}
-- New Date & Time: {{ scheduled_display|default:selected_slot }}
-
+- {% if first_time %}Date & Time{% else %}New Date & Time{% endif %}: {{ scheduled_display|default:selected_slot }}
+{% if meeting_link %}- Meeting link: {{ meeting_link }}
+{% endif %}
 Please update your calendar and make sure to:
 - Arrive on time (or join the online meeting 5 minutes early)
 - Bring a copy of your resume
 - Prepare any questions you may have
-
-For online interviews, you will receive a meeting link separately.
 
 We look forward to meeting you!
 

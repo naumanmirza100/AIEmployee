@@ -1292,6 +1292,15 @@ def update_interview(request, interview_id):
                     'status': 'error',
                     'message': f'Invalid status. Must be one of: {", ".join(VALID_INTERVIEW_STATUSES)}'
                 }, status=status.HTTP_400_BAD_REQUEST)
+            # 'Rescheduled' chosen by hand left an interview no reminder or completion job looked at, and 'Scheduled'
+            # an interview with no time at all (CO-114). A new time is set with Reschedule.
+            if new_status == 'RESCHEDULED':
+                new_status = 'SCHEDULED'
+            if (new_status == 'SCHEDULED' and interview.status != 'SCHEDULED'
+                    and interview.scheduled_datetime is None):
+                return Response({'status': 'error', 'message': (
+                    'This interview has no time yet. Use Reschedule to set one; it is then Scheduled.')},
+                    status=status.HTTP_400_BAD_REQUEST)
             interview.status = new_status or interview.status
 
         # Setting a cancelled or completed interview back to Scheduled puts its

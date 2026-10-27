@@ -36,7 +36,7 @@ const STATUS_COLUMNS = [
   { id: 'PENDING',     label: 'Pending',      icon: Clock,         color: 'yellow' },
   { id: 'SCHEDULED',   label: 'Scheduled',    icon: CalendarCheck, color: 'green'  },
   { id: 'COMPLETED',   label: 'Completed',    icon: CheckCircle2,  color: 'blue'   },
-  { id: 'RESCHEDULED', label: 'Rescheduled',  icon: CalendarClock, color: 'purple' },
+  // No 'Rescheduled' column: those are Scheduled interviews with a new time (CO-114).
   { id: 'CANCELLED',   label: 'Cancelled',    icon: XCircle,       color: 'red'    },
 ];
 

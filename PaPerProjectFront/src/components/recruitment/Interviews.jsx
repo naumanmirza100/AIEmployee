@@ -697,7 +697,7 @@ const Interviews = ({ onUpdate }) => {
                             { v: 'SCHEDULED',   label: 'Scheduled'   },
                             { v: 'COMPLETED',   label: 'Completed'   },
                             { v: 'CANCELLED',   label: 'Cancelled'   },
-                            { v: 'RESCHEDULED', label: 'Rescheduled' },
+                            // No 'Rescheduled': a new time is set with Reschedule, and the interview is then Scheduled (CO-114).
                           ].map(({ v, label }) => {
                             const active = interview.status === v;
                             return (

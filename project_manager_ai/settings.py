@@ -380,7 +380,6 @@ MIDDLEWARE = [
     # Reports a logged-in screen calling an API address that doesn't exist here
     # (a frontend newer than this backend). Only looks at 404 responses.
     'api.middleware.unknown_endpoint.UnknownEndpointMiddleware',
-    'recruitment_agent.middleware.AutoInterviewFollowupMiddleware',  # Auto follow-up email checking
     'ai_sdr_agent.middleware.AutoLeadResearchMiddleware',  # Apify auto lead research every 24h
 ]
 
@@ -792,7 +791,6 @@ LOGGING = {
         # These run on a timer and log the same "nothing to do" lines forever
         # (follow-up checks every few seconds, interview scans, token resets).
         # At WARNING they stay silent unless something actually goes wrong.
-        'recruitment_agent.middleware': {'level': 'WARNING'},
         'recruitment_agent.tasks': {'level': 'WARNING'},
         'ai_sdr_agent.scheduler': {'level': 'WARNING'},
         'marketing_agent.tasks': {'level': 'WARNING'},
@@ -820,7 +818,7 @@ if os.getenv('VERBOSE_LOGS', '').strip().lower() in ('1', 'true', 'yes'):
     for _name in (
         'httpx', 'httpcore', 'openai', 'groq', 'anthropic', 'urllib3',
         'apscheduler', 'asyncio',
-        'recruitment_agent.middleware', 'recruitment_agent.tasks',
+        'recruitment_agent.tasks',
         'ai_sdr_agent.scheduler', 'ai_sdr_agent.tasks',
         'ai_sdr_agent.middleware', 'marketing_agent.tasks',
         'api.views.pm_agent',
@@ -1213,6 +1211,13 @@ CELERY_BEAT_SCHEDULE = {
     },
 
     # Overdue tasks (CO-62): each person told once, the morning after a task's due date - daily, 04:00 UTC
+    # Recruitment's follow-ups to unanswered invitations and reminders before interviews. A thread inside the web
+    # server sent them every 30 seconds, beside two more senders (CO-185).
+    'recruitment-interview-followups': {
+        'task': 'recruitment_agent.tasks.send_interview_followups',
+        'schedule': 300.0,
+        'options': {'expires': 300},
+    },
     'tell-overdue-tasks': {
         'task': 'project_manager_agent.tell_overdue_tasks',
         'schedule': _crontab(hour=4, minute=0),
