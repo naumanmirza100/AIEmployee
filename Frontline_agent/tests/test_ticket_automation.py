@@ -2,7 +2,8 @@
 
 Customer tickets (chat hand-off, web form, email) arrived as "medium / other" and stayed that way until someone pressed
 Re-triage, and nothing answered a simple one. Two switches, both off until an admin turns them on: classify incoming
-tickets with the triage staff tickets use, and answer web-form and email tickets the knowledge base is sure about.
+tickets with the triage staff tickets use, and answer web-form and email tickets the knowledge base answers, when a
+small AI check finds the message a simple question and the reply a full answer (mocked here as passing).
 """
 import json
 from datetime import timedelta
@@ -37,6 +38,9 @@ class TicketAutomationTests(FrontlineTestCase):
         self.company.frontline_widget_key = KEY
         self.company.frontline_widget_config = {'require_captcha': False}
         self.company.save(update_fields=['frontline_widget_key', 'frontline_widget_config'])
+        from Frontline_agent import ticket_automation
+        self.check = mock.patch.object(ticket_automation, '_safe_to_send', return_value=True).start()
+        self.addCleanup(mock.patch.stopall)
 
     def switch_on(self, classify=False, resolve=False):
         self.company.frontline_widget_config = {
@@ -129,13 +133,41 @@ class TicketAutomationTests(FrontlineTestCase):
         self.assertEqual(mail.outbox[0].to, ['sana@customer.test'])
 
     def test_an_answer_that_is_not_sure_is_left_for_a_person(self):
+        from core.Frontline_agent.frontline_agent import NOT_IN_THE_DOCUMENTS
         self.switch_on(resolve=True)
-        for answer in ({**SURE, 'confidence': 'medium'}, {**SURE, 'has_verified_info': False},
-                       {**SURE, 'answer': "I don't have information about refunds for that plan."}):
+        for answer in ({**SURE, 'has_verified_info': False},
+                       {**SURE, 'answer': "I don't have information about refunds for that plan."},
+                       {**SURE, 'answer': NOT_IN_THE_DOCUMENTS}):
             mail.outbox.clear()
-            ticket = self.email_in(answer=answer, message_id=f'<{answer["confidence"]}-{len(answer["answer"])}@t>')
+            ticket = self.email_in(answer=answer, message_id=f'<{len(answer["answer"])}-{answer["has_verified_info"]}@t>')
             self.assertEqual((ticket.status, ticket.auto_resolved), ('new', False), answer)
             self.assertEqual(mail.outbox, [])
+
+    def test_a_reply_the_check_does_not_pass_is_left_for_a_person(self):
+        self.switch_on(resolve=True)
+        self.check.return_value = False
+        ticket = self.email_in()
+        self.assertEqual((ticket.status, ticket.auto_resolved), ('new', False))
+        self.assertEqual(mail.outbox, [])
+
+    def test_a_medium_search_match_is_answered_when_the_check_passes(self):
+        # Search confidence never reached 'high' on the live site, so nothing was ever answered (27 Oct).
+        self.switch_on(resolve=True)
+        ticket = self.email_in(answer={**SURE, 'confidence': 'medium', 'best_score': None})
+        self.assertEqual((ticket.status, ticket.auto_resolved), ('auto_resolved', True))
+        question, answer = self.check.call_args.args[1:]
+        self.assertEqual(answer, SURE['answer'])
+
+    def test_the_check_asks_whether_the_message_is_simple_and_fully_answered(self):
+        from Frontline_agent import ticket_automation
+        mock.patch.stopall()
+        ticket = self.make_ticket(title='Backups', description='How long do you keep backups?')
+        for raw, expected in (('{"simple_question": true, "fully_answered": true, "confidence": 0.9}', True),
+                              ('{"simple_question": false, "fully_answered": true, "confidence": 0.9}', False),
+                              ('{"simple_question": true, "fully_answered": true, "confidence": 0.5}', False),
+                              ('not json', False)):
+            with mock.patch.object(FrontlineAgent, '_call_llm', return_value=raw):
+                self.assertIs(ticket_automation._safe_to_send(ticket, 'q', 'a'), expected, raw)
 
     def test_a_chat_hand_off_is_never_answered_by_the_ai(self):
         self.switch_on(resolve=True)

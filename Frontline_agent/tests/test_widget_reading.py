@@ -151,7 +151,7 @@ class PromptTests(FrontlineTestCase):
         found = [{'answer': 'Support hours are 9 to 6.', 'type': 'document', 'source': 'Guide'}]
         customer = get_knowledge_prompt('What are your hours?', found, for_customer=True)
         team = get_knowledge_prompt('What are your hours?', found)
-        self.assertIn('never tell them to contact us by chat', customer)
+        self.assertIn('never tell them to contact us', customer)
         self.assertNotIn('**Details**', customer)
         self.assertIn('**Details**', team)
 
