@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from core.api_key_service import KeyServiceError
 from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.log_service import LogService
 from recruitment_agent.agents.summarization.prompts import SUMMARIZATION_SYSTEM_PROMPT
@@ -178,6 +179,10 @@ class SummarizationAgent:
                         })
                         return llm_result
                 except Exception as llm_exc:
+                    # No key, or the allowance is used up: the run stops with that message. It used to carry on and
+                    # score the rest with rules, saying nothing (CO-221).
+                    if isinstance(llm_exc, KeyServiceError):
+                        raise
                     # Check if it's an auth error (API key expired)
                     from recruitment_agent.core import GroqClientError
                     import time
@@ -309,6 +314,8 @@ class SummarizationAgent:
                                         # Different error - break and fall through
                                         break
                                 except Exception as retry_exc:
+                                    if isinstance(retry_exc, KeyServiceError):
+                                        raise
                                     # Other error during retry - break and fall through
                                     self._log_error("llm_retry_error", retry_exc)
                                     break
@@ -441,6 +448,8 @@ class SummarizationAgent:
                                     })
                                     return minimal_result
                             except Exception as minimal_exc:
+                                if isinstance(minimal_exc, KeyServiceError):
+                                    raise
                                 self._log_error("llm_minimal_failed", minimal_exc)
                                 # Fall through to rule-based fallback
                         else:
@@ -565,9 +574,9 @@ class SummarizationAgent:
             
         except Exception as exc:
             self._log_error("llm_summarize_error", exc)
-            # Re-raise GroqClientError to check for auth errors in caller
+            # Re-raise GroqClientError to check for auth errors in caller; key and allowance errors stop the run
             from recruitment_agent.core import GroqClientError
-            if isinstance(exc, GroqClientError):
+            if isinstance(exc, (GroqClientError, KeyServiceError)):
                 raise
             return None
 
@@ -1026,7 +1035,7 @@ Return ONLY JSON, no other text."""
         except Exception as exc:
             self._log_error("llm_summarize_minimal_error", exc)
             from recruitment_agent.core import GroqClientError
-            if isinstance(exc, GroqClientError):
+            if isinstance(exc, (GroqClientError, KeyServiceError)):
                 raise
             return None
     

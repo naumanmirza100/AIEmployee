@@ -964,11 +964,9 @@ def update_job_description(request, job_description_id):
         title = request.data.get('title', '').strip()
         description = request.data.get('description', '').strip()
         is_active = request.data.get('is_active', job_desc.is_active)
-        location = request.data.get('location', '').strip() or None
-        department = request.data.get('department', '').strip() or None
         job_type = request.data.get('type', job_desc.type).strip()
-        requirements = request.data.get('requirements', '').strip() or None
-        description_updated = 'description' in request.data
+        # Keywords are worked out again only when the description really changes; every edit re-ran the AI (CO-225).
+        description_updated = bool(description) and description != (job_desc.description or '').strip()
 
         if title:
             job_desc.title = title
@@ -976,14 +974,13 @@ def update_job_description(request, job_description_id):
             job_desc.description = description
 
         job_desc.is_active = is_active
-        if location is not None:
-            job_desc.location = location
-        if department is not None:
-            job_desc.department = department
+        # Sent empty means cleared: an empty location, department or requirements kept the old value, though the
+        # screen said 'updated' (CO-225).
+        for field in ('location', 'department', 'requirements'):
+            if field in request.data:
+                setattr(job_desc, field, (request.data.get(field) or '').strip() or None)
         if job_type:
             job_desc.type = job_type
-        if requirements is not None:
-            job_desc.requirements = requirements
 
         if 'application_open_date' in request.data:
             job_desc.application_open_date = request.data.get('application_open_date') or None
@@ -1066,6 +1063,42 @@ def delete_job_description(request, job_description_id):
             'status': 'error',
             'message': f'Delete failed: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def schedule_next_interview(request, interview_id):
+    """The onsite interview after a first one whose decision is 'Onsite Interview' (CO-272): a new interview for the
+    same candidate, type Onsite, with the usual invitation to pick a time. The candidate was told 'Onsite Interview'
+    and nothing let the recruiter arrange it."""
+    company_user = request.user
+    first = sharing.interviews(company_user).select_related('cv_record__job_description').filter(id=interview_id).first()
+    if first is None:
+        return Response({'status': 'error', 'message': 'Interview not found'}, status=status.HTTP_404_NOT_FOUND)
+    if first.status != 'COMPLETED' or first.outcome != 'ONSITE_INTERVIEW':
+        return Response({'status': 'error', 'message': (
+            'An onsite interview follows a completed interview whose decision is Onsite Interview.')},
+            status=status.HTTP_400_BAD_REQUEST)
+    if Interview.objects.filter(cv_record=first.cv_record, interview_type='ONSITE').exclude(id=first.id).exclude(
+            status__in=['CANCELLED', 'COMPLETED']).exists():
+        return Response({'status': 'error', 'message': 'This candidate already has an onsite interview arranged.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    job = first.cv_record.job_description if first.cv_record_id else None
+    from recruitment_agent.interview_time import bookable_slots, no_slots_message
+    if job is not None and bookable_slots(job) <= 0:
+        return Response({'status': 'error', 'message': no_slots_message(job)}, status=status.HTTP_400_BAD_REQUEST)
+    owner = sharing.owner(job, company_user)
+    result = InterviewSchedulingAgent(log_service=LogService()).schedule_interview(
+        candidate_name=first.candidate_name, candidate_email=first.candidate_email,
+        job_role=(job.title if job else first.job_role), interview_type='ONSITE',
+        candidate_phone=first.candidate_phone, cv_record_id=first.cv_record_id, recruiter_id=None,
+        company_user_id=company_user.id, email_settings=sharing.email_settings(owner), custom_slots=None)
+    return Response({'status': 'success', 'data': {'interview_id': result.get('interview_id'),
+                                                   'invitation_sent': bool(result.get('invitation_sent'))},
+                     'message': (f'Onsite interview arranged: {first.candidate_name} was invited to pick a time.'
+                                 if result.get('invitation_sent') else
+                                 'Onsite interview made, but the invitation email could not be sent.')})
 
 
 @api_view(['DELETE', 'POST'])
@@ -1936,6 +1969,9 @@ def list_cv_records(request):
                 'file_name': cv.file_name,
                 'role_fit_score': cv.role_fit_score,
                 'rank': ranks.get(cv.id),
+                # Scored by the built-in rules because the AI failed; the screen marks it (CO-221).
+                'scored_without_ai': (insights_data.get('summarization_source') == 'rule_based_fallback'
+                                      if isinstance(insights_data, dict) else False),
                 'qualification_decision': cv.qualification_decision,
                 'qualification_confidence': cv.qualification_confidence,
                 'qualification_priority': cv.qualification_priority,
@@ -2681,8 +2717,12 @@ def interview_settings(request):
             
             update_availability_only = request.data.get('update_availability', False)
 
-            # Saving settings from the browser states the zone its times are in.
-            if browser_tz:
+            # Saving settings from the browser states the zone its times are in, but only when it sets those times.
+            # A colleague elsewhere who only switched one slot off moved every slot of the job to their own zone
+            # (CO-222).
+            sets_times = any(key in request.data for key in
+                             ('schedule_from_date', 'schedule_to_date', 'start_time', 'end_time', 'interview_time_gap'))
+            if browser_tz and (not settings.timezone_name or (sets_times and not update_availability_only)):
                 settings.timezone_name = zone_name(browser_tz, default=settings.timezone_name or '')
             
             if 'schedule_from_date' in request.data:

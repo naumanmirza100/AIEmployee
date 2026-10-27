@@ -3,7 +3,9 @@ Dear {{ candidate_name }},
 Your interview outcome for the {{ job_title }} position has been updated.
 
 Decision: {{ outcome_label }}
-
+{% if outcome_class == 'onsite' %}
+We would like to invite you to an onsite interview. We will be in touch with the time and place.
+{% endif %}
 Thank you for your time and interest.
 
 Best regards,

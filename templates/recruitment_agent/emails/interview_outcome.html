@@ -60,7 +60,7 @@
                                 <tr>
                                     <td style="padding:14px 20px;">
                                         <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Outcome</span><br>
-                                        <span class="outcome-value{% if outcome_class %} {{ outcome_class }}{% endif %}" style="font-size:15px;font-weight:600;">{{ outcome_label }}</span>
+                                        <span class="outcome-value{% if outcome_class %} {{ outcome_class }}{% endif %}" style="font-size:15px;font-weight:600;">{{ outcome_label }}</span>{% if outcome_class == 'onsite' %}<br><span style="font-size:14px;color:#374151;">We would like to invite you to an onsite interview. We will be in touch with the time and place.</span>{% endif %}
                                     </td>
                                 </tr>
                             </table>

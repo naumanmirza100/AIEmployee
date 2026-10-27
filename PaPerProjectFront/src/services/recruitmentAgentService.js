@@ -608,6 +608,9 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
   }
 };
 
+/** The onsite interview after a completed one decided 'Onsite Interview' (CO-272). */
+export const scheduleNextInterview = async (interviewId) => companyApi.post(`/recruitment/interviews/${interviewId}/next`, {});
+
 /** Remove one candidate: their record, CV file, application and interviews (CO-183). */
 export const deleteCandidate = async (recordId) => companyApi.delete(`/recruitment/cv-records/${recordId}/delete`);
 

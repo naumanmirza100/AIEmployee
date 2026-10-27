@@ -367,6 +367,7 @@ const CVRecords = () => {
                             <div className="flex items-center gap-2 flex-wrap">
                               {record.rank != null && <Badge variant="outline" className="text-xs shrink-0">#{record.rank}</Badge>}
                               <h3 className="font-semibold text-sm truncate">{displayName}</h3>
+                              {record.scored_without_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The AI could not score this CV, so built-in rules did. Process it again to score it with AI.">scored without AI</Badge>}
                             </div>
                           </div>
                           <div className="shrink-0">{getDecisionBadge(record.qualification_decision)}</div>
@@ -424,7 +425,7 @@ const CVRecords = () => {
                           <Checkbox id={`REC-cvrecords-select-${record.id}`} data-testid={`REC-cvrecords-select-${record.id}`} checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} className="translate-y-0.5" />
                         </TableCell>
                         <TableCell className="font-medium">{record.rank != null ? record.rank : '—'}</TableCell>
-                        <TableCell>{displayName}</TableCell>
+                        <TableCell>{displayName}{record.scored_without_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The AI could not score this CV, so built-in rules did. Process it again to score it with AI.">scored without AI</Badge>}</TableCell>
                         <TableCell className="text-muted-foreground">{displayEmail}</TableCell>
                         <TableCell className="max-w-[180px] truncate" title={record.job_description_title}>{record.job_description_title || '—'}</TableCell>
                         <TableCell>{getDecisionBadge(record.qualification_decision)}</TableCell>

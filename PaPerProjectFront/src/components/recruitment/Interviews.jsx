@@ -18,7 +18,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions, submitInterviewFeedback } from '@/services/recruitmentAgentService';
+import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions, submitInterviewFeedback, scheduleNextInterview } from '@/services/recruitmentAgentService';
 import SearchableSelect from '@/components/ui/searchable-select';
 import InterviewKanban from './InterviewKanban';
 import InterviewersDialog from './InterviewersDialog';
@@ -173,6 +173,20 @@ const Interviews = ({ onUpdate }) => {
     } finally {
       setUpdatingId(null);
       setPendingChange(null);
+    }
+  };
+
+  const handleNextInterview = async (interview) => {
+    try {
+      setUpdatingId(interview.id);
+      const res = await scheduleNextInterview(interview.id);
+      toast({ title: 'Onsite interview', description: res?.message });
+      fetchInterviews();
+      if (onUpdate) onUpdate();
+    } catch (error) {
+      toast({ title: 'Not arranged', description: error?.message, variant: 'destructive' });
+    } finally {
+      setUpdatingId(null);
     }
   };
 
@@ -668,6 +682,16 @@ const Interviews = ({ onUpdate }) => {
                         Add Feedback
                       </button>
                     )
+                  )}
+
+                  {/* Decided 'Onsite Interview': arrange it (CO-272). */}
+                  {interview.status === 'COMPLETED' && interview.outcome === 'ONSITE_INTERVIEW' && (
+                    <button type="button" data-testid={`REC-interviews-next-onsite-btn-${interview.id}`}
+                      onClick={() => handleNextInterview(interview)} disabled={updatingId === interview.id}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-violet-800 bg-violet-950/40 px-3 py-1.5 text-xs font-medium text-violet-300 hover:bg-violet-900/50 transition-colors disabled:opacity-50">
+                      <CalendarClock className="h-3.5 w-3.5 text-violet-400" />
+                      Schedule onsite interview
+                    </button>
                   )}
 
                   <div className="flex-1" />

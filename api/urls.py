@@ -406,6 +406,7 @@ urlpatterns = [
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/update/?$', recruitment_agent.update_interview, name='recruitment_update_interview'),  # PATCH/PUT
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/reschedule-slots/?$', recruitment_agent.get_reschedule_slots, name='recruitment_get_reschedule_slots'),  # GET
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/reschedule/?$', recruitment_agent.reschedule_interview, name='recruitment_reschedule_interview'),  # POST
+    re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/next/?$', recruitment_agent.schedule_next_interview, name='recruitment_schedule_next_interview'),  # POST (CO-272)
     re_path(r'^recruitment/cv-records/?$', recruitment_agent.list_cv_records, name='recruitment_list_cv_records'),  # GET
     re_path(r'^recruitment/cv-records/bulk-update/?$', recruitment_agent.bulk_update_cv_records, name='recruitment_bulk_update_cv_records'),  # POST
     re_path(r'^recruitment/cv-records/(?P<record_id>\d+)/?$', recruitment_agent.get_cv_record_detail, name='recruitment_get_cv_record_detail'),  # GET
