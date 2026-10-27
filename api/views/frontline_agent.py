@@ -132,7 +132,10 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
                 )
                 continue
             seen_for_event = True
-            recipient_email = getattr(ticket.created_by, 'email', '') or ''
+            recipient_email, customer_name = _ticket_customer(ticket)
+            if not recipient_email:
+                logger.info("Notification trigger: template %s skipped, ticket %s has no customer address", t.id, ticket.id)
+                continue
             if not _should_send_notification_to_recipient(company_id, recipient_email, t.channel, event_type):
                 logger.info(f"Notification trigger: skipped template {t.id} for {recipient_email} (user preferences)")
                 continue
@@ -142,7 +145,7 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
                 'ticket_id': ticket.id,
                 'ticket_title': ticket.title,
                 'resolution': ticket.resolution or '',
-                'customer_name': getattr(ticket.created_by, 'email', '') or '',
+                'customer_name': customer_name,
             }
             created, existing_id = _create_scheduled_notification_dedup(
                 company_id=company_id,
@@ -311,6 +314,25 @@ def _create_scheduled_notification_dedup(*, company_id, template, scheduled_at,
         return True, n.id
 
 
+def _ticket_customer(ticket):
+    """(email, name) of the person a ticket is for: its contact, the customer.
+
+    Automatic emails used `ticket.created_by`, which is a system account for chat and email tickets
+    (noreply-handoff@frontline.local, the inbound bot) and the company's first login for contact-form tickets: "email
+    the customer" went to a bot, or to staff. A staff ticket with no contact keeps the person who raised it.
+    """
+    from Frontline_agent.satisfaction import customer_email
+    contact = getattr(ticket, 'contact', None)
+    if contact is not None:
+        email = customer_email(ticket)
+        return email, ((getattr(contact, 'name', '') or '').strip() or email)
+    creator = getattr(ticket, 'created_by', None)
+    email = (getattr(creator, 'email', '') or '').strip()
+    if getattr(creator, 'username', '') in SYSTEM_TICKET_ACCOUNTS or email.lower().endswith(('.local', '.invalid')):
+        email = ''
+    return email, email
+
+
 def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old_status=None):
     """
     Run workflows whose trigger_conditions match this ticket event.
@@ -329,13 +351,14 @@ def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old
                 continue
             if event_type == 'ticket_updated' and tc.get('status') is not None and ticket.status != tc.get('status'):
                 continue
+            customer_address, customer_name = _ticket_customer(ticket)
             context_data = {
                 'ticket_id': ticket.id,
                 'ticket_title': ticket.title,
                 'description': getattr(ticket, 'description', '') or '',
                 'resolution': (ticket.resolution or ''),
-                'customer_name': getattr(ticket.created_by, 'email', '') or '',
-                'recipient_email': getattr(ticket.created_by, 'email', '') or '',
+                'customer_name': customer_name,
+                'recipient_email': customer_address,
                 'status': ticket.status,
                 'priority': ticket.priority,
                 'category': ticket.category,
@@ -2063,7 +2086,8 @@ def public_submit(request):
                 ticket.save(update_fields=['description', 'updated_at'])
 
         _run_notification_triggers(company.id, 'ticket_created', ticket)
-        _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
+        # The company's "when a ticket is created" workflows run in ticket_automation (queued above), after the ticket
+        # is classified, so their category and priority conditions see the real ones.
         # The customer is told by email that it arrived, with its reference (Frontline_agent/customer_mail.py).
         from Frontline_agent.customer_mail import acknowledge_web_form
         acknowledge_web_form(ticket, message)

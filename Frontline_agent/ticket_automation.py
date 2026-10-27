@@ -10,6 +10,9 @@ both off until an admin turns them on (Chat widget tab, "Ticket automation"):
   customer's reply comes back onto the ticket and reopens it (inbound email does that for every resolved ticket). A
   chat hand-off is never answered this way: that customer asked for a person.
 
+After classifying, the company's own "when a ticket is created" workflows run for the ticket (run_new_ticket_workflows),
+so their category and priority conditions see the classified ticket.
+
 It runs on a Celery worker once the ticket is committed, never inside the customer's request.
 """
 import logging
@@ -94,10 +97,19 @@ def suggest_triage(company_id, title, description):
     }
 
 
+def has_new_ticket_workflows(company):
+    """Whether the company has an active workflow that runs when a ticket is created."""
+    from Frontline_agent.models import FrontlineWorkflow
+    return any((w.trigger_conditions or {}).get('on') == 'ticket_created'
+               for w in FrontlineWorkflow.objects.filter(company=company, is_active=True).only('trigger_conditions'))
+
+
 def queue(ticket, channel):
-    """Hand a new customer ticket to the worker, when the company has a switch on that applies to it."""
+    """Hand a new customer ticket to the worker, when the company has a switch on that applies to it, or a workflow
+    that runs when a ticket is created."""
     on = switches(ticket.company)
-    if not (on['classify_incoming'] or (on['resolve_from_knowledge'] and channel in RESOLVABLE_CHANNELS)):
+    if not (on['classify_incoming'] or (on['resolve_from_knowledge'] and channel in RESOLVABLE_CHANNELS)
+            or has_new_ticket_workflows(ticket.company)):
         return False
 
     def send():
@@ -119,13 +131,31 @@ def handle(ticket_id, channel):
     ticket = Ticket.objects.select_related('company', 'contact').filter(pk=ticket_id).first()
     if not ticket or not ticket.company or not has_module(ticket.company, 'frontline_agent'):
         return {'classified': False, 'resolved': False}
+    from core.api_key_service import KeyServiceError
     on = switches(ticket.company)
     done = {'classified': False, 'resolved': False}
     if on['classify_incoming']:
-        done['classified'] = classify(ticket)
+        try:
+            done['classified'] = classify(ticket)
+        except KeyServiceError as exc:
+            # No AI: the ticket keeps the category and priority it came in with, and its workflows still run.
+            logger.info("Ticket %s not classified: %s", ticket.id, exc)
+    run_new_ticket_workflows(ticket)
     if on['resolve_from_knowledge'] and channel in RESOLVABLE_CHANNELS:
         done['resolved'] = resolve_from_knowledge(ticket)
     return done
+
+
+def run_new_ticket_workflows(ticket):
+    """The company's "when a ticket is created" workflows for a customer ticket, once it is classified.
+
+    They used to run only for contact-form and staff tickets, and the form's ran while the request was still open,
+    before classification: a chat hand-off or an emailed ticket ran no workflow at all, and a workflow for "billing"
+    or "urgent" tickets never matched a customer's, which were all still "other" and "medium" then.
+    """
+    from api.views.frontline_agent import _run_workflow_triggers
+    ticket.refresh_from_db()
+    _run_workflow_triggers(ticket.company_id, 'ticket_created', ticket, ticket.created_by)
 
 
 def classify(ticket):
