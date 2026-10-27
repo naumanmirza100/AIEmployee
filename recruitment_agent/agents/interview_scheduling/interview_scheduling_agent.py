@@ -697,7 +697,6 @@ class InterviewSchedulingAgent:
                     if slot_datetime_normalized == selected_datetime_str or slot_datetime == selected_datetime_str:
                         slot_found = True
                         slot_available = slot.get('available', True)
-                        slot_scheduled = slot.get('scheduled', False)
                         break
 
                 if not slot_found:
@@ -712,11 +711,6 @@ class InterviewSchedulingAgent:
                         "error": "This time slot is not available. Please select another time slot.",
                     }
 
-                if slot_scheduled:
-                    return {
-                        "success": False,
-                        "error": "This time slot is already selected by another candidate. Please select a different time slot.",
-                    }
             
             # Check for double-booking: same job + same time = only one candidate (doosra bande use select na kr ske)
             existing_q = Interview.objects.filter(
@@ -755,35 +749,15 @@ class InterviewSchedulingAgent:
                                 tz_name=tz, viewer_source='recruitment',
                                 exclude=[('recruitment', interview.id)],
                                 hide_titles=True, suggest=False)
-                    # Lock the settings row to prevent concurrent double-booking
+                    # Lock the settings row, then ask again whether another candidate holds this time: two
+                    # candidates of one job cannot take the same slot in the same instant (CO-117).
                     if settings:
                         settings = RecruiterInterviewSettings.objects.select_for_update().get(pk=settings.pk)
-                        if settings.time_slots_json:
-                            # Mark slot as scheduled in time_slots_json
-                            slot_marked = False
-                            for slot in settings.time_slots_json:
-                                slot_datetime = slot.get('datetime', '')
-                                slot_datetime_normalized = slot_datetime
-                                if 'T' in slot_datetime:
-                                    date_part, time_part = slot_datetime.split('T')
-                                    if ':' in time_part:
-                                        time_hour_min = ':'.join(time_part.split(':')[:2])
-                                        slot_datetime_normalized = f"{date_part}T{time_hour_min}"
-                            
-                                if slot_datetime_normalized == selected_datetime_str or slot_datetime == selected_datetime_str:
-                                    # Double-check it's not already scheduled (race condition check)
-                                    if slot.get('scheduled', False):
-                                        return {
-                                            "success": False,
-                                            "error": "This time slot was just selected by another candidate. Please select a different time slot.",
-                                        }
-                                    # Mark as scheduled
-                                    slot['scheduled'] = True
-                                    slot_marked = True
-                                    break
-                        
-                            if slot_marked:
-                                settings.save()  # Save the updated time_slots_json
+                    if existing_q.exists():
+                        return {
+                            "success": False,
+                            "error": "This time slot was just selected by another candidate. Please select a different time slot.",
+                        }
                 
                     # What emails and pages show — with the zone, so a candidate
                     # elsewhere knows which 10:00 is meant.
@@ -893,6 +867,7 @@ class InterviewSchedulingAgent:
             return {"success": True, "slots": [], "message": "No slots configured. Add slots in Interview Settings."}
 
         now = timezone.now()
+        taken = interview_time.taken_by_others(interview)
         current_dt_str = None
         if interview.scheduled_datetime:
             current_dt_str = interview_time.slot_key(interview.scheduled_datetime,
@@ -918,7 +893,7 @@ class InterviewSchedulingAgent:
                 slot_norm = f"{date_part}T{time_hour_min}"
             # Available if not scheduled, or scheduled by this interview (current slot)
             is_current = current_dt_str and (slot_norm == current_dt_str or slot_datetime == current_dt_str)
-            scheduled = slot.get('scheduled', False)
+            scheduled = slot_norm in taken or slot_datetime in taken
             available = (not scheduled) or is_current
             # Only include future slots (optional: filter past slots for display)
             dt_parsed = interview_time.aware(slot_datetime, tz)
@@ -1000,27 +975,8 @@ class InterviewSchedulingAgent:
         if existing_q.exists():
             return {"success": False, "error": "This time is already selected by another candidate for this job. Please choose a different time."}
 
-        # Allow any valid datetime (company picker). If the chosen time is in time_slots_json and already scheduled, reject.
-        slot_found_in_config = False
-        if settings and getattr(settings, 'time_slots_json', None):
-            for slot in settings.time_slots_json:
-                slot_datetime = slot.get('datetime', '')
-                slot_datetime_normalized = slot_datetime
-                if 'T' in slot_datetime:
-                    date_part, time_part = slot_datetime.split('T')
-                    if ':' in time_part:
-                        time_hour_min = ':'.join(time_part.split(':')[:2])
-                        slot_datetime_normalized = f"{date_part}T{time_hour_min}"
-                if slot_datetime_normalized == selected_datetime_str or slot_datetime == selected_datetime_str:
-                    slot_found_in_config = True
-                    if slot.get('scheduled', False):
-                        return {"success": False, "error": "This time is already selected by another candidate for this job. Please choose a different time."}
-                    break
-            # If not in config, still allow (company can pick any time within range)
-
+        # The company may pick any time in the range, in the slot list or not.
         old_scheduled_datetime = interview.scheduled_datetime
-        old_datetime_str = (interview_time.slot_key(old_scheduled_datetime, interview_time.stored_zone(interview))
-                            if old_scheduled_datetime else None)
 
         # Everyone on the interview must be free at the new time, across every
         # agent. The recruiter is told who is busy and gets suggestions.
@@ -1031,32 +987,10 @@ class InterviewSchedulingAgent:
                 ensure_free(busy_people, selected_datetime, interview.duration_minutes,
                             tz_name=tz, viewer_source='recruitment',
                             exclude=[('recruitment', interview.id)], reveal_private=True)
-                # Only update time_slots_json if the selected slot is in the config (unmark old, mark new)
-                if settings and getattr(settings, 'time_slots_json', None):
-                    settings.refresh_from_db()
-                    if old_datetime_str:
-                        for slot in settings.time_slots_json:
-                            slot_dt = slot.get('datetime', '')
-                            slot_norm = slot_dt
-                            if 'T' in slot_dt:
-                                dp, tp = slot_dt.split('T')
-                                if ':' in tp:
-                                    slot_norm = f"{dp}T{':'.join(tp.split(':')[:2])}"
-                            if slot_norm == old_datetime_str or slot_dt == old_datetime_str:
-                                slot['scheduled'] = False
-                                break
-                    if slot_found_in_config:
-                        for slot in settings.time_slots_json:
-                            slot_dt = slot.get('datetime', '')
-                            slot_norm = slot_dt
-                            if 'T' in slot_dt:
-                                dp, tp = slot_dt.split('T')
-                                if ':' in tp:
-                                    slot_norm = f"{dp}T{':'.join(tp.split(':')[:2])}"
-                            if slot_norm == selected_datetime_str or slot_dt == selected_datetime_str:
-                                slot['scheduled'] = True
-                                break
-                        settings.save()
+                # The slots' stored 'scheduled' flags are no longer kept: a slot is taken while an interview holds it
+                # (interview_time.taken_by_others, CO-117).
+                if existing_q.exists():
+                    return {"success": False, "error": "This time is already selected by another candidate for this job. Please choose a different time."}
 
                 selected_slot_display = interview_time.label(selected_datetime, tz)
                 interview.status = 'SCHEDULED'

@@ -1365,8 +1365,9 @@ def get_available_slots_for_interview(request, token):
 
         # Taken: marked in the settings, booked by another candidate, or
         # someone on this interview is busy then (the candidate isn't told why).
-        is_scheduled_in_json = slot.get('scheduled', False)
-        is_taken = (is_scheduled_in_json or slot_key in taken_slot_datetimes
+        # The stored 'scheduled' flag is not used: it was never cleared when an interview was cancelled or moved (CO-117).
+        is_scheduled_in_json = slot_key in taken_slot_datetimes
+        is_taken = (is_scheduled_in_json
                     or (instant is not None and overlaps(busy, instant, instant + duration)))
 
         available_slots.append({

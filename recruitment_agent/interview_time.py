@@ -177,7 +177,7 @@ def bookable_slots(job, now=None) -> int:
                                                    scheduled_datetime__isnull=False)}
     count = 0
     for slot in settings.time_slots_json:
-        if not slot.get('available', True) or slot.get('scheduled'):
+        if not slot.get('available', True):
             continue
         instant = aware(slot.get('datetime', ''), tz)
         if instant is None or instant <= now or slot_key(instant, tz) in taken:
@@ -189,3 +189,24 @@ def bookable_slots(job, now=None) -> int:
 def no_slots_message(job) -> str:
     return (f'No free interview slots for "{job.title}": add dates or hours in Interview Settings, then invite the '
             'candidates again. Nobody was emailed an invitation.')
+
+
+def taken_by_others(interview) -> set:
+    """Slot keys ('YYYY-MM-DDTHH:MM', on the booking's own clock) booked by other interviews: of the same job, whose
+    slots are shared, or else of the same recruiter.
+
+    This is what decides whether a slot is taken. A 'scheduled' flag stored on the job's slots used to decide it; it
+    was set on booking and never cleared by a cancellation, a rejection or a move, so freed slots stayed greyed out
+    for every other candidate (CO-117)."""
+    from recruitment_agent.models import Interview
+    others = Interview.objects.filter(status__in=['SCHEDULED', 'CONFIRMED'],
+                                      scheduled_datetime__isnull=False).exclude(id=interview.id)
+    if interview.cv_record_id and interview.cv_record.job_description_id:
+        others = others.filter(cv_record__job_description_id=interview.cv_record.job_description_id)
+    elif interview.company_user_id:
+        others = others.filter(company_user_id=interview.company_user_id)
+    elif interview.recruiter_id:
+        others = others.filter(recruiter_id=interview.recruiter_id)
+    else:
+        return set()
+    return {slot_key(other.scheduled_datetime, stored_zone(other)) for other in others}

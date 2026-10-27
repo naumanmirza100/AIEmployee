@@ -151,3 +151,22 @@ class ReminderTests(TestCase):
     def test_saving_an_interview_sends_nothing_by_itself(self):
         self.booked(30)
         self.assertEqual(mail.outbox, [])
+
+
+class FreedSlotTests(BookingTests):
+    """CO-117: a slot freed by a cancellation or a move was greyed out for everyone else for good."""
+
+    def test_a_cancelled_booking_frees_its_slot(self):
+        self.assertTrue(self.book()['success'])
+        other = Interview.objects.create(candidate_name='Adil Shah', candidate_email='adil@mail.test',
+                                         job_role='Designer', available_slots_json='[]', company_user=self.rae,
+                                         interview_type='ONLINE', confirmation_token='tok-adil')
+        with mock.patch.object(scheduling, '_create_google_meet_link', return_value=None), \
+                mock.patch.object(scheduling.InterviewSchedulingAgent, 'send_confirmation_email', return_value=True):
+            taken = scheduling.InterviewSchedulingAgent().confirm_slot(other.id, f'{self.day}T10:00')
+        self.assertFalse(taken['success'])
+        Interview.objects.filter(pk=self.interview.pk).update(status='CANCELLED')
+        with mock.patch.object(scheduling, '_create_google_meet_link', return_value=None), \
+                mock.patch.object(scheduling.InterviewSchedulingAgent, 'send_confirmation_email', return_value=True):
+            freed = scheduling.InterviewSchedulingAgent().confirm_slot(other.id, f'{self.day}T10:00')
+        self.assertTrue(freed['success'], freed)

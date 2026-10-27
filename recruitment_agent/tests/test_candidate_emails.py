@@ -131,9 +131,16 @@ class CandidateEmailTests(TestCase):
         self.settings_row.time_slots_json = [
             {'datetime': f'{past}T10:00', 'available': True},                       # gone
             {'datetime': f'{self.day}T11:00', 'available': False},                  # switched off
-            {'datetime': f'{self.day}T12:00', 'available': True, 'scheduled': True},
+            {'datetime': f'{self.day}T12:00', 'available': True, 'scheduled': True},    # a stale flag: free
         ]
         self.settings_row.save()
+        self.assertEqual(bookable_slots(self.job), 1)
+        # Taken while another candidate's interview holds it (CO-117).
+        from recruitment_agent.interview_time import aware
+        Interview.objects.create(candidate_name='Adil', candidate_email='adil@mail.test', job_role='Designer',
+                                 cv_record=self.cv('Adil', 'adil@mail.test', decision='INTERVIEW'),
+                                 company_user=self.rae, status='SCHEDULED', timezone_name='Asia/Karachi',
+                                 scheduled_datetime=aware(f'{self.day}T12:00', 'Asia/Karachi'))
         self.assertEqual(bookable_slots(self.job), 0)
 
     def upload(self, decisions, names):
