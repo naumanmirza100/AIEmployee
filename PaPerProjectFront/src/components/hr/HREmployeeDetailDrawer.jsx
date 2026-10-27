@@ -224,6 +224,9 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
       const res = await hrAgentService.updateHREmployee(employeeId, payload);
       const updated = res?.data;
       if (updated) setData((prev) => ({ ...prev, employee: updated }));
+      // A new manager changes "Reports up to", which comes with the whole record, not with the employee.
+      const refreshed = await hrAgentService.getHREmployeeDetail(employeeId).catch(() => null);
+      if (refreshed?.data) setData(refreshed.data);
       toast({ title: 'Employee updated' });
       setEditForm({ open: false, saving: false, payload: {} });
     } catch (err) {
