@@ -231,3 +231,18 @@ class CompareTests(TestCase):
         self.assertIn('Score: 92', text)
         self.assertNotIn('--- Iqra Javed', text)
         self.assertIn('never give them a score', text)
+
+
+class ChartRefusalTextTests(TestCase):
+    """A refused chart lists what can be charted in plain words; the hints that steer the AI stay in its prompt."""
+
+    def test_the_hint_is_for_the_ai_only(self):
+        company = Company.objects.create(name='Margalla Software', email='hello@margalla.test')
+        owner = CompanyUser.objects.create(company=company, email='sana@margalla.test', full_name='Sana', role='owner',
+                                           password_hash='x', is_active=True)
+        llm = mock.Mock()
+        llm.send_prompt_text.return_value = '{"dataset": "none"}'
+        result = GraphGeneratorAgent(llm, owner).generate_graph('Our monthly revenue as a line chart')
+        self.assertIn('interviews by the day they take place', result['error'])
+        self.assertNotIn('interviews per day', result['error'])
+        self.assertIn('"interviews per day"', llm.send_prompt_text.call_args.args[0])
