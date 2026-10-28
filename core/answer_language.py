@@ -51,6 +51,18 @@ def _same_words(asked, english, share=0.8):
     return sum(w in restated for w in words) / len(words) >= share
 
 
+def settle(asked, english, language):
+    """The language to answer in: the reading's, put right where the text itself shows it. Urdu letters in the
+    question are Urdu script (on the live site "دفتر کے نئے اوقات کیا ہیں؟" was read as Roman Urdu and answered so),
+    and a question its English restatement keeps word for word is English."""
+    language = normalize(language)
+    if any('؀' <= ch <= 'ۿ' for ch in asked or ''):
+        return 'urdu'
+    if language in (None, 'roman_urdu', 'other') and _same_words(asked or '', english):
+        return 'english'
+    return language
+
+
 def line(asked, english, language=None):
     """The LANGUAGE line. `language` is the reading's ("english", "roman_urdu", "urdu", "other"); for English it says
     to answer in English. Without a reading, '' for a question that is its own restatement, else the line asking for
@@ -58,9 +70,7 @@ def line(asked, english, language=None):
     asked, english = (asked or '').strip(), (english or '').strip()
     if not asked:
         return ''
-    language = normalize(language)
-    if language in (None, 'roman_urdu', 'other') and _same_words(asked, english):
-        language = 'english'          # the restatement is the question itself: English, whatever the reading said
+    language = settle(asked, english, language)
     if language is None:
         if not english or asked.lower() == english.lower():
             return ''

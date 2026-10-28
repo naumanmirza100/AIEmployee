@@ -6,6 +6,7 @@ Document Processing, Summarization, Analytics, Knowledge Q&A, Authoring, Notific
 import os
 import hashlib
 import logging
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -867,7 +868,9 @@ def _serialize_chat(chat, include_messages=False):
         ]
     else:
         last = chat.messages.order_by('-created_at').first()
-        data['last_message'] = (last.content[:140] if last else '')
+        # As plain text: the chat list showed the answer's markdown ("Revenue for Q2 2026 was **PKR ...").
+        plain = re.sub(r'[*_`#>|]+', '', last.content or '') if last else ''
+        data['last_message'] = ' '.join(plain.split())[:140]
         data['message_count'] = chat.messages.count()
     return data
 
