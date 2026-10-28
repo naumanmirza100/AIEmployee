@@ -116,12 +116,17 @@ export const fmtUtc = (isoStr) => {
   const [datePart, timePart] = isoStr.replace('Z', '').replace('+00:00', '').split('T');
   if (!datePart) return '—';
   const [y, mo, d] = datePart.split('-');
-  if (!timePart) return `${mo}/${d}/${y}`;
+  // "Tue, 3 Nov 2026": the emails and the other agents write dates so; "11/03/2026" reads as 11 March here
+  // (live run, 29 Oct 2026). The digits are the meeting's own, as typed: no zone is applied.
+  const when = new Date(Date.UTC(+y, +mo - 1, +d));
+  const day = Number.isNaN(when.getTime()) ? `${mo}/${d}/${y}`
+    : when.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  if (!timePart) return day;
   const [h, m] = timePart.split(':');
   const hour = parseInt(h, 10);
   const ampm = hour >= 12 ? 'PM' : 'AM';
   const h12 = hour % 12 || 12;
-  return `${mo}/${d}/${y}, ${h12}:${m} ${ampm}`;
+  return `${day}, ${h12}:${m} ${ampm}`;
 };
 
 // ── Style constants ─────────────────────────────────────────────────────────

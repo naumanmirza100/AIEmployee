@@ -72,6 +72,15 @@ export const MeetingsPanel = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [peopleOpen, peopleMeetingId]);
+  // ...and again when the list arrives after the window opened (opened from a row, it is fetched then), as long as
+  // nothing was changed yet. It was seeded on opening only, so the window listed nobody (live run, 29 Oct 2026).
+  const loadedParts = peopleMeetingId != null ? participantsMap[peopleMeetingId] : undefined;
+  useEffect(() => {
+    if (peopleOpen && loadedParts && draftAddUsers.length === 0 && draftRemoveIds.size === 0) {
+      setDraftParts(loadedParts.map(p => ({ ...p })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedParts]);
 
   // Stage a new user (no API call yet). Skip if already present or already staged.
   const draftAddParticipant = (user) => {
