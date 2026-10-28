@@ -174,3 +174,20 @@ class MessagesTests(TestCase):
         templates = {t['key']: t for t in self.call(wf_views.workflow_list).data['data']['templates']}
         self.assertTrue(templates['strong_candidate']['in_use'])
         self.assertFalse(templates['hold_update']['in_use'])
+
+
+class JobKeywordsTests(SimpleTestCase):
+    """The clean run's job came back with 'Leadership', 'Code quality' and 'Testing' among its keywords, and the
+    same strong candidates scored 34 to 48 instead of 88 to 92."""
+
+    def test_soft_skills_and_practices_are_not_scored(self):
+        from recruitment_agent.agents.job_description_parser.job_description_parser_agent import (
+            JobDescriptionParserAgent)
+        agent = JobDescriptionParserAgent.__new__(JobDescriptionParserAgent)
+        out = agent._normalize_output({
+            'required_skills': ['React', 'TypeScript', 'Leadership', 'Code quality'],
+            'soft_skills': ['Leadership', 'Communication'], 'practices': ['Code quality', 'Testing'],
+            'keywords': ['React', 'TypeScript', 'Jest', 'Testing', 'Communication', 'Code quality']})
+        self.assertEqual(out['keywords'], ['React', 'TypeScript', 'Jest'])
+        self.assertEqual(out['required_skills'], ['React', 'TypeScript'])
+        self.assertEqual(out['practices'], ['Code quality', 'Testing'])

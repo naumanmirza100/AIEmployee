@@ -166,8 +166,14 @@ class JobDescriptionParserAgent:
             "education_requirements": self._normalize_list(data.get("education_requirements")),
             "certifications": self._normalize_list(data.get("certifications")),
             "soft_skills": self._normalize_list(data.get("soft_skills")),
+            "practices": self._normalize_list(data.get("practices")),
             "keywords": self._normalize_list(data.get("keywords")),
         }
+        # Candidates are scored on each keyword. What the AI itself calls a soft skill or a practice ("Leadership",
+        # "Code quality") is not one: a CV rarely lists it, and on 28 Oct strong candidates scored 34 instead of 90.
+        not_skills = {x.lower() for x in normalized["soft_skills"] + normalized["practices"]}
+        for field in ("keywords", "required_skills", "preferred_skills"):
+            normalized[field] = [x for x in normalized[field] if x.lower() not in not_skills]
         return normalized
 
     def _normalize_list(self, value: Any) -> List[str]:
