@@ -370,6 +370,21 @@ class LiveRunFixesTests(OpsCase):
         with mock.patch.object(agent, '_suggest_title', return_value='Memo'):
             prepared = agent._prepare_prompt(self.company.id, 'memo', 'memo', 'formal', None, None)
         self.assertIn("TODAY'S DATE: ", prepared['user_prompt'])
+        self.assertNotIn('FROM: ', prepared['user_prompt'])
+
+    def test_the_writer_is_the_sender(self):
+        # The film's memo said "From: [Your Name]".
+        from api.views.operations_agent import _author
+        from operations_agent.agents.document_authoring_agent import DocumentAuthoringAgent
+        writer = mock.Mock(full_name='Sana Iqbal', company=mock.Mock())
+        writer.company.name = 'Crestline'
+        self.assertEqual(_author(writer), 'Sana Iqbal, Crestline')
+        self.assertIsNone(_author(mock.Mock(full_name='', company=None)))
+        agent = DocumentAuthoringAgent()
+        agent.author = 'Sana Iqbal, Crestline'
+        with mock.patch.object(agent, '_suggest_title', return_value='Memo'):
+            prepared = agent._prepare_prompt(self.company.id, 'memo', 'memo', 'formal', None, None)
+        self.assertIn('FROM: Sana Iqbal, Crestline', prepared['user_prompt'])
 
 
 class VersionsTests(OpsCase):

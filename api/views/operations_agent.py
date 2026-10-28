@@ -1337,6 +1337,7 @@ def generate_document(request):
         agent = DocumentAuthoringAgent()
         agent.company_id = company.id
         agent.agent_key_name = 'operations_agent'
+        agent.author = _author(request.user)
         result = agent.generate(
             company_id=company.id,
             prompt=prompt,
@@ -1499,6 +1500,13 @@ def update_generated_document(request, doc_id):
         )
 
 
+def _author(company_user):
+    """'Name, Company' of the person writing, for a document's sender ("From: [Your Name]" otherwise)."""
+    name = (getattr(company_user, 'full_name', '') or '').strip()
+    company = getattr(getattr(company_user, 'company', None), 'name', '') or ''
+    return ', '.join(part for part in (name, company.strip()) if part) or None
+
+
 #: Versions of an authored document kept with their text: the last 10, each up to 200,000 characters (CO-213).
 KEPT_VERSION_TEXTS = 10
 KEPT_VERSION_CHARS = 200_000
@@ -1626,6 +1634,7 @@ def regenerate_document(request, doc_id):
         agent = DocumentAuthoringAgent()
         agent.company_id = company.id
         agent.agent_key_name = 'operations_agent'
+        agent.author = _author(request.user)
         result = agent.generate(
             company_id=company.id,
             prompt=prompt,
@@ -1780,6 +1789,7 @@ def stream_generate_document(request):
             agent = DocumentAuthoringAgent()
             agent.company_id = company.id
             agent.agent_key_name = 'operations_agent'
+            agent.author = _author(request.user)
 
             final_payload = None
 
