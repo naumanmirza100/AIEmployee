@@ -146,8 +146,8 @@ const AnalyticsDashboardTab = () => {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5" id="OPS-analytics-kpi-grid" data-testid="OPS-analytics-kpi-grid">
             <KpiCard testId="OPS-analytics-metric-card-documents"     icon={FileText}      label="Documents"       value={formatNumber(kpis.total_documents)}   sub={`${formatNumber(kpis.processed_documents)} processed`} />
             <KpiCard testId="OPS-analytics-metric-card-pages"         icon={Hash}          label="Pages processed" value={formatNumber(kpis.total_pages)}       sub={formatBytes(kpis.total_file_bytes)} />
-            <KpiCard testId="OPS-analytics-metric-card-ai-authored"   icon={Sparkles}      label="AI-authored"      value={formatNumber(kpis.total_generated)}   sub={`${formatNumber(kpis.total_summaries)} summaries`} />
-            <KpiCard testId="OPS-analytics-metric-card-qa-questions"  icon={MessageSquare} label="Q&A questions"    value={formatNumber(kpis.total_qa_messages)} sub={`${formatNumber(kpis.total_chats)} chats`} />
+            <KpiCard testId="OPS-analytics-metric-card-ai-authored"   icon={Sparkles}      label="AI-authored"      value={formatNumber(kpis.total_generated)}   sub={`${formatNumber(kpis.total_summaries)} ${kpis.total_summaries === 1 ? 'summary' : 'summaries'}`} />
+            <KpiCard testId="OPS-analytics-metric-card-qa-questions"  icon={MessageSquare} label="Q&A questions"    value={formatNumber(kpis.total_qa_messages)} sub={`${formatNumber(kpis.total_chats)} ${kpis.total_chats === 1 ? 'chat' : 'chats'}`} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-5" id="OPS-analytics-kpi-grid-secondary" data-testid="OPS-analytics-kpi-grid-secondary">

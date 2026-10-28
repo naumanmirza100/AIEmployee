@@ -10,7 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import * as operationsService from '@/services/operationsAgentService';
 
 export const formatFigure = (f) => {
-  if (f.value === null || f.value === undefined) return '—';
+  if (f.value === null || f.value === undefined) return f.text || '—';
   const n = Number(f.value).toLocaleString(undefined, { maximumFractionDigits: 2 });
   if (!f.unit) return n;
   return f.unit === '%' ? `${n}%` : `${n} ${f.unit}`;

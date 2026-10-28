@@ -14,6 +14,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import * as operationsService from '@/services/operationsAgentService';
 import DocumentFiguresPanel from './DocumentFiguresPanel';
+import { formatDeadline } from './formatDeadline';
 
 // ─── Markdown components for the Content tab ─────────────────────────
 // Plain extracted text from PDFs / DOCX is converted into markdown by
@@ -509,7 +510,7 @@ const DocumentDetailPage = () => {
                         className="text-xs px-2.5 py-1 rounded-full border"
                         style={{ borderColor: `${entityColor}25`, color: `${entityColor}cc`, background: `${entityColor}0a` }}
                       >
-                        {v}
+                        {key === 'dates' ? formatDeadline(v) : v}
                       </span>
                     ))}
                   </div>

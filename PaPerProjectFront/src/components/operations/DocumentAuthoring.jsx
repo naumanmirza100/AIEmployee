@@ -412,8 +412,10 @@ const DocumentAuthoring = () => {
     if (!currentDoc) return;
     const cleanTitle = editTitle.trim();
     const hasChanges = cleanTitle !== currentDoc.title || editContent !== currentDoc.content;
+    // Back to the formatted page: it stayed on the Markdown text, ** marks and all.
     if (!hasChanges) {
       setEditMode(false);
+      setTab('preview');
       return;
     }
     try {
@@ -427,6 +429,7 @@ const DocumentAuthoring = () => {
         setEditTitle(res.document.title);
         setEditContent(res.document.content);
         setEditMode(false);
+        setTab('preview');
         loadGenerated();
         toast({ title: 'Saved', description: `Version ${res.document.version}` });
       } else {

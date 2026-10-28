@@ -142,6 +142,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
     MAX_REF_CHARS = 12000
     MIN_PER_REF_CHARS = 1200    # with many files chosen, each still gets this much; files past the limit are named
     MAX_TOKENS = 4000
+    #: "Name, Company" of the person writing, set by the view; the sender wherever a document names one.
+    author: Optional[str] = None
 
     def __init__(self):
         try:
@@ -401,11 +403,15 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         # Today's date, so a memo or letter is dated; it wrote "Date: [Today]" (live run, 28 Oct 2026).
         from django.utils import timezone as _tz
         today = _tz.localdate()
+        # Who is writing, so a memo's "From" is a person; it wrote "From: [Your Name]" (film, 28 Oct 2026).
+        author_line = (f"FROM: {self.author} (use it wherever the document names its author or sender)\n"
+                       if self.author else '')
         user_prompt = (
             f"TEMPLATE: {template_info['name']}\n"
             f"TONE: {tone.capitalize()} — {tone_guide}\n"
             f"TITLE (use exactly): {resolved_title}\n"
-            f"TODAY'S DATE: {today.day} {today.strftime('%B %Y')} (use it wherever the document is dated)\n\n"
+            f"TODAY'S DATE: {today.day} {today.strftime('%B %Y')} (use it wherever the document is dated)\n"
+            f"{author_line}\n"
             f"USER INSTRUCTIONS:\n{prompt}\n\n"
             f"{outline_block}"
             f"TEMPLATE-SPECIFIC GUIDANCE:\n{template_info['guidance']}\n\n"
