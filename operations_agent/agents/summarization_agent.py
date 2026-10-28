@@ -610,9 +610,11 @@ Be thorough, use proper markdown, include all significant details. Return ONLY t
     # ------------------------------------------------------------------
     @staticmethod
     def _extract_section_items(markdown_text: str, section_name: str) -> list:
-        """Extract bullet/numbered items from a section in the markdown."""
+        """Extract bullet/numbered items from a section in the markdown, as plain text: the Action Items card showed
+        "**Renewal Notice:** …" with its asterisks (clean run, 28 Oct 2026)."""
         import re
         items = []
+        plain = lambda text: re.sub(r'(\*\*|__)(.+?)\1', r'\2', text).strip()  # noqa: E731
         lines = markdown_text.split('\n')
         in_section = False
 
@@ -626,11 +628,11 @@ Be thorough, use proper markdown, include all significant details. Return ONLY t
             if in_section and stripped:
                 for prefix in ['- ', '* ', '• ']:
                     if stripped.startswith(prefix):
-                        items.append(stripped[len(prefix):].strip())
+                        items.append(plain(stripped[len(prefix):]))
                         break
                 else:
                     match = re.match(r'^\d+[\.\)]\s*(.+)', stripped)
                     if match:
-                        items.append(match.group(1).strip())
+                        items.append(plain(match.group(1)))
 
         return items

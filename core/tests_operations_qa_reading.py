@@ -167,6 +167,6 @@ class SearchTests(QATestCase):
 
 class LanguageLineTests(TestCase):
 
-    def test_english_gets_no_language_line(self):
-        self.assertEqual(intent.language_line('What is the penalty?', 'What is the penalty?'), '')
-        self.assertIn('Roman Urdu', intent.language_line('jurmana kitna hai?', 'What is the penalty?'))
+    def test_english_is_asked_for_in_english(self):
+        self.assertIn('in English', intent.language_line('What is the late penalty?', 'What is the late penalty?'))
+        self.assertIn('Roman Urdu', intent.language_line('jurmana kitna hai?', 'What is the penalty?', 'roman_urdu'))

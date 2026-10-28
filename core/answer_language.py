@@ -21,6 +21,36 @@ _SCRIPT = {
 }
 
 
+def normalize(value):
+    """The reading's language as one of LANGUAGES, whatever its spelling ("English", "Roman Urdu", "en", "Hinglish");
+    None when it gave none. On the live site the reading's "English" did not match "english", and the fallback line
+    turned every English question into a Roman Urdu answer (28 Oct 2026)."""
+    text = str(value or '').strip().lower().replace('-', ' ').replace('_', ' ')
+    if not text or text in ('null', 'none', 'unknown'):
+        return None
+    if 'roman' in text or 'hinglish' in text or 'latin' in text:
+        return 'roman_urdu'
+    if 'urdu' in text or text == 'ur':
+        return 'urdu'
+    if text in ('english', 'en', 'eng'):
+        return 'english'
+    return 'other'
+
+
+def _same_words(asked, english, share=0.8):
+    """True when nearly every word of the question, in Latin letters, is in the English restatement: the question was
+    English. A Roman Urdu question shares its English nouns with the restatement ("FinEdge contract mein critical
+    problem ka response time kitna hai?" shares 6 words of 9), not its own words."""
+    import re
+    if any(ord(ch) > 127 for ch in asked):
+        return False
+    words = re.findall(r'[a-z]{3,}', asked.lower())
+    if len(words) < 3:
+        return False
+    restated = set(re.findall(r'[a-z]{3,}', (english or '').lower()))
+    return sum(w in restated for w in words) / len(words) >= share
+
+
 def line(asked, english, language=None):
     """The LANGUAGE line. `language` is the reading's ("english", "roman_urdu", "urdu", "other"); for English it says
     to answer in English. Without a reading, '' for a question that is its own restatement, else the line asking for
@@ -28,12 +58,16 @@ def line(asked, english, language=None):
     asked, english = (asked or '').strip(), (english or '').strip()
     if not asked:
         return ''
-    if language not in LANGUAGES:
+    language = normalize(language)
+    if language in (None, 'roman_urdu', 'other') and _same_words(asked, english):
+        language = 'english'          # the restatement is the question itself: English, whatever the reading said
+    if language is None:
         if not english or asked.lower() == english.lower():
             return ''
-        return (f'LANGUAGE: the person asked, in their own words: "{asked[:600]}". Write the whole answer in that same '
-                f'language and script: {_ROMAN_URDU} English if they wrote English. Names, numbers, amounts, dates and '
-                'document titles stay as they are.\n\n')
+        # No example of any language here: the Roman Urdu one, first, made English questions come back in Roman Urdu.
+        return (f'LANGUAGE: the person asked, in their own words: "{asked[:600]}". Write the whole answer in the '
+                'language and script of those words. Names, numbers, amounts, dates and document titles stay as they '
+                'are.\n\n')
     if language == 'english':
         # Said, not left out: with no line, an English question after a Roman Urdu answer was answered in Roman Urdu
         # too, the model carrying on in the conversation's language (Operations' clean run, 28 Oct 2026).
