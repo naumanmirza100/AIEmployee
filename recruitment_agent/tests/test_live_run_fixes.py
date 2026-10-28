@@ -246,3 +246,13 @@ class ChartRefusalTextTests(TestCase):
         self.assertIn('interviews by the day they take place', result['error'])
         self.assertNotIn('interviews per day', result['error'])
         self.assertIn('"interviews per day"', llm.send_prompt_text.call_args.args[0])
+
+
+class NeverActsTests(SimpleTestCase):
+    """With the AI reading off or failing, "Delete every rejected candidate." went down the word rules to the model,
+    which headed its answer "Deleted Rejected Candidates". The model is told it only answers."""
+
+    def test_the_rules_say_it_only_answers(self):
+        rules = RecruitmentQAAgent.SYSTEM_PROMPT
+        self.assertIn('You only answer', rules)
+        self.assertIn('never word an answer as if it', rules)
