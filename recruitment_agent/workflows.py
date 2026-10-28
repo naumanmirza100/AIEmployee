@@ -259,15 +259,29 @@ def run_for_event(event, *, cv_record=None, interview=None, application=None, de
 
 
 TEMPLATES = {
-    'thank_applicant': {
-        'name': 'Thank every applicant and tell the recruiter', 'trigger_event': 'application_received',
-        'description': 'A personal thank-you in the company\'s name, and a bell alert to the recruiter.',
+    # An applicant already gets "Application Received" from the job page; this template thanked them a second time
+    # in the same second, so it only tells the recruiter now.
+    'new_applicant_alert': {
+        'name': 'Tell the recruiter about each applicant', 'trigger_event': 'application_received',
+        'description': 'A bell alert to the recruiter when someone applies on the job page.',
         'steps': [
-            {'type': 'send_email', 'to': 'candidate', 'subject': 'Thank you for applying to {{company_name}}',
-             'body': 'Dear {{candidate_name}},\n\nThank you for applying for the {{job_title}} role at {{company_name}}. '
-                     'We read every application and will be in touch.\n\n{{recruiter_name}}'},
             {'type': 'notify', 'to': 'recruiter', 'title': 'New applicant: {{candidate_name}}',
              'message': '{{candidate_name}} applied for {{job_title}}.'},
+        ],
+    },
+    # Nothing else writes to a candidate the screening holds: without this they hear nothing.
+    'hold_update': {
+        'name': 'Keep held candidates informed', 'trigger_event': 'candidate_screened',
+        'description': 'A candidate put on Hold gets a short note in the company\'s name that they are still being '
+                       'considered.',
+        'steps': [
+            {'type': 'branch', 'condition': {'left': 'decision', 'op': '==', 'right': 'HOLD'},
+             'if_true': [{'type': 'send_email', 'to': 'candidate',
+                          'subject': 'Your application to {{company_name}}',
+                          'body': 'Dear {{candidate_name}},\n\nThank you for applying for the {{job_title}} role. '
+                                  'We are still considering your application and will write to you again once '
+                                  'we have reviewed the other candidates.\n\n{{recruiter_name}}\n{{company_name}}'}],
+             'if_false': []},
         ],
     },
     'strong_candidate': {

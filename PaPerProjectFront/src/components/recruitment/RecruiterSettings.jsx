@@ -354,12 +354,17 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
             setScheduleToDate(null);
           }
         }
-        toast({
-          title: 'Success',
-          description: response.data?.time_slots_json?.length 
-            ? `Interview settings saved. ${response.data.time_slots_json.length} time slots generated.`
-            : 'Interview settings saved successfully',
-        });
+        // Saved with no times (no From or To date, or hours too short for one interview) said "saved successfully",
+        // and the recruiter found out only when nobody could be invited.
+        const made = response.data?.time_slots_json?.length || 0;
+        toast(made
+          ? { title: 'Success', description: `Interview settings saved. ${made} time slots generated.` }
+          : {
+              title: 'Saved, but there are no interview times yet',
+              description: 'Choose a Schedule From Date and a Schedule To Date, with hours long enough for one interview. '
+                + 'Candidates the screening approves cannot be invited until there are times.',
+              variant: 'destructive',
+            });
       }
     } catch (error) {
       console.error('Error saving interview settings:', error);

@@ -21,7 +21,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 KINDS = ('data', 'general', 'action', 'greeting', 'not_allowed', 'off_topic')
-AREAS = ('interview', 'decision', 'job', 'cv', 'email', 'other')
+AREAS = ('interview', 'decision', 'job', 'cv', 'email', 'delete', 'other')
 WANTS = ('count', 'list', 'detail', 'best', 'compare', 'summary', 'other')
 MIN_CONFIDENCE = 0.6
 
@@ -29,7 +29,7 @@ _PROMPT = """You read one message sent to a company's Recruitment assistant. The
 own hiring records (its jobs, the candidates and their CVs, scores and AI decisions, applications from the public,
 interviews and their outcomes, interview hours) and answers general recruiting questions (interview questions for a
 role or technology, hiring best practice). It cannot DO anything: it does not schedule or move interviews, change a
-candidate's decision, post or close jobs, upload CVs or send emails.
+candidate's decision, post, close or delete jobs, delete candidates, upload CVs or send emails.
 
 {history}Message: {message}
 
@@ -55,7 +55,8 @@ Return ONLY a JSON object:
  "exclude_jobs": a list of jobs the person wants left out ("all jobs except design" -> ["design"]), else [],
  "candidate": the person it is about, as named ("Ali Raza", "candidate 2", "the top one"), or null,
  "wants": one of "count", "list", "detail", "best", "compare", "summary", "other",
- "area": for an "action", one of "interview", "decision", "job", "cv", "email", "other"; else null,
+ "area": for an "action", one of "interview", "decision", "job", "cv", "email",
+         "delete" (remove candidates or jobs: "delete every rejected candidate"), "other"; else null,
  "confidence": a number from 0 to 1}}"""
 
 
@@ -116,10 +117,14 @@ _WHERE = {
                   "approves is invited by email and picks a time from the job's interview hours."),
     'decision': ("I can't change a candidate's decision from here. Open **Candidates**, tick the people and use "
                  "**Interview**, **Hold** or **Reject**; or open one candidate's report."),
-    'job': ("I can't create, change or close jobs from here. Open **Jobs** in the Recruitment menu: **Create Job** (or "
-            "let AI write it), and **Edit** or **Deactivate** on a job."),
+    'job': ("I can't create, change or close jobs from here. Open **Job Descriptions** in the Recruitment menu: "
+            "**Create Job Description** (or **Create Job with AI**); to change or close one, **Edit** it (the **Status** "
+            "switch closes it)."),
     'cv': ("I can't upload or screen CVs from here. Open **CV Processing**, choose the job and add the CVs: each one "
            "is read, scored and given a decision."),
+    'delete': ("I can't delete anything from here. To remove a candidate, open them under **Candidates** and use "
+               "**Delete candidate** (it removes their CV, application and interviews). A job that has candidates is "
+               "closed rather than deleted: **Edit** it under **Job Descriptions** and switch **Status** off."),
     'email': ("I can't send emails from here. Candidates are emailed by the screening (the interview invitation), by "
               "the interview steps and by the decisions you save on **Candidates** and **Interviews**."),
     'other': ("I can't do that from here: I answer questions about your jobs, candidates, applications and interviews. "

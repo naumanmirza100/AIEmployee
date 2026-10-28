@@ -67,13 +67,16 @@ def _read(company_user, data, wf=None):
 def workflow_list(request):
     company_user = request.user
     if request.method == 'GET':
-        items = RecruitmentWorkflow.objects.filter(company=company_user.company).select_related('job')
+        items = list(RecruitmentWorkflow.objects.filter(company=company_user.company).select_related('job'))
+        # A template already added shows as in use: pressing Use again made a duplicate that ran twice.
+        names = {wf.name for wf in items}
         return Response({'status': 'success', 'data': {
             'workflows': [_payload(wf) for wf in items], 'can_edit': _may_edit(company_user),
             'events': [{'key': k, 'label': v} for k, v in RecruitmentWorkflow.EVENT_CHOICES],
             'step_types': list(workflows.STEP_TYPES), 'placeholders': list(workflows.PLACEHOLDERS),
             'templates': [{'key': k, 'name': t['name'], 'description': t['description'],
-                           'trigger_event': t['trigger_event']} for k, t in workflows.TEMPLATES.items()],
+                           'trigger_event': t['trigger_event'], 'in_use': t['name'] in names}
+                          for k, t in workflows.TEMPLATES.items()],
         }})
     if not _may_edit(company_user):
         return Response({'status': 'error', 'code': 'admins_only', 'message': ADMINS_ONLY},

@@ -74,7 +74,10 @@ export const processCVs = async (files, jobDescriptionId = null, jobDescriptionT
       const errorData = await response.json().catch(() => ({}));
       const message = errorData.message || `HTTP error! status: ${response.status}`;
       if (response.status >= 500) noteFailure(message);
-      throw new Error(message);
+      const failure = new Error(message);
+      failure.status = response.status;
+      failure.failedFiles = errorData.failed_files || [];   // the files refused, each with its reason
+      throw failure;
     }
 
     return await response.json();

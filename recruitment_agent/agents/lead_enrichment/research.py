@@ -86,7 +86,9 @@ Reply with ONLY a JSON object:
  "gaps": up to 4 short points: what the job asks for that the material does not show,
  "verify": up to 4 things to check in the interview (claims, gaps in dates, links that do not match the CV),
  "based_on": the sources you used, from "CV", "apply form", "GitHub"}
-Never invent employers, dates, numbers or skills. If something is unknown, say so in "gaps" or "verify"."""
+Never invent employers, dates, numbers or skills. If something is unknown, say so in "gaps" or "verify".
+For years of experience use "experience_from_cv_dates" as given; if the CV's own words claim a different number, say
+so in "verify"."""
 
 
 def profile(client, *, parsed_cv, summary, job_title, job_keywords, application=None, github=None):
@@ -105,6 +107,9 @@ def profile(client, *, parsed_cv, summary, job_title, job_keywords, application=
         'apply_form': {k: v for k, v in form.items() if v},
         'github': github,
     }
+    from recruitment_agent.experience import about_years
+    if (summary or {}).get('total_experience_years') is not None:
+        material['experience_from_cv_dates'] = about_years(summary['total_experience_years'])
     try:
         reply = client.send_prompt(SYSTEM, json.dumps(material, default=str)[:12000])
     except KeyServiceError:

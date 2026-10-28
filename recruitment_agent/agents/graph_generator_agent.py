@@ -429,7 +429,21 @@ class GraphGeneratorAgent:
         except Exception as e:
             logger.warning(f"Error fetching interview monthly data: {e}")
             data["interviews"]["over_time_monthly"] = []
-        
+
+        # Booked interviews by the day they take place, on the company's clock (two weeks back, a month ahead).
+        # "Interviews per day" could only count the day an interview was made, so three interviews booked today for
+        # the coming days showed as three today.
+        from recruitment_agent.interview_time import local, stored_zone
+        by_day = {}
+        for iv in interviews_unordered.filter(scheduled_datetime__gte=now - timedelta(days=14),
+                                              scheduled_datetime__lte=now + timedelta(days=31)):
+            day = local(iv.scheduled_datetime, stored_zone(iv)).date()
+            by_day[day] = by_day.get(day, 0) + 1
+        data["interviews"]["by_interview_date"] = [
+            {"label": day.strftime('%a %d %b'), "value": count, "date": day.isoformat()}
+            for day, count in sorted(by_day.items())
+        ]
+
         return data
     
     def generate_graph(self, prompt: str) -> Dict[str, Any]:
@@ -450,9 +464,11 @@ class GraphGeneratorAgent:
             "You choose a chart for a recruitment dashboard. You never give numbers: the server fills them in.\n"
             "Reply with ONLY a JSON object: {\"dataset\": one of the names below or \"none\", \"chart_type\": "
             "\"bar\" | \"pie\" | \"line\" | \"area\", \"title\": a short title, \"top_n\": a number or null, "
-            "\"order\": \"desc\" | \"asc\" | \"none\", \"orientation\": \"horizontal\" | \"vertical\"}.\n"
-            "Use \"none\" when no data set below answers the request. Trends over time are line or area charts; use "
-            "\"vertical\" only when the request asks for vertical bars, columns or a histogram.\n\nData sets:\n"
+            "\"order\": \"desc\" | \"asc\" | \"none\", \"orientation\": \"horizontal\" | \"vertical\" | null}.\n"
+            "Use \"none\" when no data set below answers the request. Use the chart type the request names; with none "
+            "named, trends over time are line charts. Give an orientation only when the request names one (vertical "
+            "bars, columns or a histogram: vertical; sideways bars: horizontal), else null. A time series keeps "
+            "\"order\": \"none\".\n\nData sets:\n"
             + "\n".join(f"- {name}: {about}" for name, (about, _) in datasets.items()))
         try:
             response_text = self.groq_client.send_prompt_text(system_prompt, f"Chart request: {prompt}")
@@ -498,7 +514,11 @@ class GraphGeneratorAgent:
             'interviews_by_outcome': ('interviews by outcome or decision (hired, rejected...)', ivs['by_outcome']),
             'interviews_by_type': ('online and onsite interviews', ivs['by_type']),
             'interviews_by_job': ('interviews per job role', ivs.get('by_job_role', {})),
-            'interviews_daily': ('interviews made per day, last 30 days (trend)', ivs['over_time_daily']),
+            'interviews_by_date': ('interviews by the day they take place (booked times, two weeks back to a month '
+                                   'ahead): "interviews per day", "this week\'s interviews"',
+                                   ivs.get('by_interview_date') or []),
+            'interviews_daily': ('interviews made (candidates invited) per day, last 30 days (trend)',
+                                 ivs['over_time_daily']),
             'interviews_monthly': ('interviews made per month (trend)', ivs['over_time_monthly']),
             'interviews_by_hour': ('interviews by hour of the day', sched.get('by_hour_of_day', {})),
             'interviews_by_weekday': ('interviews by day of the week', sched.get('by_day_of_week', {})),
@@ -531,15 +551,18 @@ class GraphGeneratorAgent:
                         else f"No {about} yet.")
         else:
             data = [row for row in values if isinstance(row, dict)]
-            if chart_type not in ('line', 'area'):
-                chart_type = 'line'
             total = sum((row.get('value') or 0) for row in data)
             insights = f"{total} over the period shown." if data else f"No {about} yet."
+            if chart_type in ('bar', 'pie'):
+                # Asked for bars (or a pie): drawn so, one per day or month, in time order. It was always a line.
+                data = {str(row.get('label')): row.get('value') or 0 for row in data}
         colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
         chart = {'type': chart_type, 'title': str(choice.get('title') or about.capitalize())[:120], 'data': data,
                  'colors': colors, 'color': colors[0]}
         if chart_type == 'bar':
-            chart['orientation'] = 'vertical' if choice.get('orientation') == 'vertical' else 'horizontal'
+            # Days and months read left to right: a time series is upright unless asked otherwise.
+            upright = choice.get('orientation') == 'vertical' or (isinstance(values, list) and choice.get('orientation') != 'horizontal')
+            chart['orientation'] = 'vertical' if upright else 'horizontal'
         return {'chart': chart, 'insights': insights, 'dataset': name}
 
     def _decisions_per_job_chart(self, prompt: str, data: Dict) -> Optional[Dict[str, Any]]:
