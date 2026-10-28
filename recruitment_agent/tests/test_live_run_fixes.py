@@ -191,3 +191,16 @@ class JobKeywordsTests(SimpleTestCase):
         self.assertEqual(out['keywords'], ['React', 'TypeScript', 'Jest'])
         self.assertEqual(out['required_skills'], ['React', 'TypeScript'])
         self.assertEqual(out['practices'], ['Code quality', 'Testing'])
+
+
+class SummaryYearsTests(SimpleTestCase):
+    """The clean run's AI summary said "approximately 2 years of professional experience" beside "about 5.5 years"."""
+
+    def test_the_summary_says_the_total_from_the_dates(self):
+        agent = SummarizationAgent.__new__(SummarizationAgent)
+        said = agent._say_total_years('Hira is a frontend engineer with approximately 2 years of professional experience '
+                                      'and 4 years of React experience.', 5.25)
+        self.assertEqual(said, 'Hira is a frontend engineer with about 5.5 years of professional experience '
+                               'and 4 years of React experience.')
+        self.assertEqual(agent._say_total_years('Has 3+ years of experience.', 3.0), 'Has about 3 years of experience.')
+        self.assertIsNone(agent._say_total_years(None, 3.0))
