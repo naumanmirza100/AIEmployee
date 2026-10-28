@@ -54,6 +54,19 @@ logger = logging.getLogger(__name__)
 # Email helpers
 # ---------------------------------------------------------------------------
 
+class _Escaped:
+    """A meeting or task as an email shows it: its text escaped. Titles, descriptions and names went into the
+    email's HTML as typed, so angle brackets broke the email or became the sender's own markup and links
+    (CO-261). Other attributes (times, the organiser, ids) pass through."""
+
+    def __init__(self, obj):
+        self._obj = obj
+
+    def __getattr__(self, name):
+        value = getattr(self._obj, name)
+        return escape(value) if isinstance(value, str) else value
+
+
 def _email_base_html(content: str, preview_text: str = '') -> str:
     preview = (
         f'<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">'
@@ -183,6 +196,9 @@ def _email_login(company_user, topic, subject, html_body):
 
 
 def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_fields):
+    subject_title = meeting.title
+    meeting, organizer_name = _Escaped(meeting), escape(organizer_name or '')     # (CO-261)
+    changed_fields = [escape(str(f)) for f in changed_fields or []]
     scheduled = clock_when_text(meeting)   # when it really is, its zone named; it said "UTC" (CO-210)
     changed_str = ', '.join(changed_fields) if changed_fields else 'details'
     link_row = _email_detail_row('Link', f'<a href="{meeting.meeting_link}" style="color:#7c3aed;">{meeting.meeting_link}</a>') if meeting.meeting_link else ''
@@ -225,12 +241,14 @@ def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_
       </p>
     """
     html = _email_base_html(content, preview_text=f"Your meeting '{meeting.title}' has been updated.")
-    _email_login(participant_cu, 'exec_meetings', f"Meeting Updated: {meeting.title}", html)
+    _email_login(participant_cu, 'exec_meetings', f"Meeting Updated: {subject_title}", html)
 
 
 def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
+    subject_title = meeting.title
+    meeting, organizer_name = _Escaped(meeting), escape(organizer_name or '')     # (CO-261)
     scheduled = clock_when_text(meeting)   # when it really is, its zone named; it said "UTC" (CO-210)
-    first_name = (participant_cu.full_name or '').split()[0] if participant_cu.full_name else 'there'
+    first_name = escape((participant_cu.full_name or '').split()[0]) if participant_cu.full_name else 'there'
     join_block = ''
     if meeting.meeting_link:
         join_block = f"""
@@ -253,7 +271,7 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
         </tr>
       </table>"""
     # Accept or decline from the email (CO-211): an employee cannot open the agent to answer.
-    seat = ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user=participant_cu).first()
+    seat = ExecutiveMeetingParticipant.objects.filter(meeting_id=meeting.id, company_user=participant_cu).first()
     if seat is not None:
         join_block += _answer_buttons(seat)
     desc_block = (
@@ -306,11 +324,13 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"You've been invited to '{meeting.title}' by {organizer_name}.")
-    _email_login(participant_cu, 'exec_meetings', f"Meeting Invitation: {meeting.title}", html)
+    _email_login(participant_cu, 'exec_meetings', f"Meeting Invitation: {subject_title}", html)
 
 
 def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
-    first_name = (assignee_cu.full_name or '').split()[0] if assignee_cu.full_name else 'there'
+    subject_title = task.title
+    task, assigned_by_name = _Escaped(task), escape(assigned_by_name or '')     # (CO-261)
+    first_name = escape((assignee_cu.full_name or '').split()[0]) if assignee_cu.full_name else 'there'
     priority_color = {'high': '#ef4444', 'medium': '#f59e0b', 'low': '#10b981'}.get(task.priority, '#6b7280')
     desc_block = (
         f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{task.description}</p>'
@@ -359,15 +379,17 @@ def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"New task assigned: {task.title}")
-    _email_login(assignee_cu, 'tasks_assigned', f"Task Assigned: {task.title}", html)
+    _email_login(assignee_cu, 'tasks_assigned', f"Task Assigned: {subject_title}", html)
 
 
 def _send_subtask_added_email(recipient_cu, parent_task, subtask, added_by_name):
     """Notify a parent task's assignee that a subtask was added under their task.
     Lists the subtask's own assignees (if any) so the recipient knows who's on it."""
-    first_name = (recipient_cu.full_name or '').split()[0] if recipient_cu.full_name else 'there'
+    subject_parent, subject_sub = parent_task.title, subtask.title
+    parent_task, subtask, added_by_name = _Escaped(parent_task), _Escaped(subtask), escape(added_by_name or '')
+    first_name = escape((recipient_cu.full_name or '').split()[0]) if recipient_cu.full_name else 'there'
     sub_assignees = list(subtask.assignees.all())
-    assignees_str = ', '.join(cu.full_name for cu in sub_assignees) if sub_assignees else 'No one assigned yet'
+    assignees_str = ', '.join(escape(cu.full_name or '') for cu in sub_assignees) if sub_assignees else 'No one assigned yet'
     desc_block = (
         f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{subtask.description}</p>'
         if subtask.description else ''
@@ -417,12 +439,14 @@ def _send_subtask_added_email(recipient_cu, parent_task, subtask, added_by_name)
       </p>
     """
     html = _email_base_html(content, preview_text=f"New subtask added: {subtask.title}")
-    _email_login(recipient_cu, 'tasks_assigned', f"Subtask added to \"{parent_task.title}\": {subtask.title}", html)
+    _email_login(recipient_cu, 'tasks_assigned', f'Subtask added to "{subject_parent}": {subject_sub}', html)
 
 
 def _send_meeting_removal_email(cu, meeting, removed_by_name):
+    subject_title = meeting.title
+    meeting, removed_by_name = _Escaped(meeting), escape(removed_by_name or '')     # (CO-261)
     scheduled = clock_when_text(meeting)   # when it really is, its zone named; it said "UTC" (CO-210)
-    first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
+    first_name = escape((cu.full_name or '').split()[0]) if cu.full_name else 'there'
     content = f"""
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
@@ -460,11 +484,13 @@ def _send_meeting_removal_email(cu, meeting, removed_by_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"You have been removed from '{meeting.title}'.")
-    _email_login(cu, 'exec_meetings', f"Removed from Meeting: {meeting.title}", html)
+    _email_login(cu, 'exec_meetings', f"Removed from Meeting: {subject_title}", html)
 
 
 def _send_task_removal_email(cu, task, removed_by_name):
-    first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
+    subject_title = task.title
+    task, removed_by_name = _Escaped(task), escape(removed_by_name or '')     # (CO-261)
+    first_name = escape((cu.full_name or '').split()[0]) if cu.full_name else 'there'
     content = f"""
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
@@ -502,11 +528,13 @@ def _send_task_removal_email(cu, task, removed_by_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"You have been removed from task '{task.title}'.")
-    _email_login(cu, 'tasks_assigned', f"Removed from Task: {task.title}", html)
+    _email_login(cu, 'tasks_assigned', f"Removed from Task: {subject_title}", html)
 
 
 def _send_task_deleted_email(cu, task_title, task_priority, deleted_by_name):
-    first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
+    subject_title = task_title
+    task_title, deleted_by_name = escape(task_title or ''), escape(deleted_by_name or '')     # (CO-261)
+    first_name = escape((cu.full_name or '').split()[0]) if cu.full_name else 'there'
     content = f"""
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
@@ -544,7 +572,7 @@ def _send_task_deleted_email(cu, task_title, task_priority, deleted_by_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"Task '{task_title}' has been deleted.")
-    _email_login(cu, 'tasks_assigned', f"Task Deleted: {task_title}", html)
+    _email_login(cu, 'tasks_assigned', f"Task Deleted: {subject_title}", html)
 
 
 # ---------------------------------------------------------------------------
@@ -638,6 +666,24 @@ def _calendar_people(company_users):
     who is nobody's employee login has no calendar, and is left out."""
     ids = {login_user_id_for_company_user(cu) for cu in company_users}
     return sorted(i for i in ids if i)
+
+
+LINK_RULE = 'The meeting link must be a web address starting with http:// or https://.'
+
+
+def _web_link(link) -> bool:
+    """A meeting link goes into every email's Join button: only a web address (CO-261). Any text was kept."""
+    return str(link).lower().startswith(('http://', 'https://'))
+
+
+def _bad_choice(model, data, *fields):
+    """Why one of these fields in the request is not a value the model allows, or None."""
+    for field in fields:
+        if field in data and data[field] not in (None, ''):
+            allowed = [key for key, _ in model._meta.get_field(field).choices or getattr(model, f'{field.upper()}_CHOICES', [])]
+            if allowed and data[field] not in allowed:
+                return f'{field.title()} must be one of: {", ".join(allowed)}.'
+    return None
 
 
 def _today(company_user):
@@ -1139,7 +1185,9 @@ def meeting_list(request):
     if not scheduled_at:
         return Response({'status': 'error', 'message': 'Invalid scheduled_at format. Use ISO 8601.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    meeting_link = request.data.get('meeting_link', '').strip()
+    meeting_link = str(request.data.get('meeting_link') or '').strip()
+    if meeting_link and not _web_link(meeting_link):
+        return Response({'status': 'error', 'message': LINK_RULE}, status=status.HTTP_400_BAD_REQUEST)
     if not meeting_link:
         import secrets, string
         slug = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(10))
@@ -1236,6 +1284,8 @@ def meeting_detail(request, meeting_id):
     if request.method == 'PATCH':
         updatable = ['title', 'description', 'agenda', 'meeting_link',
                      'duration_minutes', 'status', 'recurrence']
+        if request.data.get('meeting_link') and not _web_link(str(request.data['meeting_link']).strip()):
+            return Response({'status': 'error', 'message': LINK_RULE}, status=status.HTTP_400_BAD_REQUEST)
         # The browser's zone comes with every save (CO-210); it is not a change to tell anyone about.
         if _browser_zone(request):
             meeting.timezone_name = _browser_zone(request)
@@ -1538,9 +1588,22 @@ def meeting_participants(request, meeting_id):
     meeting = get_object_or_404(ExecutiveMeeting, id=meeting_id, organizer=company_user)
 
     if request.method == 'GET':
-        parts = meeting.participants.select_related('company_user').all()
+        parts = list(meeting.participants.select_related('company_user').all())
+        # Who each one is in the People window's terms: a login (its id) or an employee (their profile's id),
+        # as `user_type` + `member_id`. The window compared bare ids, so picking an employee could remove a
+        # login with the same number, and email them that they were removed (CO-163).
+        from core.models import UserProfile
+        seat_emails = [p.company_user.email.lower() for p in parts if not p.company_user.is_active and p.company_user.email]
+        profiles = {pr.user.email.lower(): pr.id for pr in UserProfile.objects.select_related('user').filter(
+            company=company_user.company, user__email__in=seat_emails)} if seat_emails else {}
+
+        def member(cu):
+            profile_id = None if cu.is_active else profiles.get((cu.email or '').lower())
+            return ('profile', profile_id) if profile_id else ('company_user', cu.id)
+
         return Response({'status': 'success', 'participants': [
             {'id': p.id, 'user_id': p.company_user.id,
+             'user_type': member(p.company_user)[0], 'member_id': member(p.company_user)[1],
              'full_name': p.company_user.full_name, 'email': p.company_user.email,
              'role': p.company_user.role, 'response': p.response}
             for p in parts
@@ -1796,8 +1859,10 @@ def meeting_suggest_slots(request):
     num_slots = min(int(request.query_params.get('num_slots', 5)), 10)
 
     try:
-        agent = _get_agent('meeting_scheduling', company_user)
-        slots = agent.suggest_available_slots(company_user.id, preferred_date, duration, num_slots)
+        slots = _shared_free_slots(company_user, preferred_date, duration, num_slots)
+        if slots is None:
+            agent = _get_agent('meeting_scheduling', company_user)
+            slots = agent.suggest_available_slots(company_user.id, preferred_date, duration, num_slots)
         return Response({'status': 'success', 'slots': slots, 'date': preferred_date})
     except KeyServiceError:
         raise
@@ -1905,21 +1970,9 @@ def meeting_notes(request, meeting_id):
         meeting_day = held_on(meeting)
         result = agent.process_full_transcript(transcript, meeting.title, participant_names, held_on=meeting_day)
 
-        note, _ = MeetingNote.objects.update_or_create(
-            meeting=meeting,
-            defaults={
-                'raw_transcript': transcript,
-                'ai_summary': result.get('summary', ''),
-                'key_decisions': result.get('key_decisions', []),
-            },
-        )
-
-        # Re-generating gives a fresh set of action items — wipe the old set
-        # completely first. Any tasks created from them are standalone, so this
-        # is safe and avoids duplicating/resurrecting old items.
-        meeting.action_items.all().delete()
-        kept_titles = set()
-
+        # The AI's answer is cleaned first, and the note and its items are replaced together: the old items were
+        # deleted before the answer was read, so an answer not in the expected shape failed the request with them
+        # already gone (CO-258).
         # The LLM sometimes returns the string "null"/"none"/"tbd" (or a
         # non-ISO date) for due_date — none of which the date column accepts.
         # Keep only a clean YYYY-MM-DD value, otherwise store no date.
@@ -1945,27 +1998,47 @@ def meeting_notes(request, meeting_id):
             name = ' '.join(str(raw or '').split())[:255]
             return '' if name.lower() in ('null', 'none', 'n/a', 'tbd', 'unassigned', 'unknown') else name
 
-        created_items = []
-        for item_data in result.get('action_items', []):
-            title = (item_data.get('title') or 'Action Item').strip()
+        raw_items = result.get('action_items') if isinstance(result, dict) else None
+        decisions = result.get('key_decisions') if isinstance(result, dict) else None
+        decisions = [' '.join(str(d).split())[:500] for d in (decisions if isinstance(decisions, list) else []) if d]
+        new_items, kept_titles = [], set()
+        for item_data in raw_items if isinstance(raw_items, list) else []:
+            if not isinstance(item_data, dict):
+                continue
+            title = ' '.join(str(item_data.get('title') or 'Action Item').split())[:255]
             if title.lower() in kept_titles:
-                continue  # already exists as a kept (done/converted) item
+                continue  # the same item twice in one answer
+            kept_titles.add(title.lower())
             prio = str(item_data.get('priority', 'medium')).strip().lower()
             if prio not in valid_priorities:
                 prio = 'medium'
             owner = _owner_named(item_data.get('assignee_hint'))
-            item = MeetingActionItem.objects.create(
+            new_items.append(MeetingActionItem(
                 meeting=meeting,
                 title=title,
-                description=item_data.get('description', '') or '',
+                description=str(item_data.get('description', '') or ''),
                 due_date=_clean_due(item_data.get('due_date')),
                 priority=prio,
                 ai_extracted=True,
                 owner_name=owner,
                 assignee=_login_named(company_user.company, owner),
+            ))
+
+        from django.db import transaction
+        with transaction.atomic():
+            note, _ = MeetingNote.objects.update_or_create(
+                meeting=meeting,
+                defaults={
+                    'raw_transcript': transcript,
+                    'ai_summary': str(result.get('summary', '') or ''),
+                    'key_decisions': decisions,
+                },
             )
-            kept_titles.add(title.lower())  # also dedupe within this batch
-            created_items.append({'id': item.id, 'title': item.title})
+            # Re-generating gives a fresh set of action items. Any tasks created from the old ones are standalone.
+            meeting.action_items.all().delete()
+            for item in new_items:
+                item.save()
+        created_items = [{'id': item.id, 'title': item.title} for item in new_items]
 
         # Notify the organizer that action items were extracted. Re-generating
         # a transcript replaces the old notification for THIS meeting instead of
@@ -1991,11 +2064,18 @@ def meeting_notes(request, meeting_id):
                 data={'meeting_id': meeting.id, 'action_item_ids': [ci['id'] for ci in created_items]},
             )
 
-        return Response({'status': 'success', 'notes': {
+        # Say how much was read: the screen said the meeting was summarised when a few minutes were (CO-164).
+        read, total = result.get('chars_read', len(transcript)), result.get('chars_total', len(transcript))
+        message = (f'Summary, {len(decisions)} decision(s) and {len(created_items)} action item(s) from the whole '
+                   'meeting.' if read >= total else
+                   f'The transcript is long: the first {read:,} of its {total:,} characters were read. Summary, '
+                   f'{len(decisions)} decision(s) and {len(created_items)} action item(s) from that part.')
+        return Response({'status': 'success', 'message': message, 'notes': {
             'ai_summary': note.ai_summary,
             'key_decisions': note.key_decisions,
             'action_items_created': len(created_items),
-            'followup_email': result.get('followup_email', ''),
+            'chars_read': read,
+            'chars_total': total,
         }})
     except KeyServiceError:
         raise
@@ -2041,13 +2121,23 @@ def action_item_detail(request, item_id):
             'assignee_id': item.assignee_id, 'ai_extracted': item.ai_extracted,
         }})
 
+    # Only this company's people, and only the states the item has: an assignee id was saved as sent, so an
+    # action item could be given to a person in another company (CO-255).
+    problem = _bad_choice(MeetingActionItem, request.data, 'status', 'priority')
+    if problem:
+        return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
     for field in ['title', 'description', 'status', 'priority']:
         if field in request.data:
             setattr(item, field, request.data[field])
     if 'due_date' in request.data:
         item.due_date = request.data['due_date'] or None
     if 'assignee_id' in request.data:
-        item.assignee_id = request.data['assignee_id'] or None
+        from core.models import CompanyUser
+        wanted = request.data['assignee_id'] or None
+        if wanted and not CompanyUser.objects.filter(id=wanted, company=company_user.company).exists():
+            return Response({'status': 'error', 'message': 'That person is not in your company.'},
+                            status=status.HTTP_404_NOT_FOUND)
+        item.assignee_id = wanted
     item.save()
     return Response({'status': 'success', 'message': 'Action item updated.'})
 
@@ -2109,6 +2199,32 @@ def action_item_convert_to_task(request, item_id):
 EXEC_TASKS_LINK = '/exec-meeting/dashboard?tab=tasks'
 
 
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def exec_stats(request):
+    """The overview's figures, counted here. The screen counted the first page of each list, so Total Tasks,
+    Overdue Tasks and Unread never went past twenty (CO-168). Upcoming is by when a meeting really starts."""
+    from meeting_agent.clock import real_start
+    company_user = request.user
+    now, today = timezone.now(), _today(company_user)
+    on = (ExecutiveMeeting.objects
+          .filter(models.Q(organizer=company_user) | models.Q(participants__company_user=company_user))
+          .filter(status='scheduled', scheduled_at__gte=now - timedelta(hours=15))
+          .exclude(participants__company_user=company_user, participants__response='rejected')
+          .distinct().select_related('organizer__company'))
+    listed = _listed_tasks(company_user)
+    return Response({'status': 'success', 'stats': {
+        'upcoming_meetings': sum(1 for m in on if real_start(m) > now),
+        'total_tasks': listed.count(),
+        'overdue_tasks': _visible_tasks(company_user).filter(due_date__lt=today)
+                         .exclude(status__in=['done']).count(),
+        'pending_action_items': listed.exclude(status__in=['done']).count(),
+        'unread_notifications': ExecNotification.objects.filter(company_user=company_user, is_read=False).count(),
+    }})
+
+
 def _visible_tasks(company_user):
     """Tasks this login made, and tasks given to it."""
     return ExecutiveTask.objects.filter(
@@ -2124,6 +2240,37 @@ def _listed_tasks(company_user):
         models.Q(company_user=company_user, parent_task__isnull=True)
         | models.Q(pk__in=given.filter(parent_task__isnull=True).values('pk'))
         | models.Q(pk__in=given.filter(parent_task__isnull=False).exclude(parent_seen).values('pk')))
+
+
+#: What a person on a task hears about when it changes (CO-171).
+TASK_TOLD_FIELDS = ('title', 'description', 'status', 'priority', 'due_date')
+_TOLD_LABEL = {'title': 'the title', 'description': 'the description', 'status': 'the status',
+               'priority': 'the priority', 'due_date': 'the due date'}
+
+
+def _tell_task_changed(people, task, by, changed):
+    """Tell the people on a task what changed, by email and in the bell."""
+    if not changed or not people:
+        return
+    from meeting_agent.bell import ring
+    due = f'{task.due_date:%d %b %Y}' if task.due_date else 'no date'
+    now = {'status': task.get_status_display(), 'priority': task.get_priority_display(), 'due_date': due}
+    what = '; '.join(f"{_TOLD_LABEL[f]}{' is now ' + now[f] if f in now else ''}" for f in changed)
+    ring(people, title=f'{by.full_name} changed a task: {task.title}'[:255],
+         message=f'{by.full_name} changed "{task.title}": {what}.', kind='exec_task_changed',
+         link='/exec-meeting/dashboard?tab=tasks', employee_link='/me/tasks', email=False,
+         data={'task_id': task.id})
+    rows = ''.join(_email_detail_row(_TOLD_LABEL[f].capitalize(), escape(now.get(f) or str(getattr(task, f) or '-')))
+                   for f in changed)
+    for cu in people:
+        if not cu.email:
+            continue
+        first = escape((cu.full_name or 'there').split()[0])
+        content = (f'<p style="margin:0 0 12px;color:#111827;font-size:16px;">Hi {first}, {escape(by.full_name or "")} '
+                   f'changed a task you are on: <strong>{escape(task.title)}</strong>.</p>'
+                   f'<table width="100%" cellpadding="0" cellspacing="0" border="0">{rows}</table>')
+        html = _email_base_html(content, preview_text=escape(f'"{task.title}" was changed.'))
+        _email_login(cu, 'tasks_assigned', f'Task changed: {task.title}', html)
 
 
 def _tell_assigned(people, task, given_by):
@@ -2215,6 +2362,13 @@ def task_list(request):
             except (ValueError, TypeError):
                 pass
 
+    # A linked meeting of this company only, and states the task has (CO-255).
+    problem = _bad_choice(ExecutiveTask, request.data, 'status', 'priority')
+    linked = request.data.get('linked_meeting_id') or None
+    if linked and not ExecutiveMeeting.objects.filter(id=linked, organizer__company=company_user.company).exists():
+        problem = "That meeting is not one of your company's."
+    if problem:
+        return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
     task = ExecutiveTask.objects.create(
         company_user=company_user,
         title=title,
@@ -2222,7 +2376,7 @@ def task_list(request):
         status=request.data.get('status', 'todo'),
         priority=request.data.get('priority', 'medium'),
         due_date=due_date,
-        linked_meeting_id=request.data.get('linked_meeting_id') or None,
+        linked_meeting_id=linked,
         parent_task_id=parent_task_id,
     )
     # assignees — list of {id, user_type} dicts
@@ -2289,6 +2443,11 @@ def task_detail(request, task_id):
                     {'status': 'error', 'message': f'A task titled “{new_title}” already exists.'},
                     status=status.HTTP_409_CONFLICT,
                 )
+        problem = _bad_choice(ExecutiveTask, request.data, 'status', 'priority')
+        if problem:
+            return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
+        before = {f: str(getattr(task, f) or '') for f in TASK_TOLD_FIELDS}
+        already_on = [cu for cu in task.assignees.all() if cu.id != company_user.id]
         # Weekend deadlines are allowed — any date may be set for a task.
         for field in ['title', 'description', 'status', 'priority', 'due_date', 'ai_reasoning']:
             if field in request.data:
@@ -2311,12 +2470,20 @@ def task_detail(request, task_id):
             for cu in existing_qs:
                 if cu.id not in new_ids and cu.email:
                     _send_task_removal_email(cu, task, company_user.full_name)
+        # The people already on it hear what changed: they were told only when added or removed, though the
+        # product says they are emailed whenever it changes (CO-171).
+        task.refresh_from_db()
+        changed = [f for f in TASK_TOLD_FIELDS if str(getattr(task, f) or '') != before[f]]
+        still_on = {cu.id for cu in task.assignees.all()}
+        _tell_task_changed([cu for cu in already_on if cu.id in still_on], task, company_user, changed)
         return Response({'status': 'success', 'task': _serialize_task(task, viewer=company_user)})
 
     # Snapshot before delete so we can reference after
     task_title = task.title
     task_priority = task.priority
-    assignees_to_notify = [cu for cu in task.assignees.all() if cu.email and cu.id != company_user.id]
+    # The people on its subtasks too: they go with it (CO-171).
+    people = {cu.id: cu for t in [task, *task.subtasks.all()] for cu in t.assignees.all()}
+    assignees_to_notify = [cu for cu in people.values() if cu.email and cu.id != company_user.id]
     task.delete()
     for cu in assignees_to_notify:
         _send_task_deleted_email(cu, task_title, task_priority, company_user.full_name)
@@ -2460,6 +2627,64 @@ def task_workload_analysis(request):
 # CALENDAR
 # ===========================================================================
 
+def _shared_free_slots(company_user, date_str, duration, limit):
+    """Free times that day from the calendar every agent shares, as {start, end} in the agent's terms (wall-clock
+    on the company's clock), or None for a login with no employee calendar. The agent's own answers looked at
+    executive meetings only, and offered hours already past (CO-276)."""
+    from meeting_agent.clock import company_zone
+    from core.scheduling import free_slots
+    people = _calendar_people([company_user])
+    if not people:
+        return None
+    try:
+        day = datetime.strptime(str(date_str)[:10], '%Y-%m-%d').date()
+    except ValueError:
+        day = _today(company_user)
+    zone = company_zone(company_user.company)
+    starts = free_slots(people, day, duration, tz_name=zone, limit=max(1, int(limit)))
+    from zoneinfo import ZoneInfo
+    wall = [start.astimezone(ZoneInfo(zone)).replace(tzinfo=None) for start in starts]
+    return [{'start': w.isoformat(timespec='seconds'),
+             'end': (w + timedelta(minutes=int(duration))).isoformat(timespec='seconds')} for w in wall]
+
+
+def _busy_elsewhere(company_user, week_start, listed_ids):
+    """The person's busy time this week outside the agent's own meetings: other agents' meetings, interviews,
+    sales calls, leave, company holidays (the calendar every agent shares). The plan read executive meetings
+    only, and put tasks over all of them (CO-276). As blocked stretches the planner works round, in the
+    agent's own terms: wall-clock time on the company's clock, cut into days and to working hours."""
+    from datetime import time as _time
+    from zoneinfo import ZoneInfo
+    from core.scheduling import busy_intervals
+    from meeting_agent.clock import company_zone
+    people = _calendar_people([company_user])
+    if not people:
+        return []
+    zone = company_zone(company_user.company)
+    tz = ZoneInfo(zone)
+    start = datetime.combine(week_start, _time(0), tzinfo=tz)
+    end = start + timedelta(days=7)
+    try:
+        intervals = busy_intervals(people, start, end, exclude=[('exec', i) for i in listed_ids if i], tz_name=zone)
+    except Exception as exc:
+        logger.warning('calendar_plan_week: shared calendar unreadable: %s', exc)
+        return []
+    blocks = []
+    for s_at, e_at in intervals:
+        s_at, e_at = max(s_at, start).astimezone(tz), min(e_at, end).astimezone(tz)
+        day = s_at.date()
+        while day <= e_at.date():
+            piece_start = max(s_at, datetime.combine(day, _time(0), tzinfo=tz))
+            piece_end = min(e_at, datetime.combine(day, _time(0), tzinfo=tz) + timedelta(days=1))
+            minutes = int((piece_end - piece_start).total_seconds() // 60)
+            if minutes > 0:
+                blocks.append({'id': None, 'title': 'Busy elsewhere', 'status': 'busy',
+                               'scheduled_at': piece_start.replace(tzinfo=None).isoformat(timespec='seconds'),
+                               'duration_minutes': minutes})
+            day += timedelta(days=1)
+    return blocks
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2537,7 +2762,7 @@ def calendar_plan_week(request):
 
     tasks = []
     seen_subtask_ids = set()
-    for t in tasks_qs[:30]:
+    for t in tasks_qs[:200]:          # it cut at 30 without saying so (CO-166)
         s = _serialize_task(t)
         subtasks = s.pop('subtasks', []) or []
         tasks.append(s)
@@ -2558,7 +2783,7 @@ def calendar_plan_week(request):
         orphan_subs = orphan_subs.filter(due_date__isnull=False, due_date__lte=_week_end_date)
     else:
         orphan_subs = orphan_subs.filter(due_date__gte=_week_start_date, due_date__lte=_week_end_date)
-    for st in orphan_subs[:30]:
+    for st in orphan_subs[:200]:
         if st.id in seen_subtask_ids:
             continue
         s = _serialize_task(st, include_subtasks=False)
@@ -2576,7 +2801,7 @@ def calendar_plan_week(request):
     for p in _EMP.objects.select_related('meeting').filter(
         company_user=company_user,
         meeting__status__in=['scheduled', 'in_progress'],
-    ):
+    ).exclude(response='rejected'):      # a declined invitation takes no time (CO-276)
         m = p.meeting
         if m.id not in participant_meeting_ids:
             local_date = timezone.localtime(m.scheduled_at).date() if timezone.is_aware(m.scheduled_at) else m.scheduled_at.date()
@@ -2589,6 +2814,7 @@ def calendar_plan_week(request):
                 })
                 participant_meeting_ids.add(m.id)
 
+    meetings += _busy_elsewhere(company_user, _week_start_date, [m['id'] for m in meetings])
     logger.info("calendar_plan_week: after participant merge meetings=%d", len(meetings))
 
     try:
@@ -2616,8 +2842,10 @@ def calendar_free_slots(request):
     duration = int(request.query_params.get('duration_minutes', 60))
 
     try:
-        agent = _get_agent('calendar_planner', company_user)
-        slots = agent.get_free_slots(company_user.id, date, duration)
+        slots = _shared_free_slots(company_user, date, duration, 12)
+        if slots is None:
+            agent = _get_agent('calendar_planner', company_user)
+            slots = agent.get_free_slots(company_user.id, date, duration)
         return Response({'status': 'success', 'slots': slots, 'date': date})
     except KeyServiceError:
         raise
@@ -2680,16 +2908,23 @@ def document_draft(request):
                     summary = meeting.note.ai_summary or ''
                 except Exception:
                     summary = ''
-            action_items = request.data.get('action_items', [])
-            decisions = request.data.get('decisions', [])
-            # Only pull from DB if user did NOT provide a manual summary
-            if meeting and not action_items and not user_provided_summary:
-                action_items = [{'title': a.title, 'assignee_hint': a.assignee.full_name if a.assignee else None, 'due_date': str(a.due_date) if a.due_date else None} for a in meeting.action_items.all()[:15]]
-            if meeting and not decisions and not user_provided_summary:
+            action_items = list(request.data.get('action_items') or [])
+            decisions = list(request.data.get('decisions') or [])
+            # A linked meeting's own decisions and action items always go in, with who owns each. With a summary
+            # typed (the screen fills the box with the notes) they were re-extracted from that text, which the screen
+            # cut at 800 characters, and most were lost (CO-167).
+            if meeting:
+                have = {str(i.get('title', '')).strip().lower() for i in action_items if isinstance(i, dict)}
+                action_items += [
+                    {'title': a.title, 'assignee_hint': (a.assignee.full_name if a.assignee else a.owner_name) or None,
+                     'due_date': str(a.due_date) if a.due_date else None}
+                    for a in meeting.action_items.select_related('assignee')[:50] if a.title.strip().lower() not in have]
                 try:
-                    decisions = meeting.note.key_decisions or []
+                    stored = meeting.note.key_decisions or []
                 except Exception:
-                    decisions = []
+                    stored = []
+                said = {' '.join(str(d).split()).lower() for d in decisions}
+                decisions += [d for d in stored if ' '.join(str(d).split()).lower() not in said]
             # If user provided a summary but no decisions/action_items, extract them via AI
             if user_provided_summary and not decisions and not action_items:
                 extracted = agent.extract_decisions_and_actions(summary)

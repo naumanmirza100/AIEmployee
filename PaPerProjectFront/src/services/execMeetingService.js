@@ -15,25 +15,12 @@ const withZone = (payload) => ({ timezone_name: browserZone(), ...payload });
 //   GET /notifications  → { status, notifications: [...] }
 
 const execMeetingService = {
-  // Stats — derive from list endpoints
+  // Stats — counted on the server. Worked out here from the first page of each list, they never went past twenty
+  // (CO-168).
   getStats: async () => {
     try {
-      const [mRes, tRes, nRes] = await Promise.all([
-        companyApi.get(`${BASE}/meetings`),
-        companyApi.get(`${BASE}/tasks`),
-        companyApi.get(`${BASE}/notifications`),
-      ]);
-      const meetings = mRes.meetings || [];
-      const tasks    = tRes.tasks    || [];
-      const notifs   = nRes.notifications || [];
-      const now = new Date();
-      return {
-        upcoming_meetings:    meetings.filter(m => m.status === 'scheduled' && new Date(m.scheduled_at) > now).length,
-        total_tasks:          tasks.length,
-        overdue_tasks:        tasks.filter(t => t.due_date && new Date(t.due_date) < now && !['done','completed'].includes(t.status)).length,
-        pending_action_items: tasks.filter(t => t.status !== 'done').length,
-        unread_notifications: notifs.filter(n => !n.is_read).length,
-      };
+      const res = await companyApi.get(`${BASE}/stats`);
+      return res.stats;
     } catch (err) {
       if (err?.status === 429) throw err;   // the screen says "too many requests" rather than showing zeros
       return { upcoming_meetings: 0, total_tasks: 0, overdue_tasks: 0, pending_action_items: 0, unread_notifications: 0 };

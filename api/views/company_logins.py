@@ -62,10 +62,33 @@ def _row(login, viewer):
     }
 
 
+def _seat_ids(company_id, candidates=None):
+    """The rows that stand in for employees in executive meetings and tasks (meeting_agent's seats): switched
+    off, never signed in, an employee's address in this company, and taking part in something. They showed here
+    as switched-off logins, and one click on the switch made a real login the employee could claim (CO-209)."""
+    from core.models import UserProfile
+    from meeting_agent.models import ExecutiveMeetingParticipant, ExecutiveTask, MeetingActionItem
+    rows = (candidates if candidates is not None else
+            CompanyUser.objects.filter(company_id=company_id, is_active=False, last_login__isnull=True))
+    rows = [r for r in rows if not r.is_active and r.last_login is None and r.email]
+    if not rows:
+        return set()
+    employees = {e.lower() for e in UserProfile.objects.filter(
+        company_id=company_id, user__is_active=True, user__email__in=[r.email for r in rows])
+        .values_list('user__email', flat=True)}
+    ids = [r.id for r in rows if r.email.lower() in employees]
+    used = (set(ExecutiveMeetingParticipant.objects.filter(company_user_id__in=ids).values_list('company_user_id', flat=True))
+            | set(ExecutiveTask.assignees.through.objects.filter(companyuser_id__in=ids).values_list('companyuser_id', flat=True))
+            | set(MeetingActionItem.objects.filter(assignee_id__in=ids).values_list('assignee_id', flat=True)))
+    return used
+
+
 def _page(viewer):
-    logins = CompanyUser.objects.filter(company_id=viewer.company_id).order_by('-is_active', 'full_name', 'id')
+    logins = [login for login in
+              CompanyUser.objects.filter(company_id=viewer.company_id).order_by('-is_active', 'full_name', 'id')]
+    seats = _seat_ids(viewer.company_id, logins)
     return {
-        'logins': [_row(login, viewer) for login in logins],
+        'logins': [_row(login, viewer) for login in logins if login.id not in seats],
         'roles': [{'key': key, 'label': label, 'description': text} for key, label, text in ROLES],
         'can_manage': viewer.role in ADMIN_ROLES,
     }
@@ -126,13 +149,21 @@ def company_logins(request):
         return _error(f"Choose one of these roles: {', '.join(LABELS[r] for r in ASSIGNABLE)}.")
     # One dashboard login per address, across every company: sign-in and
     # "Forgot password" find a login by its address alone.
-    if CompanyUser.objects.filter(email__iexact=email).exists():
+    existing = CompanyUser.objects.filter(email__iexact=email).first()
+    if existing is not None and existing.company_id == viewer.company_id and existing.id in _seat_ids(viewer.company_id, [existing]):
+        # An employee who took part in executive meetings: the row they took part through becomes their login,
+        # and their meetings and tasks come with it (CO-209). It was refused as "already has a login".
+        existing.full_name, existing.role, existing.is_active = full_name, role, True
+        existing.password_hash = make_password(None)
+        existing.save(update_fields=['full_name', 'role', 'is_active', 'password_hash'])
+        login = existing
+    elif existing is not None:
         return _error('That address already has a dashboard login.')
-
-    login = CompanyUser.objects.create(
-        company_id=viewer.company_id, email=email, full_name=full_name, role=role, is_active=True,
-        password_hash=make_password(None),      # no password until they set their own
-    )
+    else:
+        login = CompanyUser.objects.create(
+            company_id=viewer.company_id, email=email, full_name=full_name, role=role, is_active=True,
+            password_hash=make_password(None),      # no password until they set their own
+        )
     emailed = _invite(login, viewer)
     logger.info('Company %s: login %s added by %s as %s', viewer.company_id, login.id, viewer.id, role)
     return Response({
@@ -161,6 +192,10 @@ def company_login(request, login_id):
         if target is None:
             return _error('That login was not found.', status.HTTP_404_NOT_FOUND)
         was_role, was_active = target.role, target.is_active
+        if data.get('is_active') and not was_active and target.id in _seat_ids(viewer.company_id, [target]):
+            return _error(f'{target.full_name or target.email} takes part in executive meetings as an employee, '
+                          'not as a login. To let them sign in to the dashboard, add them on this page with '
+                          'their address.')
         new_role = str(data['role']).strip().lower() if 'role' in data else was_role
         new_active = bool(data['is_active']) if 'is_active' in data else was_active
         if 'role' in data and new_role != was_role and new_role not in ASSIGNABLE:

@@ -1065,6 +1065,7 @@ urlpatterns = [
     re_path(r'^exec-meeting/documents/(?P<doc_id>\d+)/?$', exec_meeting_api.standalone_document_detail, name='exec_document_detail'),  # GET, DELETE
 
     # Notifications
+    re_path(r'^exec-meeting/stats/?$', exec_meeting_api.exec_stats, name='exec_meeting_stats'),  # GET (CO-168)
     re_path(r'^exec-meeting/notifications/?$', exec_meeting_api.notification_list, name='exec_notification_list'),  # GET
     re_path(r'^exec-meeting/notifications/mark-all-read/?$', exec_meeting_api.notification_mark_all_read, name='exec_notification_mark_all_read'),  # PATCH
     re_path(r'^exec-meeting/notifications/bulk-delete/?$', exec_meeting_api.notification_bulk_delete, name='exec_notification_bulk_delete'),  # POST

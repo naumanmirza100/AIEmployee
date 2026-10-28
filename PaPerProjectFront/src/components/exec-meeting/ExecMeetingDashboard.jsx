@@ -32,7 +32,7 @@ import execMeetingService from '@/services/execMeetingService';
 import {
   markdownToHtml, CARD_STYLE, ROW_STYLE, fmtUtc,
   StatCard, priorityBadge, statusBadge,
-  AssigneeAvatars, EmptyState, BulkSelectBar, SelectCheckbox, FilterBar, Pagination,
+  AssigneeAvatars, EmptyState, BulkSelectBar, SelectCheckbox, FilterBar, Pagination, userKey, partKey,
 } from './shared';
 import {
   ScheduleMeetingDialog, MeetingEditDialog,
@@ -441,10 +441,10 @@ const ExecMeetingDashboard = () => {
         parts.push('Action Items:\n' + n.action_items.map(a => `- ${a.title}`).join('\n'));
       }
       const text = parts.join('\n\n').trim();
-      if (text) {
-        if (docType === 'minutes') setAiDocSummary(text.slice(0, 800));
-        else setAiDocContext(text.slice(0, 800));
-      }
+      // Minutes: the summary only. The server puts in the meeting's own decisions and action items, with their
+      // owners; filled in here and cut at 800 characters, most of them were lost (CO-167).
+      if (docType === 'minutes') setAiDocSummary(n.ai_summary || '');
+      else if (text) setAiDocContext(text.slice(0, 800));
     } catch { /* no notes yet — box already cleared above */ }
   };
 
@@ -558,8 +558,8 @@ const ExecMeetingDashboard = () => {
     setUserSearchLoading(true);
     try {
       const data = await execMeetingService.searchUsers(q);
-      const existing = (participantsMap[meetingId] || []).map(p => p.user_id);
-      setUserSearchResults((data.users || []).filter(u => !existing.includes(u.id)));
+      const existing = new Set((participantsMap[meetingId] || []).map(partKey));
+      setUserSearchResults((data.users || []).filter(u => !existing.has(userKey(u))));
     } catch { setUserSearchResults([]); }
     finally { setUserSearchLoading(false); }
   };
@@ -568,18 +568,22 @@ const ExecMeetingDashboard = () => {
   // commit, which shows ONE summary toast instead of one per participant.
   const addParticipant = async (meetingId, user, { silent = false } = {}) => {
     // Optimistic update — show instantly, sync with real IDs in background
-    const optimistic = { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending' };
+    const optimistic = { user_id: user.id, user_type: user.user_type || 'company_user', member_id: user.id,
+      full_name: user.full_name, email: user.email, role: user.role, response: 'pending' };
     setParticipantsMap(prev => ({ ...prev, [meetingId]: [...(prev[meetingId] || []), optimistic] }));
     setUserSearchQ(''); setUserSearchResults([]);
     try {
-      await execMeetingService.addParticipant(meetingId, user.id, user.user_type);
+      const added = await execMeetingService.addParticipant(meetingId, user.id, user.user_type);
       // Reload from backend to replace optimistic entry with real CompanyUser ID (needed for correct DELETE)
       const data = await execMeetingService.getParticipants(meetingId);
       setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
-      if (!silent) toast({ title: `${user.full_name} added`, description: 'An invitation email has been sent to them.' });
+      // Invited only if new to a meeting that is on (CO-257); the toast said an email went every time.
+      if (!silent) toast({ title: `${user.full_name} added`, description: added?.invited === false
+        ? 'No invitation was sent: they were already in it, or the meeting is not on.'
+        : 'An invitation has been sent to them, by email and in their notifications.' });
     } catch (err) {
       // Roll back optimistic update on failure
-      setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.user_id !== user.id) }));
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => partKey(p) !== userKey(user)) }));
       if (!silent) toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' });
       throw err;
     }
@@ -656,14 +660,15 @@ const ExecMeetingDashboard = () => {
     }
     setNotesLoading(true);
     try {
-      await execMeetingService.generateNotes(meetingId, { transcript: transcriptInput });
+      const made = await execMeetingService.generateNotes(meetingId, { transcript: transcriptInput });
       // Re-fetch the full notes so the extracted action items (with their ids)
       // show up — the POST response only returns a created-count, not the list.
       const fresh = await execMeetingService.getMeetingNotes(meetingId);
       if (fresh.notes) setMeetingNotes(prev => ({ ...prev, [meetingId]: fresh.notes }));
       setTranscriptInput('');
       loadStats(); // an "action items added" notification may have been created
-      toast({ title: 'Notes generated!', description: 'Summary, decisions and action items extracted.' });
+      // The server says how much of the transcript was read (CO-164).
+      toast({ title: 'Notes generated!', description: made?.message || 'Summary, decisions and action items extracted.' });
     } catch (err) {
       toast({ title: 'Notetaker failed', description: err.message, variant: 'destructive' });
     } finally {
