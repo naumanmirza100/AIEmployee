@@ -363,7 +363,7 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
     "duration_minutes": <number>,
     "recurrence": "none|daily|weekly|weekly_weekdays|biweekly|monthly",
     "recurrence_end_date": "<YYYY-MM-DD or null>",
-    "title": "<meeting title>",
+    "title": "<what the meeting is, without the people or the time: 'Kick-off meeting', 'Design review'>",
     "description": "<brief description>",
     "agenda": ["discussion topic 1", "discussion topic 2"],
     "parse_error": "<error message if cannot parse, else null>"

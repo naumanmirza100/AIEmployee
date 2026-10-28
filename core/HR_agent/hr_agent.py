@@ -14,7 +14,7 @@ from typing import Optional
 
 from django.conf import settings
 
-from core import whole_document
+from core import answer_language, whole_document
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 from .services import HRKnowledgeService, build_employee_context
 from .intent import NOT_IN_THE_DOCUMENTS
@@ -176,7 +176,10 @@ class HRAgent(BaseAgent):
         # that is not possible or fails, from the excerpts below as before.
         employee_context = self._employee_context(asker_employee)
         whole = self._plan_whole_document(question, knowledge_result, employee_context, wants_everything)
+        # Searched in English, answered in the asker's own language (core/answer_language.py).
+        language = answer_language.line(whole_document.current_question(question), search_query)
         if whole is not None:
+            whole.prompt = language + whole.prompt
             _t_llm = time.time()
             formatted = whole_document.answer(self, whole, system_prompt=self.system_prompt)
             if formatted:
@@ -200,8 +203,8 @@ class HRAgent(BaseAgent):
 
         # Format with the LLM, grounded in the retrieved excerpts + (optional) employee context.
         try:
-            prompt = get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
-                                          employee_context=employee_context)
+            prompt = language + get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
+                                                     employee_context=employee_context)
             _t_llm = time.time()
             # HR answers legitimately need more room than Frontline (policy
             # detail, leave-balance breakdowns, benefit tiers). Default 400
@@ -334,11 +337,14 @@ class HRAgent(BaseAgent):
         # whole (core/whole_document.py); when that fails before any text is out, the passages answer it.
         employee_context = self._employee_context(asker_employee)
         whole = self._plan_whole_document(question, knowledge_result, employee_context, wants_everything)
+        # Searched in English, answered in the asker's own language (core/answer_language.py).
+        language = answer_language.line(whole_document.current_question(question), search_query)
         attempts = []
         if whole is not None:
+            whole.prompt = language + whole.prompt
             attempts.append((whole.prompt, 0, whole.max_tokens, whole.citations, whole.note))
-        attempts.append((get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
-                                              employee_context=employee_context),
+        attempts.append((language + get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
+                                                         employee_context=employee_context),
                          0.3, int(getattr(settings, 'HR_QA_MAX_TOKENS', 900)),
                          knowledge_result.get('citations', []), ''))
 

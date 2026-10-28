@@ -198,18 +198,25 @@ class OperationsFaissVectorStore:
         from django.db.models import Q
         from operations_agent.models import OperationsDocumentChunk
 
-        # Chunks belong to either a document or a summary — index both.
+        # Chunks belong to either a document or a summary — index both. The vectors of the model now in use, on
+        # purpose: the first vector found set the index's size and every vector of another model was skipped, so
+        # documents embedded with an earlier model dropped out of meaning-based search while still marked indexed
+        # (CO-279). Those are re-embedded with the current model in the background.
+        current = _current_embedding_model(self.company_id)
         qs = (OperationsDocumentChunk.objects
               .filter(Q(document__company_id=self.company_id)
                       | Q(summary__company_id=self.company_id))
               .exclude(embedding__isnull=True)
-              .values_list('id', 'embedding')
+              .values_list('id', 'embedding', 'document__embedding_model', 'summary__embedding_model')
               .iterator(chunk_size=2000))
 
         vecs: List[List[float]] = []
         ids: List[int] = []
         dim = 0
-        for chunk_id, embedding in qs:
+        for chunk_id, embedding, doc_model, summary_model in qs:
+            model = doc_model or summary_model or ''
+            if current and model and model != current:
+                continue
             try:
                 # JSONField may hand back a native list; older/string payloads
                 # are JSON-decoded.
@@ -224,6 +231,8 @@ class OperationsFaissVectorStore:
                 ids.append(chunk_id)
             except Exception:
                 continue
+        if current:
+            _reembed_other_models(self.company_id, current)
 
         if not vecs:
             logger.info("Operations FAISS build skipped for company %s: no embeddings found",
@@ -275,6 +284,53 @@ class OperationsFaissVectorStore:
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
+
+def _current_embedding_model(company_id) -> str:
+    """The embedding model the company's search uses now, or '' when no provider answers."""
+    try:
+        from operations_agent.agents.document_processing_agent import build_embedding_service
+        svc = build_embedding_service(company_id)
+        if svc is not None and svc.is_available():
+            return getattr(svc, 'embedding_model', '') or ''
+    except Exception:
+        logger.debug("Operations: no current embedding model for company %s", company_id)
+    return ''
+
+
+_REEMBED_QUEUED: set = set()
+
+
+def _reembed_other_models(company_id, current: str) -> None:
+    """Re-embed, in one background thread, the company's indexed documents and summaries whose vectors came from
+    another model, at most 20 a time and each once per process (CO-279)."""
+    from django.db.models import Q
+    from operations_agent.models import OperationsDocument, OperationsDocumentSummary
+    other = Q(is_indexed=True) & ~Q(embedding_model='') & ~Q(embedding_model=current)
+    docs = [('d', i) for i in OperationsDocument.objects.filter(other, company_id=company_id)
+            .values_list('id', flat=True)[:20]]
+    sums = [('s', i) for i in OperationsDocumentSummary.objects.filter(other, company_id=company_id)
+            .values_list('id', flat=True)[:20]]
+    todo = [key for key in docs + sums if key not in _REEMBED_QUEUED][:20]
+    if not todo:
+        return
+    _REEMBED_QUEUED.update(todo)
+    logger.info("Operations: re-embedding %d entries of company %s with %s", len(todo), company_id, current)
+
+    def _run():
+        from django.db import close_old_connections
+        from operations_agent.tasks import _reindex_impl, _reindex_summary_impl
+        close_old_connections()
+        try:
+            for kind, row_id in todo:
+                try:
+                    (_reindex_impl if kind == 'd' else _reindex_summary_impl)(row_id)
+                except Exception:
+                    logger.exception("Operations: re-embedding %s %s failed", kind, row_id)
+        finally:
+            close_old_connections()
+
+    threading.Thread(target=_run, name='ops-reembed', daemon=True).start()
+
 
 def _normalize_inplace(mat) -> None:
     """L2-normalize a 2-D numpy array in place. Zero-norm rows left as zero."""

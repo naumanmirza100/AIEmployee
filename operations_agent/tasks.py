@@ -21,6 +21,28 @@ import threading
 logger = logging.getLogger(__name__)
 
 
+def _fail_if_still_running(model, row_id, result):
+    """Stamp an entry failed with the agent's own error when the work did not succeed and the entry is still pending
+    or processing.
+
+    The agent hands most errors back as a result instead of raising them, and that result was never read: an error
+    while saving left the entry on 'processing' until the sweep marked it 'The server may have restarted', 30
+    minutes later (two hours for a summary), and the file could not be summarised again meanwhile (CO-178). Saved
+    with its fields named, so the 'could not process' alert and the uploader's bell still follow. A failure that
+    already wrote its own message, and an entry deleted meanwhile, are left alone."""
+    if (result or {}).get('success') or (result or {}).get('deleted'):
+        return
+    row = model.objects.filter(id=row_id, processing_status__in=('pending', 'processing')).first()
+    if row is None:
+        return
+    row.processing_status = 'failed'
+    row.processing_error = str((result or {}).get('error') or 'Processing failed.')[:2000]
+    fields = ['processing_status', 'processing_error']
+    if any(f.name == 'updated_at' for f in model._meta.fields):
+        fields.append('updated_at')
+    row.save(update_fields=fields)
+
+
 def process_document_in_background(agent, file_path, original_filename,
                                    company_id, uploaded_by_id, existing_doc_id,
                                    title='', tags=''):
@@ -35,7 +57,7 @@ def process_document_in_background(agent, file_path, original_filename,
         from django.db import close_old_connections
         close_old_connections()
         try:
-            agent.process(
+            result = agent.process(
                 action='process_file',
                 file_path=file_path,
                 original_filename=original_filename,
@@ -45,6 +67,8 @@ def process_document_in_background(agent, file_path, original_filename,
                 tags=tags,
                 existing_doc_id=existing_doc_id,
             )
+            from operations_agent.models import OperationsDocument
+            _fail_if_still_running(OperationsDocument, existing_doc_id, result)
         except Exception as exc:
             logger.exception("Operations background processing failed for %s", original_filename)
             # Ensure the placeholder doesn't hang in 'processing' forever.
@@ -76,7 +100,7 @@ def summarize_document_in_background(agent, file_path, original_filename,
         from django.db import close_old_connections
         close_old_connections()
         try:
-            agent.process(
+            result = agent.process(
                 action='summarize_file',
                 file_path=file_path,
                 original_filename=original_filename,
@@ -84,6 +108,8 @@ def summarize_document_in_background(agent, file_path, original_filename,
                 uploaded_by_id=uploaded_by_id,
                 existing_summary_id=existing_summary_id,
             )
+            from operations_agent.models import OperationsDocumentSummary
+            _fail_if_still_running(OperationsDocumentSummary, existing_summary_id, result)
         except Exception as exc:
             logger.exception("Operations background summarisation failed for %s", original_filename)
             try:
@@ -130,23 +156,37 @@ def _reindex_impl(document_id):
     # Re-chunk + re-embed + stamp ready in one transaction so a failure can't
     # leave the doc chunk-less-but-ready or stuck mid-way.
     agent = DocumentProcessingAgent()
-    with transaction.atomic():
-        OperationsDocumentChunk.objects.filter(document=doc).delete()
-        count, embedded, model = agent._chunk_embed_and_store(
-            doc, doc.parsed_text, doc.page_count or 1, doc.document_type or 'other',
-        )
-        doc.chunks_total = count
-        doc.chunks_processed = count
-        doc.is_indexed = embedded
-        doc.embedding_model = model or ''
-        doc.processing_status = 'ready'
-        doc.is_processed = True
-        doc.save(update_fields=[
-            'chunks_total', 'chunks_processed', 'is_indexed',
-            'embedding_model', 'processing_status', 'is_processed', 'updated_at',
-        ])
+    # A document whose passages had vectors keeps them when the new run gets none (the embedding provider was down):
+    # re-indexing replaced good vectors with none and still reported success, for every document of every company
+    # when run without filters (CO-266).
+    had_vectors = OperationsDocumentChunk.objects.filter(document=doc, embedding__isnull=False).exists()
+    try:
+        with transaction.atomic():
+            OperationsDocumentChunk.objects.filter(document=doc).delete()
+            count, embedded, model = agent._chunk_embed_and_store(
+                doc, doc.parsed_text, doc.page_count or 1, doc.document_type or 'other',
+            )
+            if had_vectors and not embedded:
+                raise _NoVectors()
+            doc.chunks_total = count
+            doc.chunks_processed = count
+            doc.is_indexed = embedded
+            doc.embedding_model = model or ''
+            doc.processing_status = 'ready'
+            doc.is_processed = True
+            doc.save(update_fields=[
+                'chunks_total', 'chunks_processed', 'is_indexed',
+                'embedding_model', 'processing_status', 'is_processed', 'updated_at',
+            ])
+    except _NoVectors:
+        OperationsDocument.objects.filter(pk=doc.pk).update(processing_status='ready', processing_error='')
+        return {'status': 'not_embedded', 'document_id': document_id}
     _invalidate_operations_indexes(doc.company_id, embedded)
     return {'status': 'ready', 'document_id': document_id, 'chunks': count, 'embedded': embedded}
+
+
+class _NoVectors(Exception):
+    """The new run made no vectors for a document that had them: undo it, keep the old passages."""
 
 
 def reindex_document_in_background(document_id):
@@ -196,16 +236,23 @@ def _reindex_summary_impl(summary_id):
     s.save(update_fields=['processing_status'])
 
     agent = DocumentProcessingAgent()
-    with transaction.atomic():
-        OperationsDocumentChunk.objects.filter(summary=s).delete()
-        count, embedded, model = agent._chunk_embed_and_store(
-            s, s.parsed_text, s.page_count or 1, s.document_category or 'other',
-            owner_kind='summary',
-        )
-        s.is_indexed = embedded
-        s.embedding_model = model or ''
-        s.processing_status = 'ready'
-        s.save(update_fields=['is_indexed', 'embedding_model', 'processing_status'])
+    had_vectors = OperationsDocumentChunk.objects.filter(summary=s, embedding__isnull=False).exists()
+    try:
+        with transaction.atomic():
+            OperationsDocumentChunk.objects.filter(summary=s).delete()
+            count, embedded, model = agent._chunk_embed_and_store(
+                s, s.parsed_text, s.page_count or 1, s.document_category or 'other',
+                owner_kind='summary',
+            )
+            if had_vectors and not embedded:
+                raise _NoVectors()      # keep the old vectors (CO-266)
+            s.is_indexed = embedded
+            s.embedding_model = model or ''
+            s.processing_status = 'ready'
+            s.save(update_fields=['is_indexed', 'embedding_model', 'processing_status'])
+    except _NoVectors:
+        OperationsDocumentSummary.objects.filter(pk=s.pk).update(processing_status='ready')
+        return {'status': 'not_embedded', 'summary_id': summary_id}
     _invalidate_operations_indexes(s.company_id, embedded)
     return {'status': 'ready', 'summary_id': summary_id, 'chunks': count, 'embedded': embedded}
 

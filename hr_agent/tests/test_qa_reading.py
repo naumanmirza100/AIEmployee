@@ -122,6 +122,29 @@ class AnswerTests(HRTestCase):
         self.assertEqual(result['answer'], intent.NOT_IN_THE_DOCUMENTS)
         self.assertNotIn('route', result['answer'])
 
+    def test_roman_urdu_is_answered_in_roman_urdu(self):
+        # Searched with the reading's English, "ghar se kaam kitne din kar sakte hain?" was answered in English
+        # (28 Oct 2026): nothing in the prompt asked for the asker's language. The line now comes first.
+        from core.HR_agent.hr_agent import HRAgent
+        agent = HRAgent(company_id=self.company.id)
+        found = {'has_verified_info': True, 'excerpts': [{'title': 'Handbook', 'content': 'Two days a week.'}]}
+        with mock.patch.object(agent.knowledge_service, 'get_answer', return_value=found), \
+                mock.patch.object(agent, '_call_llm', return_value='Hafte mein do din.') as model:
+            agent.answer_question('Previous conversation:\nUser: hi\n\nCurrent question: ghar se kaam kitne din?',
+                                  asker_role='admin', search_query='How many days a week can I work from home?')
+        prompt = model.call_args.kwargs['prompt']
+        self.assertTrue(prompt.startswith('LANGUAGE: the person asked, in their own words: "ghar se kaam kitne din?"'))
+
+    def test_an_english_question_gets_no_language_line(self):
+        from core.HR_agent.hr_agent import HRAgent
+        agent = HRAgent(company_id=self.company.id)
+        found = {'has_verified_info': True, 'excerpts': [{'title': 'Handbook', 'content': 'Two days a week.'}]}
+        with mock.patch.object(agent.knowledge_service, 'get_answer', return_value=found), \
+                mock.patch.object(agent, '_call_llm', return_value='Two days.') as model:
+            agent.answer_question('How many days can I work from home?', asker_role='admin',
+                                  search_query='How many days can I work from home?')
+        self.assertNotIn('LANGUAGE:', model.call_args.kwargs['prompt'])
+
     def test_the_readings_full_list_decides_the_whole_document_mode(self):
         def plan(question, wants):
             with mock.patch('core.whole_document._budget', return_value=0) as budget:

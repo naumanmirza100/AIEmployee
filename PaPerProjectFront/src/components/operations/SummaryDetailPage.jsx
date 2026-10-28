@@ -247,6 +247,18 @@ const SummaryDetailPage = () => {
           ))}
         </div>
 
+        {/* A failed or still-running summary showed as an empty finished one (CO-179). */}
+        {summary.processing_status && summary.processing_status !== 'ready' && (
+          <div id="OPS-summarydetail-status-note" data-testid="OPS-summarydetail-status-note"
+            className={`mt-4 flex items-start gap-2.5 rounded-xl border p-3 text-xs ${summary.processing_status === 'failed'
+              ? 'border-red-500/25 text-red-200/90' : 'border-amber-500/25 text-amber-200/90'}`}
+            style={{ background: summary.processing_status === 'failed' ? 'rgba(239,68,68,0.06)' : 'rgba(245,158,11,0.06)' }}>
+            {summary.processing_status === 'failed'
+              ? <span><b>This file could not be summarised.</b> {summary.processing_error || ''} Delete it and upload it again to try once more.</span>
+              : <span className="flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" /> This file is still being summarised. Come back in a minute.</span>}
+          </div>
+        )}
+
         {/* Sentiment + Importance + Topics badges */}
         {(sentimentCfg || importanceCfg || summary.topics?.length > 0) && (
           <div id="OPS-summarydetail-badges-row" data-testid="OPS-summarydetail-badges-row" className="flex flex-wrap gap-3 mt-4">
@@ -433,7 +445,15 @@ const SummaryDetailPage = () => {
                 {summary.deadlines.map((dl, i) => (
                   <div key={i} id={`OPS-summarydetail-deadline-row-${i}`} data-testid={`OPS-summarydetail-deadline-row-${i}`} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-orange-500/10" style={{ background: 'rgba(249,115,22,0.05)' }}>
                     <Clock className="h-3.5 w-3.5 text-orange-400 mt-0.5 shrink-0" />
-                    <span className="text-xs text-white/50 leading-relaxed">{dl}</span>
+                    {/* A deadline is { date, description } since CO-277; older summaries keep a sentence. */}
+                    <span className="text-xs text-white/50 leading-relaxed">
+                      {typeof dl === 'string' ? dl : (
+                        <>
+                          {dl?.date && <span className="text-orange-300 font-medium mr-1.5">{dl.date}</span>}
+                          {dl?.description || 'Deadline'}
+                        </>
+                      )}
+                    </span>
                   </div>
                 ))}
               </div>

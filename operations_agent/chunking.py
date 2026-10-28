@@ -119,7 +119,10 @@ def _split_long_section(section: str, max_size: int, overlap: int) -> List[str]:
 
 _DOT_LEADER_RE = re.compile(r'\.{3,}|(?:\.\s){3,}')
 _PAGE_NUM_ONLY_RE = re.compile(r'^\s*(?:page\s*)?\d{1,4}\s*$', re.IGNORECASE)
-_WORD_RE = re.compile(r'[A-Za-z]{2,}')
+# Content is letters of any script and digits. Counting A to Z only threw away every passage of a document in Urdu
+# or Arabic script, and the stretches of a spreadsheet that are dates and amounts, while the document showed as
+# Processed (CO-215).
+_WORD_RE = re.compile(r'[^\W_]{2,}')
 
 
 def looks_like_toc_or_index(text: str) -> bool:

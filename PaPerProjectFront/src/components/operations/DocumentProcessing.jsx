@@ -200,8 +200,13 @@ const DocumentProcessing = () => {
           .then((res) => ({ data: res.document || {} })),
       poll: (documentId) => operationsService.getDocumentStatus(documentId),
       onDone: (statusRes) => {
-        const did = statusRes?.data?.id;
-        if (did != null) setHighlightDocId(did);
+        // "Uploaded & analyzed" only when it was: a failed file got the same banner (CO-179).
+        const data = statusRes?.data || {};
+        if (data.processing_status === 'failed') {
+          toast({ title: `Could not read ${title}`, description: data.processing_error || 'Processing failed.', variant: 'destructive' });
+        } else if (data.id != null) {
+          setHighlightDocId(data.id);
+        }
         setPage(1);
         fetchDocuments();
       },
@@ -508,10 +513,13 @@ const DocumentProcessing = () => {
                           <td className="px-4 py-3 text-xs text-white/40">{formatFileSize(doc.file_size)}</td>
                           <td className="px-4 py-3 text-xs text-white/40">{doc.page_count || '—'}</td>
                           <td className="px-4 py-3">
-                            {doc.is_processed ? (
-                              <span className="flex items-center gap-1 text-[11px] text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Processed</span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-[11px] text-amber-400"><Clock className="h-3 w-3" /> Pending</span>
+                            {/* The table knew only Processed and Pending, so a failed file read "Pending" (CO-179). */}
+                            <StatusPill doc={doc} />
+                            {getDocStatus(doc) === 'failed' && doc.processing_error && (
+                              <div className="mt-1 max-w-[220px] text-[10px] leading-snug text-red-300/80" title={doc.processing_error}
+                                id={`OPS-docprocessing-row-error-${doc.id}`} data-testid={`OPS-docprocessing-row-error-${doc.id}`}>
+                                {doc.processing_error.length > 140 ? `${doc.processing_error.slice(0, 140)}…` : doc.processing_error}
+                              </div>
                             )}
                           </td>
                           <td className="px-4 py-3">
@@ -630,7 +638,7 @@ const DocumentProcessing = () => {
                 id="OPS-docprocessing-file-input"
                 data-testid="OPS-docprocessing-file-input"
                 type="file"
-                accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.pptx,.txt,.md"
+                accept=".pdf,.docx,.xlsx,.csv,.pptx,.txt,.md"
                 onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                 className="h-10 rounded-xl border-white/[0.08] text-white file:text-amber-400 file:bg-transparent file:border-0 file:font-medium cursor-pointer"
                 style={{ background: 'rgba(0,0,0,0.3)' }}

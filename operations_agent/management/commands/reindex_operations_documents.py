@@ -29,6 +29,9 @@ class Command(BaseCommand):
                             help='Reindex ONLY summarised files, not documents.')
         parser.add_argument('--async', dest='use_celery', action='store_true',
                             help='Dispatch via Celery (default: run inline)')
+        parser.add_argument('--keep-going', action='store_true',
+                            help='Carry on after a document gets no vectors (the embedding provider is down); '
+                                 'by default the run stops there, and that document keeps its old ones.')
 
     def handle(self, *args, **opts):
         from operations_agent.models import OperationsDocument
@@ -61,6 +64,13 @@ class Command(BaseCommand):
                             self.stdout.write(f'  {st}: {doc.id} — {doc.title} ({chunks} chunks)')
                             ok += 1 if st == 'ready' else 0
                             fail += 0 if st == 'ready' else 1
+                            if st == 'not_embedded' and not opts.get('keep_going'):
+                                # The embedding provider is not answering: every other document would lose its
+                                # vectors the same way (CO-266). It kept its old ones; stop here.
+                                self.stderr.write('  Stopped: no vectors could be made (is the embedding provider '
+                                                  'available?). That document kept its old ones. Use --keep-going '
+                                                  'to carry on anyway.')
+                                break
                     except Exception as exc:
                         self.stderr.write(f'  ERROR: {doc.id} — {doc.title}: {exc}')
                         fail += 1

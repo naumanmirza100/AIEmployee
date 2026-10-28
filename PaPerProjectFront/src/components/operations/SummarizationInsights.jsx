@@ -7,7 +7,7 @@ import {
   FileText, Search, Loader2, Sparkles, RefreshCw, Upload,
   FileSpreadsheet, FileType, Presentation, File, Trash2,
   ArrowRight, Clock, BookOpen, User, X, Plus, LayoutList, LayoutGrid,
-  ChevronLeft, ChevronRight, Eye,
+  ChevronLeft, ChevronRight, Eye, AlertCircle,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +25,29 @@ const FILE_TYPE_CONFIG = {
   txt:  { icon: FileText,        color: '#6b7280', label: 'TXT' },
 };
 const getFileConfig = (type) => FILE_TYPE_CONFIG[type] || { icon: File, color: '#6b7280', label: 'FILE' };
+
+// A summary still being written, or one that failed, with its reason. They were listed like finished ones, with
+// "0 pages" and an empty page (CO-179).
+const SummaryStatus = ({ s }) => {
+  if (s.processing_status === 'failed') {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-red-300/90" title={s.processing_error || ''}
+        id={`OPS-summarization-status-failed-${s.id}`} data-testid={`OPS-summarization-status-failed-${s.id}`}>
+        <AlertCircle className="h-3 w-3 shrink-0" />
+        Failed{s.processing_error ? `: ${s.processing_error.length > 110 ? `${s.processing_error.slice(0, 110)}…` : s.processing_error}` : ''}
+      </span>
+    );
+  }
+  if (s.processing_status === 'pending' || s.processing_status === 'processing') {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-amber-300/90"
+        id={`OPS-summarization-status-running-${s.id}`} data-testid={`OPS-summarization-status-running-${s.id}`}>
+        <Loader2 className="h-3 w-3 animate-spin" /> Being summarised…
+      </span>
+    );
+  }
+  return null;
+};
 
 const formatFileSize = (bytes) => {
   if (!bytes) return '0 B';
@@ -263,6 +286,7 @@ const SummarizationInsights = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-white truncate">{s.original_filename}</p>
+                          <SummaryStatus s={s} />
                           <div className="flex items-center gap-3 mt-1 text-[11px] text-white/30 flex-wrap">
                             <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" /> {s.page_count} pages</span>
                             <span>{formatFileSize(s.file_size)}</span>
@@ -318,7 +342,10 @@ const SummarizationInsights = () => {
                               <div className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0" style={{ backgroundColor: `${fc.color}15` }}>
                                 <FIcon className="h-4 w-4" style={{ color: fc.color }} />
                               </div>
-                              <p className="text-sm font-medium text-white truncate max-w-[250px]">{s.original_filename}</p>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-white truncate max-w-[250px]">{s.original_filename}</p>
+                                <SummaryStatus s={s} />
+                              </div>
                             </div>
                           </td>
                           <td className="px-4 py-3">

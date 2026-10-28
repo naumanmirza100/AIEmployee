@@ -139,8 +139,8 @@ BASE_SYSTEM = (
 class DocumentAuthoringAgent(MarketingBaseAgent):
     """Generate professional documents using Groq + reference context."""
 
-    MAX_REF_CHARS = 10000
-    MAX_PER_REF_CHARS = 2500
+    MAX_REF_CHARS = 12000
+    MIN_PER_REF_CHARS = 1200    # with many files chosen, each still gets this much; files past the limit are named
     MAX_TOKENS = 4000
 
     def __init__(self):
@@ -239,6 +239,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             yield ('meta', {
                 'title': prepared['resolved_title'],
                 'references': prepared['refs'],
+                'references_left_out': list(getattr(self, 'references_left_out', []) or []),
             })
 
             messages = [
@@ -274,20 +275,37 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
 
             full_text = ''
             usage = None
-            for chunk in stream:
-                # usage arrives in the terminal chunk when include_usage=True
-                chunk_usage = getattr(chunk, 'usage', None)
-                if chunk_usage is not None:
-                    usage = chunk_usage
+            finished = False
+            try:
+                for chunk in stream:
+                    # usage arrives in the terminal chunk when include_usage=True
+                    chunk_usage = getattr(chunk, 'usage', None)
+                    if chunk_usage is not None:
+                        usage = chunk_usage
 
-                choices = getattr(chunk, 'choices', None) or []
-                if not choices:
-                    continue
-                delta = getattr(choices[0], 'delta', None)
-                content_delta = getattr(delta, 'content', None) if delta else None
-                if content_delta:
-                    full_text += content_delta
-                    yield ('text', content_delta)
+                    choices = getattr(chunk, 'choices', None) or []
+                    if not choices:
+                        continue
+                    delta = getattr(choices[0], 'delta', None)
+                    content_delta = getattr(delta, 'content', None) if delta else None
+                    if content_delta:
+                        full_text += content_delta
+                        yield ('text', content_delta)
+                finished = True
+            finally:
+                if not finished and full_text:
+                    # Cancelled, the tab closed, or the stream broke: the text made so far still used tokens, and
+                    # they were never counted (CO-264). The provider's figure if it came, else an estimate.
+                    spent = getattr(usage, 'total_tokens', None) or (
+                        max(1, len(prepared['user_prompt']) // 4) + max(1, len(full_text) // 4))
+                    if key_ctx:
+                        try:
+                            from core.api_key_service import record_usage
+                            record_usage(key_ctx, spent)
+                        except Exception as _ru_err:
+                            logger.warning('DocumentAuthoringAgent: usage of a stopped stream not recorded: %s', _ru_err)
+                    self._log_call(model, started, False, {'provider': provider, 'model': model,
+                                                           'total_tokens': spent, 'estimated': usage is None})
 
             # Normalize result
             content = full_text.strip()
@@ -367,7 +385,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
 
         template_info = TEMPLATE_GUIDES.get(template_type) or TEMPLATE_GUIDES['custom']
         tone_guide = TONE_GUIDES.get(tone, TONE_GUIDES['formal'])
-        ref_block, refs = self._build_reference_block(company_id, reference_document_ids)
+        self.references_left_out = []
+        ref_block, refs = self._build_reference_block(company_id, reference_document_ids, prompt)
 
         resolved_title = (title or '').strip() or self._suggest_title(prompt, template_info['name'])
 
@@ -416,6 +435,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         self,
         company_id: int,
         reference_document_ids: Optional[List[int]],
+        prompt: str = '',
     ):
         if not reference_document_ids:
             # With nothing to go on it wrote "95% customer satisfaction" and the like into a company's
@@ -432,28 +452,47 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         if not docs:
             return 'REFERENCE MATERIAL: (requested documents not found or not yet processed)\n\n', []
 
+        # Each file gets a fair share of the space, filled with its short summary and then the passages that match
+        # the request. Each got only its three-to-five-sentence summary, and files past the 10,000-character mark
+        # were skipped without a word while the document still listed them (CO-214).
+        share = max(self.MIN_PER_REF_CHARS, self.MAX_REF_CHARS // len(docs))
         parts = ['REFERENCE DOCUMENTS (use these facts as the source of truth):\n']
-        refs = []
+        refs, left_out = [], []
         total = 0
         for d in docs:
-            text_source = (d.summary or d.parsed_text or '').strip()
-            if not text_source:
+            name = d.title or d.original_filename
+            material = self._reference_material(d, prompt, share)
+            if not material or total + len(material) > self.MAX_REF_CHARS:
+                left_out.append(name)
                 continue
-            if len(text_source) > self.MAX_PER_REF_CHARS:
-                text_source = text_source[: self.MAX_PER_REF_CHARS] + '…'
-            header = f"### [{d.title or d.original_filename}]\n"
-            block = header + text_source + '\n'
-            if total + len(block) > self.MAX_REF_CHARS:
-                break
-            parts.append(block)
-            total += len(block)
-            refs.append({
-                'id': d.id,
-                'title': d.title or d.original_filename,
-                'file_type': d.file_type,
-            })
+            parts.append(f"### [{name}]\n{material}\n")
+            total += len(material)
+            refs.append({'id': d.id, 'title': name, 'file_type': d.file_type})
         parts.append('\n')
+        self.references_left_out = left_out
         return '\n'.join(parts), refs
+
+    def _reference_material(self, doc, prompt, budget):
+        """The file's summary, then its passages that hold most of the request's words, in the file's own order,
+        up to `budget` characters. A file with no passages gives the start of its text."""
+        from operations_agent.agents.knowledge_qa_agent import _score_chunk, _tokenize
+        from operations_agent.models import OperationsDocumentChunk
+        summary = (doc.summary or '').strip()[:600]
+        pieces, used = ([summary], len(summary)) if summary else ([], 0)
+        words = _tokenize(prompt)
+        chunks = list(OperationsDocumentChunk.objects.filter(document=doc).values_list('chunk_index', 'content'))
+        if chunks:
+            ranked = sorted(chunks, key=lambda c: (-_score_chunk(c[1], words), c[0]))
+            chosen = []
+            for index, content in ranked:
+                if used + len(content) > budget:
+                    continue
+                chosen.append((index, content))
+                used += len(content)
+            pieces += [content for _i, content in sorted(chosen)]
+        elif (doc.parsed_text or '').strip():
+            pieces.append(doc.parsed_text.strip()[:max(0, budget - used)])
+        return '\n\n'.join(p for p in pieces if p).strip()
 
     def _suggest_title(self, prompt: str, template_name: str) -> str:
         words = prompt.split()[:8]

@@ -359,6 +359,21 @@ const DocumentDetailPage = () => {
             </div>
           ))}
         </div>
+
+        {/* Only part of the file was read (CO-216), or nothing in it could be searched (CO-215). */}
+        {(document.metadata?.partly_read
+          || (document.processing_status === 'ready' && !document.chunks_count)) && (
+          <div id="OPS-docdetail-read-note" data-testid="OPS-docdetail-read-note"
+            className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/25 p-3 text-xs text-amber-200/90"
+            style={{ background: 'rgba(245,158,11,0.06)' }}>
+            <Info className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+            <span>
+              {document.metadata?.partly_read
+                ? `Only part of this file was read. ${document.metadata.partly_read}`
+                : 'Nothing in this file could be made searchable, so questions in Knowledge Q&A will not find it. It may be a scan (an image of text) or nearly empty.'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Tabbed Content */}
@@ -396,7 +411,7 @@ const DocumentDetailPage = () => {
           ) : (
             <div id="OPS-docdetail-summary-empty-state" data-testid="OPS-docdetail-summary-empty-state" className="rounded-xl border border-white/[0.06] p-6 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <Info className="h-5 w-5 text-white/20 mx-auto mb-2" />
-              <p className="text-xs text-white/30">No summary available. Re-upload the document to generate an AI summary.</p>
+              <p className="text-xs text-white/30">No AI summary was made for this file. To make one, delete the document and upload it again.</p>
             </div>
           )}
 
