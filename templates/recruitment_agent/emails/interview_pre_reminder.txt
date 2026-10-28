@@ -6,7 +6,7 @@ Position: {{ job_title }}
 Interview Type: {{ interview_type }}
 Date & Time: {{ selected_slot }}
 
-{% if hours_before == 24 %}
+{% if tomorrow %}
 Your interview is scheduled for tomorrow. Please make sure you are prepared and available.
 {% else %}
 Your interview is scheduled in {{ hours_before }} hours. Please make sure you are prepared and available.
@@ -17,8 +17,8 @@ For online interviews, please ensure you have:
 - A stable internet connection
 - A quiet, well-lit space
 - Your resume and any relevant documents ready
-- The meeting link (sent separately)
-{% else %}
+{% if meeting_link %}- The meeting link: {{ meeting_link }}
+{% endif %}{% else %}
 For onsite interviews, please:
 - Arrive 10 minutes early
 - Bring a copy of your resume
@@ -28,5 +28,6 @@ For onsite interviews, please:
 We look forward to meeting you!
 
 Best regards,
-Recruitment Team
+{% if company_name %}{{ company_name }} hiring team{% else %}Recruitment Team{% endif %}{% if contact_email %}
+Questions? Reply to this email, or write to {{ contact_email }}.{% endif %}
 

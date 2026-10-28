@@ -158,6 +158,11 @@ class SettingsFollowTheJobTests(SharingTestCase):
 
     def test_bulk_invitations_use_the_job_owners_timings(self):
         self.interview.delete()
+        # A slot left to book: without one nobody is invited (CO-228).
+        RecruiterInterviewSettings.objects.create(
+            company_user=self.ann, job=self.job, timezone_name='UTC',
+            time_slots_json=[{'datetime': f'{(date.today() + timedelta(days=7)).isoformat()}T10:00',
+                              'available': True}])
         code, body = self.call(views.bulk_update_cv_records, self.ben, 'post',
                                {'cv_record_ids': [self.cv.id], 'qualification_decision': 'INTERVIEW'})
         self.assertEqual((code, body['emails_sent']), (200, 1), body)

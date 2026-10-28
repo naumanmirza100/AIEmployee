@@ -5,9 +5,10 @@ import {
   Loader2, ArrowLeft, Mail, Phone, Briefcase, MapPin,
   DollarSign, Building2, Link2, ExternalLink, Star,
   CheckCircle2, Clock, Calendar, User, GraduationCap,
-  TrendingUp, AlertCircle, CheckCircle, XCircle, FileText, Printer,
+  TrendingUp, AlertCircle, CheckCircle, XCircle, FileText, Printer, Trash2,
 } from 'lucide-react';
-import { getCVRecordDetail, getCVRecordDecisionHistory } from '@/services/recruitmentAgentService';
+import { getCVRecordDetail, getCVRecordDecisionHistory, deleteCandidate } from '@/services/recruitmentAgentService';
+import { useToast } from '@/components/ui/use-toast';
 import QualificationReasoning from '@/components/recruitment/QualificationReasoning';
 
 /* ── helpers ── */
@@ -141,6 +142,41 @@ const EnrichedProfile = ({ enriched }) => {
   );
 };
 
+// The AI's research on the candidate (docx item 3): from the CV, the apply form and their public GitHub.
+const ResearchProfile = ({ enriched }) => {
+  const r = (enriched || {}).research;
+  const gh = (enriched || {}).github;
+  if (!r && !gh) return null;
+  const list = (title, items, tone) => (items && items.length > 0 ? (
+    <div className="mt-3">
+      <p className="text-[10px] text-white/40 uppercase tracking-wider font-semibold mb-1.5">{title}</p>
+      <ul className={`list-disc pl-5 space-y-1 text-sm ${tone}`}>{items.map((x, i) => <li key={i}>{x}</li>)}</ul>
+    </div>
+  ) : null);
+  return (
+    <Block title="Research" icon={<TrendingUp className="h-4 w-4" />}>
+      <div data-testid="REC-candidate-research">
+        {r?.headline && <p className="text-sm text-white/80">{r.headline}</p>}
+        {r?.seniority && r.seniority !== 'Unclear' && <p className="mt-1 text-xs text-white/50">AI's view of seniority: {r.seniority}</p>}
+        {list('Strengths', r?.strengths, 'text-emerald-200/80')}
+        {list('Gaps against the job', r?.gaps, 'text-amber-200/80')}
+        {list('Check in the interview', r?.verify, 'text-sky-200/80')}
+        {gh && (
+          <div className="mt-4 rounded-lg border border-white/10 p-3 text-xs text-white/70">
+            <a href={gh.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-violet-300 hover:underline">GitHub: {gh.login}</a>
+            <span className="text-white/50"> · {gh.public_repos} public repositories{gh.account_years != null ? ` · ${gh.account_years} years on GitHub` : ''}</span>
+            {gh.top_languages?.length > 0 && <div className="mt-1">Languages: {gh.top_languages.join(', ')}</div>}
+            {gh.recent?.length > 0 && (
+              <div className="mt-1">Recent work: {gh.recent.map((x) => x.name).join(', ')}</div>
+            )}
+          </div>
+        )}
+        {r?.based_on?.length > 0 && <p className="mt-3 text-[11px] text-white/35">Based on: {r.based_on.join(', ')}</p>}
+      </div>
+    </Block>
+  );
+};
+
 /* ── main page ── */
 const CandidateDetailPage = () => {
   const { id } = useParams();
@@ -150,6 +186,23 @@ const CandidateDetailPage = () => {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [decisionHistory, setDecisionHistory] = useState([]);
+  const { toast } = useToast();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Remove this person's data: record, CV, application and interviews (CO-183).
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await deleteCandidate(Number(id));
+      toast({ title: 'Candidate deleted', description: res?.message });
+      navigate('/recruitment/candidates');
+    } catch (e) {
+      toast({ title: 'Not deleted', description: e?.message, variant: 'destructive' });
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -178,7 +231,7 @@ const CandidateDetailPage = () => {
     const app = detail.application || null;
     const ivs = detail.interviews || [];
     const skills = (p.skills || []).join(', ');
-    const summary = ins.summary || ins.summary_text || '';
+    const summary = ins.candidate_summary || ins.summary || ins.summary_text || '';
     const exact = (q.exact_matched_skills || []).join(', ');
     const related = (q.related_matched_skills || []).join(', ');
     const missing = (q.missing_skills || []).join(', ');
@@ -308,7 +361,9 @@ const CandidateDetailPage = () => {
   const skills     = parsed.skills     || [];
   const experience = parsed.experience || parsed.work_experience || [];
   const education  = parsed.education  || [];
-  const summary    = insights.summary  || insights.summary_text  || null;
+  // The AI writes `candidate_summary`; this read `summary` only, so the summary never showed.
+  const summary    = insights.candidate_summary || insights.summary || insights.summary_text || null;
+  const achievements = Array.isArray(insights.notable_achievements) ? insights.notable_achievements : [];
   const exactSkills   = qualified.exact_matched_skills   || [];
   const relatedSkills = qualified.related_matched_skills || [];
   const missingSkills = qualified.missing_skills         || [];
@@ -350,11 +405,28 @@ const CandidateDetailPage = () => {
           <ArrowLeft className="h-4 w-4" />Back to Candidates
         </button>
         {detail && (
+          <div className="flex items-center gap-2">
+          {confirmDelete ? (
+            <span className="inline-flex items-center gap-2 text-xs text-red-200" data-testid="REC-candidate-delete-confirm">
+              Delete this candidate, their CV, application and interviews? A booked interview is called off and they are told.
+              <button onClick={handleDelete} disabled={deleting}
+                className="px-3 py-1.5 rounded-lg bg-red-500/80 text-white font-medium disabled:opacity-50">
+                {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Yes, delete'}
+              </button>
+              <button onClick={() => setConfirmDelete(false)} className="px-2 py-1.5 text-white/60 hover:text-white">Cancel</button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} data-testid="REC-candidate-delete-btn"
+              className="inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg text-red-300 hover:bg-red-500/10">
+              <Trash2 className="h-4 w-4" />Delete candidate
+            </button>
+          )}
           <button onClick={handlePrint}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-1.5 rounded-lg transition-colors text-white hover:bg-white/10"
             style={{ background: 'hsl(var(--surface-invert) / 0.07)', border: '1px solid hsl(var(--surface-invert) / 0.12)' }}>
             <Printer className="h-4 w-4" />Print Report
           </button>
+          </div>
         )}
       </div>
 
@@ -451,6 +523,20 @@ const CandidateDetailPage = () => {
               {summary && (
                 <Block title="AI Summary" icon={<FileText className="h-4 w-4" />}>
                   <p className="text-sm text-white/70 leading-relaxed">{summary}</p>
+                  {(insights.education_level || insights.total_experience_years != null) && (
+                    <p className="mt-2 text-xs text-white/50">
+                      {insights.education_level && <>Highest education: {insights.education_level}. </>}
+                      {insights.total_experience_years != null && <>Experience: about {insights.total_experience_years} years.</>}
+                    </p>
+                  )}
+                </Block>
+              )}
+
+              {achievements.length > 0 && (
+                <Block title="Notable achievements" icon={<Star className="h-4 w-4" />}>
+                  <ul className="list-disc pl-5 space-y-1 text-sm text-white/70">
+                    {achievements.map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
                 </Block>
               )}
 
@@ -476,6 +562,7 @@ const CandidateDetailPage = () => {
             </div>
 
             <div className="space-y-6">
+              <ResearchProfile enriched={detail.enriched} />
               <EnrichedProfile enriched={detail.enriched} />
 
               {(exactSkills.length > 0 || relatedSkills.length > 0 || missingSkills.length > 0) && (

@@ -372,11 +372,13 @@
     <div class="container">
         {% if invalid_token %}
         <div class="invalid-token">
+            {% if company_name %}<p style="margin:0 0 6px;font-weight:600;opacity:.8;">{{ company_name }}</p>{% endif %}
             <h2>❌ Invalid Link</h2>
             <p>{{ error }}</p>
         </div>
         {% else %}
         <div class="header">
+            {% if company_name %}<p style="margin:0 0 6px;font-weight:600;opacity:.8;">{{ company_name }}</p>{% endif %}
             <h1>📅 Select Your Interview Slot</h1>
             <p>These slots are for your <strong>{{ interview.job_role }}</strong> interview. Pick a time that works best for you.</p>
         </div>

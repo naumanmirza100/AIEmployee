@@ -19,11 +19,13 @@ the same Employee row; without a guard we'd loop. Reuses Frontline's
 ``workflow_execution_guard`` ContextVar — same module, same shape.
 """
 import logging
+import uuid
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 from core.models import CompanyUser, UserProfile
 from hr_agent import alerts, logins
@@ -265,6 +267,8 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
             # employee's first leave and was skipped as a repeat ever after.
             import hashlib as _hashlib
             target_pk = context.get('leave_request_id') or context.get('employee_id') or 'na'
+            if context.get('change'):          # a status change: each real change is its own run (CO-68)
+                target_pk = f"{target_pk}@{context['change']}"
             idem_key = _hashlib.sha256(
                 f"wf={w.id}|evt={event}|tgt={target_pk}".encode()
             ).hexdigest()
@@ -318,6 +322,14 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
 # Receivers
 # --------------------------------------------------------------------------
 
+@receiver(pre_save, sender=Employee)
+def employee_pre_save(sender, instance: Employee, **kwargs):
+    """The status as stored, before this save, for employee_post_save to tell a change from a re-save."""
+    if instance.pk and not hasattr(instance, '_status_before'):
+        instance._status_before = (Employee.objects.filter(pk=instance.pk)
+                                   .values_list('employment_status', flat=True).first())
+
+
 @receiver(post_save, sender=Employee)
 def employee_post_save(sender, instance: Employee, created, **kwargs):
     if not instance.company_id:
@@ -348,22 +360,32 @@ def employee_post_save(sender, instance: Employee, created, **kwargs):
         transaction.on_commit(hired)
         return
 
-    # Status-change triggers
+    # Status-change triggers: only when the status has just changed (CO-68). Every save of someone on leave, on
+    # probation or serving notice used to "fire" again, and a once-per-person key hid that, so the second real time
+    # (a second leave, a second notice) never ran. `_status_before` is read in employee_pre_save below; each real
+    # change is its own run (`change` in the context makes the run key).
     new_status = instance.employment_status
+    before = getattr(instance, '_status_before', None)
+    if before == new_status:
+        return
+    instance._status_before = new_status
+    # The time alone could repeat: two changes inside one clock tick (about 15 ms on Windows) shared a key, and the
+    # second run was skipped as a duplicate. This runs once per real change, so a random part is safe.
+    change = f"{timezone.now().isoformat()}#{uuid.uuid4().hex[:8]}"
     if new_status == 'offboarded':
         _run_matching_workflows(
             company_id=instance.company_id, event='employee_leaving',
-            context=_employee_context(instance, event='employee_leaving'),
+            context=dict(_employee_context(instance, event='employee_leaving'), change=change),
         )
     elif new_status == 'on_leave':
         _run_matching_workflows(
             company_id=instance.company_id, event='employee_on_leave',
-            context=_employee_context(instance, event='employee_on_leave'),
+            context=dict(_employee_context(instance, event='employee_on_leave'), change=change),
         )
     elif new_status == 'probation':
         _run_matching_workflows(
             company_id=instance.company_id, event='employee_on_probation',
-            context=_employee_context(instance, event='employee_on_probation'),
+            context=dict(_employee_context(instance, event='employee_on_probation'), change=change),
         )
     elif new_status == 'notice':
         # Serving notice is where offboarding starts; the built-in offboarding
@@ -371,7 +393,7 @@ def employee_post_save(sender, instance: Employee, created, **kwargs):
         # the end. (It used to listen for an event nothing sent.)
         _run_matching_workflows(
             company_id=instance.company_id, event='employee_offboarding_started',
-            context=_employee_context(instance, event='employee_offboarding_started'),
+            context=dict(_employee_context(instance, event='employee_offboarding_started'), change=change),
         )
 
 

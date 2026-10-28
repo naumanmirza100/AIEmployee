@@ -98,7 +98,7 @@ const CVRecords = () => {
 
   const fetchJobs = async () => {
     try {
-      const response = await getJobDescriptions();
+      const response = await getJobDescriptions({ picker: true });
       if (response.status === 'success') setJobs(response.data || []);
     } catch (error) {
       console.error('Error fetching jobs:', error);
@@ -367,6 +367,7 @@ const CVRecords = () => {
                             <div className="flex items-center gap-2 flex-wrap">
                               {record.rank != null && <Badge variant="outline" className="text-xs shrink-0">#{record.rank}</Badge>}
                               <h3 className="font-semibold text-sm truncate">{displayName}</h3>
+                              {record.scored_without_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The AI could not score this CV, so built-in rules did. Process it again to score it with AI.">scored without AI</Badge>}
                             </div>
                           </div>
                           <div className="shrink-0">{getDecisionBadge(record.qualification_decision)}</div>
@@ -424,7 +425,7 @@ const CVRecords = () => {
                           <Checkbox id={`REC-cvrecords-select-${record.id}`} data-testid={`REC-cvrecords-select-${record.id}`} checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} className="translate-y-0.5" />
                         </TableCell>
                         <TableCell className="font-medium">{record.rank != null ? record.rank : '—'}</TableCell>
-                        <TableCell>{displayName}</TableCell>
+                        <TableCell>{displayName}{record.scored_without_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The AI could not score this CV, so built-in rules did. Process it again to score it with AI.">scored without AI</Badge>}</TableCell>
                         <TableCell className="text-muted-foreground">{displayEmail}</TableCell>
                         <TableCell className="max-w-[180px] truncate" title={record.job_description_title}>{record.job_description_title || '—'}</TableCell>
                         <TableCell>{getDecisionBadge(record.qualification_decision)}</TableCell>
@@ -549,7 +550,7 @@ export function CandidateProfile({ detail, getDecisionBadge }) {
   const insights = detail.insights || {};
   const application = detail.application || null;
   const interviews = detail.interviews || [];
-  const summary = insights.summary || insights.summary_text || null;
+  const summary = insights.candidate_summary || insights.summary || insights.summary_text || null;
   const skills = parsed.skills || [];
   const experience = parsed.experience || parsed.work_experience || [];
   const education = parsed.education || [];
@@ -882,7 +883,7 @@ function LegacyCandidateDetail({ record, getDecisionBadge }) {
   const parsed = record.parsed || {};
   const qualified = record.qualified || {};
   const app = record.application || null;
-  const summary = record.insights?.summary || record.summary?.summary;
+  const summary = record.insights?.candidate_summary || record.insights?.summary || record.summary?.summary;
   const skills = parsed.skills || [];
   const displayName = app
     ? `${app.first_name} ${app.last_name}`.trim()

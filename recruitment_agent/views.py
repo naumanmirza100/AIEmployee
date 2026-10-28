@@ -653,9 +653,7 @@ def get_interview_details(request, interview_id):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-# Follow-up reminders are now sent AUTOMATICALLY ONLY via management command
-# Manual sending has been disabled to ensure consistent automatic processing
-# Run: python manage.py send_interview_reminders (via cron/scheduler)
+# Follow-ups and reminders are sent by recruitment_agent.tasks.check_and_send_followup_emails (Celery beat).
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -1356,6 +1354,8 @@ def get_available_slots_for_interview(request, token):
                            exclude=[('recruitment', interview.id)], tz_name=tz)
             if instants else [])
 
+    booked = interview_time.booked_spans(interview)
+
     # Mark which slots are taken
     available_slots = []
     for slot in time_slots:
@@ -1367,8 +1367,11 @@ def get_available_slots_for_interview(request, token):
 
         # Taken: marked in the settings, booked by another candidate, or
         # someone on this interview is busy then (the candidate isn't told why).
-        is_scheduled_in_json = slot.get('scheduled', False)
-        is_taken = (is_scheduled_in_json or slot_key in taken_slot_datetimes
+        # The stored 'scheduled' flag is not used: it was never cleared when an interview was cancelled or moved (CO-117).
+        # Taken by an overlapping booking of the job, or of a recruiter on no shared calendar (CO-186).
+        is_scheduled_in_json = (slot_key in taken_slot_datetimes or (
+            instant is not None and interview_time.overlaps_any(booked, instant, duration.total_seconds() / 60)))
+        is_taken = (is_scheduled_in_json
                     or (instant is not None and overlaps(busy, instant, instant + duration)))
 
         available_slots.append({
@@ -1416,6 +1419,9 @@ def _booking_is_closed(interview) -> bool:
     When the company cannot be told, booking stays open, as it was."""
     from core.modules import has_module
     from recruitment_agent.interview_time import company_id_for
+    # The job was deleted: nothing is left to book for (CO-118).
+    if interview.cv_record_id and interview.cv_record.job_description_id is None:
+        return True
     company_id = company_id_for(interview)
     return bool(company_id) and not has_module(company_id, 'recruitment_agent')
 
@@ -1437,6 +1443,17 @@ def candidate_select_slot(request, token):
             'error': 'Invalid or expired interview link. Please contact the recruiter.',
             'invalid_token': True,
         })
+
+    from django.shortcuts import render as _render_page
+    from recruitment_agent import candidate_mail
+    who = candidate_mail.who_hires(interview)
+
+    def render(req, template, ctx):
+        """The page in the hiring company's name; 'contact the recruiter' says who that is (CO-187)."""
+        ctx = {**who, **ctx}
+        if who['contact_email'] and isinstance(ctx.get('error'), str):
+            ctx['error'] = ctx['error'].replace('Please contact the recruiter.', f"Please write to {who['contact_email']}.")
+        return _render_page(req, template, ctx)
 
     # If already confirmed/scheduled, show the confirmed details instead of slot picker
     if interview.status == 'SCHEDULED':

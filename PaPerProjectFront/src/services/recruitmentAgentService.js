@@ -204,8 +204,9 @@ export const recruitmentQA = async (question) => {
  * Recruitment Q&A with the answer shown as it is written: calls
  * `onText(answerSoFar)` as text arrives and resolves like `recruitmentQA`.
  */
-export const recruitmentQAStream = async (question, { onText, signal } = {}) => {
-  const done = await streamAnswer('/recruitment/qa/stream', { question }, { onText, signal });
+export const recruitmentQAStream = async (question, { onText, signal, chatHistory } = {}) => {
+  const body = chatHistory?.length ? { question, chat_history: chatHistory } : { question };
+  const done = await streamAnswer('/recruitment/qa/stream', body, { onText, signal });
   return { status: 'success', data: done.data };
 };
 
@@ -257,6 +258,7 @@ export const getJobDescriptions = async (params = {}) => {
     if (params.department) query.set('department', params.department);
     if (params.page)       query.set('page',       params.page);
     if (params.page_size)  query.set('page_size',  params.page_size);
+    if (params.picker)     query.set('picker',     '1');
     const qs = query.toString();
     const response = await companyApi.get(`/recruitment/job-descriptions${qs ? `?${qs}` : ''}`);
     return response;
@@ -604,6 +606,18 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
     console.error('Get recruitment analytics error:', error);
     throw error;
   }
+};
+
+/** The onsite interview after a completed one decided 'Onsite Interview' (CO-272). */
+export const scheduleNextInterview = async (interviewId) => companyApi.post(`/recruitment/interviews/${interviewId}/next`, {});
+
+/** Remove one candidate: their record, CV file, application and interviews (CO-183). */
+export const deleteCandidate = async (recordId) => companyApi.delete(`/recruitment/cv-records/${recordId}/delete`);
+
+/** The dashboard's four counts, worked out on the server (CO-106). */
+export const getRecruitmentOverview = async () => {
+  const response = await companyApi.get('/recruitment/analytics', { overview: 1 });
+  return response?.data?.overview || {};
 };
 
 /**

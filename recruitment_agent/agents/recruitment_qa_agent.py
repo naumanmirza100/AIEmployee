@@ -14,7 +14,10 @@ from typing import Any, Dict, List, Optional
 from django.db.models import Count, Avg, Max, Min, Q
 from django.utils import timezone
 
+from core.api_key_service import KeyServiceError
+from recruitment_agent import intent as qa_intent
 from recruitment_agent.core import GroqClient, GroqClientError
+from recruitment_agent.ranking import BEST_FIRST, ranks_for
 from recruitment_agent.models import (
     CVRecord,
     JobApplication,
@@ -158,7 +161,8 @@ def _is_greeting(question: str) -> bool:
     q = question.lower().strip()
     if q in ("hi", "hey", "hello", "hi!", "hey!", "hello!", "hola", "yo"):
         return True
-    if any(g in q for g in _GREETING_OR_CASUAL):
+    # Whole words only: "sup" is in "support" and "hi " in "karachi " (seen 27 Oct 2026).
+    if any(re.search(r'(?<![a-z])' + re.escape(g.strip()) + r'(?![a-z])', q) for g in _GREETING_OR_CASUAL):
         return True
     if len(q) < 20 and not any(kw in q for kw in _RECRUITMENT_KEYWORDS) and not any(kw in q for kw in _STACK_AND_INTERVIEW_KEYWORDS):
         return True
@@ -417,6 +421,17 @@ def _unmatched_job_topics(jobs: List[Dict], question: str) -> List[str]:
     return []
 
 
+def _no_such_job(names, jobs: List[Dict]) -> str:
+    """The answer when the question names a job the company does not have, with the jobs it does have."""
+    names = [names] if isinstance(names, str) else list(names)
+    label = ', '.join(f"**{str(m).title()}**" for m in names)
+    if not jobs:
+        return f"No job matching {label} was found — there are no jobs in your account yet."
+    listed = '\n'.join(f"- **{j.get('title')}** — {j.get('candidate_count', 0)} candidate(s)" for j in jobs[:15])
+    return (f"There is no job matching {label} in your account, so no candidates have applied for it.\n\n"
+            f"**Your current jobs ({len(jobs)}):**\n{listed}")
+
+
 def _find_matching_job(jobs: List[Dict], question: str) -> Optional[Dict]:
     """Find the best matching job from the question text by fuzzy-matching job titles."""
     q = question.lower().strip()
@@ -444,9 +459,10 @@ def _find_matching_job(jobs: List[Dict], question: str) -> Optional[Dict]:
                 best_score = score
                 best_match = job
             continue
-        # Check individual words from the title (at least 2 word overlap for titles with 2+ words)
-        title_words = set(title.split())
-        q_words = set(q.split())
+        # Check individual words from the title (at least 2 word overlap for titles with 2+ words). Words, not
+        # space-separated pieces: "Mobile App Developer (Flutter)" never matched "flutter" through "(flutter)".
+        title_words = set(re.findall(r"[a-z0-9+#]+(?:\.[a-z0-9]+)*", title))
+        q_words = set(re.findall(r"[a-z0-9+#]+(?:\.[a-z0-9]+)*", q))
         overlap = title_words & q_words
         # Remove generic words from overlap count — includes common English words,
         # prepositions, question words, and generic job terms to prevent false matches
@@ -575,6 +591,7 @@ FORMATTING:
         self,
         question: str,
         company_user: Any,
+        history: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         """
         Answer a recruitment question using the company user's data.
@@ -590,11 +607,13 @@ FORMATTING:
         # Reset token tracking for this request
         self.groq_client.last_token_usage = None
         try:
-            plan = self._plan(question, company_user)
+            plan = self._plan(question, company_user, history)
             if plan[0] == 'done':
                 return plan[1]
             _, system, text, finish = plan
             return finish(self.groq_client.send_prompt_text(system_prompt=system, text=text))
+        except KeyServiceError:
+            raise                             # the view answers a key or quota problem itself
         except GroqClientError:
             logger.exception("Recruitment QA Groq error")
             return self._api_error_response()
@@ -602,7 +621,7 @@ FORMATTING:
             logger.exception("Recruitment QA failed")
             return self._failure_response()
 
-    def process_stream(self, question: str, company_user: Any):
+    def process_stream(self, question: str, company_user: Any, history: Optional[List[Dict]] = None):
         """`process`, as the answer is written. Yields
         ``{'type': 'token', 'value': '...'}`` as text arrives, then
         ``{'type': 'done', 'result': <what process returns>}``. Answers that
@@ -611,7 +630,7 @@ FORMATTING:
         logger.info("Recruitment QA streaming question: %s", question[:100])
         self.groq_client.last_token_usage = None
         try:
-            plan = self._plan(question, company_user)
+            plan = self._plan(question, company_user, history)
             if plan[0] == 'done':
                 result = plan[1]
             else:
@@ -623,6 +642,8 @@ FORMATTING:
                 result = finish(''.join(pieces))
                 yield {'type': 'done', 'result': result}
                 return
+        except KeyServiceError:
+            raise
         except GroqClientError:
             logger.exception("Recruitment QA Groq error (stream)")
             result = self._api_error_response()
@@ -647,10 +668,15 @@ FORMATTING:
             "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
         }
 
-    def _plan(self, question: str, company_user: Any):
+    def _plan(self, question: str, company_user: Any, history: Optional[List[Dict]] = None):
         """Decide how to answer. Returns ('done', result) when no model is
         needed, else ('ask', system_prompt, text, finish) — `finish` turns the
-        model's text into the result."""
+        model's text into the result. The AI reading of the question
+        (recruitment_agent/intent.py) decides first; without one, the word
+        rules below decide, as before."""
+        reading = qa_intent.read(question, history, client=self.groq_client)
+        if reading:
+            return self._plan_from_reading(question, company_user, reading)
         if _is_greeting(question):
             return ('done', self._get_friendly_non_data_response())
         # IMPORTANT: Check recruitment data FIRST (DB queries take priority)
@@ -710,9 +736,47 @@ FORMATTING:
         context = self._build_context(data, focus_job_id=focus_job_id)
         return self._ask(question, context, direct, insights)
 
-    def _ask(self, question, context, direct, insights):
-        """The model call that answers from `context`, and its tidy-up."""
-        return ('ask', self.SYSTEM_PROMPT, self._answer_prompt(question, context, direct),
+    def _plan_from_reading(self, question: str, company_user: Any, reading: Dict[str, Any]):
+        """`_plan` from the AI reading: its kind picks the path, its English restatement is what the database
+        answers and the model are given, and the job and the person it names are looked up as named — not
+        guessed from the question's words."""
+        canned = qa_intent.reply(reading)
+        if canned:
+            return ('done', self._wrap_response(canned, []))
+        english = reading.get('english') or question
+        if reading['kind'] == 'general':
+            text = english if english.strip().lower() == question.strip().lower() else (
+                f'{english}\n\n(The person asked, in their own words: "{question}". Answer in the language they used.)')
+            return ('ask', GENERAL_KNOWLEDGE_PROMPT, text,
+                    lambda answer: self._wrap_response(
+                        answer or "I couldn't generate an answer. Please try rephrasing your question.", []))
+
+        data = self._get_recruitment_data(company_user)
+        jobs = data.get("jobs", [])
+        ruled_out = [j for j in jobs if any(_find_matching_job([j], name) for name in reading.get('exclude_jobs') or [])]
+        if ruled_out:
+            data = dict(data, jobs=[j for j in jobs if j not in ruled_out])
+        job = _find_matching_job(data["jobs"], reading['job']) if reading.get('job') else None
+
+        if reading.get('candidate'):
+            dossier = self._build_candidate_dossier(company_user, reading['candidate'])
+            if dossier:
+                return self._ask(english, dossier, "", [], original=question, wants=reading.get('wants'))
+            return ('done', self._wrap_response(self._no_candidate_answer(data), []))
+        if reading.get('job') and job is None:
+            return ('done', self._wrap_response(_no_such_job(reading['job'], data["jobs"]), []))
+
+        direct = self._get_direct_answer(data, english, job=job or False)
+        insights = self._extract_insights(data, english)
+        if direct and (reading.get('wants') in ('count', 'list') or _is_comprehensive_answer(direct)):
+            return ('done', self._wrap_response(direct, insights))
+        context = self._build_context(data, focus_job_id=job["id"] if job else None)
+        return self._ask(english, context, direct, insights, original=question, wants=reading.get('wants'))
+
+    def _ask(self, question, context, direct, insights, original=None, wants=None):
+        """The model call that answers from `context`, and its tidy-up. `original` is the question as the person
+        wrote it, when `question` is the AI's English restatement; `wants` the reading's kind of answer."""
+        return ('ask', self.SYSTEM_PROMPT, self._answer_prompt(question, context, direct, original=original, wants=wants),
                 lambda text: self._wrap_response(self._tidy_answer(question, context, text), insights))
 
     def _wrap_response(self, answer: str, insights: List[Dict]) -> Dict[str, Any]:
@@ -770,13 +834,14 @@ FORMATTING:
         )
         jobs_list = []
         for job in jobs_qs:
+            # Best first, by score: the stored rank was the place in one upload or the order of applying (CO-104).
             cvs = (
                 CVRecord.objects.filter(job_description=job)
-                .order_by("rank", "-role_fit_score")
+                .order_by(*BEST_FIRST)
                 .select_related("job_description")[:50]
             )
             candidates = []
-            for cv in cvs:
+            for place, cv in enumerate(cvs, start=1):
                 parsed = json.loads(cv.parsed_json) if cv.parsed_json else {}
                 insights_json = json.loads(cv.insights_json) if cv.insights_json else {}
                 name = _get_parsed_name(parsed)
@@ -787,7 +852,9 @@ FORMATTING:
                     phone = parsed.get("phone") or parsed.get("Phone") or parsed.get("contact") or ""
                 summary = ""
                 if isinstance(insights_json, dict):
-                    summary = insights_json.get("summary") or insights_json.get("executive_summary") or ""
+                    # The summariser writes `candidate_summary`; reading `summary` gave the AI no summary at all.
+                    summary = (insights_json.get("candidate_summary") or insights_json.get("summary")
+                               or insights_json.get("executive_summary") or "")
                 if isinstance(summary, dict):
                     summary = summary.get("text", "") if isinstance(summary.get("text"), str) else ""
                 candidates.append({
@@ -796,7 +863,7 @@ FORMATTING:
                     "email": email,
                     "phone": phone,
                     "file_name": cv.file_name,
-                    "rank": cv.rank,
+                    "rank": place,
                     "role_fit_score": cv.role_fit_score,
                     "qualification_decision": cv.qualification_decision or "",
                     "qualification_confidence": cv.qualification_confidence,
@@ -1253,7 +1320,7 @@ FORMATTING:
                 f"Score: {cv.role_fit_score if cv.role_fit_score is not None else 'N/A'} | "
                 f"Decision: {cv.qualification_decision or 'N/A'} | "
                 f"Confidence: {cv.qualification_confidence if cv.qualification_confidence is not None else 'N/A'} | "
-                f"Rank: {cv.rank if cv.rank is not None else 'N/A'}"
+                f"Rank in the job: {ranks_for([cv]).get(cv.id, 'N/A')}"
             )
 
             for label, key in (
@@ -1269,8 +1336,10 @@ FORMATTING:
                 blocks.append(f"{label}: {str(val)[:900]}")
 
             for label, key in (
-                ('Summary', 'summary'), ('Strengths', 'strengths'),
+                ('Summary', 'candidate_summary'), ('Summary', 'summary'), ('Strengths', 'strengths'),
                 ('Weaknesses', 'weaknesses'), ('Key highlights', 'key_highlights'),
+                ('Achievements', 'notable_achievements'), ('Highest education', 'education_level'),
+                ('Years of experience', 'total_experience_years'),
             ):
                 val = insights.get(key)
                 if not val:
@@ -1303,7 +1372,7 @@ FORMATTING:
         index_match = re.search(r'\b(?:candidate|applicant|cv|resume)\s*#?\s*(\d+)\b', question, re.I)
         if index_match:
             idx = int(index_match.group(1))
-            ordered = list(cv_qs.order_by('rank', '-role_fit_score')[:max(idx, 1)])
+            ordered = list(cv_qs.order_by(*BEST_FIRST)[:max(idx, 1)])
             return [ordered[idx - 1]] if 0 < idx <= len(ordered) else []
 
         # Otherwise match a name mentioned in the question against parsed CV names.
@@ -1311,21 +1380,23 @@ FORMATTING:
         if not words:
             return []
         hits = []
-        for cv in cv_qs.order_by('rank', '-role_fit_score')[:200]:
+        for cv in cv_qs.order_by(*BEST_FIRST)[:200]:
             try:
                 parsed = json.loads(cv.parsed_json) if cv.parsed_json else {}
             except (ValueError, TypeError):
                 continue
             name = _get_parsed_name(parsed if isinstance(parsed, dict) else {})
-            if not name:
+            if not name or name == "Candidate":     # a CV with no name read is "Candidate": it matched any question
                 continue
             name_parts = {p.lower() for p in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", name)}
             if name_parts & words:
                 hits.append(cv)
         return hits
 
-    def _get_direct_answer(self, data: Dict[str, Any], question: str) -> str:
-        """Build a direct answer from DB for count/list/detail questions. Handles global AND per-job queries."""
+    def _get_direct_answer(self, data: Dict[str, Any], question: str, job=None) -> str:
+        """Build a direct answer from DB for count/list/detail questions. Handles global AND per-job queries.
+        `job`: the job the AI reading named (a job), no job (False), or None to find it from the question's
+        words as before."""
         q = question.lower().strip()
         jobs = data.get("jobs", [])
         total_jobs = len(jobs)
@@ -1356,29 +1427,18 @@ FORMATTING:
         # ────────────────────────────────────────────────────────────
         # Try to find a matching job for job-specific questions
         # ────────────────────────────────────────────────────────────
-        matched_job = _find_matching_job(jobs, question)
-
+        if job is not None:
+            # The AI reading named the job (or none): the "no such job" answer was given before this.
+            matched_job = job or None
+        else:
+            matched_job = _find_matching_job(jobs, question)
         # The user named a role the company has no job for (e.g. "Laravel jobs" when
         # only a MERN job exists). Answer that directly — falling through would hand
         # the LLM every unrelated job and it would present those instead.
-        if not matched_job:
+        if not matched_job and job is None:
             missing = _unmatched_job_topics(jobs, question)
             if missing:
-                label = ', '.join(f"**{m.title()}**" for m in missing)
-                if not jobs:
-                    return (
-                        f"No job matching {label} was found — there are no jobs "
-                        f"in your account yet."
-                    )
-                listed = '\n'.join(
-                    f"- **{j.get('title')}** — {j.get('candidate_count', 0)} candidate(s)"
-                    for j in jobs[:15]
-                )
-                return (
-                    f"There is no job matching {label} in your account, so no "
-                    f"candidates have applied for it.\n\n"
-                    f"**Your current jobs ({len(jobs)}):**\n{listed}"
-                )
+                return _no_such_job(missing, jobs)
 
         # ════════════════════════════════════════════════════════════
         # JOB-SPECIFIC: Time slots
@@ -1866,10 +1926,23 @@ FORMATTING:
         )
         return self._tidy_answer(question, context, llm_answer)
 
-    def _answer_prompt(self, question: str, context: str, direct_answer: str = "") -> str:
+    def _answer_prompt(self, question: str, context: str, direct_answer: str = "", original=None, wants=None) -> str:
+        prompt = self._answer_instructions(question, context, wants)
+        if original and original.strip().lower() != question.strip().lower():
+            prompt += (f'\nThe person asked, in their own words: "{original}". Answer in the language they used '
+                       '(English, or Roman Urdu if they wrote Roman Urdu).\n')
+        return prompt
+
+    def _answer_instructions(self, question: str, context: str, wants=None) -> str:
         q = question.lower()
-        # Always require markdown table, summary, and explanation for any query with 'table', 'summary', 'markdown', 'compare', 'explain', 'analysis', 'recommendation', 'impact', 'top candidate', 'most popular job', or 'short summary'.
-        if any(x in q for x in ["table", "compare", "summary", "markdown", "explain", "analysis", "recommendation", "impact", "top candidate", "most popular job", "short summary"]):
+        # The AI reading's kind of answer decides the shape; without one, the question's words do, as before.
+        if wants:
+            as_table = wants in ('compare', 'summary')
+            wants_detail = wants == 'detail'
+        else:
+            as_table = any(x in q for x in ["table", "compare", "summary", "markdown", "explain", "analysis", "recommendation", "impact", "top candidate", "most popular job", "short summary"])
+            wants_detail = any(x in q for x in ("detail", "details", "full", "complete", "everything", "description", "requirement", "explain", "tell me", "show me", "all info", "poori", "puri"))
+        if as_table:
             prompt = f"""
 Question: "{question}"
 
@@ -1886,7 +1959,6 @@ INSTRUCTIONS:
 - Do NOT add extra sections unless explicitly asked.
 """
         else:
-            wants_detail = any(x in q for x in ("detail", "details", "full", "complete", "everything", "description", "requirement", "explain", "tell me", "show me", "all info", "poori", "puri"))
             if wants_detail:
                 prompt = f"""
 Question: "{question}"
@@ -1914,39 +1986,9 @@ INSTRUCTIONS:
         return prompt
 
     def _tidy_answer(self, question: str, context: str, llm_answer: str) -> str:
-        """If the answer lacks the format the question asked for, fix it."""
-        q = question.lower()
-        # Post-processing: If output does not contain markdown table, summary, or explanation as required, reformat or retry
-        needs_table = any(x in q for x in ["table", "compare", "summary", "markdown"])
-        needs_explanation = any(x in q for x in ["explain", "analysis", "recommendation", "impact"])
-        needs_top = any(x in q for x in ["top candidate", "most popular job", "short summary"])
-        def is_markdown_table(text):
-            return "|" in text and "---" in text
-        def is_markdown_heading(text):
-            return "##" in text or "###" in text
-        def is_bullet_list(text):
-            return "- " in text or "* " in text
-        def is_explanation(text):
-            return len(text.split("\n")) > 4 and (is_markdown_heading(text) or is_bullet_list(text))
-        # If required format missing, retry with forced template
-        if needs_table and not is_markdown_table(llm_answer):
-            # Force a markdown table template
-            table_header = "| Job Title | Department | Location | Candidates | Interviews | Outcomes |\n|---|---|---|---|---|---|"
-            rows = []
-            # Use context to extract job info
-            for line in context.split("\n"):
-                if line.startswith("JOB_ID_"):
-                    parts = re.findall(r'title="([^"]+)".*department="([^"]*)".*location="([^"]*)".*candidates=(\d+).*interviews=(\d+)', line)
-                    if parts:
-                        title, dept, loc, cand, interv = parts[0]
-                        rows.append(f"| {title} | {dept} | {loc} | {cand} | {interv} | |")
-            table = table_header + "\n" + "\n".join(rows)
-            summary = "\n\n**Summary:** Recruitment status for all jobs is shown above."
-            llm_answer = table + summary
-        elif needs_explanation and not is_explanation(llm_answer):
-            llm_answer = "## Explanation\n- The qualification settings determine which candidates are selected for interviews based on their scores.\n- Interview threshold: Candidates above this score are invited for interviews.\n- Hold threshold: Candidates between hold and interview thresholds are put on hold.\n- Custom thresholds: If enabled, allows per-job settings."
-        elif needs_top and not is_bullet_list(llm_answer):
-            llm_answer = "## Top Candidates\n1. Candidate A (Score: 25, Decision: INTERVIEW)\n2. Candidate B (Score: 23, Decision: INTERVIEW)\n3. Candidate C (Score: 21, Decision: INTERVIEW)\n\n**Summary:** These candidates are ranked highest based on role fit score."
+        """The model's answer as it is. It used to be replaced when the question's words asked for a table, an
+        explanation or "top candidates" and the answer lacked one: by a jobs table (even for a candidate's summary),
+        a fixed text on thresholds, or a made-up list ("Candidate A (Score: 25 …)"). Removed 27 Oct 2026."""
         return llm_answer or "No answer could be generated from the data."
 
     def _extract_insights(

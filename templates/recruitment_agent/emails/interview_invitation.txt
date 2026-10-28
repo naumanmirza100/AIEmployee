@@ -22,5 +22,6 @@ Note: Time slots are available on a first-come, first-served basis. Once a slot 
 We look forward to speaking with you!
 
 Best regards,
-Recruitment Team
+{% if company_name %}{{ company_name }} hiring team{% else %}Recruitment Team{% endif %}{% if contact_email %}
+Questions? Reply to this email, or write to {{ contact_email }}.{% endif %}
 

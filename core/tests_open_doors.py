@@ -89,12 +89,12 @@ OLD_PAGES = [
     '/frontline/', '/frontline/api/tickets/', '/api/frontline/api/knowledge/',
     '/marketing/', '/marketing/campaigns/', '/marketing/email-accounts/',
 ]
-GONE_FOR_GOOD = ['/recruitment/debug/parsed/7/', '/recruitment/api/interviews/auto-check/']
+GONE_FOR_GOOD = ['/recruitment/debug/parsed/7/', '/recruitment/api/interviews/auto-check/',
+                 '/recruitment/api/interviews/confirm/']   # booked with none of the page's checks (CO-112)
 EMAILED_LINKS = {
     '/recruitment/interview/select/tok123/': 'candidate_select_slot',
     '/recruitment/application/track/tok123/': 'candidate_application_status',
     '/recruitment/api/interview/available-slots/tok123/': 'get_available_slots_for_interview',
-    '/recruitment/api/interviews/confirm/': 'confirm_interview_slot',
     '/marketing/track/email/tok123/open/': 'track_email_open',
     '/marketing/track/email/tok123/click/': 'track_email_click',
     '/marketing/token/': 'simple_track_open',

@@ -375,6 +375,13 @@ def generate_recurring_tasks():
     return {'generated': generated, 'deactivated': deactivated}
 
 
+@shared_task(name='project_manager_agent.tell_overdue_tasks')
+def tell_overdue_tasks():
+    """Daily: tell each person once about their tasks that became overdue yesterday (project_manager_agent/overdue.py)."""
+    from project_manager_agent.overdue import tell_newly_overdue
+    return tell_newly_overdue()
+
+
 @shared_task(name='project_manager_agent.cleanup_old_notifications')
 def cleanup_old_notifications():
     """

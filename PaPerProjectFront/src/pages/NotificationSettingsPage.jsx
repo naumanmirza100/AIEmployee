@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { BellRing, ChevronLeft, Loader2, MailX } from 'lucide-react';
 
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import ChatWebhooksCard from '@/components/common/ChatWebhooksCard';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
@@ -158,6 +159,8 @@ export default function NotificationSettingsPage() {
                   </div>
                 </section>
               ))}
+
+              <ChatWebhooksCard />
 
               {groups.some((g) => g.agent === 'project_manager_agent') && (
                 <p className="text-xs text-muted-foreground">

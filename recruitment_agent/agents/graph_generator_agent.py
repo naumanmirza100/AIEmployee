@@ -11,6 +11,8 @@ from django.utils import timezone
 from django.db.models import Count, Avg
 from django.db.models.functions import TruncDate, TruncMonth, TruncWeek
 
+from core.api_key_service import KeyServiceError
+
 logger = logging.getLogger(__name__)
 
 
@@ -441,160 +443,105 @@ class GraphGeneratorAgent:
         if per_job:
             return per_job
 
-        # Build system prompt for LLM
-        system_prompt = """You are an AI assistant that generates chart configurations for a recruitment dashboard.
-Your task is to interpret the user's natural language request and return a JSON configuration for a chart.
-
-Available data from the database:
-{data_summary}
-
-You must respond with ONLY a valid JSON object (no markdown, no explanation) with this structure:
-{{
-    "chart_type": "bar" | "pie" | "line" | "area",
-    "title": "Chart title",
-    "data": {{ "label1": value1, "label2": value2 }} for bar/pie OR [{{ "label": "x", "value": y }}] for line/area,
-    "insights": "Brief insight about the data (1-2 sentences)",
-    "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"],
-    "orientation": "horizontal" | "vertical"  (only for bar charts; omit for other types)
-}}
-
-Rules:
-1. For pie charts: use object format {{ "Category": count }}
-2. For bar charts: use object format {{ "Category": count }}
-2a. For bar chart orientation: use "vertical" when user asks for "vertical bar", "vertical histogram", "column chart", or "histogram" (without "horizontal"); use "horizontal" when user asks for "horizontal bar" or for generic "bar chart" without specifying vertical
-3. For line/area charts: use array format [{{ "label": "date/period", "value": count }}]
-4. Only include categories with count > 0
-5. Use the actual data values from the database
-6. Choose the most appropriate chart type for the request
-7. If user asks for "active vs inactive jobs", use the jobs.active and jobs.inactive values
-8. If user asks for "applicants per job", use candidates.by_job data
-9. If user asks for trends/over time, use the over_time_daily/weekly/monthly arrays
-10. If user asks for "top N" (e.g., "top 5", "top 3"), only include the N items with highest values, sorted descending
-11. If user asks for "bottom N" or "lowest N", only include the N items with lowest values
-12. Always sort bar chart data by value (highest first) unless user asks for alphabetical or chronological order
-13. For "top applicants" or "most applicants", sort candidates.by_job by count descending and take top N
-14. For "interview times" or "interview hours", use scheduling.by_hour_of_day data - bar chart is best
-15. For "interview days" or "busiest days", use scheduling.by_day_of_week data
-16. For "interview time gaps" or "slot duration", use interview_settings.time_gaps_distribution
-17. For "interview slots by job" or "available slots", use interview_settings.slots_by_job
-18. For "online vs onsite" interviews, use interviews.by_type data
-19. For "interview outcomes" or "hiring results", use interviews.by_outcome data
-20. For "upcoming interviews", list the scheduling.upcoming data
-21. For "interview confirmation rate" or "response rate", show the confirmation_rate percentage
-22. For "time to schedule" or "scheduling efficiency", show avg_time_to_schedule_days
-"""
-        
-        # Create data summary for LLM
-        data_summary = f"""
-JOBS DATA:
-- Total jobs: {recruitment_data['jobs']['total']}
-- Active jobs: {recruitment_data['jobs']['active']}
-- Inactive jobs: {recruitment_data['jobs']['inactive']}
-- Jobs by type: {json.dumps(recruitment_data['jobs']['by_type'])}
-- Jobs by department: {json.dumps(recruitment_data['jobs']['by_department'])}
-- Jobs by location: {json.dumps(recruitment_data['jobs']['by_location'])}
-
-CANDIDATES DATA:
-- Total candidates: {recruitment_data['candidates']['total']}
-- By decision: {json.dumps(recruitment_data['candidates']['by_decision'])}
-- By priority: {json.dumps(recruitment_data['candidates']['by_priority'])}
-- Average confidence: {recruitment_data['candidates']['avg_confidence']:.1f}%
-- Average role fit: {recruitment_data['candidates']['avg_role_fit']:.1f}%
-- Candidates per job: {json.dumps(recruitment_data['candidates']['by_job'])}
-- Daily trend (last 30 days): {json.dumps(recruitment_data['candidates']['over_time_daily'][-10:] if recruitment_data['candidates']['over_time_daily'] else [])}
-- Monthly trend: {json.dumps(recruitment_data['candidates']['over_time_monthly'])}
-
-INTERVIEWS DATA:
-- Total interviews: {recruitment_data['interviews']['total']}
-- By status: {json.dumps(recruitment_data['interviews']['by_status'])}
-- By outcome: {json.dumps(recruitment_data['interviews']['by_outcome'])}
-- By type (Online/Onsite): {json.dumps(recruitment_data['interviews']['by_type'])}
-- By job role: {json.dumps(recruitment_data['interviews'].get('by_job_role', {}))}
-- Daily trend (last 30 days): {json.dumps(recruitment_data['interviews']['over_time_daily'][-10:] if recruitment_data['interviews']['over_time_daily'] else [])}
-- Monthly trend: {json.dumps(recruitment_data['interviews']['over_time_monthly'])}
-
-INTERVIEW SCHEDULING DATA:
-- Scheduled today: {recruitment_data['interviews'].get('scheduling', {}).get('scheduled_today', 0)}
-- Scheduled this week: {recruitment_data['interviews'].get('scheduling', {}).get('scheduled_this_week', 0)}
-- Scheduled this month: {recruitment_data['interviews'].get('scheduling', {}).get('scheduled_this_month', 0)}
-- Interviews by hour of day: {json.dumps(recruitment_data['interviews'].get('scheduling', {}).get('by_hour_of_day', {}))}
-- Interviews by day of week: {json.dumps(recruitment_data['interviews'].get('scheduling', {}).get('by_day_of_week', {}))}
-- Average days to schedule: {recruitment_data['interviews'].get('scheduling', {}).get('avg_time_to_schedule_days', 0)}
-- Confirmation rate: {recruitment_data['interviews'].get('scheduling', {}).get('confirmation_rate', 0)}%
-- Upcoming interviews (next 7 days): {json.dumps(recruitment_data['interviews'].get('scheduling', {}).get('upcoming', [])[:5])}
-
-INTERVIEW SETTINGS (Time Slots Configuration):
-- Jobs with interview settings: {recruitment_data.get('interview_settings', {}).get('total_jobs_with_settings', 0)}
-- Time gap distribution: {json.dumps(recruitment_data.get('interview_settings', {}).get('time_gaps_distribution', {}))}
-- Default interview types: {json.dumps(recruitment_data.get('interview_settings', {}).get('interview_types_default', {}))}
-- Total available slots: {recruitment_data.get('interview_settings', {}).get('total_available_slots', 0)}
-- Slots by job: {json.dumps(recruitment_data.get('interview_settings', {}).get('slots_by_job', {}))}
-- Job settings details: {json.dumps(recruitment_data.get('interview_settings', {}).get('jobs_settings', [])[:5])}
-"""
-        
+        # The AI chooses; the server counts (CO-184). It used to type the chart's numbers itself from a text summary,
+        # nothing compared them with the data, and asked for something the summary did not hold it still drew one.
+        datasets = self._datasets(recruitment_data)
+        system_prompt = (
+            "You choose a chart for a recruitment dashboard. You never give numbers: the server fills them in.\n"
+            "Reply with ONLY a JSON object: {\"dataset\": one of the names below or \"none\", \"chart_type\": "
+            "\"bar\" | \"pie\" | \"line\" | \"area\", \"title\": a short title, \"top_n\": a number or null, "
+            "\"order\": \"desc\" | \"asc\" | \"none\", \"orientation\": \"horizontal\" | \"vertical\"}.\n"
+            "Use \"none\" when no data set below answers the request. Trends over time are line or area charts; use "
+            "\"vertical\" only when the request asks for vertical bars, columns or a histogram.\n\nData sets:\n"
+            + "\n".join(f"- {name}: {about}" for name, (about, _) in datasets.items()))
         try:
-            # Call LLM to interpret prompt and generate chart config
-            # Use send_prompt_text which returns raw text response
-            response_text = self.groq_client.send_prompt_text(
-                system_prompt.format(data_summary=data_summary),
-                f"Generate a chart for: {prompt}"
-            )
-            logger.info(f"LLM Response for graph generation: {response_text[:500]}")
-            
-            # Clean up response - remove markdown code blocks if present
-            if response_text.startswith('```'):
-                lines = response_text.split('\n')
-                # Find the closing ```
-                end_idx = -1
-                for i, line in enumerate(lines):
-                    if i > 0 and line.strip() == '```':
-                        end_idx = i
-                        break
-                if end_idx > 0:
-                    response_text = '\n'.join(lines[1:end_idx])
-                else:
-                    response_text = '\n'.join(lines[1:])
-            
-            # Also handle ```json prefix
-            if response_text.startswith('json'):
-                response_text = response_text[4:].strip()
-            
-            # Parse JSON
-            chart_config = json.loads(response_text)
-            
-            # Validate and set defaults
-            if 'chart_type' not in chart_config:
-                chart_config['chart_type'] = 'bar'
-            if 'title' not in chart_config:
-                chart_config['title'] = 'Generated Chart'
-            if 'data' not in chart_config:
-                chart_config['data'] = {}
-            if 'colors' not in chart_config:
-                chart_config['colors'] = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
-            # Bar orientation: respect user request (vertical/horizontal)
-            chart_out = {
-                'type': chart_config['chart_type'],
-                'title': chart_config['title'],
-                'data': chart_config['data'],
-                'colors': chart_config.get('colors', ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']),
-                'color': chart_config.get('colors', ['#3b82f6'])[0],
-            }
-            if chart_config['chart_type'] == 'bar':
-                chart_out['orientation'] = chart_config.get('orientation', 'horizontal')
-            return {
-                'chart': chart_out,
-                'insights': chart_config.get('insights', ''),
-                'raw_data': recruitment_data,  # Include raw data for debugging
-            }
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {e}")
-            # Fallback to a default chart
+            response_text = self.groq_client.send_prompt_text(system_prompt, f"Chart request: {prompt}")
+            choice = json.loads(self._strip_fences(response_text))
+        except (json.JSONDecodeError, TypeError, AttributeError) as e:
+            logger.error(f"Graph choice was not JSON: {e}")
             return self._generate_fallback_chart(prompt, recruitment_data)
+        except KeyServiceError:
+            raise
         except Exception as e:
             logger.error(f"Error generating graph: {e}")
             return self._generate_fallback_chart(prompt, recruitment_data)
-    
+        return self._fill(choice if isinstance(choice, dict) else {}, datasets, prompt)
+
+    @staticmethod
+    def _strip_fences(text):
+        text = (text or '').strip()
+        if text.startswith('```'):
+            text = text.split('\n', 1)[1] if '\n' in text else ''
+            text = text.rsplit('```', 1)[0]
+        if text.startswith('json'):
+            text = text[4:]
+        return text.strip()
+
+    @staticmethod
+    def _datasets(d: Dict) -> Dict[str, Any]:
+        """Each named data set the AI may choose: (what it holds, its values from the database)."""
+        jobs, cands, ivs = d['jobs'], d['candidates'], d['interviews']
+        sched = ivs.get('scheduling', {}) or {}
+        slots = d.get('interview_settings', {}) or {}
+        return {
+            'jobs_active_inactive': ('active and inactive jobs', {'Active': jobs['active'], 'Inactive': jobs['inactive']}),
+            'jobs_by_type': ('jobs by employment type', jobs['by_type']),
+            'jobs_by_department': ('jobs by department', jobs['by_department']),
+            'jobs_by_location': ('jobs by location', jobs['by_location']),
+            'candidates_by_decision': ('candidates by screening decision', cands['by_decision']),
+            'candidates_by_priority': ('candidates by priority', cands['by_priority']),
+            'candidates_by_job': ('candidates (applicants) per job', cands['by_job']),
+            'candidates_daily': ('candidates processed per day, last 30 days (trend)', cands['over_time_daily']),
+            'candidates_weekly': ('candidates processed per week (trend)', cands.get('over_time_weekly') or []),
+            'candidates_monthly': ('candidates processed per month (trend)', cands['over_time_monthly']),
+            'interviews_by_status': ('interviews by status', ivs['by_status']),
+            'interviews_by_outcome': ('interviews by outcome or decision (hired, rejected...)', ivs['by_outcome']),
+            'interviews_by_type': ('online and onsite interviews', ivs['by_type']),
+            'interviews_by_job': ('interviews per job role', ivs.get('by_job_role', {})),
+            'interviews_daily': ('interviews made per day, last 30 days (trend)', ivs['over_time_daily']),
+            'interviews_monthly': ('interviews made per month (trend)', ivs['over_time_monthly']),
+            'interviews_by_hour': ('interviews by hour of the day', sched.get('by_hour_of_day', {})),
+            'interviews_by_weekday': ('interviews by day of the week', sched.get('by_day_of_week', {})),
+            'slots_by_job': ('interview slots set up per job', slots.get('slots_by_job', {})),
+            'slot_lengths': ('interview slot lengths in use', slots.get('time_gaps_distribution', {})),
+        }
+
+    def _fill(self, choice: Dict, datasets: Dict, prompt: str) -> Dict[str, Any]:
+        name = str(choice.get('dataset') or 'none')
+        if name not in datasets:
+            return {'chart': None, 'insights': '', 'error': (
+                "That chart can't be made from Recruitment's data. Charts can show: "
+                + ', '.join(about for about, _ in datasets.values()) + '.')}
+        about, values = datasets[name]
+        chart_type = choice.get('chart_type') if choice.get('chart_type') in ('bar', 'pie', 'line', 'area') else 'bar'
+        if isinstance(values, dict):
+            items = [(str(k), v) for k, v in values.items() if isinstance(v, (int, float)) and v > 0]
+            if choice.get('order') != 'none':
+                items.sort(key=lambda kv: kv[1], reverse=choice.get('order') != 'asc')
+            top_n = choice.get('top_n')
+            if isinstance(top_n, int) and top_n > 0:
+                items = items[:top_n]
+            if chart_type in ('line', 'area'):
+                data = [{'label': k, 'value': v} for k, v in items]
+            else:
+                data = dict(items)
+            total = sum(v for _, v in items)
+            highest = max(items, key=lambda kv: kv[1]) if items else None
+            insights = (f"{total} in all; the most is {highest[0]} with {highest[1]}." if highest
+                        else f"No {about} yet.")
+        else:
+            data = [row for row in values if isinstance(row, dict)]
+            if chart_type not in ('line', 'area'):
+                chart_type = 'line'
+            total = sum((row.get('value') or 0) for row in data)
+            insights = f"{total} over the period shown." if data else f"No {about} yet."
+        colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
+        chart = {'type': chart_type, 'title': str(choice.get('title') or about.capitalize())[:120], 'data': data,
+                 'colors': colors, 'color': colors[0]}
+        if chart_type == 'bar':
+            chart['orientation'] = 'vertical' if choice.get('orientation') == 'vertical' else 'horizontal'
+        return {'chart': chart, 'insights': insights, 'dataset': name}
+
     def _decisions_per_job_chart(self, prompt: str, data: Dict) -> Optional[Dict[str, Any]]:
         """"Candidates per job by decision": one bar per job and decision, built here rather than by the AI.
 

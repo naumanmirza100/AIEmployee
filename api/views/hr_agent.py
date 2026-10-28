@@ -57,6 +57,7 @@ from core.api_key_service import KeyServiceError
 from api.streaming import error_event
 # Re-use Frontline's hardened helpers — file validation + broker probe.
 from Frontline_agent.document_processor import DocumentProcessor
+from core.document_search import vectors_in
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +435,7 @@ def list_departments(request):
 @throttle_classes([HRCRUDThrottle])
 def create_department(request):
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = request.data or {}
@@ -473,7 +474,7 @@ def create_department(request):
 @throttle_classes([HRCRUDThrottle])
 def update_department(request, dept_id):
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     dept = Department.objects.filter(company=company, pk=dept_id).first()
@@ -560,7 +561,7 @@ def update_department(request, dept_id):
 @throttle_classes([HRCRUDThrottle])
 def delete_department(request, dept_id):
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     dept = Department.objects.filter(company=company, pk=dept_id).first()
@@ -1028,7 +1029,14 @@ def upload_hr_document(request):
         employee_id        optional — FK to a personal-doc owner
         retention_days     optional override; otherwise defaults from
                            `RETENTION_DEFAULTS_DAYS` per document_type
+
+    HR admins only: the uploader sets who may read it, so any login could publish a document to everyone or file a
+    confidential one (found 3 Oct 2026, fixed 27 Oct).
     """
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'code': 'hr_admin_only',
+                         'message': _HR_DOCUMENTS_ARE_FOR_HR_ADMINS.format(what='upload')},
+                        status=status.HTTP_403_FORBIDDEN)
     try:
         company_user = request.user
         company = company_user.company
@@ -1355,6 +1363,8 @@ def get_hr_document_status(request, document_id):
             'is_indexed': bool(d.is_indexed),
             'chunks_processed': done,
             'chunks_total': total,
+            # How many parts can be found by meaning; the rest only by matching words (CO-70).
+            'chunks_with_vectors': vectors_in(d) if d.processing_status == 'ready' else None,
             'percent': percent,
             'updated_at': d.updated_at.isoformat() if d.updated_at else None,
         }})
@@ -1369,7 +1379,12 @@ def get_hr_document_status(request, document_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def delete_hr_document(request, document_id):
-    """Delete an HR document (and its file on disk + indexed chunks via FK CASCADE)."""
+    """Delete an HR document (and its file on disk + indexed chunks via FK CASCADE). HR admins only: any login could
+    delete any document, confidential ones included (found 3 Oct 2026, fixed 27 Oct)."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'code': 'hr_admin_only',
+                         'message': _HR_DOCUMENTS_ARE_FOR_HR_ADMINS.format(what='delete')},
+                        status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.company
         d = HRDocument.objects.filter(pk=document_id, company=company).first()
@@ -1458,7 +1473,7 @@ def update_hr_workflow(request, workflow_id):
     """Update name/description/trigger/steps/is_active/timeout. HR admins only:
     a workflow's steps email people and change employee records."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
@@ -1518,7 +1533,7 @@ def update_hr_workflow(request, workflow_id):
 @throttle_classes([HRCRUDThrottle])
 def delete_hr_workflow(request, workflow_id):
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
@@ -1576,7 +1591,7 @@ def list_hr_workflows(request):
 @throttle_classes([HRCRUDThrottle])
 def create_hr_workflow(request):
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = request.data or {}
@@ -1616,7 +1631,7 @@ def execute_hr_workflow(request, workflow_id):
     the dashboard shows before running — each step says what it would do, and
     nothing is sent, changed or recorded. HR admins only."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.company
@@ -1731,7 +1746,7 @@ def approve_hr_workflow_execution(request, execution_id):
             return Response({'status': 'error', 'message': 'Not authorized to approve this execution'},
                             status=status.HTTP_403_FORBIDDEN)
     elif not _is_hr_admin(company_user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
 
     # Record who approved + comment, then flip status so the resume task accepts it.
@@ -1787,7 +1802,7 @@ def reject_hr_workflow_execution(request, execution_id):
             return Response({'status': 'error', 'message': 'Not authorized to reject this execution'},
                             status=status.HTTP_403_FORBIDDEN)
     elif not _is_hr_admin(company_user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
 
     reason = ((request.data or {}).get('reason') or '').strip()
@@ -2036,7 +2051,7 @@ def send_hr_notification_now(request):
     dispatch so it lands in the same audit view as walker-fanned messages.
     """
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR admin only.'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = request.data or {}
@@ -2588,6 +2603,12 @@ def submit_leave_request(request):
         if not emp:
             return Response({'status': 'error', 'message': 'employee_id required + must belong to your company'},
                             status=status.HTTP_400_BAD_REQUEST)
+        if not _may_file_leave_for(request.user, emp):
+            first = (emp.full_name or '').split(' ')[0] or 'They'
+            return Response({'status': 'error', 'code': 'not_their_leave', 'message': (
+                f'You can put in leave for yourself or for someone who reports to you, and {emp.full_name} does not '
+                f"report to you. Ask an HR admin (the company's owner, an admin, or a login with the HR admin role), "
+                f'or {first} can ask for it under My HR.')}, status=status.HTTP_403_FORBIDDEN)
         lr, refused = make_leave_request(emp, company, d)
         if refused is not None:
             return refused
@@ -2624,7 +2645,8 @@ def update_leave_request(request, request_id):
         caller_user_id = _caller_login_user_id(request.user)
         is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
         if not (is_admin or is_owner):
-            return Response({'status': 'error', 'message': 'Not authorized to edit this leave request'},
+            return Response({'status': 'error', 'message': 'Only the person this leave is for, or an HR admin, can '
+                             'change this request.'},
                             status=status.HTTP_403_FORBIDDEN)
         if lr.status != 'pending':
             return Response({
@@ -2709,7 +2731,8 @@ def cancel_leave_request(request, request_id):
         caller_user_id = _caller_login_user_id(request.user)
         is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
         if not (is_admin or is_owner):
-            return Response({'status': 'error', 'message': 'Only the submitter or HR-admin can cancel this request'},
+            return Response({'status': 'error', 'message': 'Only the person this leave is for, or an HR admin, can '
+                             'cancel this request.'},
                             status=status.HTTP_403_FORBIDDEN)
         if lr.status != 'pending':
             return Response({
@@ -2780,7 +2803,7 @@ def withdraw_leave_request(request, request_id):
             is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
             if not (is_admin or is_owner):
                 return Response({'status': 'error',
-                                 'message': 'Only the submitter or HR-admin can withdraw this leave'},
+                                 'message': 'Only the person this leave is for, or an HR admin, can withdraw it.'},
                                 status=status.HTTP_403_FORBIDDEN)
 
             if lr.status != 'approved':
@@ -2994,7 +3017,7 @@ def hr_time_zones(request):
     if request.method == 'GET':
         return Response({'status': 'success', 'data': zones.summary(company)})
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     if (request.data or {}).get('action') != 'follow_company':
         return Response({'status': 'error', 'message': "action must be 'follow_company'"},
@@ -3008,6 +3031,22 @@ def hr_time_zones(request):
                      before={'timezone_name': zones.OLD_DEFAULT},
                      after={'timezone_name': '', 'company_zone': company.timezone_name, 'records': moved})
     return Response({'status': 'success', 'data': {**zones.summary(company), 'moved': moved}})
+
+
+def _caller_record(company_user):
+    """This dashboard login's own HR record: by its link, else by its work address."""
+    company = company_user.company
+    return (Employee.objects.filter(company=company, company_user=company_user).first()
+            or Employee.objects.filter(company=company, work_email__iexact=company_user.email).first())
+
+
+def _may_file_leave_for(company_user, employee) -> bool:
+    """May this login put in leave for `employee`? HR admins, the person themself, and their manager. Any login
+    could file leave for anyone in the company (CO-66, found 5 Oct 2026; fixed 27 Oct)."""
+    if _is_hr_admin(company_user):
+        return True
+    record = _caller_record(company_user)
+    return bool(record and (employee.id == record.id or employee.manager_id == record.id))
 
 
 def _may_decide_leave(company_user, leave_request) -> bool:
@@ -5262,6 +5301,15 @@ def set_employee_dashboard_login(request, employee_id):
 # Compensation history (HR-only)
 # ============================================================================
 
+#: What a login that is not an HR admin is told: why, and who can. (It said "HR-admin role required".)
+_HR_ADMIN_ONLY = ("Only an HR admin can do this: the company's owner, an admin, or a login with the HR admin role. "
+                  "Ask one of them, or ask the owner to give you the HR admin role under Logins & roles.")
+_HR_DOCUMENTS_ARE_FOR_HR_ADMINS = (
+    "Only an HR admin can {what} HR documents, because they decide who may read each one, confidential ones "
+    "included: the company's owner, an admin, or a login with the HR admin role. Ask one of them, or ask the owner "
+    "to give you the HR admin role under Logins & roles.")
+
+
 def _is_hr_admin(company_user) -> bool:
     """Whether this dashboard login administers HR for its company.
 
@@ -5340,7 +5388,7 @@ def update_employee(request, employee_id):
         is_self = caller_user_id and str(caller_user_id) == str(emp.user_id)
 
         if not (is_admin or is_self):
-            return Response({'status': 'error', 'message': 'HR-admin access required'},
+            return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                             status=status.HTTP_403_FORBIDDEN)
 
         d = request.data or {}
@@ -5495,7 +5543,7 @@ def employee_handover(request, employee_id):
     """
     from hr_agent import handover
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     employee = Employee.objects.filter(pk=employee_id, company=company).first()
@@ -5539,7 +5587,7 @@ def deactivate_employee(request, employee_id):
     status is stashed in `before` so `reactivate_employee` can restore it.
     """
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR admin only.'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     emp, err = _company_employee_or_404(request, employee_id)
     if err:
@@ -5595,7 +5643,7 @@ def reactivate_employee(request, employee_id):
     logs and returns).
     """
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR admin only.'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     emp, err = _company_employee_or_404(request, employee_id)
     if err:
@@ -5644,7 +5692,7 @@ def list_hr_audit_log(request):
       ``?limit=`` / ``?offset=`` (default 50/0, max 200)
     """
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.company
@@ -5718,7 +5766,7 @@ def list_compensation_history(request, employee_id):
     """Compensation history for a single employee. HR-admins only — anyone
     else gets 403 even if they happen to be the same employee."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     emp, err = _company_employee_or_404(request, employee_id)
     if err:
@@ -5736,7 +5784,7 @@ def create_compensation(request, employee_id):
     """Record a new compensation change (e.g. annual raise, promotion). The
     new row becomes the employee's "current" pay — older rows are kept."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     emp, err = _company_employee_or_404(request, employee_id)
     if err:
@@ -5824,7 +5872,7 @@ def create_compensation(request, employee_id):
 def delete_compensation(request, comp_id):
     """Remove a single compensation row (corrections / typos). HR-admin only."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import Compensation
     comp_qs = Compensation.objects.filter(pk=comp_id, employee__company=request.user.company)
@@ -5909,7 +5957,7 @@ def list_review_cycles(request):
 @throttle_classes([HRCRUDThrottle])
 def create_review_cycle(request):
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import PerformanceReviewCycle
     company = request.user.company
@@ -5953,7 +6001,7 @@ def activate_review_cycle(request, cycle_id):
     """Flip a draft cycle to active and generate one PerformanceReview row per
     active employee in the company. Idempotent — won't duplicate existing rows."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import PerformanceReviewCycle, PerformanceReview
     company = request.user.company
@@ -5986,7 +6034,7 @@ def activate_review_cycle(request, cycle_id):
 @throttle_classes([HRCRUDThrottle])
 def delete_review_cycle(request, cycle_id):
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import PerformanceReviewCycle
     company = request.user.company
@@ -6014,7 +6062,7 @@ def close_review_cycle(request, cycle_id):
     releases every review to its employee (``release_reviews=true``) — otherwise
     ratings stay HR-only until someone flips ``visible_to_employee`` per row."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import PerformanceReviewCycle, PerformanceReview
     company = request.user.company
@@ -6054,7 +6102,7 @@ def reopen_review_cycle(request, cycle_id):
     NOT re-hide already-released reviews — that would surprise employees who've
     already seen their rating."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin role required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import PerformanceReviewCycle
     company = request.user.company
@@ -6242,7 +6290,7 @@ def create_workflow_from_template(request):
     """Clone a built-in template into a new HRWorkflow row. HR-admin only.
     Body: ``{template_key, name?}``."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.workflow_templates import get_template
     d = request.data or {}
@@ -6397,7 +6445,7 @@ def adjust_leave_balance(request, employee_id):
     matches the model's `unique_together`).
     """
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR admin only.'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     emp, err = _company_employee_or_404(request, employee_id)
     if err:
@@ -6886,7 +6934,7 @@ def anonymize_employee(request, employee_id):
     HR-admin only. Irreversible.
     """
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     emp, err = _company_employee_or_404(request, employee_id)
     if err:
@@ -6976,7 +7024,7 @@ def list_hr_document_access_log(request, document_id):
     """Who read this document, and when? HR-admin only. Pagination via
     ``limit`` / ``offset`` query params (defaults 50/0, hard cap 200)."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = HRDocument.objects.filter(company=company, pk=document_id).first()
@@ -7015,7 +7063,7 @@ def list_hr_document_access_log(request, document_id):
 def list_company_user_roles(request):
     """The company's dashboard logins and their roles. HR-admin only."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     rows = [{
@@ -7051,7 +7099,7 @@ def set_company_user_role(request, company_user_id):
     lock a tenant out of its own HR data.
     """
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
 
     company = request.user.company
@@ -7273,7 +7321,7 @@ def mark_hr_document_outdated(request, document_id):
     disk so HR can review or restore. Distinct from `superseded_by` (which
     requires uploading a replacement). HR-admin only."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = HRDocument.objects.filter(company=company, pk=document_id).first()
@@ -7296,7 +7344,7 @@ def mark_hr_document_outdated(request, document_id):
 def unmark_hr_document_outdated(request, document_id):
     """Restore a soft-deprecated HR doc back into retrieval. HR-admin only."""
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = HRDocument.objects.filter(company=company, pk=document_id).first()
@@ -7327,7 +7375,7 @@ def reingest_hr_document(request, document_id):
     """
     from core.tasks import is_stalled
     if not _is_hr_admin(request.user):
-        return Response({'status': 'error', 'message': 'HR-admin access required'},
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY},
                         status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = HRDocument.objects.filter(company=company, pk=document_id).first()

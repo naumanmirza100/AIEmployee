@@ -18,7 +18,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions, submitInterviewFeedback } from '@/services/recruitmentAgentService';
+import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions, submitInterviewFeedback, scheduleNextInterview } from '@/services/recruitmentAgentService';
 import SearchableSelect from '@/components/ui/searchable-select';
 import InterviewKanban from './InterviewKanban';
 import InterviewersDialog from './InterviewersDialog';
@@ -89,7 +89,7 @@ const Interviews = ({ onUpdate }) => {
 
   const fetchJobs = async () => {
     try {
-      const response = await getJobDescriptions();
+      const response = await getJobDescriptions({ picker: true });
       if (response.status === 'success') setJobs(response.data || []);
     } catch (_) {}
   };
@@ -164,7 +164,7 @@ const Interviews = ({ onUpdate }) => {
       const payload = type === 'status' ? { status: value } : { outcome: value || '' };
       const response = await updateInterview(interview.id, payload);
       if (response.status === 'success') {
-        toast({ title: 'Updated', description: `Interview ${type} updated successfully` });
+        toast({ title: 'Updated', description: response.message || `Interview ${type} updated successfully` });
         fetchInterviews();
         if (onUpdate) onUpdate();
       }
@@ -173,6 +173,20 @@ const Interviews = ({ onUpdate }) => {
     } finally {
       setUpdatingId(null);
       setPendingChange(null);
+    }
+  };
+
+  const handleNextInterview = async (interview) => {
+    try {
+      setUpdatingId(interview.id);
+      const res = await scheduleNextInterview(interview.id);
+      toast({ title: 'Onsite interview', description: res?.message });
+      fetchInterviews();
+      if (onUpdate) onUpdate();
+    } catch (error) {
+      toast({ title: 'Not arranged', description: error?.message, variant: 'destructive' });
+    } finally {
+      setUpdatingId(null);
     }
   };
 
@@ -229,6 +243,8 @@ const Interviews = ({ onUpdate }) => {
       strengths: interview.feedback_strengths || '',
       improvements: interview.feedback_improvements || '',
       pendingDecision,
+      // Whether the candidate is emailed the decision (CO-119). A hire is usually told in person, with an offer.
+      notifyCandidate: !!pendingDecision?.outcome && pendingDecision.outcome !== 'HIRED',
     });
   };
 
@@ -248,16 +264,19 @@ const Interviews = ({ onUpdate }) => {
         feedback_improvements: feedbackModal.improvements,
       });
       // 2. If triggered by decision change, save decision too
+      let emailed = false;
       if (feedbackModal.pendingDecision) {
-        await updateInterview(feedbackModal.interview.id, {
+        const res = await updateInterview(feedbackModal.interview.id, {
           outcome: feedbackModal.pendingDecision.outcome,
+          notify_candidate: !!feedbackModal.notifyCandidate,
         });
+        emailed = res?.data?.candidate_emailed === 'outcome';
       }
       if (fbRes.status === 'success') {
         toast({
           title: 'Saved',
           description: feedbackModal.pendingDecision
-            ? `Decision set to "${feedbackModal.pendingDecision.label}" and feedback saved.`
+            ? `Decision set to "${feedbackModal.pendingDecision.label}" and feedback saved. ${emailed ? 'The candidate was emailed the decision.' : 'The candidate was not emailed.'}`
             : 'Interview feedback recorded successfully.',
         });
         // Hired: offer to add them to HR straight away, which starts onboarding.
@@ -665,6 +684,16 @@ const Interviews = ({ onUpdate }) => {
                     )
                   )}
 
+                  {/* Decided 'Onsite Interview': arrange it (CO-272). */}
+                  {interview.status === 'COMPLETED' && interview.outcome === 'ONSITE_INTERVIEW' && (
+                    <button type="button" data-testid={`REC-interviews-next-onsite-btn-${interview.id}`}
+                      onClick={() => handleNextInterview(interview)} disabled={updatingId === interview.id}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-violet-800 bg-violet-950/40 px-3 py-1.5 text-xs font-medium text-violet-300 hover:bg-violet-900/50 transition-colors disabled:opacity-50">
+                      <CalendarClock className="h-3.5 w-3.5 text-violet-400" />
+                      Schedule onsite interview
+                    </button>
+                  )}
+
                   <div className="flex-1" />
 
                   {updatingId === interview.id && (
@@ -692,7 +721,7 @@ const Interviews = ({ onUpdate }) => {
                             { v: 'SCHEDULED',   label: 'Scheduled'   },
                             { v: 'COMPLETED',   label: 'Completed'   },
                             { v: 'CANCELLED',   label: 'Cancelled'   },
-                            { v: 'RESCHEDULED', label: 'Rescheduled' },
+                            // No 'Rescheduled': a new time is set with Reschedule, and the interview is then Scheduled (CO-114).
                           ].map(({ v, label }) => {
                             const active = interview.status === v;
                             return (
@@ -887,6 +916,17 @@ const Interviews = ({ onUpdate }) => {
                   <p className="text-[11px] text-white/40 mt-0.5">
                     Feedback is required to confirm this decision.
                   </p>
+                  {feedbackModal.pendingDecision.outcome && (
+                    <label className="mt-2 flex items-start gap-2 text-[11px] text-white/70 cursor-pointer">
+                      <input type="checkbox" className="mt-0.5" data-testid="REC-interviews-feedback-notify-candidate"
+                             checked={!!feedbackModal.notifyCandidate}
+                             onChange={(e) => setFeedbackModal(f => ({ ...f, notifyCandidate: e.target.checked }))} />
+                      <span>
+                        Email the candidate this decision. They get "Interview outcome – {feedbackModal.interview.job_title || 'the position'}",
+                        saying the outcome is {feedbackModal.pendingDecision.label}.
+                      </span>
+                    </label>
+                  )}
                 </div>
               </div>
             )}
@@ -955,6 +995,10 @@ const Interviews = ({ onUpdate }) => {
               New {pendingChange.type}:{' '}
               <span className="font-semibold text-violet-300">{pendingChange.label}</span>
             </p>
+            {pendingChange.type === 'status' && pendingChange.value === 'CANCELLED'
+              && ['SCHEDULED', 'RESCHEDULED', 'CONFIRMED'].includes(pendingChange.interview.status) && (
+              <p className="text-xs text-amber-300/90 -mt-3 mb-5">The candidate and the interviewers will be emailed that it is cancelled.</p>
+            )}
             <div className="flex gap-3 justify-end">
               <button id="REC-interviews-confirm-change-cancel-btn" data-testid="REC-interviews-confirm-change-cancel-btn" onClick={() => setPendingChange(null)}
                 className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 border border-white/10 hover:border-white/25 transition-colors">

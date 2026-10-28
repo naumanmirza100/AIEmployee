@@ -339,30 +339,123 @@ def _step_schedule_meeting(step, ctx, simulate):
     return True, {'done': True, 'meeting_id': m.id, 'scheduled_at': sched.isoformat()}, None
 
 
-def _step_provision_account(step, ctx, simulate):
-    """Placeholder. Real impls would call Okta / Google Workspace / Slack admin
-    APIs; we just log the intent so the workflow is observable end-to-end."""
-    employee_id = step.get('employee_id') or ctx.get('employee_id')
-    systems = step.get('systems') or []
+def _hr_admins(company_id):
+    from core.models import CompanyUser
+    from hr_agent.alerts import HR_ADMIN_ROLES
+    return list(CompanyUser.objects.filter(company_id=company_id, is_active=True, role__in=HR_ADMIN_ROLES))
+
+
+def _needs_a_person(step, ctx, simulate, *, what, items_key):
+    """A step this product cannot do itself (accounts in other systems, training in an LMS): it asks HR admins to do
+    it, by a bell alert, and says so in the run. It used to write a log line and report itself done (CO-74)."""
+    employee = _own_employee(ctx, step.get('employee_id') or ctx.get('employee_id'))
+    items = [str(x) for x in (step.get(items_key) or []) if str(x).strip()]
+    name = employee.full_name if employee else 'the employee'
+    text = f"{what} for {name}" + (f": {', '.join(items)}" if items else '') + '.'
     if simulate:
-        return True, {'done': True, 'simulated': True, 'employee_id': employee_id,
-                      'systems': systems}, None
-    logger.info("[hr workflow] provision_account intent: employee=%s systems=%s",
-                employee_id, systems)
-    return True, {'done': True, 'employee_id': employee_id, 'systems': systems,
-                  'note': 'placeholder — wire to your IT provisioning'}, None
+        return True, {'done': True, 'simulated': True, 'needs_a_person': True,
+                      'note': f'Would ask HR admins: {text}'}, None
+    from core.notification_utils import notify_company_users
+    told = notify_company_users(_hr_admins(ctx.get('company_id')), title=f'To do: {text[:200]}',
+                                message=f'An HR workflow asked for this; it cannot be done automatically. {text}',
+                                link='/hr/dashboard?tab=operations&sub=workflows', severity='warning',
+                                kind='hr_workflow_failed')
+    return True, {'done': True, 'needs_a_person': True, items_key: items,
+                  'note': f'Asked {told} HR admin(s) to do it: {text}'}, None
+
+
+def _step_provision_account(step, ctx, simulate):
+    return _needs_a_person(step, ctx, simulate, what='Set up accounts', items_key='systems')
 
 
 def _step_assign_training(step, ctx, simulate):
-    employee_id = step.get('employee_id') or ctx.get('employee_id')
-    modules = step.get('modules') or []
+    return _needs_a_person(step, ctx, simulate, what='Assign training', items_key='modules')
+
+
+def _step_notify(step, ctx, simulate):
+    """A bell alert (CO-74): to HR admins, the employee's manager, the employee, or several (`to`: a name or a list).
+    `title` and `message` take {{placeholders}}. Nobody to tell is a failed step, not a silent one."""
+    from core.models import CompanyUser
+    from core.notification_utils import notify_company_users, notify_employees
+    to = step.get('to') or ['hr_admins']
+    to = [to] if isinstance(to, str) else list(to)
+    fields = {**ctx, **_employee_fields(ctx)}
+    title = _render(step.get('title') or 'HR workflow', fields)[:200]
+    message = _render(step.get('message') or '', fields)
+    employee = _own_employee(ctx, ctx.get('employee_id'))
+    logins, people = [], []
+    if 'hr_admins' in to:
+        logins += _hr_admins(ctx.get('company_id'))
+    if 'manager' in to and employee and employee.manager_id:
+        manager = employee.manager
+        login = CompanyUser.objects.filter(company_id=ctx.get('company_id'), is_active=True,
+                                           email__iexact=manager.work_email).first()
+        if login:
+            logins.append(login)
+        elif manager.user_id:
+            people.append(manager.user)
+    if 'employee' in to and employee and employee.user_id:
+        people.append(employee.user)
+    if not (logins or people):
+        return False, {'done': False, 'error': f'Nobody to tell ({", ".join(to)})'}, None
     if simulate:
-        return True, {'done': True, 'simulated': True,
-                      'employee_id': employee_id, 'modules': modules}, None
-    logger.info("[hr workflow] assign_training intent: employee=%s modules=%s",
-                employee_id, modules)
-    return True, {'done': True, 'employee_id': employee_id, 'modules': modules,
-                  'note': 'placeholder — wire to your LMS'}, None
+        return True, {'done': True, 'simulated': True, 'to': to, 'title': title}, None
+    told = notify_company_users(logins, title=title, message=message, link='/hr/dashboard', kind='hr_workflow_notice')
+    told += notify_employees(people, title=title, message=message, link='/me/hr', kind='hr_workflow_notice')
+    return True, {'done': True, 'told': told, 'title': title}, None
+
+
+def _step_create_task(step, ctx, simulate):
+    """A Project Manager task (CO-74): `project_id`, `title`, optional `description`, `priority`, `due_in_days` and
+    `assignee` ("employee", "manager" or a user id). Made as `owner_company_user_id`, else the company's first HR
+    admin. With no Project Manager, or no project, HR admins get a bell alert with the task instead."""
+    from datetime import timedelta as _td
+    from core.models import CompanyUser, Project
+    from core.modules import has_module
+    fields = {**ctx, **_employee_fields(ctx)}
+    title = _render(step.get('title') or 'Task from an HR workflow', fields)[:200]
+    description = _render(step.get('description') or '', fields)
+    company_id = ctx.get('company_id')
+    project = None
+    if step.get('project_id'):
+        project = Project.objects.filter(pk=step.get('project_id'), company_id=company_id).first()
+    if not (project and has_module(company_id, 'project_manager_agent')):
+        if simulate:
+            return True, {'done': True, 'simulated': True, 'note': 'No project: HR admins would be told instead'}, None
+        from core.notification_utils import notify_company_users
+        told = notify_company_users(_hr_admins(company_id), title=f'To do: {title}', message=description or title,
+                                    link='/hr/dashboard?tab=operations&sub=workflows', severity='warning',
+                                    kind='hr_workflow_failed')
+        return True, {'done': True, 'needs_a_person': True,
+                      'note': f'No Project Manager project to put it in: asked {told} HR admin(s) instead'}, None
+    employee = _own_employee(ctx, ctx.get('employee_id'))
+    assignee = step.get('assignee')
+    assignee_id = None
+    if assignee == 'employee' and employee:
+        assignee_id = employee.user_id
+    elif assignee == 'manager' and employee and employee.manager_id:
+        assignee_id = employee.manager.user_id
+    elif isinstance(assignee, int) or (isinstance(assignee, str) and assignee.isdigit()):
+        assignee_id = int(assignee)
+    owner = (CompanyUser.objects.filter(pk=step.get('owner_company_user_id'), company_id=company_id,
+                                        is_active=True).first()
+             or next(iter(_hr_admins(company_id)), None))
+    if owner is None:
+        return False, {'done': False, 'error': 'No active HR admin to make the task as'}, None
+    due = None
+    if step.get('due_in_days') not in (None, ''):
+        due = (timezone.localdate() + _td(days=int(step['due_in_days']))).isoformat()
+    if simulate:
+        return True, {'done': True, 'simulated': True, 'project_id': project.id, 'title': title}, None
+    from project_manager_agent import services as pm_services
+    from project_manager_agent.services.actor import DashboardActor
+    try:
+        task = pm_services.create_task(DashboardActor(owner), {
+            'project_id': project.id, 'title': title, 'description': description,
+            'priority': step.get('priority') or 'medium', 'assignee_id': assignee_id, 'due_date': due})
+    except Exception as exc:
+        return False, {'done': False, 'error': f'Project Manager refused the task: {exc}'}, None
+    return True, {'done': True, 'task_id': task.id, 'project_id': project.id, 'title': title}, None
 
 
 def _step_assign_manager(step, ctx, simulate):
@@ -427,6 +520,8 @@ STEP_HANDLERS = {
     'assign_training': _step_assign_training,
     'assign_manager': _step_assign_manager,
     'notify_template': _step_notify_template,
+    'notify': _step_notify,
+    'create_task': _step_create_task,
 }
 
 
@@ -434,7 +529,7 @@ STEP_HANDLERS = {
 # Executor
 # --------------------------------------------------------------------------
 
-def _run_single_step(step, step_index, step_path, workflow, context_data, simulate
+def _run_single_step(step, step_index, step_path, workflow, context_data, simulate, handlers=None
                      ) -> Tuple[bool, dict, Optional[str]]:
     step_type = (step.get('type') or '').lower()
     base = {'step': step_index, 'step_path': step_path, 'type': step_type}
@@ -468,7 +563,8 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
         )
         raise sig
 
-    handler = STEP_HANDLERS.get(step_type)
+    # Another agent can run its own steps through this engine (Recruitment's SOP runner); HR's are the default.
+    handler = (handlers if handlers is not None else STEP_HANDLERS).get(step_type)
     if handler is None:
         return True, {**base, 'done': True, 'note': 'unknown step type treated as no-op'}, None
     ok, result, fatal = handler(step, context_data, simulate)
@@ -476,7 +572,7 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
 
 
 def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic, timeout,
-                       path_prefix='') -> Tuple[bool, list, Optional[str]]:
+                       path_prefix='', handlers=None) -> Tuple[bool, list, Optional[str]]:
     """Walk a step list. Branches recurse. Pauses bubble up via
     `_WorkflowPauseSignal`, each level prepending its tail so the top sees a
     flat continuation list. Mirrors the Frontline executor."""
@@ -502,7 +598,7 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
             try:
                 nested_ok, nested_results, nested_err = _execute_step_list(
                     nested, workflow, context_data, simulate, start_monotonic, timeout,
-                    path_prefix=f"{step_path}.{branch_taken}.",
+                    path_prefix=f"{step_path}.{branch_taken}.", handlers=handlers,
                 )
             except _WorkflowPauseSignal as pause:
                 pause.partial_results = results + pause.partial_results
@@ -520,7 +616,7 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
             attempt += 1
             try:
                 ok, result_entry, fatal = _run_single_step(
-                    step, i, step_path, workflow, context_data, simulate,
+                    step, i, step_path, workflow, context_data, simulate, handlers=handlers,
                 )
             except _WorkflowPauseSignal as pause:
                 pause.partial_results = list(results)
@@ -550,7 +646,7 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
 
 
 def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False, execution=None,
-                     _steps_override=None, _prior_results=None, _prior_elapsed=0.0):
+                     _steps_override=None, _prior_results=None, _prior_elapsed=0.0, handlers=None):
     """Top-level entry. Returns `(success, result_data, error_message)`.
 
     On a `wait` step, persists the pause snapshot onto `execution` (when
@@ -568,7 +664,7 @@ def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False
     prior_results = list(_prior_results or [])
     try:
         ok, results, err = _execute_step_list(
-            steps, workflow, context_data, simulate, start, effective_timeout,
+            steps, workflow, context_data, simulate, start, effective_timeout, handlers=handlers,
         )
     except _WorkflowPauseSignal as pause:
         accumulated = prior_results + list(pause.partial_results or [])

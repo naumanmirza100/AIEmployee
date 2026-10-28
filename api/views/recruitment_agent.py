@@ -20,6 +20,7 @@ from django.db.models import Q
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.conf import settings
+from django.utils import timezone as dj_timezone
 
 from recruitment_agent.agents.cv_parser import CVParserAgent
 from recruitment_agent.agents.summarization import SummarizationAgent
@@ -32,6 +33,8 @@ from recruitment_agent.core import RecruitmentAIClient
 from recruitment_agent import sharing
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
+from recruitment_agent import candidate_mail
+from recruitment_agent.ranking import BEST_FIRST, ranks_for
 from recruitment_agent.models import (
     Interview,
     CVRecord,
@@ -82,7 +85,8 @@ def _make_agents(company):
         # asking whose candidate that is, and two addresses below take that data
         # straight from the request. The pipelines that really screen CVs write the
         # record themselves, by an id they created.
-        'enrich_agent': LeadResearchEnrichmentAgent(log_service=log_service, sql_repository=None),
+        'enrich_agent': LeadResearchEnrichmentAgent(log_service=log_service, sql_repository=None,
+                                                    groq_client=groq_client),
         'qualify_agent': LeadQualificationAgent(log_service=log_service, sql_repository=None),
         'job_desc_agent': JobDescriptionParserAgent(groq_client=groq_client, log_service=log_service),
         'interview_agent': InterviewSchedulingAgent(log_service=log_service),
@@ -221,10 +225,16 @@ def process_cvs(request):
         # Use manual keywords if provided
         if not job_kw_list and job_keywords:
             job_kw_list = [kw.strip() for kw in job_keywords.split(",") if kw.strip()]
+        # Keywords worked out now are kept for the job's next run, as screening applicants does (CO-103).
+        if job_kw_list and job_desc and not job_desc.keywords_json:
+            job_desc.keywords_json = json.dumps({'keywords': job_kw_list})
+            job_desc.save(update_fields=['keywords_json'])
         
-        # Process CV files
+        # Process CV files. Each file on its own: one unreadable file failed the whole upload after the earlier
+        # ones were saved, and uploading again saved them twice (CO-180).
         parsed_results = []
         temp_paths = []
+        failed_files = []
         
         try:
             for uploaded_file in files:
@@ -237,6 +247,8 @@ def process_cvs(request):
                 
                 try:
                     parsed = cv_agent.parse_file(str(temp_path))
+                except KeyServiceError:
+                    raise
                 except Exception as parse_exc:
                     # Check if it's an API key expiration error
                     from recruitment_agent.core import GroqClientError
@@ -248,8 +260,17 @@ def process_cvs(request):
                             'message': 'API key rejected by provider. Please update your key in API Keys settings (BYOK) or contact your admin to refresh the managed key.',
                             'error_type': 'api_key_expired'
                         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-                    else:
-                        raise  # Re-raise other errors
+                    failed_files.append({'file_name': uploaded_file.name, 'reason': _unreadable_reason(uploaded_file.name,
+                                                                                                      parse_exc)})
+                    continue
+
+                # The same person on the same job again: not a second candidate (CO-180).
+                _email = (parsed.get('email') or '').strip().lower() if isinstance(parsed, dict) else ''
+                if job_desc and _email and CVRecord.objects.filter(
+                        job_description=job_desc, parsed_json__icontains=f'"{_email}"').exists():
+                    failed_files.append({'file_name': uploaded_file.name,
+                                         'reason': f'{_email} is already a candidate for this job; not added again.'})
+                    continue
                 
                 record_id = django_repo.store_parsed(uploaded_file.name, parsed) if django_repo else None
                 
@@ -262,7 +283,9 @@ def process_cvs(request):
                         if job_desc:
                             cv_record.job_description = job_desc
 
-                        # Auto-link to JobApplication using parsed email or filename
+                        # Auto-link to JobApplication by the email in the CV. It also matched by file name, and
+                        # "CV.pdf" is many people's: the invitation then went to a different applicant, on the
+                        # strength of this CV, and their own CV was never read (CO-101).
                         if job_desc and not cv_record.job_application_id:
                             _parsed_email = ''
                             if isinstance(parsed, dict):
@@ -277,13 +300,6 @@ def process_cvs(request):
                                 _app = (
                                     _JobApp.objects
                                     .filter(job=job_desc, email__iexact=_parsed_email, cv_records__isnull=True)
-                                    .first()
-                                )
-                            # Fallback: filename match
-                            if not _app:
-                                _app = (
-                                    _JobApp.objects
-                                    .filter(job=job_desc, cv_file_name=uploaded_file.name, cv_records__isnull=True)
                                     .first()
                                 )
                             if _app:
@@ -318,6 +334,14 @@ def process_cvs(request):
                 except Exception:
                     pass
             
+            if failed_files and not parsed_results:
+                return Response({
+                    'status': 'error',
+                    'message': 'None of the files could be added. ' + ' '.join(
+                        f"{f['file_name']}: {f['reason']}" for f in failed_files),
+                    'failed_files': failed_files,
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # If parse_only, return parsed results
             if parse_only:
                 return Response({
@@ -349,7 +373,9 @@ def process_cvs(request):
                 summary = _own_data_only(summary)
                 
                 # Enrich
-                enriched = enrich_agent.enrich(parsed, summary)
+                _rec = CVRecord.objects.select_related('job_application').filter(id=result.get('record_id')).first()
+                enriched = enrich_agent.enrich(parsed, summary, application=_rec.job_application if _rec else None,
+                                               job=job_desc, job_keywords=job_kw_list)
                 # Ensure enriched is a dict
                 if not isinstance(enriched, dict):
                     enriched = enriched[0] if isinstance(enriched, list) and len(enriched) > 0 else {}
@@ -376,12 +402,18 @@ def process_cvs(request):
                 reverse=True
             )
             
-            # Apply top_n limit
+            # Top N limits what is shown and who is invited. Everyone's results are saved: they were thrown away for
+            # all but the top N, who stayed candidates with no score (CO-227).
+            everyone = ranked
             if top_n:
                 ranked = ranked[:top_n]
             
             # Get interview agent for auto-scheduling
             interview_agent = agents.get('interview_agent')
+            # Nothing left to book: no invitation goes, and the screen says why (CO-228).
+            from recruitment_agent import interview_time as _itime
+            slots_left = _itime.bookable_slots(job_desc) if job_desc else 0
+            no_slots = no_keywords = False
             
             # Use job's default interview type (Online/Onsite) for auto-scheduled invitations
             auto_interview_type = 'ONLINE'
@@ -394,7 +426,7 @@ def process_cvs(request):
             email_settings = sharing.email_settings(settings_owner)
 
             # Update CV records with qualification data and auto-schedule interviews
-            for idx, result in enumerate(ranked):
+            for idx, result in enumerate(everyone):
                 if result['record_id']:
                     try:
                         cv_record = CVRecord.objects.get(id=result['record_id'])
@@ -409,10 +441,12 @@ def process_cvs(request):
                         # qualified has confidence_score, not confidence
                         cv_record.qualification_confidence = result['qualified'].get('confidence_score') if isinstance(result.get('qualified'), dict) else None
                         cv_record.qualification_priority = result['qualified'].get('priority') if isinstance(result.get('qualified'), dict) else None
-                        cv_record.rank = idx + 1
                         cv_record.save()
                         from recruitment_agent import application_status
                         application_status.after_screening(cv_record)
+                        from recruitment_agent import workflows
+                        workflows.run_for_event('candidate_screened', cv_record=cv_record,
+                                                detail=cv_record.qualification_decision or '')
                         if new_decision and new_decision != old_decision:
                             try:
                                 CVRecordDecisionLog.objects.create(
@@ -427,6 +461,9 @@ def process_cvs(request):
                     except CVRecord.DoesNotExist:
                         pass
                 
+                if top_n and idx >= top_n:
+                    continue    # saved above; only the top N are invited
+
                 # Auto-schedule interview if decision is INTERVIEW
                 qual_decision = result.get('qualified', {}).get('decision', '') if isinstance(result.get('qualified'), dict) else ''
                 if qual_decision == "INTERVIEW" and interview_agent:
@@ -450,7 +487,23 @@ def process_cvs(request):
                     # Use the actual job title as job_role (not first line of description text)
                     job_role = (job_desc.title if job_desc and job_desc.title else None) or "Position"
                     
-                    if candidate_email:
+                    already = bool(candidate_email) and Interview.objects.filter(
+                        cv_record__job_description=job_desc, candidate_email__iexact=candidate_email,
+                    ).exclude(status__in=['CANCELLED', 'COMPLETED']).exists()
+                    if candidate_email and already:
+                        # The same person processed again got a second invitation with a second working link.
+                        result['interview_scheduled'] = False
+                        result['interview_error'] = 'Already invited to an interview for this job'
+                    elif candidate_email and slots_left <= 0:
+                        no_slots = True
+                        result['interview_scheduled'] = False
+                        result['interview_error'] = 'No free interview slots'
+                    elif candidate_email and not job_kw_list:
+                        # Scored without anything to match against: nobody is invited on that (CO-103).
+                        no_keywords = True
+                        result['interview_scheduled'] = False
+                        result['interview_error'] = 'No job requirements to match against'
+                    elif candidate_email:
                         logger.info(f"Auto-scheduling interview for approved candidate: {candidate_name} ({candidate_email})")
                         try:
                             interview_result = interview_agent.schedule_interview(
@@ -488,11 +541,18 @@ def process_cvs(request):
                         result['interview_scheduled'] = False
                         result['interview_error'] = "No email address found"
             
-            return Response({
+            payload = {
                 'status': 'success',
                 'results': ranked,
-                'total': len(ranked)
-            })
+                'total': len(ranked),
+                'failed_files': failed_files,
+            }
+            if no_slots:
+                payload['notice'] = _itime.no_slots_message(job_desc)
+            elif no_keywords:
+                from recruitment_agent.applicant_screening import NO_KEYWORDS
+                payload['notice'] = NO_KEYWORDS[0].upper() + NO_KEYWORDS[1:]
+            return Response(payload)
             
         except KeyServiceError:
             raise
@@ -671,6 +731,15 @@ def list_job_descriptions(request):
             qs = qs.filter(department__icontains=dept_filter)
 
         total = qs.count()
+
+        # The job pickers (CV Processing, Interview Settings, Candidates, Interviews, Analytics) asked once with no
+        # page size and got the nine newest jobs (CO-105). `picker=1` gives every job, without the long texts.
+        if request.query_params.get('picker') in ('1', 'true'):
+            return Response({'status': 'success', 'total': total, 'data': [{
+                'id': jd.id, 'title': jd.title, 'is_active': jd.is_active, 'department': jd.department,
+                'location': jd.location, 'type': jd.type, 'keywords_json': jd.keywords_json,
+                'owner': sharing.owner_payload(jd, company_user),
+            } for jd in qs.order_by('-created_at')]})
 
         # pagination
         try:
@@ -913,11 +982,9 @@ def update_job_description(request, job_description_id):
         title = request.data.get('title', '').strip()
         description = request.data.get('description', '').strip()
         is_active = request.data.get('is_active', job_desc.is_active)
-        location = request.data.get('location', '').strip() or None
-        department = request.data.get('department', '').strip() or None
         job_type = request.data.get('type', job_desc.type).strip()
-        requirements = request.data.get('requirements', '').strip() or None
-        description_updated = 'description' in request.data
+        # Keywords are worked out again only when the description really changes; every edit re-ran the AI (CO-225).
+        description_updated = bool(description) and description != (job_desc.description or '').strip()
 
         if title:
             job_desc.title = title
@@ -925,14 +992,13 @@ def update_job_description(request, job_description_id):
             job_desc.description = description
 
         job_desc.is_active = is_active
-        if location is not None:
-            job_desc.location = location
-        if department is not None:
-            job_desc.department = department
+        # Sent empty means cleared: an empty location, department or requirements kept the old value, though the
+        # screen said 'updated' (CO-225).
+        for field in ('location', 'department', 'requirements'):
+            if field in request.data:
+                setattr(job_desc, field, (request.data.get(field) or '').strip() or None)
         if job_type:
             job_desc.type = job_type
-        if requirements is not None:
-            job_desc.requirements = requirements
 
         if 'application_open_date' in request.data:
             job_desc.application_open_date = request.data.get('application_open_date') or None
@@ -987,8 +1053,21 @@ def delete_job_description(request, job_description_id):
                 'message': 'Job description not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
+        # Deleting a job removed every application to it and hid its candidates while keeping their data and files
+        # (CO-183). A job with people in it is closed instead; its booked interviews go on.
+        applications = job_desc.applications.count()
+        candidates = job_desc.cv_records.count()
+        if applications or candidates:
+            return Response({
+                'status': 'error', 'code': 'job_has_people',
+                'message': (f'"{job_desc.title}" has {applications} application(s) and {candidates} candidate(s), so it '
+                            'cannot be deleted. Close it instead (Edit, then switch it off): it stops taking '
+                            'applications, unanswered invitations stop being chased, and booked interviews go on. A '
+                            "candidate's data can be removed on their own page with Delete candidate."),
+                'applications': applications, 'candidates': candidates,
+            }, status=status.HTTP_409_CONFLICT)
         job_desc.delete()
-        
+
         return Response({
             'status': 'success',
             'message': 'Job description deleted successfully'
@@ -1002,6 +1081,84 @@ def delete_job_description(request, job_description_id):
             'status': 'error',
             'message': f'Delete failed: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def schedule_next_interview(request, interview_id):
+    """The onsite interview after a first one whose decision is 'Onsite Interview' (CO-272): a new interview for the
+    same candidate, type Onsite, with the usual invitation to pick a time. The candidate was told 'Onsite Interview'
+    and nothing let the recruiter arrange it."""
+    company_user = request.user
+    first = sharing.interviews(company_user).select_related('cv_record__job_description').filter(id=interview_id).first()
+    if first is None:
+        return Response({'status': 'error', 'message': 'Interview not found'}, status=status.HTTP_404_NOT_FOUND)
+    if first.status != 'COMPLETED' or first.outcome != 'ONSITE_INTERVIEW':
+        return Response({'status': 'error', 'message': (
+            'An onsite interview follows a completed interview whose decision is Onsite Interview.')},
+            status=status.HTTP_400_BAD_REQUEST)
+    if Interview.objects.filter(cv_record=first.cv_record, interview_type='ONSITE').exclude(id=first.id).exclude(
+            status__in=['CANCELLED', 'COMPLETED']).exists():
+        return Response({'status': 'error', 'message': 'This candidate already has an onsite interview arranged.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    job = first.cv_record.job_description if first.cv_record_id else None
+    from recruitment_agent.interview_time import bookable_slots, no_slots_message
+    if job is not None and bookable_slots(job) <= 0:
+        return Response({'status': 'error', 'message': no_slots_message(job)}, status=status.HTTP_400_BAD_REQUEST)
+    owner = sharing.owner(job, company_user)
+    result = InterviewSchedulingAgent(log_service=LogService()).schedule_interview(
+        candidate_name=first.candidate_name, candidate_email=first.candidate_email,
+        job_role=(job.title if job else first.job_role), interview_type='ONSITE',
+        candidate_phone=first.candidate_phone, cv_record_id=first.cv_record_id, recruiter_id=None,
+        company_user_id=company_user.id, email_settings=sharing.email_settings(owner), custom_slots=None)
+    return Response({'status': 'success', 'data': {'interview_id': result.get('interview_id'),
+                                                   'invitation_sent': bool(result.get('invitation_sent'))},
+                     'message': (f'Onsite interview arranged: {first.candidate_name} was invited to pick a time.'
+                                 if result.get('invitation_sent') else
+                                 'Onsite interview made, but the invitation email could not be sent.')})
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_cv_record(request, record_id):
+    """Remove one candidate: their record, CV file, public application and interviews (CO-183). There was no way
+    to delete a candidate, so a request to remove a person's data could not be met. The company's owner, an admin, or
+    whoever owns the job may do it; a booked interview is called off with the candidate and interviewers told."""
+    company_user = request.user
+    cv = sharing.cvs(company_user).select_related('job_description', 'job_application').filter(id=record_id).first()
+    if cv is None:
+        return Response({'status': 'error', 'message': 'Candidate not found'}, status=status.HTTP_404_NOT_FOUND)
+    job = cv.job_description
+    if company_user.role not in ('owner', 'admin') and not (job and job.company_user_id == company_user.id):
+        owner = job.company_user.full_name if job and job.company_user_id else 'the job owner'
+        return Response({'status': 'error', 'code': 'not_allowed', 'message': (
+            f"Only the company's owner, an admin, or {owner} (who owns this job) can delete a candidate.")},
+            status=status.HTTP_403_FORBIDDEN)
+    from recruitment_agent import interviewer_alerts
+    agent = InterviewSchedulingAgent(log_service=LogService())
+    told = 0
+    for iv in Interview.objects.filter(cv_record=cv):
+        if iv.status in ('SCHEDULED', 'CONFIRMED') and iv.scheduled_datetime and iv.scheduled_datetime > dj_timezone.now():
+            told += bool(agent.send_cancellation_email(iv))
+            interviewer_alerts.tell(iv, 'cancelled')
+        iv.delete()
+    for key in [cv.s3_key] if cv.s3_key else []:
+        try:
+            default_storage.delete(key)
+        except Exception:
+            logger.warning('delete_cv_record: could not remove file %s', key)
+    application = cv.job_application
+    name = cv.file_name
+    cv.delete()
+    if application is not None and not application.cv_records.exists():
+        if application.cv_file:
+            application.cv_file.delete(save=False)
+        application.delete()
+    return Response({'status': 'success', 'message': (
+        f'{name} was deleted, with their CV and interviews.'
+        + (' They were told their booked interview is cancelled.' if told else ''))})
 
 
 @api_view(['GET', 'POST'])
@@ -1253,9 +1410,14 @@ def update_interview(request, interview_id):
         new_outcome = request.data.get('outcome')
         new_meeting_link = request.data.get('meeting_link')
         resend_confirmation = request.data.get('resend_confirmation', False)
+        # The decision email goes only when asked and the decision really changes (CO-119). Screens from before
+        # this did not ask, so a request without the flag keeps the old behaviour.
+        notify_candidate = request.data.get('notify_candidate', True) not in (False, 'false', 0, '0')
         from recruitment_agent import interviewer_alerts
         was_booked = interview.status in ('SCHEDULED', 'RESCHEDULED', 'CONFIRMED')
         was_hired = interview.outcome == 'HIRED'
+        old_outcome = interview.outcome or ''
+        candidate_emailed = None
 
         if new_status is not None:
             new_status = (new_status or '').strip().upper()
@@ -1264,6 +1426,15 @@ def update_interview(request, interview_id):
                     'status': 'error',
                     'message': f'Invalid status. Must be one of: {", ".join(VALID_INTERVIEW_STATUSES)}'
                 }, status=status.HTTP_400_BAD_REQUEST)
+            # 'Rescheduled' chosen by hand left an interview no reminder or completion job looked at, and 'Scheduled'
+            # an interview with no time at all (CO-114). A new time is set with Reschedule.
+            if new_status == 'RESCHEDULED':
+                new_status = 'SCHEDULED'
+            if (new_status == 'SCHEDULED' and interview.status != 'SCHEDULED'
+                    and interview.scheduled_datetime is None):
+                return Response({'status': 'error', 'message': (
+                    'This interview has no time yet. Use Reschedule to set one; it is then Scheduled.')},
+                    status=status.HTTP_400_BAD_REQUEST)
             interview.status = new_status or interview.status
 
         # Setting a cancelled or completed interview back to Scheduled puts its
@@ -1344,6 +1515,9 @@ def update_interview(request, interview_id):
         if outcome_updated:
             from recruitment_agent import application_status
             application_status.after_interview_outcome(interview)
+            if interview.outcome and interview.outcome != old_outcome:
+                from recruitment_agent import workflows
+                workflows.run_for_event('interview_outcome', interview=interview, detail=interview.outcome)
 
         # HR was handed this person as a new hire. It hears if that changes.
         if was_hired and interview.outcome != 'HIRED':
@@ -1355,6 +1529,10 @@ def update_interview(request, interview_id):
         staying = set(interview.interviewers.values_list('id', flat=True)) - added
         if was_booked and interview.status == 'CANCELLED':
             interviewer_alerts.tell(interview, 'cancelled', users=staying)
+            # The candidate too: only the interviewers were told, and the candidate kept a link to a meeting that
+            # was no longer happening (CO-113). An invitation not yet booked is withdrawn without an email.
+            if InterviewSchedulingAgent(log_service=LogService()).send_cancellation_email(interview):
+                candidate_emailed = 'cancelled'
         elif rebooked:
             interviewer_alerts.tell(interview, 'booked', users=staying)
 
@@ -1368,7 +1546,8 @@ def update_interview(request, interview_id):
                 logger.warning(f"Failed to resend confirmation email: {mail_err}")
 
         # Send simple outcome email to candidate when decision is changed
-        if outcome_updated and interview.outcome and interview.candidate_email:
+        if (outcome_updated and interview.outcome and interview.candidate_email and notify_candidate
+                and interview.outcome != old_outcome):
             try:
                 job_title_for_email = None
                 if interview.cv_record and interview.cv_record.job_description:
@@ -1384,20 +1563,15 @@ def update_interview(request, interview_id):
                     'job_title': job_title_for_email,
                     'outcome_label': outcome_label,
                     'outcome_class': outcome_class,
+                    **candidate_mail.who_hires(interview),
                 }
                 subject = f"Interview outcome – {job_title_for_email}"
                 message = render_to_string('recruitment_agent/emails/interview_outcome.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_outcome.html', context)
-                from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
-                send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=from_email,
-                    recipient_list=[interview.candidate_email],
-                    html_message=html_message,
-                    fail_silently=True,
-                )
+                candidate_mail.send(subject, message, html_message, interview.candidate_email, interview=interview,
+                                    fail_silently=True)
                 logger.info(f"Outcome email sent to {interview.candidate_email} for interview {interview.id} ({interview.outcome})")
+                candidate_emailed = 'outcome'
             except Exception as mail_err:
                 logger.warning(f"Failed to send outcome email to {interview.candidate_email}: {mail_err}")
 
@@ -1405,11 +1579,14 @@ def update_interview(request, interview_id):
         if interview.cv_record and interview.cv_record.job_description:
             job_title = interview.cv_record.job_description.title
 
+        said = {'cancelled': ' The candidate was emailed that it is cancelled.',
+                'outcome': ' The candidate was emailed the decision.'}.get(candidate_emailed, '')
         return Response({
             'status': 'success',
-            'message': 'Interview updated',
+            'message': 'Interview updated.' + said,
             'data': {
                 'id': interview.id,
+                'candidate_emailed': candidate_emailed,
                 'status': interview.status,
                 'outcome': interview.outcome or '',
                 'candidate_name': interview.candidate_name,
@@ -1790,12 +1967,15 @@ def list_cv_records(request):
             except Exception:
                 pass
 
-        cv_records = cv_records.order_by('-rank', '-created_at')
+        # Best first, by score; it sorted by the stored rank, highest number first (CO-104).
+        cv_records = cv_records.order_by(*BEST_FIRST)
         total = cv_records.count()
 
         if paginate and page_size is not None:
             start = (page - 1) * page_size
             cv_records = cv_records[start:start + page_size]
+        cv_records = list(cv_records)
+        ranks = ranks_for(cv_records)
 
         records_list = []
         for cv in cv_records:
@@ -1809,7 +1989,10 @@ def list_cv_records(request):
                 'id': cv.id,
                 'file_name': cv.file_name,
                 'role_fit_score': cv.role_fit_score,
-                'rank': cv.rank,
+                'rank': ranks.get(cv.id),
+                # Scored by the built-in rules because the AI failed; the screen marks it (CO-221).
+                'scored_without_ai': (insights_data.get('summarization_source') == 'rule_based_fallback'
+                                      if isinstance(insights_data, dict) else False),
                 'qualification_decision': cv.qualification_decision,
                 'qualification_confidence': cv.qualification_confidence,
                 'qualification_priority': cv.qualification_priority,
@@ -1862,6 +2045,26 @@ def _get_parsed_email_and_name(parsed):
     name = (parsed.get('name') or parsed.get('full_name') or parsed.get('Name') or 'Candidate') if isinstance(parsed, dict) else 'Candidate'
     name = (name or 'Candidate').strip()
     return (email or None), name
+
+
+EMAIL_TIMING_LIMITS = (
+    ('followup_delay_hours', 1, 336, float, 'The wait before the first follow-up (hours)'),
+    ('min_hours_between_followups', 1, 336, float, 'The time between follow-ups (hours)'),
+    ('max_followup_emails', 0, 5, int, 'The number of follow-up emails'),
+    ('reminder_hours_before', 1, 168, float, 'The reminder time before an interview (hours)'),
+)
+
+
+def _unreadable_reason(file_name, exc):
+    """Why a CV file could not be read, in words the recruiter can act on (CO-102, CO-180)."""
+    suffix = Path(file_name).suffix.lower()
+    if suffix == '.doc':
+        return 'an old Word file (.doc) cannot be read; save it as .docx or PDF and upload it again.'
+    if suffix not in ('.pdf', '.docx', '.txt'):
+        return f'{suffix or "this kind of"} files cannot be read; upload a PDF or .docx.'
+    if 'empty' in str(exc).lower():
+        return 'no text could be read from it (it may be a scanned picture); upload a PDF with text, or a .docx.'
+    return f'it could not be read ({str(exc)[:160]}).'
 
 
 def _reject_recipient(cv_record):
@@ -1921,6 +2124,10 @@ def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, 
     if not candidate_email:
         logger.info(f"Bulk INTERVIEW: CV record id={cv_record.id} skipped - no email available")
         return ('skipped', 'no_email')
+    # The bulk Interview decision had no settings check at all (CO-228).
+    from recruitment_agent.interview_time import bookable_slots
+    if cv_record.job_description is None or bookable_slots(cv_record.job_description) <= 0:
+        return ('skipped', 'no_free_slots')
     job_role = 'Position'
     if cv_record.job_description:
         job_role = (cv_record.job_description.title or 'Position')[:255]
@@ -2042,7 +2249,7 @@ def get_cv_record_detail(request, record_id):
                 'id': cv.id,
                 'file_name': cv.file_name,
                 'role_fit_score': cv.role_fit_score,
-                'rank': cv.rank,
+                'rank': ranks_for([cv]).get(cv.id),
                 'qualification_decision': cv.qualification_decision,
                 'qualification_confidence': cv.qualification_confidence,
                 'qualification_priority': cv.qualification_priority,
@@ -2153,7 +2360,14 @@ def bulk_update_cv_records(request):
         # Capture old decisions before bulk update for audit trail
         old_decisions = {cv.id: cv.qualification_decision for cv in qs.only('id', 'qualification_decision')}
         remaining_ids = list(old_decisions.keys())
-        updated_count = qs.update(qualification_decision=decision)
+        # Rejected and already told: rejecting them again sent the same email again (CO-111). A candidate the AI
+        # rejected was never told, so the first person's Reject still emails them.
+        already_told = set(qs.filter(qualification_decision='REJECT', rejection_emailed_at__isnull=False)
+                           .values_list('id', flat=True)) if decision == 'REJECT' else set()
+        if decision == 'REJECT':
+            updated_count = qs.update(qualification_decision=decision)
+        else:
+            updated_count = qs.update(qualification_decision=decision, rejection_emailed_at=None)
 
         # Moving a candidate OUT of INTERVIEW (to REJECT/HOLD) removes their
         # still-open interview so they leave the interview section. We keep
@@ -2167,7 +2381,7 @@ def bulk_update_cv_records(request):
         removed_interviews = 0
         cancel_emails_sent = 0
         reject_emails_sent = 0
-        told_rejected = set()        # cv ids whose rejection email went
+        told_rejected = set(already_told)  # cv ids whose rejection email went, now or before
         if decision in ('REJECT', 'HOLD') and remaining_ids:
             _agent = InterviewSchedulingAgent(log_service=LogService())
 
@@ -2175,15 +2389,17 @@ def bulk_update_cv_records(request):
             # whether or not they ever had an interview. This is the candidate's
             # closure, so it replaces the interview-cancelled email on rejection.
             if decision == 'REJECT':
-                for cv in CVRecord.objects.filter(id__in=remaining_ids).select_related('job_description', 'job_application'):
+                for cv in (CVRecord.objects.filter(id__in=remaining_ids).exclude(id__in=already_told)
+                           .select_related('job_description', 'job_application')):
                     r_email, r_name = _reject_recipient(cv)
                     if not r_email:
                         continue
                     job_title = (cv.job_description.title if cv.job_description else '') or 'the position'
                     try:
-                        if _agent.send_rejection_email(r_name, r_email, job_title):
+                        if _agent.send_rejection_email(r_name, r_email, job_title, job=cv.job_description):
                             reject_emails_sent += 1
                             told_rejected.add(cv.id)
+                            CVRecord.objects.filter(pk=cv.pk).update(rejection_emailed_at=dj_timezone.now())
                     except Exception as _re:
                         logger.warning(f"Rejection email failed for cv_record {cv.id}: {_re}")
 
@@ -2269,7 +2485,11 @@ def bulk_update_cv_records(request):
             elif updated_count > 0:
                 no_email = skip_reasons.get('no_email', 0)
                 already = skip_reasons.get('already_has_interview', 0)
-                if no_email == updated_count:
+                if skip_reasons.get('no_free_slots'):
+                    message += ('. No invitation emails sent to {n}: their job has no free interview slots. Add '
+                                'dates or hours in Interview Settings, then set them to Interview again.'
+                                .format(n=skip_reasons['no_free_slots']))
+                elif no_email == updated_count:
                     message += '. No invitation emails sent: no email found in parsed CV data for selected candidates.'
                 elif already == updated_count:
                     message += '. No invitation emails sent: all selected candidates already have an interview.'
@@ -2279,6 +2499,9 @@ def bulk_update_cv_records(request):
         # Note the rejection emails sent.
         if decision == 'REJECT' and reject_emails_sent:
             message += f'. Sent an application update email to {reject_emails_sent} candidate(s).'
+        if decision == 'REJECT' and already_told:
+            message = message.rstrip('.') + (f'. {len(already_told)} candidate(s) had already been sent the '
+                                             'rejection email, so it was not sent again.')
 
         # Note removed open interviews when moving candidates to REJECT/HOLD.
         if decision in ('REJECT', 'HOLD') and removed_interviews:
@@ -2309,6 +2532,7 @@ def bulk_update_cv_records(request):
             payload['cancel_emails_sent'] = cancel_emails_sent
         if decision == 'REJECT':
             payload['reject_emails_sent'] = reject_emails_sent
+            payload['already_told'] = len(already_told)
         return Response(payload)
     except (ValueError, TypeError) as e:
         return Response({
@@ -2363,14 +2587,19 @@ def email_settings(request):
                 company_user=company_user
             )
             
-            if 'followup_delay_hours' in request.data:
-                settings.followup_delay_hours = float(request.data['followup_delay_hours'])
-            if 'min_hours_between_followups' in request.data:
-                settings.min_hours_between_followups = float(request.data['min_hours_between_followups'])
-            if 'max_followup_emails' in request.data:
-                settings.max_followup_emails = int(request.data['max_followup_emails'])
-            if 'reminder_hours_before' in request.data:
-                settings.reminder_hours_before = float(request.data['reminder_hours_before'])
+            # Limits (CO-223): a delay or gap of 0 sent a follow-up on every pass of the check, and the number of
+            # follow-ups had no cap. Each refusal says what is allowed.
+            for field, low, high, kind, what in EMAIL_TIMING_LIMITS:
+                if field not in request.data:
+                    continue
+                try:
+                    value = kind(request.data[field])
+                except (TypeError, ValueError):
+                    value = None
+                if value is None or not (low <= value <= high):
+                    return Response({'status': 'error', 'message': f'{what} must be between {low} and {high}.'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                setattr(settings, field, value)
             if 'auto_send_followups' in request.data:
                 settings.auto_send_followups = bool(request.data['auto_send_followups'])
             if 'auto_send_reminders' in request.data:
@@ -2509,8 +2738,12 @@ def interview_settings(request):
             
             update_availability_only = request.data.get('update_availability', False)
 
-            # Saving settings from the browser states the zone its times are in.
-            if browser_tz:
+            # Saving settings from the browser states the zone its times are in, but only when it sets those times.
+            # A colleague elsewhere who only switched one slot off moved every slot of the job to their own zone
+            # (CO-222).
+            sets_times = any(key in request.data for key in
+                             ('schedule_from_date', 'schedule_to_date', 'start_time', 'end_time', 'interview_time_gap'))
+            if browser_tz and (not settings.timezone_name or (sets_times and not update_availability_only)):
                 settings.timezone_name = zone_name(browser_tz, default=settings.timezone_name or '')
             
             if 'schedule_from_date' in request.data:
@@ -2555,6 +2788,14 @@ def interview_settings(request):
                     return Response({
                         'status': 'error',
                         'message': 'schedule_from_date cannot be after schedule_to_date.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                # A mistyped year (2062 for 2026) made hundreds of thousands of slots, read whole on every load and
+                # by the assistant for every question (CO-224).
+                if (settings.schedule_to_date - settings.schedule_from_date).days > 90:
+                    return Response({
+                        'status': 'error',
+                        'message': ('Interview dates can cover at most 90 days. Check the end date, or set the next '
+                                    'dates when these are used up.'),
                     }, status=status.HTTP_400_BAD_REQUEST)
             
             # Validate time range
@@ -2828,6 +3069,21 @@ def recruitment_analytics(request):
         else:
             total_jobs = sharing.jobs(company_user).count()
             active_jobs = sharing.jobs(company_user).filter(is_active=True).count()
+
+        # The dashboard's four cards. They were counted in the browser from the first page of each list, so they
+        # stopped at 9 jobs and 10 interviews (CO-106).
+        if request.query_params.get('overview') in ('1', 'true'):
+            return Response({'status': 'success', 'data': {'overview': {
+                'total_cvs': total_cvs, 'total_interviews': total_interviews, 'active_jobs': active_jobs,
+                'pending_interviews': Interview.objects.filter(interview_base_filter, status='PENDING').count(),
+            }}})
+
+        # Candidates who really had an interview: booked or held, counted once each (CO-107). The rate counted only
+        # interviews sitting in Scheduled right now, so it fell to 0% as interviews were held, and the funnel's
+        # 'Interviewed' counted every invitation, answered or not.
+        interviewed = (Interview.objects.filter(interview_base_filter,
+                                                status__in=['SCHEDULED', 'RESCHEDULED', 'CONFIRMED', 'COMPLETED'])
+                       .order_by().values('candidate_email').distinct().count())
         
         # ========== CV STATISTICS ==========
         # For SQL Server compatibility: clear any default ordering and sort in Python
@@ -2912,16 +3168,10 @@ def recruitment_analytics(request):
         ))
         interview_over_time.sort(key=lambda x: x['date'] if x['date'] else datetime.min)
         
-        # Interview conversion rate (INTERVIEW decision -> SCHEDULED interview)
-        interview_cvs = CVRecord.objects.filter(
-            cv_base_filter,
-            qualification_decision='INTERVIEW'
-        ).count()
-        scheduled_interviews = Interview.objects.filter(
-            interview_base_filter,
-            status='SCHEDULED'
-        ).count()
-        conversion_rate = (scheduled_interviews / interview_cvs * 100) if interview_cvs > 0 else 0
+        # Conversion rate: screened candidates who went on to a booked or held interview (CO-107).
+        screened = (CVRecord.objects.filter(cv_base_filter).exclude(qualification_decision__isnull=True)
+                    .exclude(qualification_decision='').count())
+        conversion_rate = (interviewed / screened * 100) if screened > 0 else 0
         
         # Interviews by job (only if not filtering by specific job)
         # For SQL Server compatibility: clear any default ordering and sort in Python
@@ -3153,7 +3403,7 @@ def recruitment_analytics(request):
             cv_base_filter
         ).exclude(qualification_decision__isnull=True).exclude(qualification_decision='').count()
         funnel_shortlisted = cv_decisions.get('INTERVIEW', 0)
-        funnel_interviewed = total_interviews
+        funnel_interviewed = interviewed
         funnel_hired = Interview.objects.filter(interview_base_filter, outcome='HIRED').count()
 
         def _conv(current, previous):
@@ -3240,6 +3490,8 @@ def export_candidates_csv(request):
     writer = csv.writer(response)
     writer.writerow(['ID', 'File Name', 'Job Title', 'Role Fit Score', 'Rank',
                      'Qualification Decision', 'Qualification Confidence', 'Created At'])
+    qs = list(qs.order_by('job_description_id', *BEST_FIRST))
+    ranks = ranks_for(qs)
     for cv in qs:
         import json as _json
         parsed = {}
@@ -3252,7 +3504,7 @@ def export_candidates_csv(request):
             parsed.get('name') or cv.file_name,
             cv.job_description.title if cv.job_description else '',
             cv.role_fit_score or '',
-            cv.rank or '',
+            ranks.get(cv.id) or '',
             cv.qualification_decision or '',
             cv.qualification_confidence or '',
             cv.created_at.strftime('%Y-%m-%d %H:%M') if cv.created_at else '',
@@ -3281,8 +3533,12 @@ def export_interviews_csv(request):
     writer = csv.writer(response)
     writer.writerow(['ID', 'Candidate Name', 'Candidate Email', 'Candidate Phone',
                      'Job Role', 'Interview Type', 'Status', 'Outcome',
-                     'Scheduled Date/Time', 'Selected Slot', 'Created At'])
+                     'Scheduled Date/Time', 'Time zone', 'Selected Slot', 'Created At (UTC)'])
+    # Times in the interview's own zone, named: the column was UTC with no label, five hours off the slot beside it
+    # for a recruiter in Karachi (CO-229).
+    from recruitment_agent import interview_time as _itime
     for iv in qs:
+        _zone = _itime.stored_zone(iv) if iv.scheduled_datetime else ''
         writer.writerow([
             iv.id,
             iv.candidate_name or '',
@@ -3292,7 +3548,8 @@ def export_interviews_csv(request):
             iv.interview_type or '',
             iv.status or '',
             iv.outcome or '',
-            iv.scheduled_datetime.strftime('%Y-%m-%d %H:%M') if iv.scheduled_datetime else '',
+            _itime.local(iv.scheduled_datetime, _zone).strftime('%Y-%m-%d %H:%M') if iv.scheduled_datetime else '',
+            _zone,
             iv.selected_slot or '',
             iv.created_at.strftime('%Y-%m-%d %H:%M') if iv.created_at else '',
         ])
@@ -3380,6 +3637,16 @@ def suggest_interview_questions(request):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _qa_history(data):
+    """The conversation so far ({role, content} turns), as HR and Frontline send it: the AI reading of a follow-up
+    ("and for Flutter?", "uski skills?") needs it."""
+    history = data.get('chat_history') if isinstance(data, dict) else None
+    if not isinstance(history, list):
+        return []
+    return [{'role': str(t.get('role')), 'content': str(t.get('content'))[:2000]} for t in history[-8:]
+            if isinstance(t, dict) and t.get('role') in ('user', 'assistant') and t.get('content')]
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -3408,7 +3675,7 @@ def recruitment_qa(request):
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         qa_agent = RecruitmentQAAgent(groq_client=groq_client)
-        result = qa_agent.process(question=question, company_user=company_user)
+        result = qa_agent.process(question=question, company_user=company_user, history=_qa_history(data))
         return Response({
             'status': 'success',
             'data': {
@@ -3453,7 +3720,7 @@ def recruitment_qa_stream(request):
 
     def events():
         try:
-            for event in agent.process_stream(question=question, company_user=company_user):
+            for event in agent.process_stream(question=question, company_user=company_user, history=_qa_history(data)):
                 if event.get('type') == 'done':
                     result = event['result']
                     event = {'type': 'done', 'data': {'answer': result.get('answer', ''),
@@ -3910,7 +4177,10 @@ def api_generate_graph(request):
 
         graph_agent = GraphGeneratorAgent(groq_client, company_user)
         result = graph_agent.generate_graph(prompt)
-        
+        # Asked for something Recruitment's data does not hold: say so, rather than draw invented numbers (CO-184).
+        if result.get('error'):
+            return Response({'status': 'error', 'message': result['error']}, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
             'status': 'success',
             'data': {

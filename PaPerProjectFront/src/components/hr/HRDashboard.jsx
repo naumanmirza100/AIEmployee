@@ -64,6 +64,8 @@ import {
 } from './hrTutorialSteps';
 import { trackHRRecentlyViewed } from './hrLocalStore';
 import HRWorkflowsTab from './HRWorkflowsTab';
+import companyAuthService from '@/services/companyAuthService';
+import DocumentSearchBanner from '@/components/shared/DocumentSearchBanner';
 import {
   useTutorialNudge,
   tourAvailable, makeHoverLaunchHandlers,
@@ -114,6 +116,14 @@ const STAT_PALETTE = {
 
 const HRDashboard = () => {
   const { toast } = useToast();
+  // Only HR admins upload or delete HR documents (the server refuses everyone else): say why before a file is chosen.
+  const isHRAdmin = ['owner', 'admin', 'hr_agent'].includes(companyAuthService.getCompanyUser()?.role);
+  const hrAdminOnly = (what) => toast({
+    title: `Only an HR admin can ${what} HR documents`,
+    description: "HR admins decide who may read each document, confidential ones included: the company's owner, an admin, "
+      + 'or a login with the HR admin role. Ask one of them, or ask the owner to give you the HR admin role under Logins & roles.',
+    variant: 'destructive',
+  });
   const { startUpload: startBackgroundUpload } = useBackgroundUpload();
   // Tab state lives in the URL as `?tab=...` so browser reload keeps you on
   // the tab you were on. Falls back to 'overview' when the param is missing
@@ -1306,6 +1316,7 @@ const HRDashboard = () => {
             <TabsContent value="documents" className="mt-6">
               <ErrorBoundary>
                 <div className="flex justify-end mb-3"><TabTourButton tabKey="documents" /></div>
+                <DocumentSearchBanner agent="hr_agent" refreshKey={documents.length} />
                 <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
@@ -1316,7 +1327,7 @@ const HRDashboard = () => {
                       <CardDescription>Handbook, policies, contracts, payroll. Each one says who may read it.</CardDescription>
                     </div>
                     <div className="flex items-center gap-2" data-tour-hr-docs="upload">
-                      <Button onClick={() => setUploadOpen(true)}>
+                      <Button onClick={() => (isHRAdmin ? setUploadOpen(true) : hrAdminOnly('upload'))}>
                         <Upload className="h-4 w-4 mr-1" /> Upload
                       </Button>
                       <InfoHint {...HR_HINTS.hrDocsUpload} />
@@ -1464,7 +1475,7 @@ const HRDashboard = () => {
                                     </DropdownMenuContent>
                                   </DropdownMenu>
                                   <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-white/60 hover:text-rose-400"
-                                    onClick={() => setDocDelete({ open: true, doc: d, loading: false })} title="Delete">
+                                    onClick={() => (isHRAdmin ? setDocDelete({ open: true, doc: d, loading: false }) : hrAdminOnly('delete'))} title="Delete">
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </Button>
                                 </div>

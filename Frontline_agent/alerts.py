@@ -153,3 +153,30 @@ def tickets_assigned(tickets, assignee, actor=None):
     return notify_company_users([assignee], title=title, message=message,
                                 link='/frontline/dashboard?tab=tickets',
                                 kind='frontline_ticket_assigned')
+
+
+def ticket_near_deadline(ticket, now=None):
+    """A ticket about to miss its response time (CO-62). The five-minute job raised it to Urgent and told nobody. Now
+    the person it is assigned to is told; with nobody on it, the people who take hand-offs are. Knowledge-gap
+    tickets (public questions the documents could not answer) carry deadlines too, but are not worth an alert each.
+    Said once: the job skips tickets already Urgent."""
+    if not ticket.company_id:
+        return 0
+    owner = None
+    if ticket.assigned_to_id:
+        owner = CompanyUser.objects.filter(company_id=ticket.company_id, login_user_id=ticket.assigned_to_id,
+                                           is_active=True).first()
+    if owner is None and ticket.category == 'knowledge_gap':
+        return 0
+    now = now or timezone.now()
+    minutes = max(0, int((ticket.sla_due_at - now).total_seconds() // 60)) if ticket.sla_due_at else None
+    left = f' in {minutes} min' if minutes is not None else ' soon'
+    return notify_company_users(
+        [owner] if owner else handoff_recipients(ticket.company_id),
+        title=f"About to miss its response time: #{ticket.id} {ticket.title[:110]}",
+        message=(f"Its response time ends{left}, so it has been raised to Urgent. "
+                 + ('It is assigned to you.' if owner else 'Nobody is assigned to it yet.')),
+        link='/frontline/dashboard?tab=tickets',
+        severity='critical',
+        kind='frontline_ticket_near_deadline',
+    )

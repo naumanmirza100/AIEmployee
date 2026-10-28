@@ -6,10 +6,11 @@ We're writing to let you know that your scheduled interview for the {{ job_title
 {% if scheduled_display %}
 Cancelled time slot: {{ scheduled_display }}
 {% endif %}
-We appreciate the time and interest you've shown, and we're sorry for any inconvenience. If this was unexpected, please reach out to us.
+We appreciate the time and interest you've shown, and we're sorry for any inconvenience. If this was unexpected, please {% if contact_email %}write to {{ contact_email }}{% else %}reach out to us{% endif %}.
 
 Best regards,
-Recruitment Team
+{% if company_name %}{{ company_name }} hiring team{% else %}Recruitment Team{% endif %}{% if contact_email %}
+Questions? Reply to this email, or write to {{ contact_email }}.{% endif %}
 
 —
 This is an automated notification.

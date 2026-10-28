@@ -117,6 +117,14 @@ class MarketingBaseAgent:
             return self._call_openai(prompt, system_prompt, temperature, max_tokens, model)
         return self._call_groq_qa(prompt, system_prompt, temperature, max_tokens, timeout=timeout)
     
+    def _log_call(self, model, started, success, usage=None):
+        """One LLMUsage row per AI call, as BaseAgent writes for PM, HR, Frontline and Recruitment, so the API Keys
+        page counts Marketing's, Operations' and Reply Draft's calls and failures. It showed 0 for them (CO-69)."""
+        from project_manager_agent.ai_agents.base_agent import _record_llm_usage
+        _record_llm_usage(company_id=getattr(self, 'company_id', None), agent_name=self.agent_name, model=model,
+                          usage_dict=usage, duration_ms=(time.monotonic() - started) * 1000, success=success,
+                          agent=getattr(self, 'agent_key_name', None) or '')
+
     def _call_openai(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
         """
         Make a call to the OpenAI LLM API (for document writing and advanced tasks).
@@ -152,6 +160,7 @@ class MarketingBaseAgent:
                 "Keys are never read from environment variables."
             )
 
+        started = time.monotonic()
         try:
             messages = []
 
@@ -213,11 +222,13 @@ class MarketingBaseAgent:
                     record_usage(key_ctx, total_tokens)
                 except Exception as e:
                     logger.warning("marketing quota decrement failed: %s", e)
+            self._log_call(model_to_use, started, True, self.last_token_usage)
 
             return content
 
         except Exception as e:
             logger.error(f"Error in {self.agent_name} OpenAI LLM call: {str(e)}")
+            self._log_call(model_to_use, started, False)
             from core.api_key_service import raise_if_auth_error
             raise_if_auth_error(e, key_ctx)
             raise
@@ -330,6 +341,7 @@ class MarketingBaseAgent:
 
         last_error = None
         max_retries = 2  # 3 attempts total
+        started = time.monotonic()
         for attempt in range(max_retries + 1):
             try:
                 response = call_client.chat.completions.create(
@@ -379,6 +391,7 @@ class MarketingBaseAgent:
                         record_usage(key_ctx, total_tokens)
                     except Exception as e:
                         logger.warning("marketing quota decrement failed: %s", e)
+                self._log_call(effective_model, started, True, self.last_token_usage)
                 return content
             except Exception as e:
                 last_error = e
@@ -394,6 +407,7 @@ class MarketingBaseAgent:
                     time.sleep(wait_sec)
                 else:
                     logger.error(f"Error in {self.agent_name} Groq Q&A call: {err_str}")
+                    self._log_call(effective_model, started, False)
                     if is_rate_limit:
                         raise RuntimeError("The service is busy. Please try again in a moment.")
                     if is_timeout:

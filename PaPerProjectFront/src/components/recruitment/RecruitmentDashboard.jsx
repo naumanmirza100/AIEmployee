@@ -13,9 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Loader2, FileText, Briefcase, Calendar, Settings, Users, Upload, BarChart3, Menu, Check, LayoutDashboard, BarChart2, X, Star, TrendingUp, ArrowUpRight } from 'lucide-react';
 import {
-  getJobDescriptions,
-  getInterviews,
-  getCVRecords,
+  getRecruitmentOverview,
   getSavedPrompts,
   isPromptOnDashboard,
   generateGraph,
@@ -23,6 +21,7 @@ import {
 import CVProcessing from './CVProcessing';
 import JobDescriptions from './JobDescriptions';
 import Interviews from './Interviews';
+import RecruitmentWorkflows from './RecruitmentWorkflows';
 import CVRecords from './CVRecords';
 import RecruiterSettings from './RecruiterSettings';
 import RecruitmentAnalytics from './RecruitmentAnalytics';
@@ -31,7 +30,7 @@ import AiInterviewQuestions from './AiInterviewQuestions';
 // import AIGraphGenerator from './AIGraphGenerator';
 import SavedPrompts from './SavedPrompts';
 import { renderChart } from '@/components/common/ChartRenderer';
-import { FlaskConical, HelpCircle, Sparkles } from 'lucide-react';
+import { FlaskConical, HelpCircle, Sparkles, Workflow } from 'lucide-react';
 
 // Tab items configuration
 const TAB_ITEMS = [
@@ -42,6 +41,7 @@ const TAB_ITEMS = [
   { value: 'ai-interview-questions', label: 'AI Questions', icon: HelpCircle },
   { value: 'candidates', label: 'Candidates', icon: Users },
   { value: 'interviews', label: 'Interviews', icon: Calendar },
+  { value: 'workflows', label: 'Workflows', icon: Workflow },
   { value: 'saved-prompts', label: 'Saved Prompts', icon: Star },
   { value: 'api-tester', label: 'API Tester', icon: FlaskConical },
   { value: 'settings', label: 'Settings', icon: Settings },
@@ -58,6 +58,7 @@ const PATH_TO_TAB = {
   'job-descriptions': 'jobs',
   candidates: 'candidates',
   interviews: 'interviews',
+  workflows: 'workflows',
   settings: 'settings',
 };
 const TAB_TO_PATH = {
@@ -71,6 +72,7 @@ const TAB_TO_PATH = {
   'jobs': 'job-descriptions',
   'candidates': 'candidates',
   'interviews': 'interviews',
+  'workflows': 'workflows',
   'settings': 'settings',
 };
 
@@ -129,21 +131,13 @@ const RecruitmentDashboard = () => {
     try {
       setLoading(true);
       
-      const [jobsRes, interviewsRes, cvRecordsRes] = await Promise.all([
-        getJobDescriptions().catch(() => ({ status: 'success', data: [] })),
-        getInterviews().catch(() => ({ status: 'success', data: [] })),
-        getCVRecords().catch(() => ({ status: 'success', data: [] })),
-      ]);
-
-      const jobs = jobsRes.data || [];
-      const interviews = interviewsRes.data || [];
-      const cvRecords = cvRecordsRes.data || [];
-
+      // Counted on the server: counting the first page of each list stopped at 9 jobs and 10 interviews (CO-106).
+      const overview = await getRecruitmentOverview();
       setStats({
-        totalCVs: cvRecords.length,
-        totalInterviews: interviews.length,
-        activeJobs: jobs.filter(j => j.is_active).length,
-        pendingInterviews: interviews.filter(i => i.status === 'PENDING').length,
+        totalCVs: overview.total_cvs || 0,
+        totalInterviews: overview.total_interviews || 0,
+        activeJobs: overview.active_jobs || 0,
+        pendingInterviews: overview.pending_interviews || 0,
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -172,7 +166,7 @@ const RecruitmentDashboard = () => {
       console.error('Error generating graph:', error);
       toast({
         title: 'Error',
-        description: 'Failed to generate graph',
+        description: error?.message || 'Failed to generate graph',
         variant: 'destructive',
       });
     } finally {
@@ -491,6 +485,10 @@ const RecruitmentDashboard = () => {
 
         <TabsContent value="interviews" id="REC-dashboard-tab-interviews" data-testid="REC-dashboard-tab-interviews">
           <Interviews onUpdate={fetchStats} />
+        </TabsContent>
+
+        <TabsContent value="workflows" id="REC-dashboard-tab-workflows" data-testid="REC-dashboard-tab-workflows">
+          <RecruitmentWorkflows />
         </TabsContent>
 
         <TabsContent value="settings" id="REC-dashboard-tab-settings" data-testid="REC-dashboard-tab-settings">

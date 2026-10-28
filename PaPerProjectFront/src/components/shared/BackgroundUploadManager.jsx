@@ -185,8 +185,16 @@ export function BackgroundUploadProvider({ children }) {
               // fire a more descriptive toast if it wants to.
               toast({
                 title: 'Upload complete',
+                // It said "N chunk(s) embedded" even when no part got a vector and search could only match words
+                // (CO-70). HR and Frontline now say how many parts can be found by meaning.
                 description: s.chunks_total > 0
-                  ? `"${title}" — ${s.chunks_total} chunk(s) embedded.`
+                  ? (s.chunks_with_vectors == null
+                    ? `"${title}" — ${s.chunks_total} part(s) indexed.`
+                    : s.chunks_with_vectors >= s.chunks_total
+                      ? `"${title}" — ${s.chunks_total} part(s) indexed for searching by meaning.`
+                      : s.chunks_with_vectors === 0
+                        ? `"${title}" is indexed, but can only be found by matching words: searching by meaning is off.`
+                        : `"${title}" — ${s.chunks_with_vectors} of ${s.chunks_total} parts can be found by meaning; the rest only by matching words.`)
                   : `"${title}" is ready.`,
               });
               try { onDone?.(statusRes); } catch (_) { /* swallow */ }

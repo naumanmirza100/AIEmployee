@@ -8,7 +8,7 @@ urlpatterns = [
     path('interview/select/<str:token>/', views.candidate_select_slot, name='candidate_select_slot'),
     path('application/track/<str:token>/', views.candidate_application_status, name='candidate_application_status'),
     path('api/interview/available-slots/<str:token>/', views.get_available_slots_for_interview, name='get_available_slots_for_interview'),
-    path('api/interviews/confirm/', views.confirm_interview_slot, name='confirm_interview_slot'),
+    # api/interviews/confirm/ is gone: it booked with none of the page's checks, and nothing called it (CO-112).
 ]
 
 # The old session-login recruiter pages. The React app uses /api/recruitment/

@@ -469,6 +469,14 @@ def resume_hr_workflow_execution(self, execution_id: int):
         execution.save(update_fields=['status', 'error_message', 'completed_at'])
         return {'status': 'failed', 'execution_id': execution_id, 'reason': 'not_subscribed'}
 
+    # Claim the row before running the rest, as Frontline does (FL-DATA-6): a resume delivered twice used to run the
+    # remaining steps twice, its emails included (CO-68).
+    from hr_agent.models import HRWorkflowExecution as _Execution
+    if not _Execution.objects.filter(pk=execution.pk, status='paused').update(status='in_progress'):
+        logger.info("resume_hr_workflow_execution: %s already claimed, skipping", execution_id)
+        return {'status': 'noop', 'execution_id': execution_id, 'reason': 'already_claimed'}
+    execution.status = 'in_progress'
+
     snap = execution.pause_state or {}
     # A workflow that needs approval before it starts was never paused partway:
     # it has no snapshot, and every step is still to do. (Approving one used to
@@ -568,6 +576,13 @@ def process_hr_scheduled_notifications():
     processed = sent = failed = dead = 0
 
     for notif in due[:200]:
+        # Claim it first, as Frontline's sender does: two overlapping runs used to send the same email twice
+        # (CO-68). The claim is a ten-minute hold on its next try: a run that dies leaves the row due again after it;
+        # a send or a failure sets the field itself.
+        if not HRScheduledNotification.objects.filter(pk=notif.pk, status='pending').filter(
+                Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now)).update(
+                next_retry_at=now + timedelta(minutes=10)):
+            continue
         processed += 1
         template = notif.template
         if not template:

@@ -354,8 +354,14 @@ const AiInterviewQuestions = () => {
         return;
       }
 
+      // The conversation so far, so a follow-up ("and for Flutter?", "uski skills?") is understood.
+      const earlier = (chats.find((c) => c.id === selectedChatId)?.messages || [])
+        .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .slice(-6)
+        .map((m) => ({ role: m.role, content: m.content.split('\n\n---\n')[0].slice(0, 1500) }));
       const result = await recruitmentQAStream(q, {
         onText: (text) => setPending((p) => (p ? { ...p, answer: text } : p)),
+        chatHistory: earlier,
       });
       if (result.status === 'success' && result.data) {
         const response = result.data;

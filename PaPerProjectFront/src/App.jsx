@@ -227,6 +227,7 @@ import { useTranslation } from 'react-i18next';
               <Route path="/recruitment/candidates" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/candidates/:id" element={<CandidateDetailPage />} />
               <Route path="/recruitment/interviews" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/workflows" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/settings" element={<Navigate to="/recruitment/settings/email" replace />} />
               <Route path="/recruitment/settings/email" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/settings/interview" element={<RecruitmentDashboard />} />

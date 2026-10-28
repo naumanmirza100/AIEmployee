@@ -36,8 +36,17 @@ class DecisionsPerJobChartTests(TestCase):
         self.assertIn('Flutter Developer has the most candidates (3)', result['insights'])
         self.llm.send_prompt_text.assert_not_called()
 
-    def test_other_charts_still_go_to_the_ai(self):
-        self.llm.send_prompt_text.return_value = '{"chart_type": "pie", "title": "Decisions", "data": {"INTERVIEW": 2}}'
+    def test_other_charts_are_chosen_by_the_ai_and_counted_from_the_data(self):
+        # CO-184: the AI names the data set; numbers it offers are ignored.
+        self.llm.send_prompt_text.return_value = ('{"dataset": "candidates_by_decision", "chart_type": "pie", '
+                                                  '"title": "Decisions", "data": {"INTERVIEW": 99}}')
         result = self.agent.generate_graph('Candidates by decision as a pie chart')
         self.llm.send_prompt_text.assert_called_once()
         self.assertEqual(result['chart']['title'], 'Decisions')
+        self.assertEqual(result['chart']['data'], {'INTERVIEW': 2, 'HOLD': 1, 'REJECT': 1})
+
+    def test_a_chart_the_data_cannot_answer_is_refused(self):
+        self.llm.send_prompt_text.return_value = '{"dataset": "none", "chart_type": "line", "title": "Hires per month"}'
+        result = self.agent.generate_graph('Hires per month by salary band')
+        self.assertIsNone(result['chart'])
+        self.assertIn("can't be made from Recruitment's data", result['error'])

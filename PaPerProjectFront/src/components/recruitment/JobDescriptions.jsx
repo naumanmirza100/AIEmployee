@@ -329,15 +329,17 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         (r) => r.status === 'rejected' || r.value?.status !== 'success'
       ).length;
       const succeeded = ids.length - failed;
+      // A job with applications or candidates is kept: it is closed instead (CO-183).
+      const kept = failed ? ` ${failed} kept: a job with applications or candidates can't be deleted; close it instead.` : '';
 
       if (succeeded > 0) {
         toast({
           title: 'Deleted',
-          description: `${succeeded} job${succeeded > 1 ? 's' : ''} deleted${failed ? `, ${failed} failed` : ''}.`,
+          description: `${succeeded} job${succeeded > 1 ? 's' : ''} deleted.${kept}`,
           variant: failed ? 'destructive' : undefined,
         });
       } else {
-        toast({ title: 'Error', description: 'Failed to delete selected jobs', variant: 'destructive' });
+        toast({ title: 'Nothing deleted', description: kept.trim() || 'Failed to delete selected jobs', variant: 'destructive' });
       }
 
       setSelectedJobIds(new Set());

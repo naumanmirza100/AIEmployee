@@ -73,7 +73,7 @@ const SavedPrompts = () => {
       }
     } catch (error) {
       console.error('Error generating graph:', error);
-      toast({ title: 'Error', description: 'Failed to generate graph', variant: 'destructive' });
+      toast({ title: 'Error', description: error?.message || 'Failed to generate graph', variant: 'destructive' });
     } finally {
       setGraphLoading(false);
     }

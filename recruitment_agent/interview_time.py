@@ -158,3 +158,77 @@ def people(interview, extra_user_ids=()) -> list[int]:
     company_id = company_id_for(interview)
     ids.discard(None)
     return sorted(member_ids(company_id, ids)) if company_id else []
+
+
+def bookable_slots(job, now=None) -> int:
+    """How many of `job`'s interview slots a candidate could still book: switched on, still ahead, and not taken by
+    another interview for this job. Invitations went out with nothing left to book, and the link then said the period
+    had ended or showed an empty grid (CO-228)."""
+    from django.utils import timezone
+    from recruitment_agent import sharing
+    from recruitment_agent.models import Interview
+    settings = sharing.job_interview_settings(job)
+    if settings is None or not isinstance(settings.time_slots_json, list):
+        return 0
+    tz = settings.timezone_name or 'UTC'
+    now = now or timezone.now()
+    taken = {slot_key(other.scheduled_datetime, stored_zone(other))
+             for other in Interview.objects.filter(cv_record__job_description=job, status__in=['SCHEDULED', 'CONFIRMED'],
+                                                   scheduled_datetime__isnull=False)}
+    count = 0
+    for slot in settings.time_slots_json:
+        if not slot.get('available', True):
+            continue
+        instant = aware(slot.get('datetime', ''), tz)
+        if instant is None or instant <= now or slot_key(instant, tz) in taken:
+            continue
+        count += 1
+    return count
+
+
+def no_slots_message(job) -> str:
+    return (f'No free interview slots for "{job.title}": add dates or hours in Interview Settings, then invite the '
+            'candidates again. Nobody was emailed an invitation.')
+
+
+def recruiter_on_calendar(interview) -> bool:
+    """Whether the recruiter's dashboard login is a person on the shared calendar (linked to an employee login)."""
+    if not interview.company_user_id:
+        return True
+    from core.scheduling.identity import login_user_id_for_company_user, member_ids
+    user_id = login_user_id_for_company_user(interview.company_user)
+    company_id = company_id_for(interview)
+    return bool(user_id and company_id and member_ids(company_id, {user_id}))
+
+
+def others_booked(interview):
+    """Other booked interviews whose times this one must not overlap: those of the same job, whose slots are shared,
+    and, when the recruiter's dashboard login is on no shared calendar, every interview that login runs. The calendar
+    could not see such a recruiter, so two candidates of two jobs could book them at the same time (CO-186)."""
+    from django.db.models import Q
+    from recruitment_agent.models import Interview
+    booked = (Interview.objects.filter(status__in=['SCHEDULED', 'CONFIRMED'], scheduled_datetime__isnull=False)
+              .exclude(id=interview.id))
+    job_id = interview.cv_record.job_description_id if interview.cv_record_id else None
+    clash = Q(pk__in=[])
+    if job_id:
+        clash |= Q(cv_record__job_description_id=job_id)
+    if interview.company_user_id and (not job_id or not recruiter_on_calendar(interview)):
+        clash |= Q(company_user_id=interview.company_user_id)
+    elif not job_id and interview.recruiter_id:
+        clash |= Q(recruiter_id=interview.recruiter_id)
+    return booked.filter(clash)
+
+
+def booked_spans(interview) -> list:
+    """(start, end) of each interview in `others_booked`."""
+    from datetime import timedelta
+    return [(other.scheduled_datetime, other.scheduled_datetime + timedelta(minutes=other.duration_minutes or 30))
+            for other in others_booked(interview)]
+
+
+def overlaps_any(spans, start, minutes) -> bool:
+    """An overlap, not only an equal start: a booking a quarter-hour into another one clashes too (CO-186)."""
+    from datetime import timedelta
+    end = start + timedelta(minutes=minutes or 30)
+    return any(s < end and start < e for s, e in spans)

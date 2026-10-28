@@ -53,6 +53,8 @@ from api.views.health import health_check, ping, version
 from api.views import public_jobs
 from api.views import my_work
 from api.views import notification_settings
+from api.views import document_search
+from api.views import recruitment_workflows
 from api.views import do_not_email
 from api.views import company_logins
 from api.views import quick_chats
@@ -318,6 +320,10 @@ urlpatterns = [
     re_path(r'^company/my-work/?$', my_work.company_my_work, name='company_my_work'),  # GET
     re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
+    re_path(r'^company/notification-settings/chat-webhooks/?$', notification_settings.chat_webhooks,
+            name='company_chat_webhooks'),  # GET/PATCH/POST (CO-64)
+    re_path(r'^company/document-search/?$', document_search.document_search_status,
+            name='company_document_search'),  # GET/POST (CO-70)
     re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
             name='company_notification_settings'),  # GET/PATCH
     # The company's dashboard logins and their roles (api/views/company_logins.py).
@@ -394,6 +400,12 @@ urlpatterns = [
     re_path(r'^recruitment/job-descriptions/(?P<job_description_id>\d+)/delete/?$', recruitment_agent.delete_job_description, name='recruitment_delete_job_description'),  # DELETE
     re_path(r'^recruitment/job-descriptions/(?P<job_description_id>\d+)/applications/?$', recruitment_agent.list_job_applications, name='recruitment_list_job_applications'),  # GET
     re_path(r'^recruitment/interviews/?$', recruitment_agent.list_interviews, name='recruitment_list_interviews'),  # GET
+    # Recruitment workflows / SOP runner (docx item 7)
+    re_path(r'^recruitment/workflows/?$', recruitment_workflows.workflow_list, name='recruitment_workflows'),  # GET/POST
+    re_path(r'^recruitment/workflows/from-template/?$', recruitment_workflows.workflow_from_template, name='recruitment_workflow_from_template'),  # POST
+    re_path(r'^recruitment/workflows/runs/?$', recruitment_workflows.workflow_runs, name='recruitment_workflow_runs'),  # GET
+    re_path(r'^recruitment/workflows/(?P<workflow_id>\d+)/?$', recruitment_workflows.workflow_detail, name='recruitment_workflow_detail'),  # GET/PATCH/DELETE
+    re_path(r'^recruitment/workflows/(?P<workflow_id>\d+)/test/?$', recruitment_workflows.workflow_test, name='recruitment_workflow_test'),  # POST
     re_path(r'^recruitment/interviewers/?$', recruitment_agent.list_interviewer_options, name='recruitment_list_interviewer_options'),  # GET
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/hr-handoff/?$', recruitment_agent.interview_hr_handoff, name='recruitment_interview_hr_handoff'),  # GET/POST
     re_path(r'^recruitment/interviews/schedule/?$', recruitment_agent.schedule_interview, name='recruitment_schedule_interview'),  # POST
@@ -401,10 +413,12 @@ urlpatterns = [
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/update/?$', recruitment_agent.update_interview, name='recruitment_update_interview'),  # PATCH/PUT
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/reschedule-slots/?$', recruitment_agent.get_reschedule_slots, name='recruitment_get_reschedule_slots'),  # GET
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/reschedule/?$', recruitment_agent.reschedule_interview, name='recruitment_reschedule_interview'),  # POST
+    re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/next/?$', recruitment_agent.schedule_next_interview, name='recruitment_schedule_next_interview'),  # POST (CO-272)
     re_path(r'^recruitment/cv-records/?$', recruitment_agent.list_cv_records, name='recruitment_list_cv_records'),  # GET
     re_path(r'^recruitment/cv-records/bulk-update/?$', recruitment_agent.bulk_update_cv_records, name='recruitment_bulk_update_cv_records'),  # POST
     re_path(r'^recruitment/cv-records/(?P<record_id>\d+)/?$', recruitment_agent.get_cv_record_detail, name='recruitment_get_cv_record_detail'),  # GET
     re_path(r'^recruitment/cv-records/(?P<record_id>\d+)/decision-history/?$', recruitment_agent.get_cv_record_decision_history, name='recruitment_cv_record_decision_history'),  # GET
+    re_path(r'^recruitment/cv-records/(?P<record_id>\d+)/delete/?$', recruitment_agent.delete_cv_record, name='recruitment_delete_cv_record'),  # DELETE/POST (CO-183)
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/feedback/?$', recruitment_agent.submit_interview_feedback, name='recruitment_submit_interview_feedback'),  # PATCH/POST
     re_path(r'^recruitment/settings/email/?$', recruitment_agent.email_settings, name='recruitment_email_settings'),  # GET/POST
     re_path(r'^recruitment/settings/interview/?$', recruitment_agent.interview_settings, name='recruitment_interview_settings'),  # GET/POST

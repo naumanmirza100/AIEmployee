@@ -1,6 +1,11 @@
 """
 Background tasks for automatic interview follow-up email checking.
-This runs periodically to check for interviews that need follow-up emails.
+
+`check_and_send_followup_emails` is the one sender of follow-ups and pre-interview reminders, run by Celery beat
+every five minutes (`send_interview_followups`). There used to be three: a thread in the web server every 30
+seconds, a thread two seconds after every invitation and a thread on every save of an interview, none of them
+checking the others, so a booking a day ahead could get the same reminder two or three times (CO-185). Each email is
+now claimed with a conditional update before it is sent, and the claim is undone if the send fails.
 """
 
 from django.utils import timezone
@@ -25,6 +30,19 @@ def get_interview_agent():
         _log_service = LogService()
         _interview_agent = InterviewSchedulingAgent(log_service=_log_service)
     return _interview_agent
+
+
+def reminder_due(interview, now) -> bool:
+    """The reminder goes once the set time before the interview is reached, while it is still ahead (CO-116).
+
+    It went only within two hours either side of that time, so a booking made a day ahead for an interview with a
+    48-hour reminder never got one, and a move skipped it. It is not sent when under two hours remain, nor for a
+    booking made inside the reminder period: the confirmation, just sent, says the same."""
+    start = interview.scheduled_datetime - timedelta(hours=interview.get_reminder_hours_before())
+    if now < start or interview.scheduled_datetime - now < timedelta(hours=2):
+        return False
+    booked = interview.confirmation_sent_at       # when it got its time (booked, or set by the recruiter)
+    return not (booked and booked >= start)
 
 
 def check_and_send_followup_emails():
@@ -79,6 +97,10 @@ def check_and_send_followup_emails():
                 # The recruiter turned automatic follow-ups off.
                 if not interview.sends_followups():
                     continue
+                # A closed job stops chasing candidates who have not booked; a deleted one too (CO-118).
+                if interview.cv_record_id and not (interview.cv_record.job_description
+                                                   and interview.cv_record.job_description.is_active):
+                    continue
 
                 # Skip if interview is in the past
                 if interview.scheduled_datetime and interview.scheduled_datetime < now:
@@ -107,16 +129,19 @@ def check_and_send_followup_emails():
                     if time_since_last < timedelta(hours=min_between):
                         continue
                 
-                # Send follow-up email
-                logger.info(f"Auto-sending follow-up #{interview.followup_count + 1} for interview #{interview.id}")
+                # Claim it: only the run that moves the count on sends.
+                count, last = interview.followup_count, interview.last_followup_sent_at
+                if not Interview.objects.filter(pk=interview.pk, followup_count=count).update(
+                        followup_count=count + 1, last_followup_sent_at=now):
+                    continue
+                logger.info(f"Auto-sending follow-up #{count + 1} for interview #{interview.id}")
                 result = agent.send_followup_reminder(interview.id)
                 if result.get('success'):
-                    interview.followup_count += 1
-                    interview.last_followup_sent_at = now
-                    interview.save(update_fields=['followup_count', 'last_followup_sent_at'])
                     stats['followups_sent'] += 1
                     logger.info(f"Follow-up email sent successfully for interview #{interview.id}")
                 else:
+                    Interview.objects.filter(pk=interview.pk, followup_count=count + 1).update(
+                        followup_count=count, last_followup_sent_at=last)
                     stats['errors'] += 1
                     logger.error(f"Failed to send follow-up for interview #{interview.id}: {result.get('error')}")
                     
@@ -143,26 +168,21 @@ def check_and_send_followup_emails():
                 if not interview.sends_reminders():
                     continue
 
-                # Get recruiter settings for reminder timing
-                reminder_hours = interview.get_reminder_hours_before()
-                
-                # Calculate reminder time (using recruiter preference)
-                reminder_time = interview.scheduled_datetime - timedelta(hours=reminder_hours)
-                time_until_reminder = (reminder_time - now).total_seconds()
-                
-                # Send if we're within 2 hours of reminder time
-                if -7200 <= time_until_reminder <= 7200:
-                    logger.info(f"Auto-sending pre-interview reminder for interview #{interview.id}")
-                    reminder_hours = interview.get_reminder_hours_before()
-                    result = agent.send_pre_interview_reminder(interview.id, hours_before=reminder_hours)
-                    if result.get('success'):
-                        interview.pre_interview_reminder_sent_at = now
-                        interview.save(update_fields=['pre_interview_reminder_sent_at'])
-                        stats['reminders_sent'] += 1
-                        logger.info(f"Pre-interview reminder sent successfully for interview #{interview.id}")
-                    else:
-                        stats['errors'] += 1
-                        logger.error(f"Failed to send reminder for interview #{interview.id}: {result.get('error')}")
+                if not reminder_due(interview, now):
+                    continue
+                # Claim it: only the run that stamps it sends.
+                if not Interview.objects.filter(pk=interview.pk, pre_interview_reminder_sent_at__isnull=True).update(
+                        pre_interview_reminder_sent_at=now):
+                    continue
+                logger.info(f"Auto-sending pre-interview reminder for interview #{interview.id}")
+                result = agent.send_pre_interview_reminder(interview.id)
+                if result.get('success'):
+                    stats['reminders_sent'] += 1
+                    logger.info(f"Pre-interview reminder sent successfully for interview #{interview.id}")
+                else:
+                    Interview.objects.filter(pk=interview.pk).update(pre_interview_reminder_sent_at=None)
+                    stats['errors'] += 1
+                    logger.error(f"Failed to send reminder for interview #{interview.id}: {result.get('error')}")
                         
             except Exception as e:
                 stats['errors'] += 1
@@ -205,6 +225,10 @@ def _pipeline_digests_impl():
 
 
 if shared_task is not None:
+    @shared_task(name='recruitment_agent.tasks.send_interview_followups')
+    def send_interview_followups():
+        return check_and_send_followup_emails()
+
     @shared_task(name='recruitment_agent.tasks.send_pipeline_digests')
     def send_pipeline_digests():
         return _pipeline_digests_impl()

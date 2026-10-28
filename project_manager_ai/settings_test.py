@@ -52,6 +52,7 @@ CELERY_TASK_ALWAYS_EAGER = True
 PM_PILOT_AI_INTENT = False
 HR_AI_INTENT = False          # tests stub the reading where they need one
 FRONTLINE_AI_INTENT = False    # the same
+RECRUITMENT_AI_INTENT = False  # the same
 CELERY_TASK_EAGER_PROPAGATES = True
 WHITENOISE_AUTOREFRESH = True
 

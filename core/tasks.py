@@ -254,3 +254,10 @@ def fail_stalled_operations_documents(now=None) -> int:
             # One agent's table must not stop the others' documents being recovered.
             logger.exception('fail_stalled_documents: could not check %s', model.__name__)
     return failed
+
+
+@shared_task(name='core.tasks.fill_missing_vectors')
+def fill_missing_vectors(company_id, agent):
+    """Make a company's HR or Frontline document parts searchable by meaning when they were saved without (CO-70)."""
+    from core.document_search import fill_missing_vectors as fill
+    return fill(company_id, agent)
