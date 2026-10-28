@@ -14,7 +14,9 @@ from typing import Dict
 from django.db import DatabaseError, transaction
 
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
-from operations_agent.agents.document_processing_agent import DocumentProcessingAgent, _deleted_meanwhile
+from operations_agent.agents.document_processing_agent import (
+    DocumentProcessingAgent, _deleted_meanwhile, no_text_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +136,7 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             return _fail(error or 'Text extraction failed')
 
         if not extracted_text or not extracted_text.strip():
-            return _fail('No text could be extracted from this document')
+            return _fail(no_text_message(file_type))
 
         word_count = len(extracted_text.split())
 
@@ -300,7 +302,7 @@ Return this exact JSON structure:
     "organizations": ["company/org names"],
     "locations": ["places mentioned"],
     "dates": ["important dates found"],
-    "amounts": ["monetary values or key numbers"]
+    "amounts": ["each amount as the document writes it, with its currency, e.g. \\"PKR 950,000\\""]
   }},
   "risks": ["risk or concern 1", "risk or concern 2"],
   "opportunities": ["opportunity 1", "opportunity 2"],
@@ -398,7 +400,9 @@ Provide in-depth analysis organized by the document's sections or themes. Use ##
 A numbered list of the most important findings or takeaways.
 
 ## Action Items
-If the document contains recommendations or next steps, list them. If none, write "No specific action items identified."
+What the reader's company has to do, and by when: notices to give, payments due, renewals, deadlines to meet, then
+recommendations and next steps. Give each its date when the document has one. Only when there is nothing at all,
+write "No specific action items identified."
 
 IMPORTANT:
 - Read and analyze the ENTIRE text
@@ -532,7 +536,9 @@ Organized by themes using ### subheadings with in-depth explanations.
 Numbered list of most important findings.
 
 ## Action Items
-Recommendations or next steps. If none, write "No specific action items identified."
+What the reader's company has to do, and by when (notices, payments, renewals, deadlines), then recommendations and
+next steps, each with its date when there is one. Only when there is nothing at all, write "No specific action items
+identified."
 
 Be thorough, use proper markdown, include all significant details. Return ONLY the markdown."""
 

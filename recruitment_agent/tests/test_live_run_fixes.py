@@ -280,3 +280,14 @@ class AnswerLanguageTests(SimpleTestCase):
         agent = RecruitmentQAAgent.__new__(RecruitmentQAAgent)
         prompt = agent._answer_prompt('Which interviews are booked?', 'CONTEXT', original='Which interviews are booked?')
         self.assertNotIn('LANGUAGE:', prompt)
+
+    def test_an_english_follow_up_after_roman_urdu_stays_english(self):
+        # "and how does Mahnoor compare with him?" was restated, so it got the Roman Urdu line and a Roman Urdu answer.
+        agent = RecruitmentQAAgent.__new__(RecruitmentQAAgent)
+        prompt = agent._answer_prompt('How does Mahnoor Khalid compare with Ahmed Raza?', 'CONTEXT',
+                                      original='and how does Mahnoor compare with him?', wants='compare',
+                                      language='english')
+        self.assertNotIn('LANGUAGE:', prompt)
+        roman = agent._answer_prompt("What are Ahmed Raza's skills?", 'CONTEXT',
+                                     original='Ahmed Raza ki skills batao', language='roman_urdu')
+        self.assertTrue(roman.startswith('LANGUAGE: the person asked'))

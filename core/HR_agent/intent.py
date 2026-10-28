@@ -44,6 +44,9 @@ Return ONLY a JSON object:
             the conversation spelled out ("and for managers?" -> "How many days of annual leave do managers get?"),
  "full_list": true only when it asks for a complete list of something ("list all leave types", "saari leave types
               batao", "what are the different departments"), false for a question about one thing,
+ "language": the language of the words of Message alone, never of the conversation before it: "english",
+             "roman_urdu" (Urdu or Hindi in Latin letters), "urdu" (Urdu script) or "other". "and for
+             managers?" is "english" even after Roman Urdu messages,
  "confidence": a number from 0 to 1}}"""
 
 
@@ -77,8 +80,10 @@ def read(message, history=None, *, company_id):
             return None
     except (TypeError, ValueError):
         return None
+    from core.answer_language import LANGUAGES
     english = str(reading.get('english') or '').strip()
-    return {'kind': reading['kind'], 'english': english[:500] or None, 'full_list': reading.get('full_list') is True}
+    return {'kind': reading['kind'], 'english': english[:500] or None, 'full_list': reading.get('full_list') is True,
+            'language': reading.get('language') if reading.get('language') in LANGUAGES else None}
 
 
 #: Where each request is done instead. `dashboard`: an HR dashboard login (the floating chat, the Q&A tab);

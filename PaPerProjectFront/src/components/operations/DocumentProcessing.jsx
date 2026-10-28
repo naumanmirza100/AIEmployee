@@ -129,15 +129,9 @@ const DocumentProcessing = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-  // Upload — auto-open the modal the first time the Documents section opens
-  // this session (cleared on logout). Lazy initializer avoids effect timing.
-  const [showUpload, setShowUpload] = useState(() => {
-    if (typeof window !== 'undefined' && !sessionStorage.getItem('operations_upload_modal_shown')) {
-      sessionStorage.setItem('operations_upload_modal_shown', '1');
-      return true;
-    }
-    return false;
-  });
+  // Upload — the modal opens by itself once a session (cleared on logout), and only while the library is still
+  // empty: it opened at every sign-in for a company with documents too (found on the live run, 28 Oct 2026).
+  const [showUpload, setShowUpload] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadTags, setUploadTags] = useState('');
@@ -171,6 +165,10 @@ const DocumentProcessing = () => {
         setDocuments(res.documents || []);
         setTotalItems(res.total || 0);
         setTotalPages(res.total_pages || 1);
+        if (!searchQuery && !(res.total || 0) && !sessionStorage.getItem('operations_upload_modal_shown')) {
+          sessionStorage.setItem('operations_upload_modal_shown', '1');
+          setShowUpload(true);
+        }
       }
     } catch (e) {
       console.error('Documents fetch error:', e);

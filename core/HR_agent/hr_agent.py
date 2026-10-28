@@ -113,7 +113,7 @@ class HRAgent(BaseAgent):
                         # rationale; the old 3 was a bottleneck that starved
                         # the LLM of context on broad "list all" questions.
                         asker_employee=None, max_results: int = 12, search_query=None,
-                        wants_everything=None) -> dict:
+                        wants_everything=None, language=None) -> dict:
         """Q&A entry point. ``asker_role`` controls what the retriever is
         allowed to see; ``asker_employee`` (Employee instance, optional)
         unlocks personalised answers (their leave balance, manager etc.).
@@ -177,7 +177,7 @@ class HRAgent(BaseAgent):
         employee_context = self._employee_context(asker_employee)
         whole = self._plan_whole_document(question, knowledge_result, employee_context, wants_everything)
         # Searched in English, answered in the asker's own language (core/answer_language.py).
-        language = answer_language.line(whole_document.current_question(question), search_query)
+        language = answer_language.line(whole_document.current_question(question), search_query, language)
         if whole is not None:
             whole.prompt = language + whole.prompt
             _t_llm = time.time()
@@ -250,7 +250,7 @@ class HRAgent(BaseAgent):
     def answer_question_stream(self, question: str, *, asker_role: str = 'employee',
                                 # See note on answer_question(): bumped 3 → 12.
                                 asker_employee=None, max_results: int = 12, search_query=None,
-                                wants_everything=None):
+                                wants_everything=None, language=None):
         """Generator variant of :meth:`answer_question`. Yields dicts:
 
           * ``{'type': 'meta', ...}`` — first event with retrieval results
@@ -338,7 +338,7 @@ class HRAgent(BaseAgent):
         employee_context = self._employee_context(asker_employee)
         whole = self._plan_whole_document(question, knowledge_result, employee_context, wants_everything)
         # Searched in English, answered in the asker's own language (core/answer_language.py).
-        language = answer_language.line(whole_document.current_question(question), search_query)
+        language = answer_language.line(whole_document.current_question(question), search_query, language)
         attempts = []
         if whole is not None:
             whole.prompt = language + whole.prompt

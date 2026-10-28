@@ -642,6 +642,7 @@ def hr_knowledge_qa(request):
             asker_employee=asker_employee,
             search_query=(reading or {}).get('english'),
             wants_everything=reading['full_list'] if reading else None,
+            language=(reading or {}).get('language'),
         )
         # F1 — compliance log: an HR doc being quoted into a Q&A answer is
         # functionally a read of that doc. The direct-read endpoints already log
@@ -758,6 +759,7 @@ def hr_knowledge_qa_stream(request):
                     asker_employee=asker_employee,
                     search_query=(reading or {}).get('english'),
                     wants_everything=reading['full_list'] if reading else None,
+                    language=(reading or {}).get('language'),
                 ):
                     # Capture citations for the after-stream access-log write.
                     if event.get('type') == 'meta':

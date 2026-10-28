@@ -131,10 +131,11 @@ def alert_upcoming_deadlines(summary, today: Optional[date] = None) -> Optional[
     days = soonest['days_left']
     when = 'today' if days == 0 else f'in {days} day{"s" if days != 1 else ""}'
     title = f'Deadline {when}' if len(fresh) == 1 else f'{len(fresh)} upcoming deadlines in {filename}'
-    message = (f'{soonest["description"]} — {soonest["date"]} ({filename})' if len(fresh) == 1
+    when_label = date.fromisoformat(soonest['date']).strftime('%d %b %Y').lstrip('0')   # "2 Nov 2026", not ISO
+    message = (f'{soonest["description"]} — by {when_label} ({filename})' if len(fresh) == 1
                else 'Review the summary for the full list of deadlines.')
     keys = ','.join(sorted(_deadline_key(d) for d in fresh))
-    return _create_once(
+    created = _create_once(
         company=summary.company,
         notification_type='threshold_breach',
         severity='warning',
@@ -143,6 +144,25 @@ def alert_upcoming_deadlines(summary, today: Optional[date] = None) -> Optional[
         data={'summary_id': summary.id, 'source': 'summary', 'filename': filename, 'deadlines': fresh},
         dedupe_key=f'summary:{summary.id}:deadlines:{hashlib.sha1(keys.encode()).hexdigest()[:12]}',
     )
+    if created is not None:
+        _ring_bell(summary, f'{title}: {filename}' if len(fresh) == 1 else title, message, 'operations_deadline')
+    return created
+
+
+def _ring_bell(summary, title, message, kind):
+    """An alert that needs someone reaches the bell of whoever summarised the file, once.
+
+    A deadline within a week ("renew the lease by 2 November") and a critical document stayed on Operations' own
+    Notifications page, which nobody opens to look (found on the live run, 28 Oct 2026)."""
+    from core.notification_utils import notify_company_users
+    if not summary.created_by_id:
+        return
+    try:
+        notify_company_users([summary.created_by], title=title[:255], message=(message or '')[:300],
+                             link=f'/operations/summarization/{summary.id}', severity='warning', kind=kind,
+                             data={'summary_id': summary.id})
+    except Exception:
+        logger.exception('Operations: could not ring the bell for summary %s', summary.id)
 
 
 # ──────────────────────────────────────────────
@@ -165,7 +185,7 @@ def notifications_for_summary(sender, instance: OperationsDocumentSummary,
 
         # 1) Critical importance
         if (instance.importance_level or '').lower() == 'critical':
-            _create_once(
+            critical = _create_once(
                 company=instance.company,
                 notification_type='anomaly_detected',
                 severity='critical',
@@ -179,6 +199,8 @@ def notifications_for_summary(sender, instance: OperationsDocumentSummary,
                 },
                 dedupe_key=f'summary:{instance.id}:critical',
             )
+            if critical is not None:
+                _ring_bell(instance, critical.title, critical.message, 'operations_critical_document')
 
         # 2) Upcoming deadlines (≤ 7 days)
         alert_upcoming_deadlines(instance)

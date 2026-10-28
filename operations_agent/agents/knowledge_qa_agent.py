@@ -473,7 +473,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             restated = (f"THE QUESTION AS ONE STANDALONE QUESTION IN ENGLISH:\n{search_text}\n\n"
                         if search_text.strip().lower() != question.strip().lower() else '')
             prompt = (
-                f"{intent.language_line(question, search_text if reading is not None else '')}"
+                f"{intent.language_line(question, search_text if reading is not None else '', (reading or {}).get('language'))}"
                 f"{history_block}"
                 f"USER QUESTION:\n{question}\n\n"
                 f"{restated}"

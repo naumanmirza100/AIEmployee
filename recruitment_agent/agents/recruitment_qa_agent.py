@@ -755,9 +755,8 @@ FORMATTING:
             return ('done', self._wrap_response(canned, []))
         english = reading.get('english') or question
         if reading['kind'] == 'general':
-            text = english if english.strip().lower() == question.strip().lower() else (
-                f'LANGUAGE: the person asked, in their own words: "{question}". Write the whole answer in that same '
-                'language and script (Roman Urdu if that is how they wrote).\n\n' + english)
+            from core.answer_language import line as language_line
+            text = language_line(question, english, reading.get('language')) + english
             return ('ask', GENERAL_KNOWLEDGE_PROMPT, text,
                     lambda answer: self._wrap_response(
                         answer or "I couldn't generate an answer. Please try rephrasing your question.", []))
@@ -774,7 +773,8 @@ FORMATTING:
             # with him?" loaded Mahnoor alone, and the model wrote Ahmed a score, a phone and two employers of its own.
             dossier = self._build_candidate_dossier(company_user, f"{reading['candidate']}\n{english}")
             if dossier:
-                return self._ask(english, dossier, "", [], original=question, wants=reading.get('wants'))
+                return self._ask(english, dossier, "", [], original=question, wants=reading.get('wants'),
+                                 language=reading.get('language'))
             return ('done', self._wrap_response(self._no_candidate_answer(data), []))
         if reading.get('job') and job is None:
             return ('done', self._wrap_response(_no_such_job(reading['job'], data["jobs"]), []))
@@ -784,12 +784,14 @@ FORMATTING:
         if direct and (reading.get('wants') in ('count', 'list') or _is_comprehensive_answer(direct)):
             return ('done', self._wrap_response(direct, insights))
         context = self._build_context(data, focus_job_id=job["id"] if job else None)
-        return self._ask(english, context, direct, insights, original=question, wants=reading.get('wants'))
+        return self._ask(english, context, direct, insights, original=question, wants=reading.get('wants'),
+                         language=reading.get('language'))
 
-    def _ask(self, question, context, direct, insights, original=None, wants=None):
+    def _ask(self, question, context, direct, insights, original=None, wants=None, language=None):
         """The model call that answers from `context`, and its tidy-up. `original` is the question as the person
         wrote it, when `question` is the AI's English restatement; `wants` the reading's kind of answer."""
-        return ('ask', self.SYSTEM_PROMPT, self._answer_prompt(question, context, direct, original=original, wants=wants),
+        return ('ask', self.SYSTEM_PROMPT, self._answer_prompt(question, context, direct, original=original, wants=wants,
+                                                                language=language),
                 lambda text: self._wrap_response(self._tidy_answer(question, context, text), insights))
 
     def _wrap_response(self, answer: str, insights: List[Dict]) -> Dict[str, Any]:
@@ -1963,9 +1965,17 @@ FORMATTING:
         )
         return self._tidy_answer(question, context, llm_answer)
 
-    def _answer_prompt(self, question: str, context: str, direct_answer: str = "", original=None, wants=None) -> str:
+    def _answer_prompt(self, question: str, context: str, direct_answer: str = "", original=None, wants=None,
+                       language=None) -> str:
         prompt = self._answer_instructions(question, context, wants)
-        if original and original.strip().lower() != question.strip().lower():
+        from core.answer_language import LANGUAGES, line as language_line
+        if original and language in ('urdu', 'other'):
+            return language_line(original, question, language) + prompt
+        # The reading's language when it gave one: a line whenever the restatement differs meant every English
+        # follow-up got it, and "and how does Mahnoor compare with him?" was answered in Roman Urdu (28 Oct 2026).
+        not_english = language == 'roman_urdu' if language in LANGUAGES else (
+            bool(original) and original.strip().lower() != question.strip().lower())
+        if original and not_english:
             # First, not last: as a line after the instructions it was ignored, and "Ahmed Raza ki skills aur
             # experience batao" was answered in English.
             prompt = (f'LANGUAGE: the person asked, in their own words: "{original}". Write the whole answer in that '
