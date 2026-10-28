@@ -676,6 +676,30 @@ def _web_link(link) -> bool:
     return str(link).lower().startswith(('http://', 'https://'))
 
 
+def _meeting_context(meeting, writer):
+    """What a document written for a meeting knows of it: when, who, the agenda, and its notes."""
+    lines = [f'Meeting: {meeting.title}, {clock_when_text(meeting)}, {meeting.duration_minutes} minutes.',
+             f'Prepared by: {writer.full_name or writer.email}. Today: {_today(writer):%d %b %Y}.']
+    people = [p.company_user.full_name for p in meeting.participants.select_related('company_user')]
+    if people:
+        lines.append('Attendees: ' + ', '.join(n for n in people if n) + '.')
+    if meeting.agenda:
+        lines.append('Agenda: ' + '; '.join(str(a) for a in meeting.agenda) + '.')
+    try:
+        note = meeting.note
+    except Exception:
+        note = None
+    if note and note.ai_summary:
+        lines.append('Notes: ' + note.ai_summary)
+    if note and note.key_decisions:
+        lines.append('Decisions: ' + '; '.join(str(d) for d in note.key_decisions) + '.')
+    for item in meeting.action_items.select_related('assignee')[:20]:
+        owner = item.assignee.full_name if item.assignee else item.owner_name
+        lines.append(f"Action: {item.title}" + (f' ({owner})' if owner else '')
+                     + (f', due {item.due_date:%d %b %Y}' if item.due_date else '') + '.')
+    return '\n'.join(lines)
+
+
 def _bad_choice(model, data, *fields):
     """Why one of these fields in the request is not a value the model allows, or None."""
     for field in fields:
@@ -918,6 +942,25 @@ def _login_named(company, name):
     if len(found) != 1 and ' ' not in name:
         found = list(logins.filter(full_name__istartswith=name + ' ')[:2])
     return found[0] if len(found) == 1 else None
+
+
+def _member_named(company, name):
+    """The login or employee with this name (an employee through their seat), or None. The notes name who does
+    each item, and most people are employees, not logins: matched to logins only, Usman's item was given to
+    nobody, and so was the task made from it (live run, 28 Oct 2026)."""
+    login = _login_named(company, name)
+    if login is not None:
+        return login
+    from core.models import UserProfile
+    name = ' '.join((name or '').split()).lower()
+    if not name:
+        return None
+    profiles = list(UserProfile.objects.select_related('user').filter(company=company, user__is_active=True)
+                    .only('id', 'user__first_name', 'user__last_name'))
+    found = [p for p in profiles if f'{p.user.first_name} {p.user.last_name}'.strip().lower() == name]
+    if len(found) != 1 and ' ' not in name:
+        found = [p for p in profiles if (p.user.first_name or '').strip().lower() == name]
+    return _seat_for_employee(found[0].id, company) if len(found) == 1 else None
 
 
 def _resolve_assignees(assignee_list, company):
@@ -1466,6 +1509,29 @@ def _all_company_members(company_user):
     return out
 
 
+def _not_a_draft(parsed, thing):
+    """Why "Create with AI" drafts nothing for this message, or None. It drafted anything it was given: "What's the
+    weather?" became a meeting called Weather Inquiry, and "Show me everyone's salaries" a task (live run, 28 Oct)."""
+    kind = str(parsed.get('kind') or thing).strip().lower()
+    if kind == 'not_allowed':
+        return ("Sorry, I can't help with that. I only draft " + ('meetings' if thing == 'meeting' else 'tasks')
+                + " from what you describe, and I don't show other people's private records.")
+    if kind != thing:
+        if thing == 'meeting':
+            return ('That does not ask for a meeting, so nothing was drafted. Say who it is with, when, for how '
+                    'long and what about, for example "Board review with Usman next Tuesday at 11 for 45 minutes". '
+                    'To change or cancel a meeting, open it in the list.')
+        return ('That does not describe a task, so nothing was drafted. Say what has to be done, by whom and by '
+                'when, for example "Ayesha to send the renewal notice by Friday, high priority".')
+    return None
+
+
+def _draft_warnings(members, hints):
+    """Names the AI heard that are nobody in the company: they were dropped without a word."""
+    missing = [str(h).strip() for h in (hints or []) if str(h).strip() and not _match_members_by_hints(members, [h])]
+    return [f"No one called {', '.join(missing)} is in your company, so they were not added."] if missing else []
+
+
 def _match_members_by_hints(members, hints):
     """Resolve free-text name/email hints (from the AI) to real member rows.
 
@@ -1526,10 +1592,21 @@ def meeting_ai_parse(request):
         logger.error("meeting_ai_parse error: %s", e)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    refused = _not_a_draft(parsed, 'meeting')
+    if refused:
+        return Response({'status': 'error', 'message': refused}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
     members = _all_company_members(company_user)
     participants = _match_members_by_hints(members, parsed.get('participant_hints'))
+    warnings = _draft_warnings(members, parsed.get('participant_hints'))
+    if parsed.get('time_problem'):
+        warnings.append(f"Check the time: {str(parsed['time_problem'])[:120]}.")
+    at = _parse_datetime(parsed.get('scheduled_at'))
+    from meeting_agent.clock import typed_now
+    if at and at < typed_now(company_user.company, _browser_zone(request)):
+        warnings.append('That time has already passed: pick a time to come.')
     return Response({
         'status': 'success',
+        'warnings': warnings,
         'data': {
             'title': parsed.get('title') or '',
             'description': parsed.get('description') or '',
@@ -1563,10 +1640,14 @@ def task_ai_parse(request):
         logger.error("task_ai_parse error: %s", e)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    refused = _not_a_draft(parsed, 'task')
+    if refused:
+        return Response({'status': 'error', 'message': refused}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
     members = _all_company_members(company_user)
     assignees = _match_members_by_hints(members, parsed.get('assignee_hints'))
     return Response({
         'status': 'success',
+        'warnings': _draft_warnings(members, parsed.get('assignee_hints')),
         'data': {
             'title': parsed.get('title') or '',
             'description': parsed.get('description') or '',
@@ -1766,10 +1847,9 @@ def _not_answerable(meeting):
 
 def answer_link(participant, action):
     """The Accept or Decline button of an invitation email: a signed link for this seat, good for 14 days."""
-    from django.conf import settings as django_settings
     from django.core.signing import TimestampSigner
-    base = (getattr(django_settings, 'BACKEND_PUBLIC_URL', None) or getattr(django_settings, 'PUBLIC_BACKEND_URL', None)
-            or 'http://localhost:8000').rstrip('/')
+    from core.notification_settings import backend_url
+    base = backend_url()
     token = TimestampSigner(salt=EXEC_ANSWER_SALT).sign(str(int(participant.id)))
     return f'{base}/api/meetings/exec-email-answer/{action}/{token}/'
 
@@ -2021,7 +2101,7 @@ def meeting_notes(request, meeting_id):
                 priority=prio,
                 ai_extracted=True,
                 owner_name=owner,
-                assignee=_login_named(company_user.company, owner),
+                assignee=_member_named(company_user.company, owner),
             ))
 
         from django.db import transaction
@@ -2936,7 +3016,7 @@ def document_draft(request):
             content = agent.write_minutes(
                 meeting.title if meeting else request.data.get('title', 'Meeting'),
                 # The day it was held, not the day the minutes were written (CO-167).
-                request.data.get('date') or (held_on(meeting) if meeting else _today(request.user)).isoformat(),
+                request.data.get('date') or f"{(held_on(meeting) if meeting else _today(request.user)):%d %b %Y}",
                 attendees_minutes,
                 summary, action_items, decisions,
             )
@@ -2947,9 +3027,14 @@ def document_draft(request):
                 request.data.get('title') or
                 (meeting.title if meeting else 'Executive Briefing')
             )
+            # A briefing for a chosen meeting is about that meeting. Given only a topic, it came back as a blank
+            # template ("[DD MMM YYYY]", "[Name / Department]") whatever meeting was chosen (live run, 28 Oct).
+            context = str(request.data.get('context', '') or '')
+            if meeting and not context.strip():
+                context = _meeting_context(meeting, company_user)
             content = agent.create_briefing(
                 briefing_topic,
-                request.data.get('context', ''),
+                context,
                 request.data.get('key_points'),
                 request.data.get('audience', 'Executive Team') or 'Executive Team',
             )

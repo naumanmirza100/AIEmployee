@@ -706,10 +706,8 @@ def build_meeting_email_action_url(meeting_id: int, user_id: int, action: str) -
     from django.conf import settings as django_settings
     if action not in ('accepted', 'rejected'):
         raise ValueError(f"Unsupported action: {action}")
-    backend_base = (getattr(django_settings, 'BACKEND_PUBLIC_URL', None)
-                    or getattr(django_settings, 'PUBLIC_BACKEND_URL', None)
-                    or 'http://localhost:8000')
-    backend_base = backend_base.rstrip('/')
+    from core.notification_settings import backend_url
+    backend_base = backend_url()      # it went to localhost on the live site (live run, 28 Oct 2026)
     token = _make_meeting_email_token(meeting_id, user_id)
     return f"{backend_base}/api/meetings/email-action/{action}/{token}/"
 
