@@ -17,6 +17,7 @@ from django.utils import timezone
 from core.api_key_service import KeyServiceError
 from recruitment_agent import intent as qa_intent
 from recruitment_agent.core import GroqClient, GroqClientError
+from recruitment_agent.experience import about_years
 from recruitment_agent.interview_time import when
 from recruitment_agent.ranking import BEST_FIRST, ranks_for
 from recruitment_agent.models import (
@@ -1351,6 +1352,8 @@ FORMATTING:
                 val = insights.get(key)
                 if not val:
                     continue
+                if key == 'total_experience_years':
+                    val = about_years(val)      # as the candidate page says it, not 5.75
                 if isinstance(val, list):
                     val = ', '.join(str(v) for v in val if v)
                 blocks.append(f"{label}: {str(val)[:900]}")
@@ -1977,7 +1980,8 @@ Question: "{question}"
 INSTRUCTIONS:
 - Provide a detailed markdown table comparing all relevant items (jobs, candidates, interview outcomes, etc.) as requested.
 - Use ## for main heading, ### for subheading, and | for table columns.
-- Include all requested fields (e.g. job title, department, location, candidate/interview counts, outcomes).
+- Include the requested fields (e.g. scores, decisions, interview times, outcomes); a job's description and
+  requirements only when the question is about the job itself.
 - Add a short summary/explanation below the table if the question asks for it.
 - For explanations/analysis/recommendations, provide multi-paragraph markdown with bullet/numbered lists and actionable insights.
 - For top candidates/jobs, list them with a short summary for each, including scores, decisions, and relevant details.
@@ -1992,10 +1996,13 @@ Question: "{question}"
 {context}
 
 INSTRUCTIONS:
-- Provide COMPLETE and DETAILED answer using all available data from the context.
-- For each job/candidate/interview: include name, status, location, department, type, description, requirements, candidate count, scores, decisions — every field available.
-- Format with ## for job/section headings, ### for sub-sections, bullet lists for fields.
-- Use exact values from context. Never omit available details.
+- Provide a COMPLETE and DETAILED answer about what was asked, using the context.
+- If the question is about a job itself, give every field of the job: status, location, department, type,
+  description, requirements, candidate and interview counts.
+- If it is about candidates or interviews, give every field of each one (score, decision, email, interview time,
+  status, outcome, summary) and do NOT repeat the job's description or requirements.
+- Start with the direct answer (the number, the names), then the details.
+- Format with ## for the heading, ### per person or job, bullet lists for fields. Use exact values from context.
 """
             else:
                 prompt = f"""

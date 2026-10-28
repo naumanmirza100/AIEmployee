@@ -89,6 +89,15 @@ class AssistantTests(TestCase):
         prompt = self.agent._answer_instructions('Which interviews are booked?', 'CONTEXT', wants='list')
         self.assertIn('Start with the answer itself', prompt)
         self.assertNotIn('description, requirements, scores', prompt)
+        # Read as "detail" (live run, Q1: "how many applied, and what did each one get?") it still dumped the job.
+        detail = self.agent._answer_instructions('How many applied and what did each get?', 'CONTEXT', wants='detail')
+        self.assertIn("do NOT repeat the job's description", detail)
+
+    def test_the_dossier_says_the_years_as_the_page_does(self):
+        self.cv.insights_json = json.dumps({'total_experience_years': 5.75})
+        self.cv.save()
+        dossier = self.agent._build_candidate_dossier(self.owner, 'Tell me about Hira Siddiqui')
+        self.assertIn('Years of experience: about 6 years', dossier)
 
     def test_a_delete_request_says_where_deleting_is_done(self):
         answer = intent.reply({'kind': 'action', 'area': 'delete'})
