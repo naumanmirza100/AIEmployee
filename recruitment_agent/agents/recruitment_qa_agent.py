@@ -756,7 +756,8 @@ FORMATTING:
         english = reading.get('english') or question
         if reading['kind'] == 'general':
             text = english if english.strip().lower() == question.strip().lower() else (
-                f'{english}\n\n(The person asked, in their own words: "{question}". Answer in the language they used.)')
+                f'LANGUAGE: the person asked, in their own words: "{question}". Write the whole answer in that same '
+                'language and script (Roman Urdu if that is how they wrote).\n\n' + english)
             return ('ask', GENERAL_KNOWLEDGE_PROMPT, text,
                     lambda answer: self._wrap_response(
                         answer or "I couldn't generate an answer. Please try rephrasing your question.", []))
@@ -1965,8 +1966,15 @@ FORMATTING:
     def _answer_prompt(self, question: str, context: str, direct_answer: str = "", original=None, wants=None) -> str:
         prompt = self._answer_instructions(question, context, wants)
         if original and original.strip().lower() != question.strip().lower():
-            prompt += (f'\nThe person asked, in their own words: "{original}". Answer in the language they used '
-                       '(English, or Roman Urdu if they wrote Roman Urdu).\n')
+            # First, not last: as a line after the instructions it was ignored, and "Ahmed Raza ki skills aur
+            # experience batao" was answered in English.
+            prompt = (f'LANGUAGE: the person asked, in their own words: "{original}". Write the whole answer in that '
+                      'same language and script: Roman Urdu (Urdu in Latin letters) if that is how they wrote, English '
+                      'if English. In Roman Urdu the headings, the labels and every sentence are Roman Urdu, and the '
+                      'facts from the records are told in it too, in this style (the <...> are filled from the '
+                      'records): "<name> ke paas takreeban <N> saal ka tajurba hai. Taleem: <degree>. Pichli naukri: '
+                      '<company> mein <role>." Names, numbers, emails, dates, skills and job titles stay as they are.\n'
+                      + prompt)
         return prompt
 
     def _answer_instructions(self, question: str, context: str, wants=None) -> str:

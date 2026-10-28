@@ -99,7 +99,7 @@ class ReadingTests(TestCase):
         self.assertIn('Assistant: Ali Raza, score 82.', client.prompts[0])   # the reading saw the conversation
         self.assertIn('CANDIDATE DOSSIER', client.texts[-1])
         self.assertIn('Zendesk', client.texts[-1])
-        self.assertIn('Answer in the language they used', client.texts[-1])
+        self.assertTrue(client.texts[-1].startswith('LANGUAGE: the person asked'))   # first, not after the rules
 
     def test_a_cv_with_no_name_is_not_every_candidate(self):
         client = FakeClient(reading(english='Tell me about candidate Bilal', candidate='Bilal'))
