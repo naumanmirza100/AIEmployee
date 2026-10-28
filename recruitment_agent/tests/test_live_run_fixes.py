@@ -256,3 +256,20 @@ class NeverActsTests(SimpleTestCase):
         rules = RecruitmentQAAgent.SYSTEM_PROMPT
         self.assertIn('You only answer', rules)
         self.assertIn('never word an answer as if it', rules)
+
+
+class AnswerLanguageTests(SimpleTestCase):
+    """"Ahmed Raza ki skills aur experience batao" was answered in English: the line asking for the person's language
+    came after all the instructions. It now comes first."""
+
+    def test_the_language_comes_first(self):
+        agent = RecruitmentQAAgent.__new__(RecruitmentQAAgent)
+        prompt = agent._answer_prompt("What are Ahmed Raza's skills and experience?", 'CONTEXT',
+                                      original='Ahmed Raza ki skills aur experience batao', wants='detail')
+        self.assertTrue(prompt.startswith('LANGUAGE: the person asked'))
+        self.assertIn('Roman Urdu', prompt.split('\n')[0])
+
+    def test_an_english_question_gets_no_language_line(self):
+        agent = RecruitmentQAAgent.__new__(RecruitmentQAAgent)
+        prompt = agent._answer_prompt('Which interviews are booked?', 'CONTEXT', original='Which interviews are booked?')
+        self.assertNotIn('LANGUAGE:', prompt)
