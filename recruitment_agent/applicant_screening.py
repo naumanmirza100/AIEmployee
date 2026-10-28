@@ -207,6 +207,9 @@ def screen(job, applications, actor, agents) -> list:
                     cv_record.qualification_priority = qualified.get('priority') if isinstance(qualified, dict) else None
                     cv_record.save()
                     application_status.after_screening(cv_record)
+                    from recruitment_agent import workflows
+                    workflows.run_for_event('candidate_screened', cv_record=cv_record,
+                                            detail=cv_record.qualification_decision or '')
                 except CVRecord.DoesNotExist:
                     pass
 

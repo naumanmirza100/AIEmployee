@@ -123,6 +123,7 @@ const ALL_AGENTS = [
       { label: 'AI Questions',     icon: HelpCircle,      path: '/recruitment/ai-interview-questions' },
       { label: 'Candidates',       icon: Users,           path: '/recruitment/candidates' },
       { label: 'Interviews',       icon: Calendar,        path: '/recruitment/interviews' },
+      { label: 'Workflows',        icon: Workflow,        path: '/recruitment/workflows' },
       { label: 'Saved Prompts',    icon: Star,            path: '/recruitment/saved-prompts' },
       { label: 'API Tester',       icon: FlaskConical,    path: '/recruitment/api-tester' },
       {

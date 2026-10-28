@@ -784,6 +784,10 @@ class InterviewSchedulingAgent:
             # The interviewers hear as well; nothing told them before.
             from recruitment_agent import interviewer_alerts
             interviewer_alerts.tell(interview, 'booked')
+            # The company's own steps for a booked interview (Recruitment workflows).
+            from recruitment_agent import workflows
+            workflows.run_for_event('interview_booked', interview=interview,
+                                    detail=interview.scheduled_datetime.isoformat() if interview.scheduled_datetime else '')
 
             # Tell the recruiter in the app too; this used to be email-only.
             if interview.company_user_id:

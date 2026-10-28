@@ -529,7 +529,7 @@ STEP_HANDLERS = {
 # Executor
 # --------------------------------------------------------------------------
 
-def _run_single_step(step, step_index, step_path, workflow, context_data, simulate
+def _run_single_step(step, step_index, step_path, workflow, context_data, simulate, handlers=None
                      ) -> Tuple[bool, dict, Optional[str]]:
     step_type = (step.get('type') or '').lower()
     base = {'step': step_index, 'step_path': step_path, 'type': step_type}
@@ -563,7 +563,8 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
         )
         raise sig
 
-    handler = STEP_HANDLERS.get(step_type)
+    # Another agent can run its own steps through this engine (Recruitment's SOP runner); HR's are the default.
+    handler = (handlers if handlers is not None else STEP_HANDLERS).get(step_type)
     if handler is None:
         return True, {**base, 'done': True, 'note': 'unknown step type treated as no-op'}, None
     ok, result, fatal = handler(step, context_data, simulate)
@@ -571,7 +572,7 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
 
 
 def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic, timeout,
-                       path_prefix='') -> Tuple[bool, list, Optional[str]]:
+                       path_prefix='', handlers=None) -> Tuple[bool, list, Optional[str]]:
     """Walk a step list. Branches recurse. Pauses bubble up via
     `_WorkflowPauseSignal`, each level prepending its tail so the top sees a
     flat continuation list. Mirrors the Frontline executor."""
@@ -597,7 +598,7 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
             try:
                 nested_ok, nested_results, nested_err = _execute_step_list(
                     nested, workflow, context_data, simulate, start_monotonic, timeout,
-                    path_prefix=f"{step_path}.{branch_taken}.",
+                    path_prefix=f"{step_path}.{branch_taken}.", handlers=handlers,
                 )
             except _WorkflowPauseSignal as pause:
                 pause.partial_results = results + pause.partial_results
@@ -615,7 +616,7 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
             attempt += 1
             try:
                 ok, result_entry, fatal = _run_single_step(
-                    step, i, step_path, workflow, context_data, simulate,
+                    step, i, step_path, workflow, context_data, simulate, handlers=handlers,
                 )
             except _WorkflowPauseSignal as pause:
                 pause.partial_results = list(results)
@@ -645,7 +646,7 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
 
 
 def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False, execution=None,
-                     _steps_override=None, _prior_results=None, _prior_elapsed=0.0):
+                     _steps_override=None, _prior_results=None, _prior_elapsed=0.0, handlers=None):
     """Top-level entry. Returns `(success, result_data, error_message)`.
 
     On a `wait` step, persists the pause snapshot onto `execution` (when
@@ -663,7 +664,7 @@ def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False
     prior_results = list(_prior_results or [])
     try:
         ok, results, err = _execute_step_list(
-            steps, workflow, context_data, simulate, start, effective_timeout,
+            steps, workflow, context_data, simulate, start, effective_timeout, handlers=handlers,
         )
     except _WorkflowPauseSignal as pause:
         accumulated = prior_results + list(pause.partial_results or [])

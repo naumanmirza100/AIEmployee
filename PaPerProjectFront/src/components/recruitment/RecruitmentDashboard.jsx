@@ -21,6 +21,7 @@ import {
 import CVProcessing from './CVProcessing';
 import JobDescriptions from './JobDescriptions';
 import Interviews from './Interviews';
+import RecruitmentWorkflows from './RecruitmentWorkflows';
 import CVRecords from './CVRecords';
 import RecruiterSettings from './RecruiterSettings';
 import RecruitmentAnalytics from './RecruitmentAnalytics';
@@ -29,7 +30,7 @@ import AiInterviewQuestions from './AiInterviewQuestions';
 // import AIGraphGenerator from './AIGraphGenerator';
 import SavedPrompts from './SavedPrompts';
 import { renderChart } from '@/components/common/ChartRenderer';
-import { FlaskConical, HelpCircle, Sparkles } from 'lucide-react';
+import { FlaskConical, HelpCircle, Sparkles, Workflow } from 'lucide-react';
 
 // Tab items configuration
 const TAB_ITEMS = [
@@ -40,6 +41,7 @@ const TAB_ITEMS = [
   { value: 'ai-interview-questions', label: 'AI Questions', icon: HelpCircle },
   { value: 'candidates', label: 'Candidates', icon: Users },
   { value: 'interviews', label: 'Interviews', icon: Calendar },
+  { value: 'workflows', label: 'Workflows', icon: Workflow },
   { value: 'saved-prompts', label: 'Saved Prompts', icon: Star },
   { value: 'api-tester', label: 'API Tester', icon: FlaskConical },
   { value: 'settings', label: 'Settings', icon: Settings },
@@ -56,6 +58,7 @@ const PATH_TO_TAB = {
   'job-descriptions': 'jobs',
   candidates: 'candidates',
   interviews: 'interviews',
+  workflows: 'workflows',
   settings: 'settings',
 };
 const TAB_TO_PATH = {
@@ -69,6 +72,7 @@ const TAB_TO_PATH = {
   'jobs': 'job-descriptions',
   'candidates': 'candidates',
   'interviews': 'interviews',
+  'workflows': 'workflows',
   'settings': 'settings',
 };
 
@@ -481,6 +485,10 @@ const RecruitmentDashboard = () => {
 
         <TabsContent value="interviews" id="REC-dashboard-tab-interviews" data-testid="REC-dashboard-tab-interviews">
           <Interviews onUpdate={fetchStats} />
+        </TabsContent>
+
+        <TabsContent value="workflows" id="REC-dashboard-tab-workflows" data-testid="REC-dashboard-tab-workflows">
+          <RecruitmentWorkflows />
         </TabsContent>
 
         <TabsContent value="settings" id="REC-dashboard-tab-settings" data-testid="REC-dashboard-tab-settings">

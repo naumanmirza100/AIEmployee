@@ -444,6 +444,9 @@ def process_cvs(request):
                         cv_record.save()
                         from recruitment_agent import application_status
                         application_status.after_screening(cv_record)
+                        from recruitment_agent import workflows
+                        workflows.run_for_event('candidate_screened', cv_record=cv_record,
+                                                detail=cv_record.qualification_decision or '')
                         if new_decision and new_decision != old_decision:
                             try:
                                 CVRecordDecisionLog.objects.create(
@@ -1512,6 +1515,9 @@ def update_interview(request, interview_id):
         if outcome_updated:
             from recruitment_agent import application_status
             application_status.after_interview_outcome(interview)
+            if interview.outcome and interview.outcome != old_outcome:
+                from recruitment_agent import workflows
+                workflows.run_for_event('interview_outcome', interview=interview, detail=interview.outcome)
 
         # HR was handed this person as a new hire. It hears if that changes.
         if was_hired and interview.outcome != 'HIRED':

@@ -745,3 +745,59 @@ class CareerApplication(models.Model):
     
     def __str__(self):
         return f"{self.applicant_name} - {self.position_title}"
+
+class RecruitmentWorkflow(models.Model):
+    """A Recruitment SOP: steps that run by themselves on a hiring event (docx item 7, "Workflow / SOP Runner").
+
+    The steps are run by HR's workflow engine with Recruitment's own step types (recruitment_agent/workflows.py)."""
+    EVENT_CHOICES = [
+        ('application_received', 'An application arrives from the job page'),
+        ('candidate_screened', 'The AI screens a candidate'),
+        ('interview_booked', 'A candidate books an interview'),
+        ('interview_outcome', 'An interview decision is recorded'),
+    ]
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='recruitment_workflows')
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default='')
+    trigger_event = models.CharField(max_length=40, choices=EVENT_CHOICES)
+    # Optional: only for this job, and only when these context fields match (Frontline's condition format).
+    job = models.ForeignKey(JobDescription, on_delete=models.CASCADE, null=True, blank=True,
+                            related_name='workflows')
+    conditions = models.JSONField(default=dict, blank=True)
+    steps = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='recruitment_workflows_made')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ppp_recruitment_workflows'
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.trigger_event})"
+
+
+class RecruitmentWorkflowRun(models.Model):
+    """One run of a Recruitment workflow. `run_key` makes the same event run a workflow once."""
+    STATUS_CHOICES = [('completed', 'Completed'), ('failed', 'Failed'), ('simulated', 'Test run')]
+    workflow = models.ForeignKey(RecruitmentWorkflow, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='runs')
+    workflow_name = models.CharField(max_length=200)
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='recruitment_workflow_runs')
+    event = models.CharField(max_length=40)
+    cv_record = models.ForeignKey(CVRecord, on_delete=models.SET_NULL, null=True, blank=True,
+                                  related_name='workflow_runs')
+    interview = models.ForeignKey(Interview, on_delete=models.SET_NULL, null=True, blank=True,
+                                  related_name='workflow_runs')
+    candidate_name = models.CharField(max_length=255, blank=True, default='')
+    run_key = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    results = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True, default='')
+    started_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ppp_recruitment_workflow_runs'
+        ordering = ['-started_at']

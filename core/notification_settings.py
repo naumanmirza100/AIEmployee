@@ -133,6 +133,9 @@ TOPICS = (
           'Once a day: candidates on hold for over 3 days, online interviews in the next 24 hours with no meeting '
           'link, and interviews done with no outcome recorded.', 'recruitment_agent',
           kinds=('recruitment_pipeline_digest',)),
+    Topic('recruitment_workflows', 'Recruitment workflow alerts',
+          'A Recruitment workflow tells you something, gives you a to-do, or stops on a step.',
+          'recruitment_agent', kinds=('recruitment_workflow_notice',)),
     Topic('exec_meetings', 'Executive meeting invitations and changes',
           'You are invited to an executive meeting, its time or details change, or you are taken off it.',
           'exec_meeting_agent', email_default=True, in_app=False),

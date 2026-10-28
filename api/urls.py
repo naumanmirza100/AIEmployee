@@ -54,6 +54,7 @@ from api.views import public_jobs
 from api.views import my_work
 from api.views import notification_settings
 from api.views import document_search
+from api.views import recruitment_workflows
 from api.views import do_not_email
 from api.views import company_logins
 from api.views import quick_chats
@@ -399,6 +400,12 @@ urlpatterns = [
     re_path(r'^recruitment/job-descriptions/(?P<job_description_id>\d+)/delete/?$', recruitment_agent.delete_job_description, name='recruitment_delete_job_description'),  # DELETE
     re_path(r'^recruitment/job-descriptions/(?P<job_description_id>\d+)/applications/?$', recruitment_agent.list_job_applications, name='recruitment_list_job_applications'),  # GET
     re_path(r'^recruitment/interviews/?$', recruitment_agent.list_interviews, name='recruitment_list_interviews'),  # GET
+    # Recruitment workflows / SOP runner (docx item 7)
+    re_path(r'^recruitment/workflows/?$', recruitment_workflows.workflow_list, name='recruitment_workflows'),  # GET/POST
+    re_path(r'^recruitment/workflows/from-template/?$', recruitment_workflows.workflow_from_template, name='recruitment_workflow_from_template'),  # POST
+    re_path(r'^recruitment/workflows/runs/?$', recruitment_workflows.workflow_runs, name='recruitment_workflow_runs'),  # GET
+    re_path(r'^recruitment/workflows/(?P<workflow_id>\d+)/?$', recruitment_workflows.workflow_detail, name='recruitment_workflow_detail'),  # GET/PATCH/DELETE
+    re_path(r'^recruitment/workflows/(?P<workflow_id>\d+)/test/?$', recruitment_workflows.workflow_test, name='recruitment_workflow_test'),  # POST
     re_path(r'^recruitment/interviewers/?$', recruitment_agent.list_interviewer_options, name='recruitment_list_interviewer_options'),  # GET
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/hr-handoff/?$', recruitment_agent.interview_hr_handoff, name='recruitment_interview_hr_handoff'),  # GET/POST
     re_path(r'^recruitment/interviews/schedule/?$', recruitment_agent.schedule_interview, name='recruitment_schedule_interview'),  # POST
