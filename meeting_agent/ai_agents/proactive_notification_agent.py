@@ -155,11 +155,16 @@ Be direct and actionable. No fluff."""
         owner = CompanyUser.objects.select_related('company').filter(id=company_user_id).first()
         today = clock.today(owner.company) if owner else now.date()
 
-        todays_meetings = list(ExecutiveMeeting.objects.filter(
-            organizer_id=company_user_id,
-            scheduled_at__date=today,
-            status__in=['scheduled', 'in_progress'],
-        ).values('id', 'title', 'scheduled_at', 'duration_minutes')[:10])
+        # The time as typed, which is the company's own clock. Sent as a stored datetime ("03:25:00+00:00") it was
+        # read as UTC, and the digest said "at 03:25 UTC" of a meeting at 03:25 in Karachi (film, 29 Oct 2026).
+        todays_meetings = [
+            {'title': m['title'], 'time': f"{m['scheduled_at']:%H:%M}", 'duration_minutes': m['duration_minutes']}
+            for m in ExecutiveMeeting.objects.filter(
+                organizer_id=company_user_id,
+                scheduled_at__date=today,
+                status__in=['scheduled', 'in_progress'],
+            ).order_by('scheduled_at').values('title', 'scheduled_at', 'duration_minutes')[:10]
+        ]
 
         overdue_tasks = ExecutiveTask.objects.filter(
             company_user_id=company_user_id,
@@ -200,7 +205,7 @@ Be direct and actionable. No fluff."""
 Executive: {company_user_name or 'Executive'}
 Today: {today}
 
-Today's meetings: {len(todays_meetings)} scheduled
+Today's meetings: {len(todays_meetings)} scheduled (times are the company's own clock: write them as given, with no time zone)
 {json.dumps(todays_meetings, indent=2, default=str)}
 
 Overdue tasks: {overdue_tasks}

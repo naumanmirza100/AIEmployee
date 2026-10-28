@@ -10,6 +10,7 @@ import logging
 from typing import Optional
 
 from project_manager_agent.ai_agents.base_agent import BaseAgent
+from meeting_agent.ai_agents.meeting_scheduling_agent import as_object
 
 logger = logging.getLogger(__name__)
 
@@ -278,12 +279,12 @@ Rules:
         text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\s*```$', '', text)
         try:
-            return json.loads(text)
+            return as_object(json.loads(text))
         except json.JSONDecodeError:
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
                 try:
-                    return json.loads(match.group())
+                    return as_object(json.loads(match.group()))
                 except json.JSONDecodeError:
                     pass
         return {}

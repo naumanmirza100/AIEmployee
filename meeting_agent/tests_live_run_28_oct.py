@@ -62,6 +62,50 @@ class DraftTests(base.ExecCase):
         for said in ('Board review', 'Renew for a year', 'Send the acceptance (Usman Tariq)', 'Prepared by: Nadia Rehman'):
             self.assertIn(said, context)
 
+    def test_an_answer_in_a_list_is_read_and_an_unreadable_one_drafts_nothing(self):
+        # The film's board review failed with a server error: the AI had put its one answer in a list (29 Oct 2026).
+        from meeting_agent.ai_agents.meeting_scheduling_agent import MeetingSchedulingAgent
+        from meeting_agent.ai_agents.task_prioritization_agent import TaskPrioritizationAgent
+        for agent in (MeetingSchedulingAgent, TaskPrioritizationAgent):
+            self.assertEqual(agent._extract_json('```json\n[{"title": "Board review"}]\n```'), {'title': 'Board review'})
+            self.assertEqual(agent._extract_json('["Board review"]'), {})
+        for answer in ({}, ['Board review']):
+            code, body = self.draft(views.meeting_ai_parse, answer)
+            self.assertEqual(code, 422, body)
+            self.assertIn('could not be read', body['message'])
+
+    def test_minutes_do_not_print_none_for_an_item_with_no_date(self):
+        # "Update pipeline sheet ... | Owner: Bilal Ahmed | Due: None" in the film's minutes (29 Oct 2026).
+        from meeting_agent.ai_agents.document_authoring_agent import DocumentAuthoringAgent
+        agent = DocumentAuthoringAgent.__new__(DocumentAuthoringAgent)
+        agent.log_action = lambda *a, **k: None
+        agent.system_prompt = ''
+        with mock.patch.object(DocumentAuthoringAgent, '_call_llm', create=True, return_value='# Minutes') as llm:
+            agent.write_minutes('Board review', '29 Oct 2026', ['Bilal Ahmed'], 'Summary', [
+                {'title': 'Update the pipeline sheet', 'assignee_hint': 'Bilal Ahmed', 'due_date': None},
+                {'title': 'Book the movers', 'assignee_hint': None}], ['Renew FinEdge'])
+        prompt = llm.call_args[0][0]
+        self.assertIn('Owner: Bilal Ahmed | Due: no date set', prompt)
+        self.assertIn('Book the movers | Owner: not named | Due: no date set', prompt)
+        self.assertNotIn('None', prompt)
+
+    def test_the_digest_gives_a_meeting_its_time_as_typed_not_as_utc(self):
+        # "a Quick FinEdge check-in with Bilal at 03:25 UTC", of a meeting at 03:25 in Karachi (film, 29 Oct 2026).
+        from datetime import datetime
+        from meeting_agent import clock
+        from meeting_agent.ai_agents.proactive_notification_agent import ProactiveNotificationAgent
+        from meeting_agent.tests_time_and_answers import typed
+        today = clock.today(self.company)
+        self.meeting(typed(datetime(today.year, today.month, today.day, 3, 25)), title='Quick FinEdge check-in')
+        agent = ProactiveNotificationAgent.__new__(ProactiveNotificationAgent)
+        agent.log_action = lambda *a, **k: None
+        agent.system_prompt = ''
+        with mock.patch.object(ProactiveNotificationAgent, '_call_llm', create=True, return_value='{}') as llm:
+            agent.generate_daily_digest(self.nadia.id, 'Nadia')
+        prompt = llm.call_args[0][0]
+        self.assertIn('"time": "03:25"', prompt)
+        self.assertNotIn('+00:00', prompt)
+
     def test_a_meeting_request_without_a_kind_is_still_drafted(self):
         code, body = self.draft(views.meeting_ai_parse, {'title': 'Board review', 'scheduled_at': '2099-01-05T11:00:00'})
         self.assertEqual(code, 200, body)
