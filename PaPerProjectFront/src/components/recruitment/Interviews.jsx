@@ -962,7 +962,12 @@ const Interviews = ({ onUpdate }) => {
                 placeholder="Any other observations or comments..."
                 className="min-h-[60px] text-sm bg-white/5 border-white/10 text-white placeholder:text-white/25 resize-none" />
             </div>
-            <div className="flex gap-3 justify-end pt-1">
+            <div className="flex gap-3 justify-end items-center pt-1">
+              {!feedbackModal.rating && (
+                <span className="mr-auto text-xs text-amber-300/80" data-testid="REC-interviews-feedback-rating-needed">
+                  Choose an overall rating to save.
+                </span>
+              )}
               <button id="REC-interviews-feedback-cancel-btn" data-testid="REC-interviews-feedback-cancel-btn" onClick={() => setFeedbackModal(null)} disabled={feedbackSubmitting}
                 className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 border border-white/10 hover:border-white/25 transition-colors">
                 Cancel

@@ -19,6 +19,11 @@ import QualificationReasoning from './QualificationReasoning';
 // clears on a full page reload, which is the expected "fresh start" behaviour.
 let cvProcessingDraft = null;
 
+// Files per upload request: about ten seconds of AI work each, inside the live server's 60-second limit.
+const FILES_PER_REQUEST = 3;
+// With Top N the best of the whole upload are chosen in one request, so it stays within the limit too.
+const FILES_WITH_TOP_N = 4;
+
 const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const { toast } = useToast();
   // Restore any draft left behind before an unmount (e.g. "Fix Settings" nav).
@@ -29,6 +34,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const [jobKeywords, setJobKeywords] = useState(() => cvProcessingDraft?.jobKeywords || '');
   const [topN, setTopN] = useState(() => cvProcessingDraft?.topN || '');
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress] = useState(null);   // { done, total } while files go in a few at a time
   const [results, setResults] = useState(null);
   const [displayedKeywords, setDisplayedKeywords] = useState([]);
   const [jobSearchOpen, setJobSearchOpen] = useState(false);
@@ -212,18 +218,55 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
       }
     }
 
+    // Each CV is read, scored and screened by the AI inside the request, about ten seconds a file, and the live
+    // server ends a request after 60 seconds: six CVs at once failed on screen although the server finished them.
+    // So the files go three at a time and the results are put together here. Top N picks the best of the whole
+    // upload, so with Top N they go together, and only up to FILES_WITH_TOP_N of them.
+    const all = Array.from(files);
+    if (topN && all.length > FILES_WITH_TOP_N) {
+      toast({
+        title: `Top N works on up to ${FILES_WITH_TOP_N} CVs at a time`,
+        description: `Leave Top N empty to upload all ${all.length}: everyone is scored and ranked, and the screening invites those it chooses.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    const batches = [];
+    for (let i = 0; i < all.length; i += (topN ? all.length : FILES_PER_REQUEST)) {
+      batches.push(all.slice(i, i + (topN ? all.length : FILES_PER_REQUEST)));
+    }
+
     try {
       setProcessing(true);
       setResults(null);
-
-      const response = await processCVs(
-        files,
-        selectedJobId,
-        jobDescriptionText,
-        jobKeywords,
-        topN ? parseInt(topN) : null,
-        false
-      );
+      const response = { status: 'success', results: [], failed_files: [], notice: null };
+      let sent = 0;
+      for (const batch of batches) {
+        setProgress({ done: sent, total: all.length });
+        try {
+          const part = await processCVs(batch, selectedJobId, jobDescriptionText, jobKeywords,
+                                        topN ? parseInt(topN) : null, false);
+          response.results.push(...(part.results || []));
+          response.failed_files.push(...(part.failed_files || []));
+          response.notice = response.notice || part.notice || null;
+        } catch (batchError) {
+          // One batch refused (all duplicates, unreadable, or the server stopped): say which files, go on.
+          const refused = batchError.failedFiles?.length
+            ? batchError.failedFiles
+            : batch.map((f) => ({ file_name: f.name, reason: batchError.message || 'not processed' }));
+          response.failed_files.push(...refused);
+          if (batches.length === 1) throw batchError;
+        }
+        sent += batch.length;
+      }
+      setProgress(null);
+      const score = (r) => (r.summary && typeof r.summary === 'object' ? r.summary.role_fit_score || 0 : 0);
+      response.results.sort((a, b) => score(b) - score(a));
+      response.total = response.results.length;
+      if (!response.results.length) {
+        throw new Error('None of the files could be added. '
+          + response.failed_files.map((f) => `${f.file_name}: ${f.reason}`).join(' '));
+      }
 
       if (response.status === 'success') {
         setResults(response);
@@ -261,6 +304,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
       });
     } finally {
       setProcessing(false);
+      setProgress(null);
     }
   };
 
@@ -505,7 +549,11 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
               {processing ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  <span className="hidden sm:inline">Processing CVs...</span>
+                  <span className="hidden sm:inline">
+                    {progress && progress.total > FILES_PER_REQUEST
+                      ? `Processing ${Math.min(progress.done + FILES_PER_REQUEST, progress.total)} of ${progress.total}...`
+                      : 'Processing CVs...'}
+                  </span>
                   <span className="sm:hidden">Processing...</span>
                 </>
               ) : (

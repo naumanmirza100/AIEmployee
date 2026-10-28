@@ -124,10 +124,14 @@ export default function RecruitmentWorkflows() {
               <p className="text-xs text-white/50 mt-0.5">{t.description}</p>
               <div className="mt-2 flex items-center justify-between">
                 <span className="text-[11px] text-white/40">When: {eventLabel(t.trigger_event)}</span>
-                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy === `t:${t.key}`}
-                        onClick={() => fromTemplate(t.key)} data-testid={`REC-workflows-template-${t.key}`}>
-                  <BookTemplate className="h-3.5 w-3.5 mr-1" /> Use
-                </Button>
+                {t.in_use ? (
+                  <span className="text-[11px] text-emerald-300" data-testid={`REC-workflows-template-${t.key}-in-use`}>In use</span>
+                ) : (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy === `t:${t.key}`}
+                          onClick={() => fromTemplate(t.key)} data-testid={`REC-workflows-template-${t.key}`}>
+                    <BookTemplate className="h-3.5 w-3.5 mr-1" /> Use
+                  </Button>
+                )}
               </div>
             </div>
           ))}

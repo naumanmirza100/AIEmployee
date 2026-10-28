@@ -17,6 +17,7 @@ from django.utils import timezone
 from core.api_key_service import KeyServiceError
 from recruitment_agent import intent as qa_intent
 from recruitment_agent.core import GroqClient, GroqClientError
+from recruitment_agent.interview_time import when
 from recruitment_agent.ranking import BEST_FIRST, ranks_for
 from recruitment_agent.models import (
     CVRecord,
@@ -562,9 +563,14 @@ RULES:
    requirements." Instead say the field was truncated and the detail may be in the omitted part, and
    tell the user to ask about that specific job to load its full text. Only state that something is
    absent when the relevant field is present IN FULL (no truncation marker) and still does not contain it.
-4. If a field is available in the context (description, requirements, location, department, etc.) — include it in your answer when relevant.
-5. For job details — always show: title, status, location, department, type, description, requirements, candidate count, interview count.
-6. For candidate details — always show: name, score, decision, email if available, summary if available.
+4. Answer the question that was asked, first: the number, the names, the times. Include a field only when it helps
+   answer that question. Never restate a job's description or requirements unless the question is about the job
+   itself ("tell me about the Flutter job", "what does the job need").
+5. When asked about a job itself — show: title, status, location, department, type, description, requirements,
+   candidate count, interview count.
+6. When asked about a candidate — show: name, score, decision, email if available, summary if available. When
+   asked what the research says, answer from the Research lines (and GitHub), not from general advice.
+6a. Interview times are given in the company's time with the zone, as the context writes them; repeat them so.
 7. Default to active jobs unless the user asks about all/inactive jobs.
 8. If the user refers to a candidate, job, or record that is NOT in the context (by name,
    number, or position — e.g. "candidate 2" when only one candidate exists), say plainly
@@ -932,7 +938,8 @@ FORMATTING:
                     "status": intv.status,
                     "outcome": intv.outcome or "",
                     "interview_type": intv.interview_type,
-                    "scheduled_datetime": str(intv.scheduled_datetime) if intv.scheduled_datetime else "",
+                    # In the company's time, with the zone: str() gave UTC ("2026-10-29 05:00:00+00:00" for 10:00 Karachi).
+                    "scheduled_datetime": when(intv) if intv.scheduled_datetime else "",
                     "selected_slot": intv.selected_slot or "",
                 })
 
@@ -1348,6 +1355,25 @@ FORMATTING:
                     val = ', '.join(str(v) for v in val if v)
                 blocks.append(f"{label}: {str(val)[:900]}")
 
+            # The research (an AI profile, and the public GitHub the apply form gave): "what does the research say"
+            # was answered with a made-up checklist, because none of it was here.
+            enriched = json.loads(cv.enriched_json) if cv.enriched_json else {}
+            enriched = enriched if isinstance(enriched, dict) else {}
+            research = enriched.get('research') if isinstance(enriched.get('research'), dict) else {}
+            if research:
+                blocks.append(f"Research headline: {research.get('headline') or 'N/A'} | "
+                              f"Research's view of seniority: {research.get('seniority') or 'Unclear'}")
+                for label, key in (('Research strengths', 'strengths'), ('Research gaps against the job', 'gaps'),
+                                   ('Research: check in the interview', 'verify'), ('Research based on', 'based_on')):
+                    if research.get(key):
+                        blocks.append(f"{label}: " + '; '.join(str(x) for x in research[key]))
+            github = enriched.get('github') if isinstance(enriched.get('github'), dict) else {}
+            if github:
+                recent = ', '.join(r.get('name') or '' for r in github.get('recent') or [])
+                blocks.append(f"GitHub ({github.get('url')}): {github.get('public_repos', 0)} public repositories, "
+                              f"{github.get('account_years', '?')} years on GitHub, languages: "
+                              f"{', '.join(github.get('top_languages') or []) or 'none shown'}; recent: {recent or 'none'}")
+
             reasoning = qual.get('reasoning') or qual.get('justification')
             if reasoning:
                 blocks.append(f"Qualification reasoning: {str(reasoning)[:700]}")
@@ -1355,7 +1381,7 @@ FORMATTING:
             for iv in Interview.objects.filter(cv_record=cv).order_by('-created_at')[:5]:
                 blocks.append(
                     f"Interview: {iv.status} | Outcome: {iv.outcome or 'N/A'} | "
-                    f"Type: {iv.interview_type} | When: {iv.scheduled_datetime or 'not scheduled'}"
+                    f"Type: {iv.interview_type} | When: {when(iv) if iv.scheduled_datetime else 'not booked yet'}"
                 )
 
         return "\n".join(blocks)
@@ -1978,10 +2004,11 @@ Question: "{question}"
 {context}
 
 INSTRUCTIONS:
-- Answer the question clearly and completely. Use exact numbers and names from the context.
-- For each item mentioned (job, candidate, interview) — include all relevant fields: title, status, location, description, requirements, scores, decisions.
-- Format with markdown: ## headings, bullet lists for multiple fields per item.
-- Do not give a one-line answer if the context has more relevant detail.
+- Start with the answer itself (the number, the people, the times), then only the details that support it.
+- Use exact numbers and names from the context. For each person or interview named, give the fields the question
+  is about (score, decision, interview time and status, outcome) — not the job's description or requirements.
+- Format with markdown: a short ## heading, then a list or a small table when there are several items.
+- Do not pad the answer with sections nobody asked for.
 """
         return prompt
 

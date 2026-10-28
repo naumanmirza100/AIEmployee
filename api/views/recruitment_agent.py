@@ -1150,7 +1150,8 @@ def delete_cv_record(request, record_id):
         except Exception:
             logger.warning('delete_cv_record: could not remove file %s', key)
     application = cv.job_application
-    name = cv.file_name
+    _, person = _reject_recipient(cv)
+    name = person if person and person != 'Candidate' else cv.file_name   # the person, not "Ahmed_Raza_CV.pdf"
     cv.delete()
     if application is not None and not application.cv_records.exists():
         if application.cv_file:
@@ -2347,11 +2348,13 @@ def bulk_update_cv_records(request):
 
         # Nothing left to update — every selected candidate has finished interviewing.
         if not qs.exists():
+            finished = [_reject_recipient(cv)[1] for cv in CVRecord.objects.filter(id__in=completed_ids)]
+            who = finished[0] if len(finished) == 1 else f'{len(finished)} of them'
             return Response({
                 'status': 'error',
                 'message': (
-                    f"{skipped_completed} candidate(s) have already completed their interview — "
-                    f"their status can no longer be changed."
+                    f"{who} {'has' if len(finished) == 1 else 'have'} already had the interview, so the decision is "
+                    f"no longer set here: open Interviews and use Change Decision on the interview."
                 ),
                 'skipped_completed': skipped_completed,
                 'updated_count': 0,

@@ -1,6 +1,7 @@
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from recruitment_agent.experience import about_years
 from recruitment_agent.log_service import LogService
 from recruitment_agent.skill_equivalences import (contains_term, is_exact_match, is_related_match,
                                                   skill_matches_keyword)
@@ -703,7 +704,7 @@ class LeadQualificationAgent:
         
         # ========== EXPERIENCE & SCORES SECTION ==========
         if total_exp_years is not None:
-            reasons.append(f"📅 **Professional Experience:** ~{total_exp_years:.1f} years")
+            reasons.append(f"📅 **Professional Experience:** {about_years(total_exp_years)}")
         
         if role_fit_score is not None:
             score_emoji = "🟢" if role_fit_score >= 70 else "🟡" if role_fit_score >= 50 else "🔴"
@@ -743,7 +744,7 @@ class LeadQualificationAgent:
         if enriched_data and enriched_data.get("technical_depth_signals"):
             strengths.append("Strong technical depth indicators")
         if total_exp_years and total_exp_years >= 3:
-            strengths.append(f"Solid experience ({total_exp_years:.1f} years)")
+            strengths.append(f"Solid experience ({about_years(total_exp_years)})")
         
         if strengths:
             reasons.append("**Strengths:**")

@@ -95,12 +95,21 @@ const SkillChip = ({ label, variant = 'default' }) => {
   );
 };
 
+// A candidate's years, said one way across the page (the summary line, the profile, the analysis): to the nearest
+// half year, as recruitment_agent/experience.py writes it. The same CV showed 5.75, ~5.8 and "5-8".
+const aboutYears = (years) => {
+  if (years == null || Number.isNaN(Number(years))) return null;
+  const half = Math.round(Number(years) * 2) / 2;
+  if (half < 1) { const m = Math.max(1, Math.round(Number(years) * 12)); return `about ${m} month${m === 1 ? '' : 's'}`; }
+  return `about ${half} year${half === 1 ? '' : 's'}`;
+};
+
 // What the enrichment step worked out from the CV: role, seniority, experience band, depth signals and how complete
 // the CV is. It was saved with every CV and shown nowhere.
-const EnrichedProfile = ({ enriched }) => {
+const EnrichedProfile = ({ enriched, years }) => {
   const e = enriched || {};
   const seniority = e.seniority_level && e.seniority_level !== 'Unknown' ? e.seniority_level : null;
-  const experience = e.years_experience_bucket ? `${e.years_experience_bucket} years` : null;
+  const experience = aboutYears(years) || (e.years_experience_bucket ? `${e.years_experience_bucket} years` : null);
   const leadership = [...new Set((e.leadership_signals || []).filter((s) => s && s !== 'Leadership signal'))].slice(0, 4);
   const depth = (e.technical_depth_signals || []).slice(0, 8);
   const score = typeof e.profile_completeness_score === 'number' ? e.profile_completeness_score : null;
@@ -526,7 +535,7 @@ const CandidateDetailPage = () => {
                   {(insights.education_level || insights.total_experience_years != null) && (
                     <p className="mt-2 text-xs text-white/50">
                       {insights.education_level && <>Highest education: {insights.education_level}. </>}
-                      {insights.total_experience_years != null && <>Experience: about {insights.total_experience_years} years.</>}
+                      {insights.total_experience_years != null && <>Experience: {aboutYears(insights.total_experience_years)}.</>}
                     </p>
                   )}
                 </Block>
@@ -563,7 +572,7 @@ const CandidateDetailPage = () => {
 
             <div className="space-y-6">
               <ResearchProfile enriched={detail.enriched} />
-              <EnrichedProfile enriched={detail.enriched} />
+              <EnrichedProfile enriched={detail.enriched} years={insights.total_experience_years} />
 
               {(exactSkills.length > 0 || relatedSkills.length > 0 || missingSkills.length > 0) && (
                 <Block title="Skill Match">

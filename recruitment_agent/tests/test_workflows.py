@@ -57,13 +57,27 @@ class WorkflowTests(TestCase):
         workflows.run_for_event('candidate_screened', cv_record=self.cv, detail='HOLD')
         self.assertFalse(PMNotification.objects.exists())
 
-    def test_the_thank_you_goes_in_the_companys_name(self):
-        self.make('thank_applicant')
-        workflows.run_for_event('application_received', cv_record=self.cv)
+    def test_a_held_candidate_hears_in_the_companys_name(self):
+        self.make('hold_update')
+        self.cv.qualification_decision = 'HOLD'
+        self.cv.save()
+        workflows.run_for_event('candidate_screened', cv_record=self.cv, detail='HOLD')
         [sent] = mail.outbox
         self.assertEqual(sent.to, ['cara@mail.test'])
         self.assertIn('Margalla Software', sent.subject)
         self.assertIn('Margalla Software via Pay Per Project', sent.from_email)
+
+    def test_a_candidate_invited_to_interview_gets_no_hold_note(self):
+        self.make('hold_update')
+        workflows.run_for_event('candidate_screened', cv_record=self.cv, detail='INTERVIEW')
+        self.assertEqual(mail.outbox, [])
+
+    def test_an_applicant_is_thanked_once_the_recruiter_is_told(self):
+        # The job page already sends "Application Received"; the template only alerts the recruiter.
+        self.make('new_applicant_alert')
+        workflows.run_for_event('application_received', cv_record=self.cv)
+        self.assertEqual(mail.outbox, [])
+        self.assertTrue(PMNotification.objects.filter(title='New applicant: Cara Khan').exists())
 
     def test_a_hire_reaches_hr_admins(self):
         self.make('hired_to_hr')
@@ -82,7 +96,7 @@ class WorkflowTests(TestCase):
         self.assertTrue(PMNotification.objects.filter(company_user=self.owner, title__contains='stopped').exists())
 
     def test_only_the_owner_or_an_admin_sets_them_up_and_steps_are_checked(self):
-        response = self.call(views.workflow_from_template, self.member, 'post', {'template_key': 'thank_applicant'})
+        response = self.call(views.workflow_from_template, self.member, 'post', {'template_key': 'hold_update'})
         self.assertEqual(response.status_code, 403)
         self.assertIn("Only the company's owner or an admin", response.data['message'])
         response = self.call(views.workflow_list, self.owner, 'post', {
@@ -92,9 +106,12 @@ class WorkflowTests(TestCase):
         self.assertIn('waiting steps are not available', response.data['message'])
 
     def test_a_test_run_sends_nothing(self):
-        wf = self.make('thank_applicant')
+        self.cv.qualification_decision = 'HOLD'
+        self.cv.save()
+        wf = self.make('hold_update')
         response = self.call(views.workflow_test, self.member, 'post', {}, workflow_id=wf.id)
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data['data']['candidate'], 'Cara Khan')
-        self.assertTrue(all(step.get('simulated') for step in response.data['data']['results']['results']))
+        steps = response.data['data']['results']['results']
+        self.assertTrue([s for s in steps if s.get('type') == 'send_email' and s.get('simulated')], steps)
         self.assertEqual(mail.outbox, [])

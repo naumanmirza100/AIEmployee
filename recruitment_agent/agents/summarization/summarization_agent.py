@@ -548,6 +548,13 @@ class SummarizationAgent:
                 "parsed_cv": reduced_cv,
                 "job_keywords": job_keywords if job_keywords else None,
             }
+            # The years from the CV's dates, worked out here: the summary wrote its own guess ("approximately 3
+            # years") beside the computed figure on the same card.
+            years = self._estimate_total_experience_years(parsed_cv.get("experience"))
+            if years is not None:
+                from recruitment_agent.experience import about_years
+                input_data["total_experience_from_dates"] = (
+                    f"{about_years(years)}. If the summary mentions years of experience, use exactly this figure.")
             
             # Convert to JSON string for LLM
             input_text = json.dumps(input_data, indent=2, ensure_ascii=False)
@@ -817,19 +824,18 @@ class SummarizationAgent:
             return None
         text = str(value).strip()
         # Try formats: YYYY, MMM YYYY, Month YYYY
-        for fmt in ("%b %Y", "%B %Y", "%Y-%m-%d", "%Y/%m/%d", "%Y"):
+        # The one date reader: a second _parse_date further down, without the year-alone rule, overrode this one.
+        for fmt in ("%b %Y", "%B %Y", "%Y-%m-%d", "%Y/%m/%d", "%Y-%m", "%m/%Y", "%d %B %Y", "%d %b %Y"):
             try:
                 dt = datetime.strptime(text, fmt)
                 return dt
             except ValueError:
                 continue
-        # If numeric year in text
+        # A year alone ("2021 to 2022") is read as the middle of that year. As 1 January, "2021 to present" gave a
+        # candidate who started that summer most of an extra year.
         m = re.search(r"(20\d{2}|19\d{2})", text)
         if m:
-            try:
-                return datetime.strptime(m.group(1), "%Y")
-            except ValueError:
-                return None
+            return datetime(int(m.group(1)), 7, 1)
         return None
 
     def _extract_key_skills(self, skills: Any, limit: int = 10) -> List[str]:
@@ -1474,36 +1480,6 @@ Return ONLY JSON, no other text."""
             return 3
         else:
             return 1
-    
-    def _parse_date(self, date_str: str):
-        """Parse date string to datetime object, handling various formats."""
-        if not date_str:
-            return None
-        
-        from datetime import datetime
-        
-        date_str = str(date_str).strip()
-        
-        # Common formats
-        formats = [
-            "%Y-%m-%d",
-            "%Y/%m/%d",
-            "%m/%Y",
-            "%Y-%m",
-            "%Y",
-            "%B %Y",
-            "%b %Y",
-            "%d %B %Y",
-            "%d %b %Y",
-        ]
-        
-        for fmt in formats:
-            try:
-                return datetime.strptime(date_str, fmt)
-            except ValueError:
-                continue
-        
-        return None
     
     def _has_leadership_role(self, experience: Any) -> bool:
         if not experience or not isinstance(experience, list):
