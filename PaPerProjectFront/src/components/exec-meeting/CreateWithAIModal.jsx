@@ -154,9 +154,11 @@ export const CreateWithAIModal = ({ open, onClose, mode = 'meeting', onParsed, i
         ? { ...data, assignees: merged }
         : { ...data, participants: merged };
 
+      // What the draft could not do: a name that is nobody in the company, a time that has passed (live run, 28 Oct).
+      const warnings = Array.isArray(res?.warnings) ? res.warnings : [];
       toast({
         title: 'Draft ready',
-        description: 'Review the details and members, then save.',
+        description: [...warnings, 'Review the details and members, then save.'].join(' '),
       });
       // Hand the parsed fields to the parent, which opens the normal dialog
       // pre-filled. We also return the prompt so the parent can offer an

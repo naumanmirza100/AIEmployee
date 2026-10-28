@@ -299,6 +299,22 @@ def page(company_user) -> dict:
 
 # ---- the email ----------------------------------------------------------------
 
+def backend_url(path=''):
+    """The server's public address, for links in emails that the server answers itself (an invitation's Accept
+    and Decline). Project Manager's and Executive Meeting's read BACKEND_PUBLIC_URL / PUBLIC_BACKEND_URL only, which
+    the live site does not set, and fell back to http://localhost:8000: every such button was dead (live run,
+    28 Oct 2026). BACKEND_URL is the one the live site sets (Recruitment's booking links use it)."""
+    from django.conf import settings
+    base = ''
+    for name in ('BACKEND_PUBLIC_URL', 'PUBLIC_BACKEND_URL', 'BACKEND_URL', 'SITE_URL'):
+        base = str(getattr(settings, name, '') or '').strip().rstrip('/')
+        if base:
+            break
+    if base and not base.startswith('http'):
+        base = f'https://{base}'
+    return f'{base}{path}' if path else base
+
+
 def frontend_url(path=''):
     from django.conf import settings
     base = (getattr(settings, 'FRONTEND_URL', '') or '').rstrip('/')
