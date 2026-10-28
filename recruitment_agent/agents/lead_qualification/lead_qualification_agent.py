@@ -2,7 +2,8 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from recruitment_agent.log_service import LogService
-from recruitment_agent.skill_equivalences import skill_matches_keyword, is_exact_match, is_related_match
+from recruitment_agent.skill_equivalences import (contains_term, is_exact_match, is_related_match,
+                                                  skill_matches_keyword)
 
 
 class LeadQualificationAgent:
@@ -234,33 +235,33 @@ class LeadQualificationAgent:
         
         # MERN Stack → MongoDB, Express.js, React, Node.js
         # Only infer if "MERN" is explicitly mentioned (not individual components)
-        if "mern" in combined_text and "mern stack" in combined_text:
+        if contains_term(combined_text, "mern") and contains_term(combined_text, "mern stack"):
             add_if_new("MongoDB")
             add_if_new("Express.js")
             add_if_new("React")
             add_if_new("Node.js")
         
         # React Native → React
-        if "react native" in combined_text and "react" not in seen:
+        if contains_term(combined_text, "react native") and "react" not in seen:
             add_if_new("React")
         
         # AI/LLM/Agentic signals → LLMs, NLP, Transformers
         ai_terms = ["ai engineer", "agentic", "llm", "large language model", "language model", "nlp", "natural language"]
-        if any(term in combined_text for term in ai_terms):
+        if any(contains_term(combined_text, term) for term in ai_terms):
             add_if_new("LLMs")
             add_if_new("NLP")
-            if "transformer" in combined_text or "bert" in combined_text or "gpt" in combined_text:
+            if contains_term(combined_text, "transformer") or contains_term(combined_text, "bert") or contains_term(combined_text, "gpt"):
                 add_if_new("Transformers")
         
         # Backend/API work → Node.js, API design
-        if any(term in combined_text for term in ["backend", "api", "rest", "graphql", "microservice"]):
+        if any(contains_term(combined_text, term) for term in ["backend", "api", "rest", "graphql", "microservice"]):
             if "node" not in seen and "node.js" not in seen:
                 add_if_new("Node.js")
             add_if_new("API Design")
         
         # Full Stack → implies both frontend and backend
         # Only infer if explicitly mentioned as "full stack" role
-        if ("full stack" in combined_text or "fullstack" in combined_text) and any(term in combined_text for term in ["developer", "engineer", "role", "position"]):
+        if (contains_term(combined_text, "full stack") or contains_term(combined_text, "fullstack")) and any(contains_term(combined_text, term) for term in ["developer", "engineer", "role", "position"]):
             if "frontend" not in seen:
                 add_if_new("Frontend Development")
             if "backend" not in seen:
@@ -269,29 +270,29 @@ class LeadQualificationAgent:
         # Database signals - only if they actually worked with databases (not just mentioned)
         # Look for action verbs indicating database work
         db_action_verbs = ["designed database", "created database", "managed database", "database design", "database schema", "database modeling"]
-        if any(verb in combined_text for verb in db_action_verbs):
+        if any(contains_term(combined_text, verb) for verb in db_action_verbs):
             if "database" not in seen and "database design" not in seen:
                 add_if_new("Database Design")
         
         # Cloud/AWS signals
-        if any(term in combined_text for term in ["aws", "cloud", "azure", "gcp", "deployment"]):
+        if any(contains_term(combined_text, term) for term in ["aws", "cloud", "azure", "gcp", "deployment"]):
             if "cloud" not in seen:
                 add_if_new("Cloud Infrastructure")
         
         # Teaching/Mentoring/Leadership → Communication skills
         # Only infer if there's strong evidence (not just mentions in job titles)
         leadership_strong_terms = ["mentored", "taught", "trained", "led team", "managed team", "presented to", "director of"]
-        if any(term in combined_text for term in leadership_strong_terms):
+        if any(contains_term(combined_text, term) for term in leadership_strong_terms):
             add_if_new("Communication")
             add_if_new("Leadership")
         
         # Docker/Containerization
-        if "docker" in combined_text or "container" in combined_text:
+        if contains_term(combined_text, "docker") or contains_term(combined_text, "container"):
             add_if_new("Docker")
             add_if_new("Containerization")
         
         # CI/CD signals
-        if any(term in combined_text for term in ["ci/cd", "jenkins", "github actions", "gitlab", "pipeline"]):
+        if any(contains_term(combined_text, term) for term in ["ci/cd", "jenkins", "github actions", "gitlab", "pipeline"]):
             add_if_new("CI/CD")
         
         return inferred
@@ -333,12 +334,12 @@ class LeadQualificationAgent:
         
         # MERN/MEAN/MEVN Stack - JavaScript-based full stack
         # Only infer if "MERN/MEAN/MEVN" is explicitly mentioned OR they have 3+ components
-        has_mern_explicit = any(term in combined_skills_text for term in ["mern", "mean", "mevn"])
+        has_mern_explicit = any(contains_term(combined_skills_text, term) for term in ["mern", "mean", "mevn"])
         mern_components = sum([
-            "mongodb" in combined_skills_text or "mongo" in combined_skills_text,
-            "express" in combined_skills_text or "express.js" in combined_skills_text,
-            "react" in combined_skills_text or "angular" in combined_skills_text or "vue" in combined_skills_text,
-            "node.js" in combined_skills_text or "nodejs" in combined_skills_text or "node" in combined_skills_text
+            contains_term(combined_skills_text, "mongodb") or contains_term(combined_skills_text, "mongo"),
+            contains_term(combined_skills_text, "express") or contains_term(combined_skills_text, "express.js"),
+            contains_term(combined_skills_text, "react") or contains_term(combined_skills_text, "angular") or contains_term(combined_skills_text, "vue"),
+            contains_term(combined_skills_text, "node.js") or contains_term(combined_skills_text, "nodejs") or contains_term(combined_skills_text, "node")
         ])
         
         if has_mern_explicit or mern_components >= 3:  # Changed from 2 to 3
@@ -349,12 +350,12 @@ class LeadQualificationAgent:
                 add_if_new("ES6+")
         
         # Django Stack - Python-based full stack
-        if "django" in combined_skills_text or "python" in combined_skills_text:
+        if contains_term(combined_skills_text, "django") or contains_term(combined_skills_text, "python"):
             # Check if they have Django + at least one other web component
-            has_django = "django" in combined_skills_text
-            has_python_web = any(term in combined_skills_text for term in ["flask", "fastapi", "python"])
+            has_django = contains_term(combined_skills_text, "django")
+            has_python_web = any(contains_term(combined_skills_text, term) for term in ["flask", "fastapi", "python"])
             
-            if has_django or (has_python_web and any(term in combined_skills_text for term in ["sql", "postgresql", "mysql", "database"])):
+            if has_django or (has_python_web and any(contains_term(combined_skills_text, term) for term in ["sql", "postgresql", "mysql", "database"])):
                 for skill in common_fullstack_skills:
                     add_if_new(skill)
                 # Python-specific
@@ -364,33 +365,33 @@ class LeadQualificationAgent:
                     add_if_new("REST API")
         
         # .NET Stack - C# based
-        if any(term in combined_skills_text for term in [".net", "c#", "asp.net", "entity framework"]):
+        if any(contains_term(combined_skills_text, term) for term in [".net", "c#", "asp.net", "entity framework"]):
             for skill in common_fullstack_skills:
                 add_if_new(skill)
             if "linq" not in seen:
                 add_if_new("LINQ")
         
         # Spring Boot / Java Stack
-        if any(term in combined_skills_text for term in ["spring", "spring boot", "java", "hibernate"]):
+        if any(contains_term(combined_skills_text, term) for term in ["spring", "spring boot", "java", "hibernate"]):
             for skill in common_fullstack_skills:
                 add_if_new(skill)
             if "jpa" not in seen:
                 add_if_new("JPA")
         
         # Laravel / PHP Stack
-        if any(term in combined_skills_text for term in ["laravel", "php", "symfony"]):
+        if any(contains_term(combined_skills_text, term) for term in ["laravel", "php", "symfony"]):
             for skill in common_fullstack_skills:
                 add_if_new(skill)
         
         # React / Frontend frameworks
-        if any(term in combined_skills_text for term in ["react", "vue", "angular", "next.js"]):
+        if any(contains_term(combined_skills_text, term) for term in ["react", "vue", "angular", "next.js"]):
             if "frontend–backend api integration" not in seen:
                 add_if_new("Frontend–backend API integration")
             if "state management" not in seen:
                 add_if_new("State Management")
         
         # Backend frameworks (Express, NestJS, etc.)
-        if any(term in combined_skills_text for term in ["express", "nestjs", "koa", "fastapi", "flask"]):
+        if any(contains_term(combined_skills_text, term) for term in ["express", "nestjs", "koa", "fastapi", "flask"]):
             if "backend business logic" not in seen:
                 add_if_new("Backend business logic")
             if "api design" not in seen:
@@ -400,11 +401,11 @@ class LeadQualificationAgent:
         
         # Database work - only if they have multiple database-related skills
         db_skills_count = sum([
-            "mongodb" in combined_skills_text or "mongo" in combined_skills_text,
-            "mysql" in combined_skills_text,
-            "postgresql" in combined_skills_text or "postgres" in combined_skills_text,
-            "sql" in combined_skills_text,
-            "database" in combined_skills_text
+            contains_term(combined_skills_text, "mongodb") or contains_term(combined_skills_text, "mongo"),
+            contains_term(combined_skills_text, "mysql"),
+            contains_term(combined_skills_text, "postgresql") or contains_term(combined_skills_text, "postgres"),
+            contains_term(combined_skills_text, "sql"),
+            contains_term(combined_skills_text, "database")
         ])
         # Only infer if they have 2+ database skills (not just one mention)
         if db_skills_count >= 2:

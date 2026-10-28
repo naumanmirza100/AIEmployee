@@ -2,7 +2,7 @@
 Shared skill equivalences and related-terms for matching job keywords to CV skills.
 Node.js ↔ JavaScript, React ↔ ReactJS, etc. Used by Lead Qualification and Summarization.
 """
-from typing import Optional
+import re
 from typing import Optional
 
 SKILL_EQUIVALENCES = {
@@ -195,6 +195,15 @@ def get_all_match_terms(keyword: str) -> set:
     return out
 
 
+
+def contains_term(text: str, term: str) -> bool:
+    """`term` in `text` as a whole term: "react" in "react.js developer", but not "api" in "rapid", "java" in
+    "javascript" or "it" in "university". Plain substring tests gave those matches and changed decisions."""
+    if not text or not term:
+        return False
+    return re.search(r'(?<![a-z0-9])' + re.escape(term) + r'(?![a-z0-9])', text) is not None
+
+
 def skill_matches_keyword(skill_lower: str, keyword_lower: str) -> bool:
     """
     True if candidate skill matches job keyword (direct, equivalence, substring, or same database type).
@@ -216,8 +225,8 @@ def skill_matches_keyword(skill_lower: str, keyword_lower: str) -> bool:
     # Database type matching: if both are databases of the same type, they match
     if databases_same_type(skill_lower, keyword_lower):
         return True
-    # Substring match
-    if keyword_lower in skill_lower or skill_lower in keyword_lower:
+    # One contains the other as a whole term ("react" in "react.js"; not "api" in "rapid")
+    if contains_term(skill_lower, keyword_lower) or contains_term(keyword_lower, skill_lower):
         return True
     return False
 
@@ -253,7 +262,7 @@ def is_exact_match(skill_lower: str, keyword_lower: str) -> bool:
     
     # If not related through equivalences, check substring match
     # (e.g., "react" in "react.js" or "react.js" contains "react")
-    if keyword_lower in skill_lower or skill_lower in keyword_lower:
+    if contains_term(skill_lower, keyword_lower) or contains_term(keyword_lower, skill_lower):
         return True
     
     return False

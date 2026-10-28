@@ -8,7 +8,8 @@ from core.api_key_service import KeyServiceError
 from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.log_service import LogService
 from recruitment_agent.agents.summarization.prompts import SUMMARIZATION_SYSTEM_PROMPT
-from recruitment_agent.skill_equivalences import skill_matches_keyword, get_all_match_terms, is_exact_match, is_related_match
+from recruitment_agent.skill_equivalences import (contains_term, get_all_match_terms, is_exact_match,
+                                                  is_related_match, skill_matches_keyword)
 
 
 class SummarizationAgent:
@@ -1165,7 +1166,7 @@ Return ONLY JSON, no other text."""
                     terms.add(kw_lower)
                     
                     # Check if any term appears in experience text
-                    if any(term in combined_exp_text for term in terms):
+                    if any(contains_term(combined_exp_text, term) for term in terms):   # whole terms
                         exp_keywords_found.add(kw)
             
             exp_match_count = len(exp_keywords_found)
@@ -1341,9 +1342,10 @@ Return ONLY JSON, no other text."""
             "bsc", "msc", "mtech", "btech"
         ]
         
-        if any(deg in education_lower for deg in relevant_degrees):
+        # Whole words: "it" was found in "university", so every degree scored as a computing degree.
+        if any(contains_term(education_lower, deg) for deg in relevant_degrees):
             return 10
-        elif any(deg in education_lower for deg in related_degrees):
+        elif any(contains_term(education_lower, deg) for deg in related_degrees):
             return 5
         else:
             return 2  # Other degree
@@ -1381,7 +1383,7 @@ Return ONLY JSON, no other text."""
             
             # Check if cert matches job keywords
             for kw in job_kw_lower:
-                if kw in cert_text or cert_text in kw:
+                if contains_term(cert_text, kw) or contains_term(kw, cert_text):
                     relevant_count += 1
                     break
             
