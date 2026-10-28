@@ -398,10 +398,14 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 f'```\n{outline}\n```\n\n'
             )
 
+        # Today's date, so a memo or letter is dated; it wrote "Date: [Today]" (live run, 28 Oct 2026).
+        from django.utils import timezone as _tz
+        today = _tz.localdate()
         user_prompt = (
             f"TEMPLATE: {template_info['name']}\n"
             f"TONE: {tone.capitalize()} — {tone_guide}\n"
-            f"TITLE (use exactly): {resolved_title}\n\n"
+            f"TITLE (use exactly): {resolved_title}\n"
+            f"TODAY'S DATE: {today.day} {today.strftime('%B %Y')} (use it wherever the document is dated)\n\n"
             f"USER INSTRUCTIONS:\n{prompt}\n\n"
             f"{outline_block}"
             f"TEMPLATE-SPECIFIC GUIDANCE:\n{template_info['guidance']}\n\n"
@@ -495,6 +499,22 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         return '\n\n'.join(p for p in pieces if p).strip()
 
     def _suggest_title(self, prompt: str, template_name: str) -> str:
+        """A short title for the document, from the AI. It was the request's first eight words: "A one-page memo to
+        the management team before" (found on the live run, 28 Oct 2026). Those are kept only when the AI gives
+        nothing."""
+        try:
+            title = self._call_llm_for_reasoning(
+                f'Write a short, specific title (at most 8 words) for this {template_name}. The request: "{prompt[:800]}". '
+                'Return only the title, with no quotes and no full stop.',
+                temperature=0.2, max_tokens=30)
+            title = (title or '').strip().strip('"\'').rstrip('.').strip()
+            if 3 <= len(title) <= 90 and '\n' not in title:
+                return title
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            logger.info('Authoring: no AI title (%s)', e)
         words = prompt.split()[:8]
         base = ' '.join(words).strip(' .,:;')
         if not base:

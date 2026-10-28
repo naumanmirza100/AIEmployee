@@ -111,6 +111,15 @@ def clean_entities(entities) -> dict:
             for key, values in entities.items() if clean_items(values)}
 
 
+def no_text_message(file_type) -> str:
+    """Why a file gave no text, and what to do. It said only "No text could be extracted from this document"
+    (found on the live run, 28 Oct 2026: a scanned invoice)."""
+    if file_type == 'pdf':
+        return ('No text could be read from this PDF. It looks like a scan or a photo of a page, and Operations reads '
+                'text, not pictures of text. Upload the original document, or a PDF whose text you can select.')
+    return 'This file has no text in it to read. Check that it is the right file, then upload it again.'
+
+
 #: What the processing returns when the entry was deleted while it was being processed (CO-172).
 DELETED_MEANWHILE = 'The document was deleted while it was being processed.'
 
@@ -240,7 +249,7 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             return _fail(placeholder, error)
 
         if not extracted_text or not extracted_text.strip():
-            return _fail(placeholder, 'No text could be extracted from this document')
+            return _fail(placeholder, no_text_message(file_type))
 
         # 3. Auto-classify document type via LLM
         doc_type = self._classify_document(text=extracted_text[:3000])

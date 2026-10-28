@@ -181,7 +181,8 @@ def my_hr_ask(request):
                 'answer': instead, 'has_verified_info': False, 'sources': [], 'redirect': reading['kind']}})
         result = HRAgent(company_id=company.id).answer_question(
             question, asker_role='employee', asker_employee=emp,
-            search_query=(reading or {}).get('english'), wants_everything=reading['full_list'] if reading else None)
+            search_query=(reading or {}).get('english'), wants_everything=reading['full_list'] if reading else None,
+            language=(reading or {}).get('language'))
     except KeyServiceError:
         # The company's AI allowance or key is between us and the company; an employee is
         # not shown billing messages, and a 402/403 would sign them out of My Space.

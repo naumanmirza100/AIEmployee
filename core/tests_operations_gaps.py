@@ -10,7 +10,7 @@ from django.test import Client, TestCase
 from django.utils import timezone
 
 from core.models import Company, CompanyModulePurchase, CompanyUser, CompanyUserToken
-from operations_agent import tasks
+from operations_agent import intent, tasks
 from operations_agent.agents import document_processing_agent as dpa
 from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
 from operations_agent.agents.summarization_agent import DocumentSummarizationAgent, clean_deadlines
@@ -282,6 +282,57 @@ class RealPagesTests(TestCase):
     def test_no_pages_no_page_number(self):
         pairs = DocumentProcessingAgent()._chunk_pairs('Some memo text. ' * 100, 1, 'other', None)
         self.assertIsNone(pairs[0][2])
+
+
+class LiveRunFixesTests(OpsCase):
+    """Found on the Operations live run on Margalla, 28 Oct 2026 (F2 to F9)."""
+
+    def test_a_scan_says_why_and_what_to_do(self):                                  # F2
+        self.assertIn('scan or a photo', dpa.no_text_message('pdf'))
+        self.assertIn('no text in it', dpa.no_text_message('txt'))
+
+    def test_the_summary_asks_for_what_must_be_done_and_amounts_as_written(self):   # F3, F4
+        import inspect
+        from operations_agent.agents import summarization_agent as sa
+        source = inspect.getsource(sa)
+        self.assertIn('notices to give, payments due, renewals', source)
+        self.assertIn('with its currency', source)
+
+    def test_the_deadline_alert_reads_a_date_and_rings_the_bell(self):               # F5, F9
+        from operations_agent.signals import alert_upcoming_deadlines
+        from project_manager_agent.models import PMNotification
+        today = timezone.localdate()
+        summary = OperationsDocumentSummary.objects.create(
+            company=self.company, created_by=self.nadia, original_filename='lease.pdf', rich_summary='x',
+            processing_status='processing',
+            deadlines=[{'date': (today + timedelta(days=5)).isoformat(), 'description': 'Renewal notice'}])
+        created = alert_upcoming_deadlines(summary, today)
+        self.assertIn('by ' + (today + timedelta(days=5)).strftime('%d %b %Y').lstrip('0'), created.message)
+        bell = PMNotification.objects.filter(company_user=self.nadia, data__kind='operations_deadline').first()
+        self.assertIsNotNone(bell)
+        self.assertIn('lease.pdf', bell.title)
+
+    def test_an_english_follow_up_gets_no_language_line(self):                       # F6
+        from core.answer_language import line
+        self.assertEqual(line('On the results slide, what about the margin?',
+                              'What does the speaker say about the margin on the Q3 results slide?', 'english'), '')
+        self.assertIn('Roman Urdu', line('margin kitna hai?', 'What is the margin?', 'roman_urdu'))
+        self.assertIn('Urdu script', line('دفتر کے اوقات؟', 'What are the office hours?', 'urdu'))
+
+    def test_company_matters_in_any_script_are_documents(self):                      # F7
+        self.assertIn('in any language or script', intent._PROMPT)
+
+    def test_a_real_title_and_todays_date(self):                                     # F8
+        from operations_agent.agents.document_authoring_agent import DocumentAuthoringAgent
+        agent = DocumentAuthoringAgent()
+        with mock.patch.object(agent, '_call_llm_for_reasoning', return_value='Q3 Results and FinEdge Renewal'):
+            self.assertEqual(agent._suggest_title('A one-page memo to the management team before ...', 'Memo'),
+                             'Q3 Results and FinEdge Renewal')
+        with mock.patch.object(agent, '_call_llm_for_reasoning', side_effect=ValueError('down')):
+            self.assertTrue(agent._suggest_title('A memo about the lease', 'Memo').startswith('A memo about'))
+        with mock.patch.object(agent, '_suggest_title', return_value='Memo'):
+            prepared = agent._prepare_prompt(self.company.id, 'memo', 'memo', 'formal', None, None)
+        self.assertIn("TODAY'S DATE: ", prepared['user_prompt'])
 
 
 class VersionsTests(OpsCase):

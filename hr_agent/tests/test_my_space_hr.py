@@ -99,7 +99,7 @@ class MySpaceHRTests(HRTestCase):
         self.assertEqual(code, 200, body)
         self.assertEqual(body['data']['sources'], [{'title': 'Leave Policy 2026'}])
         self.assertEqual(ask.call_args.kwargs, {'asker_role': 'employee', 'asker_employee': self.sara,
-                                                'search_query': None, 'wants_everything': None})
+                                                'search_query': None, 'wants_everything': None, 'language': None})
 
     def test_without_the_hr_agent_or_an_hr_record_the_page_says_so(self):
         CompanyModulePurchase.objects.filter(company=self.company).update(status='cancelled')

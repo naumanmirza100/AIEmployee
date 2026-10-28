@@ -11,6 +11,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import * as operationsService from '@/services/operationsAgentService';
 import { FiguresTable } from './DocumentFiguresPanel';
+import { formatDeadline } from './formatDeadline';
 
 // ──────────────────────────────────────────────
 // Theme (matches rest of Operations module — amber)
@@ -338,7 +339,7 @@ const AnalyticsDashboardTab = () => {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-white/90 truncate">{d.description || '—'}</div>
                       <div className="text-[11px] text-white/45 flex items-center gap-2 mt-0.5 truncate">
-                        {d.date && <span className="text-amber-300">{d.date}</span>}
+                        {d.date && <span className="text-amber-300">{formatDeadline(d.date)}</span>}
                         {d.date && d.source && <span>·</span>}
                         {d.source && <span className="truncate">{d.source}</span>}
                       </div>

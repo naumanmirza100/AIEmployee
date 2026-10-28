@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import * as operationsService from '@/services/operationsAgentService';
+import { formatDeadline } from './formatDeadline';
 
 // ─── Helpers ────────────────────────────────
 const FILE_TYPE_CONFIG = {
@@ -449,7 +450,7 @@ const SummaryDetailPage = () => {
                     <span className="text-xs text-white/50 leading-relaxed">
                       {typeof dl === 'string' ? dl : (
                         <>
-                          {dl?.date && <span className="text-orange-300 font-medium mr-1.5">{dl.date}</span>}
+                          {dl?.date && <span className="text-orange-300 font-medium mr-1.5">{formatDeadline(dl.date)}</span>}
                           {dl?.description || 'Deadline'}
                         </>
                       )}

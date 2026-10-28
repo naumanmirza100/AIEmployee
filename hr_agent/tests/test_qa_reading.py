@@ -135,6 +135,17 @@ class AnswerTests(HRTestCase):
         prompt = model.call_args.kwargs['prompt']
         self.assertTrue(prompt.startswith('LANGUAGE: the person asked, in their own words: "ghar se kaam kitne din?"'))
 
+    def test_an_english_follow_up_after_roman_urdu_stays_english(self):
+        from core.HR_agent.hr_agent import HRAgent
+        agent = HRAgent(company_id=self.company.id)
+        found = {'has_verified_info': True, 'excerpts': [{'title': 'Handbook', 'content': 'Ten days of sick leave.'}]}
+        with mock.patch.object(agent.knowledge_service, 'get_answer', return_value=found), \
+                mock.patch.object(agent, '_call_llm', return_value='Ten days.') as model:
+            agent.answer_question('Previous conversation:\nUser: chutti kitni hai?\n\nCurrent question: and for sick leave?',
+                                  asker_role='admin', search_query='How many days of sick leave do employees get?',
+                                  language='english')
+        self.assertNotIn('LANGUAGE:', model.call_args.kwargs['prompt'])
+
     def test_an_english_question_gets_no_language_line(self):
         from core.HR_agent.hr_agent import HRAgent
         agent = HRAgent(company_id=self.company.id)

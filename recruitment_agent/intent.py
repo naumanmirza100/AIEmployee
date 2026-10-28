@@ -18,6 +18,8 @@ import logging
 
 from django.conf import settings
 
+from core.answer_language import LANGUAGES
+
 logger = logging.getLogger(__name__)
 
 KINDS = ('data', 'general', 'action', 'greeting', 'not_allowed', 'off_topic')
@@ -60,6 +62,9 @@ Return ONLY a JSON object:
  "wants": one of "count", "list", "detail", "best", "compare", "summary", "other",
  "area": for an "action", one of "interview", "decision", "job", "cv", "email",
          "delete" (remove candidates or jobs: "delete every rejected candidate"), "other"; else null,
+ "language": the language of the words of Message alone, never of the conversation before it: "english",
+             "roman_urdu" (Urdu or Hindi in Latin letters), "urdu" (Urdu script) or "other". "and how does Mahnoor
+             compare with him?" is "english" even after Roman Urdu messages,
  "confidence": a number from 0 to 1}}"""
 
 
@@ -110,6 +115,7 @@ def read(message, history=None, *, client):
         'candidate': text('candidate'),
         'wants': reading.get('wants') if reading.get('wants') in WANTS else 'other',
         'area': reading.get('area') if reading.get('area') in AREAS else None,
+        'language': reading.get('language') if reading.get('language') in LANGUAGES else None,
     }
 
 
