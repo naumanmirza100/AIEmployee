@@ -48,6 +48,8 @@ class SummarizationAgent:
                         # Use manual experience calculation (more accurate)
                         if manual_exp is not None:
                             llm_result["total_experience_years"] = manual_exp
+                            llm_result["candidate_summary"] = self._say_total_years(
+                                llm_result.get("candidate_summary"), manual_exp)
                         
                         # Validate and correct role_fit_score if needed
                         llm_score = llm_result.get("role_fit_score")
@@ -217,6 +219,8 @@ class SummarizationAgent:
                                         manual_exp = self._estimate_total_experience_years(validated.get("experience"))
                                         if manual_exp is not None:
                                             llm_result["total_experience_years"] = manual_exp
+                                            llm_result["candidate_summary"] = self._say_total_years(
+                                                llm_result.get("candidate_summary"), manual_exp)
                                         
                                         # Validate and correct role_fit_score if needed (same logic as above)
                                         llm_score = llm_result.get("role_fit_score")
@@ -598,6 +602,19 @@ class SummarizationAgent:
         if missing:
             raise ValueError(f"Parsed CV missing required keys: {sorted(missing)}")
         return parsed
+
+    # "approximately 2 years of professional experience": a total, not "4 years of React experience".
+    _TOTAL_YEARS = re.compile(
+        r"\b(?:(?:approximately|about|around|roughly|over|nearly|almost|some)\s+)?\d+(?:\.\d+)?\+?\s+years?"
+        r"(?=\s+of\s+(?:professional\s+|total\s+|work\s+|industry\s+|relevant\s+)?experience\b)", re.I)
+
+    def _say_total_years(self, summary, years):
+        """The summary with its total years said as the page says them. The AI worked out its own figure ("about 2
+        years") and wrote it beside the one from the CV's dates ("about 5.5 years") on the same card."""
+        if not summary or years is None:
+            return summary
+        from recruitment_agent.experience import about_years
+        return self._TOTAL_YEARS.sub(about_years(years), str(summary))
 
     def _estimate_total_experience_years(self, experience: Any) -> Optional[float]:
         """

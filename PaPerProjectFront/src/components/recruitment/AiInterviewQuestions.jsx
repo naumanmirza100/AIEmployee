@@ -310,34 +310,35 @@ const AiInterviewQuestions = () => {
       setPending({ question: q, answer: '' });
       setTimeout(scrollToBottom, 50);
       if (inputMode === 'graph') {
-        const result = await generateGraph(q);
-        if (result.status === 'success' && result.data) {
+        let assistantMsg;
+        try {
+          const result = await generateGraph(q);
+          if (!(result.status === 'success' && result.data)) throw new Error(result.message || 'Failed to generate graph');
           const { chart, insights } = result.data;
-          const userMsg = { role: 'user', content: q, ts: new Date().toISOString() };
-          const assistantMsg = {
+          assistantMsg = {
             role: 'assistant',
             content: chart?.title ? `**${chart.title}**` : 'Chart generated',
             responseData: { isGraph: true, chart, insights, chartTitle: chart?.title, chartType: chart?.type },
             ts: new Date().toISOString(),
           };
-          const title = q.slice(0, 40);
-          if (selectedChatId) {
-            const existing = chats.find((c) => c.id === selectedChatId);
-            if (existing) {
-              const newMessages = [...(existing.messages || []), userMsg, assistantMsg];
-              const updRes = await updateQAChat(selectedChatId, { messages: [userMsg, assistantMsg], title: existing.title || title });
-              if (updRes.status === 'success' && updRes.data) {
-                const updatedChat = normalizeChat(updRes.data);
-                setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
-              } else throw new Error(updRes.message || 'Failed to save chat');
-            } else {
-              const createRes = await createQAChat({ title, messages: [userMsg, assistantMsg] });
-              if (createRes.status === 'success' && createRes.data) {
-                const newChat = normalizeChat(createRes.data);
-                setChats((prev) => [newChat, ...prev]);
-                setSelectedChatId(newChat.id);
-              } else throw new Error(createRes.message || 'Failed to create chat');
-            }
+        } catch (graphError) {
+          // A chart the data cannot make is refused with the reason and what can be charted (400). That is an
+          // answer: it goes in the conversation. It showed as an "Error" pop-up that vanished, the question put
+          // back in the box, so it looked as if nothing had been sent.
+          if (graphError.status !== 400 || !graphError.message) throw graphError;
+          assistantMsg = { role: 'assistant', content: graphError.message, ts: new Date().toISOString() };
+        }
+        const userMsg = { role: 'user', content: q, ts: new Date().toISOString() };
+        const title = q.slice(0, 40);
+        if (selectedChatId) {
+          const existing = chats.find((c) => c.id === selectedChatId);
+          if (existing) {
+            const newMessages = [...(existing.messages || []), userMsg, assistantMsg];
+            const updRes = await updateQAChat(selectedChatId, { messages: [userMsg, assistantMsg], title: existing.title || title });
+            if (updRes.status === 'success' && updRes.data) {
+              const updatedChat = normalizeChat(updRes.data);
+              setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
+            } else throw new Error(updRes.message || 'Failed to save chat');
           } else {
             const createRes = await createQAChat({ title, messages: [userMsg, assistantMsg] });
             if (createRes.status === 'success' && createRes.data) {
@@ -346,11 +347,16 @@ const AiInterviewQuestions = () => {
               setSelectedChatId(newChat.id);
             } else throw new Error(createRes.message || 'Failed to create chat');
           }
-          setQuestion('');
-          setTimeout(scrollToBottom, 100);
         } else {
-          throw new Error(result.message || 'Failed to generate graph');
+          const createRes = await createQAChat({ title, messages: [userMsg, assistantMsg] });
+          if (createRes.status === 'success' && createRes.data) {
+            const newChat = normalizeChat(createRes.data);
+            setChats((prev) => [newChat, ...prev]);
+            setSelectedChatId(newChat.id);
+          } else throw new Error(createRes.message || 'Failed to create chat');
         }
+        setQuestion('');
+        setTimeout(scrollToBottom, 100);
         return;
       }
 

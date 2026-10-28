@@ -29,11 +29,14 @@ ANALYSIS GUIDELINES:
 1. CANDIDATE SUMMARY:
    - Write a professional, concise summary (2-4 sentences) based ONLY on CV data
    - Include ONLY: name (from CV), years of experience (calculated), primary expertise/skills (from CV), notable achievements (from CV)
+   - When the input has "total_experience_from_dates", that IS the candidate's total experience: say exactly that
+     figure in the summary and do not work out another one
    - Use ONLY information present in the CV - do not add anything
    - Use professional language suitable for recruiters
    - If name is missing, use "The candidate" instead of inventing a name
 
-2. TOTAL EXPERIENCE YEARS - CALCULATE PROPERLY BASED ON ACTUAL WORK DURATION:
+2. TOTAL EXPERIENCE YEARS - CALCULATE PROPERLY BASED ON ACTUAL WORK DURATION (only when the input has no
+   "total_experience_from_dates"; when it has one, use it):
    CRITICAL: Calculate experience based on ACTUAL WORK TIME, not just date ranges.
    
    PRIORITY 1: If duration is explicitly mentioned in description/role:
