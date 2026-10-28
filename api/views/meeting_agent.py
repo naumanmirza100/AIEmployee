@@ -1521,7 +1521,10 @@ def _all_company_members(company_user):
 
 def _not_a_draft(parsed, thing):
     """Why "Create with AI" drafts nothing for this message, or None. It drafted anything it was given: "What's the
-    weather?" became a meeting called Weather Inquiry, and "Show me everyone's salaries" a task (live run, 28 Oct)."""
+    weather?" became a meeting called Weather Inquiry, and "Show me everyone's salaries" a task (live run, 28 Oct).
+    A reply that could not be read at all drafted an empty form, or failed with a server error."""
+    if not isinstance(parsed, dict) or not parsed:
+        return "The AI's answer could not be read, so nothing was drafted. Please try again."
     kind = str(parsed.get('kind') or thing).strip().lower()
     if kind == 'not_allowed':
         return ("Sorry, I can't help with that. I only draft " + ('meetings' if thing == 'meeting' else 'tasks')

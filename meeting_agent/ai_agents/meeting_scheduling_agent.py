@@ -16,6 +16,14 @@ from project_manager_agent.ai_agents.base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
+
+def as_object(value) -> dict:
+    """The AI's reply as one object. It sometimes wraps its one answer in a list, and the drafts then failed with a
+    server error (the Executive Meeting film, 29 Oct 2026); anything else that is not an object reads as nothing."""
+    if isinstance(value, list):
+        value = next((v for v in value if isinstance(v, dict)), {})
+    return value if isinstance(value, dict) else {}
+
 SYSTEM_PROMPT = """You are the Meeting Scheduling Agent for an AI Executive Meeting Assistant.
 You help executives schedule, reschedule, and manage meetings with precision.
 
@@ -272,12 +280,12 @@ Write a concise, professional email body (no subject line). Keep it under 150 wo
         text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\s*```$', '', text)
         try:
-            return json.loads(text)
+            return as_object(json.loads(text))
         except json.JSONDecodeError:
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
                 try:
-                    return json.loads(match.group())
+                    return as_object(json.loads(match.group()))
                 except json.JSONDecodeError:
                     pass
         return {}

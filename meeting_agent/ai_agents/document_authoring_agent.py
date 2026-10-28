@@ -196,8 +196,9 @@ STRICT RULES:
         has_summary = bool(summary and summary.strip())
         has_actions = bool(action_items)
         has_decisions = bool(decisions)
+        # An item stored with no owner or date has them as None, which the minutes printed ("Due: None").
         action_text = '\n'.join([
-            f"- {a.get('title', '')} | Owner: {a.get('assignee_hint', 'TBD')} | Due: {a.get('due_date', 'TBD')}"
+            f"- {a.get('title', '')} | Owner: {a.get('assignee_hint') or 'not named'} | Due: {a.get('due_date') or 'no date set'}"
             for a in action_items[:15]
         ])
         decisions_text = '\n'.join([f"- {d}" for d in decisions[:15]])
