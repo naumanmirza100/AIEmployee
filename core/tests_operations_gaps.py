@@ -312,10 +312,12 @@ class LiveRunFixesTests(OpsCase):
         self.assertIsNotNone(bell)
         self.assertIn('lease.pdf', bell.title)
 
-    def test_an_english_follow_up_gets_no_language_line(self):                       # F6
+    def test_an_english_follow_up_is_answered_in_english(self):                      # F6, and the clean run
         from core.answer_language import line
-        self.assertEqual(line('On the results slide, what about the margin?',
-                              'What does the speaker say about the margin on the Q3 results slide?', 'english'), '')
+        english = line('On the results slide, what about the margin?',
+                       'What does the speaker say about the margin on the Q3 results slide?', 'english')
+        self.assertIn('Write the whole answer in English', english)
+        self.assertNotIn('Roman Urdu', english)
         self.assertIn('Roman Urdu', line('margin kitna hai?', 'What is the margin?', 'roman_urdu'))
         self.assertIn('Urdu script', line('دفتر کے اوقات؟', 'What are the office hours?', 'urdu'))
 

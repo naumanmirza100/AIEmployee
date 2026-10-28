@@ -144,7 +144,9 @@ class AnswerTests(HRTestCase):
             agent.answer_question('Previous conversation:\nUser: chutti kitni hai?\n\nCurrent question: and for sick leave?',
                                   asker_role='admin', search_query='How many days of sick leave do employees get?',
                                   language='english')
-        self.assertNotIn('LANGUAGE:', model.call_args.kwargs['prompt'])
+        prompt = model.call_args.kwargs['prompt']
+        self.assertTrue(prompt.startswith('LANGUAGE: this question is in English'))
+        self.assertNotIn('Roman Urdu', prompt.split('\n')[0])
 
     def test_an_english_question_gets_no_language_line(self):
         from core.HR_agent.hr_agent import HRAgent

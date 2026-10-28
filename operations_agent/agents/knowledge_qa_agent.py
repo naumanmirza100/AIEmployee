@@ -422,6 +422,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             _t_retr = time.time()
             context_text, sources, is_relevant = self._build_context(
                 search_text, company_id, document_ids,
+                also_words=question if search_text != question else None,
             )
             timing_ms['retrieval'] = int((time.time() - _t_retr) * 1000)
             timing_ms['retrieval_breakdown'] = dict(self.last_retrieval_timing)
@@ -684,6 +685,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         question: str,
         company_id: int,
         document_ids: Optional[List[int]],
+        also_words: Optional[str] = None,
     ) -> Tuple[str, List[Dict], bool]:
         """Keyword-based retrieval over OperationsDocumentChunk *and*
         OperationsDocumentSummary.
@@ -702,6 +704,11 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         _t_all = time.time()
 
         tokens = _tokenize(question)
+        # The words as the person typed them are searched too: "دفتر کے نئے اوقات کیا ہیں؟" was searched only as "What
+        # are the new office hours?", which matches no word of the Urdu notice, so the survey answered (clean run,
+        # 28 Oct 2026).
+        if also_words:
+            tokens += [t for t in _tokenize(also_words) if t not in tokens]
 
         # Chunks come from EITHER a processed document (Documents tab) OR a
         # summarised file (Summarization tab). Both are searched together so QA
