@@ -72,9 +72,8 @@ const JobApplicationPage = () => {
     if (!data.education.trim()) e.education = 'Required';
     if (!data.salary_expectation.trim()) e.salary_expectation = 'Required';
     else if (!/^\d+$/.test(data.salary_expectation.trim())) e.salary_expectation = 'Numbers only';
-    if (!data.previous_company.trim()) e.previous_company = 'Required';
-    if (!data.previous_salary.trim()) e.previous_salary = 'Required';
-    else if (!/^\d+$/.test(data.previous_salary.trim())) e.previous_salary = 'Numbers only';
+    // Previous company and salary are optional: a fresh graduate has neither, and could not apply.
+    if (data.previous_salary.trim() && !/^\d+$/.test(data.previous_salary.trim())) e.previous_salary = 'Numbers only';
     if (!cvFile) e.cv_file = 'Please upload your CV';
     return e;
   };
@@ -393,12 +392,12 @@ const JobApplicationPage = () => {
             {/* Previous company + salary */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Company <span className="text-red-400">*</span></label>
+                <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Company <span className="text-white/30 font-normal">(optional)</span></label>
                 <input name="previous_company" value={form.previous_company} onChange={handleChange} placeholder="e.g. Google" className={inputCls('previous_company')} />
                 {errors.previous_company && <p className="mt-1 text-xs text-red-400">{errors.previous_company}</p>}
               </div>
               <div>
-                <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Salary <span className="text-red-400">*</span></label>
+                <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Salary <span className="text-white/30 font-normal">(optional)</span></label>
                 <input name="previous_salary" value={form.previous_salary} onChange={handleChange} inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3000" className={inputCls('previous_salary')} />
                 {errors.previous_salary && <p className="mt-1 text-xs text-red-400">{errors.previous_salary}</p>}
               </div>
