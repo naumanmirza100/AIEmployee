@@ -11,6 +11,7 @@ import userTaskService from '@/services/userTaskService';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { isOverdue } from '@/utils/taskHelpers';
 import { fetchMyWork, urgentCount } from '@/utils/myWork';
+import { awaitsAnswer } from '@/utils/meetingAnswers';
 
 /**
  * EmployeeLayout — shared shell for the `/me/*` route group.
@@ -59,11 +60,7 @@ const EmployeeLayout = () => {
       const notifRaw = nRes?.data?.notifications || nRes?.data || [];
       const notifs = Array.isArray(notifRaw) ? notifRaw : [];
 
-      const pending = meetings.filter((m) =>
-        (m.my_status === 'pending' || m.my_status === 'counter_proposed' ||
-         m.status === 'pending' || m.status === 'counter_proposed')
-        && m.status !== 'withdrawn' && m.my_status !== 'accepted',
-      ).length;
+      const pending = meetings.filter(awaitsAnswer).length;
 
       const unread = notifs.filter((n) => !n.is_read).length;
       const overdue = tasks.filter(isOverdue).length;

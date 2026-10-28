@@ -19,6 +19,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import userTaskService from '@/services/userTaskService';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { isOverdue, isDueThisWeek, getStatusColor, humanStatus } from '@/utils/taskHelpers';
+import { awaitsAnswer } from '@/utils/meetingAnswers';
 import FrontlineTutorial, { resetTutorial } from '@/components/frontline/FrontlineTutorial';
 import { useTutorialNudge } from '@/components/frontline/tourUtils';
 import { USER_MAIN_TOUR_KEY, USER_MAIN_TOUR_STEPS } from '@/utils/userTutorialSteps';
@@ -84,11 +85,7 @@ export default function HomeView() {
   const openTasks = tasks.filter((t) => t.status !== 'done');
   const overdueTasks = tasks.filter(isOverdue);
   const dueThisWeek = tasks.filter(isDueThisWeek);
-  const pendingInvites = meetings.filter((m) =>
-    (m.my_status === 'pending' || m.my_status === 'counter_proposed' ||
-     m.status === 'pending' || m.status === 'counter_proposed')
-    && m.status !== 'withdrawn' && m.my_status !== 'accepted',
-  );
+  const pendingInvites = meetings.filter(awaitsAnswer);
 
   const tiles = [
     { label: 'Open tasks', value: openTasks.length, icon: CheckSquare, to: '/me/tasks' },
@@ -107,7 +104,7 @@ export default function HomeView() {
       onClick: () => navigate('/me/tasks'),
     })),
     ...pendingInvites.slice(0, 3).map((m) => ({
-      key: `m${m.id}`,
+      key: `m-${m.source || 'pm'}-${m.id}`,   // ids repeat across agents
       title: m.title,
       subtitle: `Meeting invite • ${m.organizer_name || m.organizer_email || 'organizer'}`,
       badge: 'Respond',
