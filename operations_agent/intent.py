@@ -19,7 +19,7 @@ import logging
 
 from django.conf import settings
 
-from core.answer_language import LANGUAGES
+from core.answer_language import normalize as normalize_language
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def read(message, history=None, *, agent):
         'document': text('document'),
         'full_list': reading.get('full_list') is True,
         'area': reading.get('area') if reading.get('area') in AREAS else None,
-        'language': reading.get('language') if reading.get('language') in LANGUAGES else None,
+        'language': normalize_language(reading.get('language')),
     }
 
 

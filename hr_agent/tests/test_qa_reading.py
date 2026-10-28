@@ -156,7 +156,9 @@ class AnswerTests(HRTestCase):
                 mock.patch.object(agent, '_call_llm', return_value='Two days.') as model:
             agent.answer_question('How many days can I work from home?', asker_role='admin',
                                   search_query='How many days can I work from home?')
-        self.assertNotIn('LANGUAGE:', model.call_args.kwargs['prompt'])
+        first = model.call_args.kwargs['prompt'].split('\n')[0]
+        self.assertNotIn('Roman Urdu', first)
+        self.assertTrue(first.startswith('LANGUAGE: this question is in English'))
 
     def test_the_readings_full_list_decides_the_whole_document_mode(self):
         def plan(question, wants):

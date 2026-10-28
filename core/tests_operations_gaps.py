@@ -321,6 +321,19 @@ class LiveRunFixesTests(OpsCase):
         self.assertIn('Roman Urdu', line('margin kitna hai?', 'What is the margin?', 'roman_urdu'))
         self.assertIn('Urdu script', line('دفتر کے اوقات؟', 'What are the office hours?', 'urdu'))
 
+    def test_any_spelling_of_the_language_and_an_english_question_is_english(self):  # live, after #326
+        # On the live site every English question came back in Roman Urdu: the reading's language did not match.
+        from core.answer_language import line, normalize
+        self.assertEqual([normalize(v) for v in ('English', 'Roman Urdu', 'roman-urdu', 'Hinglish', 'Urdu', 'ur', None)],
+                         ['english', 'roman_urdu', 'roman_urdu', 'roman_urdu', 'urdu', 'urdu', None])
+        question = 'What are the payment terms in the FinEdge agreement?'
+        for said in ('English', 'roman_urdu', None):
+            self.assertIn('in English', line(question, question, said), said)
+        roman = line('FinEdge contract mein critical problem ka response time kitna hai?',
+                     'What is the response time for a critical problem in the FinEdge contract?', None)
+        self.assertNotIn('in English', roman)
+        self.assertNotIn('Roman Urdu', roman)          # no example of any language when the reading gave none
+
     def test_company_matters_in_any_script_are_documents(self):                      # F7
         self.assertIn('in any language or script', intent._PROMPT)
 

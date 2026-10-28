@@ -80,10 +80,10 @@ def read(message, history=None, *, company_id):
             return None
     except (TypeError, ValueError):
         return None
-    from core.answer_language import LANGUAGES
+    from core.answer_language import normalize as normalize_language
     english = str(reading.get('english') or '').strip()
     return {'kind': reading['kind'], 'english': english[:500] or None, 'full_list': reading.get('full_list') is True,
-            'language': reading.get('language') if reading.get('language') in LANGUAGES else None}
+            'language': normalize_language(reading.get('language'))}
 
 
 #: Where each request is done instead. `dashboard`: an HR dashboard login (the floating chat, the Q&A tab);

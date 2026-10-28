@@ -14,6 +14,9 @@ import ReactMarkdown from 'react-markdown';
 import * as operationsService from '@/services/operationsAgentService';
 import { formatDeadline } from './formatDeadline';
 
+// An item taken out of the summary's markdown, without its ** marks (summaries saved before the server strips them).
+const plainText = (text) => String(text ?? '').replace(/(\*\*|__)(.+?)\1/g, '$2');
+
 // ─── Helpers ────────────────────────────────
 const FILE_TYPE_CONFIG = {
   pdf:  { icon: FileText,        color: '#ef4444', bg: 'rgba(239,68,68,0.12)', label: 'PDF' },
@@ -477,7 +480,7 @@ const SummaryDetailPage = () => {
                 <div className="h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.12)' }}>
                   <span className="text-[11px] font-bold text-amber-400">{i + 1}</span>
                 </div>
-                <p className="text-sm text-white/55 leading-relaxed">{finding}</p>
+                <p className="text-sm text-white/55 leading-relaxed">{plainText(finding)}</p>
               </div>
             ))}
           </div>
@@ -496,7 +499,7 @@ const SummaryDetailPage = () => {
             {summary.action_items.map((item, i) => (
               <div key={i} id={`OPS-summarydetail-action-item-row-${i}`} data-testid={`OPS-summarydetail-action-item-row-${i}`} className="flex items-start gap-3 p-3 rounded-lg border border-emerald-500/10" style={{ background: 'rgba(16,185,129,0.04)' }}>
                 <ArrowRight className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
-                <span className="text-sm text-white/55 leading-relaxed">{item}</span>
+                <span className="text-sm text-white/55 leading-relaxed">{plainText(item)}</span>
               </div>
             ))}
           </div>
