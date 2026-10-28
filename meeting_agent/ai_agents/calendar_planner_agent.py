@@ -49,7 +49,8 @@ class CalendarPlannerAgent(BaseAgent):
         self.log_action("plan_week", {"meetings": len(meetings), "tasks": len(tasks),
                                        "hours": f"{work_start_hour}-{work_end_hour}"})
         if not week_start:
-            week_start = timezone.now().strftime('%Y-%m-%d')
+            from meeting_agent.clock import today_for
+            week_start = today_for(self.company_id).isoformat()   # the company's today (CO-210)
         try:
             work_start_hour = max(0, min(23, int(work_start_hour)))
             work_end_hour = max(work_start_hour + 1, min(24, int(work_end_hour)))
@@ -149,7 +150,9 @@ class CalendarPlannerAgent(BaseAgent):
         tasks_by_date = {d['date']: [] for d in week_dates}
         unscheduled_tasks = []  # tasks that couldn't fit any day's free slots
         week_date_set = {d['date'] for d in week_dates}
-        task_queue = list(tasks[:20])
+        # Every task: it took the first twenty and left the rest out, neither placed nor listed as not fitting
+        # (CO-166). Anything that does not fit is in unscheduled_tasks.
+        task_queue = list(tasks)
         for task in task_queue:
             due = (task.get('due_date') or '')[:10]
             placed = False
@@ -170,7 +173,8 @@ class CalendarPlannerAgent(BaseAgent):
 
         # Ask AI only for summary, recommendations, focus blocks per day
         days_summary = '\n'.join(
-            f"  {d['date']} ({d['day_name']}): meetings={[m['title'] for m in meetings_by_date.get(d['date'], [])]}, tasks={[t.get('title') for t in tasks_by_date.get(d['date'], [])]}"
+            f"  {d['date']} ({d['day_name']}): meetings={[m['title'] for m in meetings_by_date.get(d['date'], [])][:8]}, "
+            f"tasks ({len(tasks_by_date.get(d['date'], []))})={[t.get('title') for t in tasks_by_date.get(d['date'], [])][:8]}"
             for d in week_dates
         )
         prompt = f"""You are a calendar assistant. Given this weekly schedule, write a brief summary and 2-3 practical recommendations.
@@ -317,7 +321,8 @@ Return ONLY the JSON array."""
         try:
             date = datetime.strptime(date_str, '%Y-%m-%d')
         except ValueError:
-            date = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            from meeting_agent.clock import today_for
+            date = datetime.combine(today_for(self.company_id), datetime.min.time())
 
         day_start = timezone.make_aware(date.replace(hour=9, minute=0, second=0, microsecond=0))
         day_end = timezone.make_aware(date.replace(hour=18, minute=0, second=0, microsecond=0))

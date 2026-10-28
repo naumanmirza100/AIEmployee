@@ -10,7 +10,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
   Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight, ChevronLeft, Trash2, Check, X, Wand2, Users,
 } from 'lucide-react';
-import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar, Pagination } from '../shared';
+import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar, Pagination, userKey, partKey } from '../shared';
 import HoverTip from '@/components/common/HoverTip';
 import { AllMembersPanel } from '../AllMembersPanel';
 import { useToast } from '@/components/ui/use-toast';
@@ -75,10 +75,10 @@ export const MeetingsPanel = ({
 
   // Stage a new user (no API call yet). Skip if already present or already staged.
   const draftAddParticipant = (user) => {
-    const uid = String(user.id);
-    const exists = draftParts.some(p => String(p.user_id) === uid);
+    const exists = draftParts.some(p => partKey(p) === userKey(user));
     if (exists) return;
-    setDraftParts(prev => [...prev, { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending', __new: true }]);
+    setDraftParts(prev => [...prev, { user_id: user.id, user_type: user.user_type || 'company_user', member_id: user.id,
+      full_name: user.full_name, email: user.email, role: user.role, response: 'pending', __new: true }]);
     setDraftAddUsers(prev => [...prev, user]);
     setUserSearchQ(''); setUserSearchResults([]);
   };
@@ -86,9 +86,9 @@ export const MeetingsPanel = ({
   // Un-stage a participant from the draft list. Existing (saved) ones are queued
   // for deletion on save; not-yet-saved additions are just dropped.
   const draftRemoveParticipant = (p) => {
-    setDraftParts(prev => prev.filter(x => String(x.user_id) !== String(p.user_id)));
+    setDraftParts(prev => prev.filter(x => partKey(x) !== partKey(p)));
     if (p.__new) {
-      setDraftAddUsers(prev => prev.filter(u => String(u.id) !== String(p.user_id)));
+      setDraftAddUsers(prev => prev.filter(u => userKey(u) !== partKey(p)));
     } else if (p.id) {
       setDraftRemoveIds(prev => new Set(prev).add(p.id));
     }
@@ -644,9 +644,9 @@ export const MeetingsPanel = ({
                     open={showAllMembers}
                     onClose={() => setShowAllMembers(false)}
                     fullWidth
-                    selected={parts.map(p => ({ id: p.user_id, user_type: p.user_type || 'company_user' }))}
+                    selected={parts.map(p => ({ id: p.member_id ?? p.user_id, user_type: p.user_type || 'company_user' }))}
                     onToggle={(u) => {
-                      const existing = parts.find(p => String(p.user_id) === String(u.id));
+                      const existing = parts.find(p => partKey(p) === userKey(u));
                       if (existing) {
                         draftRemoveParticipant(existing);
                       } else {

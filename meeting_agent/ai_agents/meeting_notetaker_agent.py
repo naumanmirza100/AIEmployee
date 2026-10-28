@@ -28,6 +28,12 @@ Be accurate, concise, and professional.
 """
 
 
+#: A transcript is read in pieces of this many characters (about 3,000 tokens), one call each (CO-164).
+PIECE_CHARS = 12000
+#: At most this many pieces, about 96,000 characters: two hours of talk. Past it, the reply says how much was read.
+MAX_PIECES = 8
+
+
 class MeetingNotetakerAgent(BaseAgent):
 
     def __init__(self, company_id: Optional[int] = None):
@@ -42,7 +48,7 @@ class MeetingNotetakerAgent(BaseAgent):
         prompt = f"""Summarize this meeting transcript in 3-5 bullet points. Be concise and professional.
 
 Transcript:
-{transcript[:4000]}
+{transcript[:PIECE_CHARS]}
 
 Return a clean bullet-point summary. Focus on what was discussed, decided, and agreed upon."""
         return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=500)
@@ -67,7 +73,7 @@ Return a clean bullet-point summary. Focus on what was discussed, decided, and a
 {self._dates_hint(held_on)}
 
 Transcript:
-{transcript[:4000]}
+{transcript[:PIECE_CHARS]}
 
 Return ONLY a JSON array:
 [
@@ -90,7 +96,7 @@ Return ONLY the JSON array, no explanation."""
         prompt = f"""Extract all key decisions made in this meeting transcript.
 
 Transcript:
-{transcript[:4000]}
+{transcript[:PIECE_CHARS]}
 
 Return ONLY a JSON array of decision strings:
 ["decision 1", "decision 2", ...]
@@ -120,19 +126,72 @@ Key Decisions:
 Write a professional email body (no subject line). Keep it under 200 words. Be clear and actionable."""
         return self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=400)
 
+    def _read_piece(self, piece: str, number: int, total: int, participant_names: list = None, held_on=None) -> dict:
+        """One piece of a long transcript, read in one call: its points, action items and decisions."""
+        participants_hint = f"Known participants: {', '.join(participant_names)}" if participant_names else ""
+        prompt = f"""This is part {number} of {total} of a meeting transcript.
+{participants_hint}
+{self._dates_hint(held_on)}
+
+Transcript, part {number}:
+{piece}
+
+Return ONLY JSON:
+{{"points": ["what was discussed, decided or agreed in this part, 2-4 short bullets"],
+  "action_items": [{{"title": "...", "assignee_hint": "name or null", "due_date": "YYYY-MM-DD or null",
+                    "priority": "low|medium|high|critical", "description": "..."}}],
+  "decisions": ["decision", "..."]}}"""
+        raw = self._call_llm(prompt, self.system_prompt, temperature=0.1, max_tokens=1200)
+        try:
+            data = json.loads(re.sub(r'^```(?:json)?|```$', '', (raw or '').strip(), flags=re.M).strip())
+        except (TypeError, ValueError):
+            match = re.search(r'\{.*\}', raw or '', re.S)
+            try:
+                data = json.loads(match.group(0)) if match else {}
+            except ValueError:
+                data = {}
+        return data if isinstance(data, dict) else {}
+
     def process_full_transcript(self, transcript: str, meeting_title: str = '', participant_names: list = None,
                                 held_on=None) -> dict:
-        """Run full notetaker pipeline: summary + action items + decisions."""
-        self.log_action("process_full_transcript")
-        summary = self.generate_summary(transcript)
-        action_items = self.extract_action_items(transcript, participant_names, held_on)
-        decisions = self.extract_key_decisions(transcript)
-        followup = self.draft_followup_email(meeting_title, summary, action_items, decisions)
+        """Summary, action items and decisions from the whole transcript.
+
+        Only its first 4,000 characters were read, a few minutes of talk, and the screen said the meeting was
+        summarised (CO-164). A short transcript is read whole; a long one in pieces of PIECE_CHARS, one call each,
+        and the pieces' points combined. Past MAX_PIECES the rest is not read, and `chars_read` says so."""
+        self.log_action("process_full_transcript", {"transcript_len": len(transcript)})
+        total = len(transcript)
+        if total <= PIECE_CHARS:
+            return {
+                'summary': self.generate_summary(transcript),
+                'action_items': self.extract_action_items(transcript, participant_names, held_on),
+                'key_decisions': self.extract_key_decisions(transcript),
+                'chars_read': total, 'chars_total': total,
+            }
+        pieces = [transcript[i:i + PIECE_CHARS] for i in range(0, total, PIECE_CHARS)][:MAX_PIECES]
+        points, items, decisions, seen_items, seen_decisions = [], [], [], set(), set()
+        for number, piece in enumerate(pieces, 1):
+            part = self._read_piece(piece, number, len(pieces), participant_names, held_on)
+            points += [str(p) for p in part.get('points') or [] if p]
+            for item in part.get('action_items') or []:
+                key = str((item or {}).get('title', '')).strip().lower() if isinstance(item, dict) else ''
+                if key and key not in seen_items:
+                    seen_items.add(key)
+                    items.append(item)
+            for decision in part.get('decisions') or []:
+                key = ' '.join(str(decision).split()).lower()
+                if key and key not in seen_decisions:
+                    seen_decisions.add(key)
+                    decisions.append(str(decision))
+        summary = self._call_llm(
+            "These are the points of a meeting, part by part, in order:\n" + '\n'.join(f'- {p}' for p in points)
+            + "\n\nSummarize the whole meeting in 3-6 bullet points. Be concise and professional.",
+            self.system_prompt, temperature=0.3, max_tokens=500) if points else ''
         return {
             'summary': summary,
-            'action_items': action_items,
+            'action_items': items,
             'key_decisions': decisions,
-            'followup_email': followup,
+            'chars_read': sum(len(p) for p in pieces), 'chars_total': total,
         }
 
     def process(self, action: str = 'full', **kwargs) -> dict:

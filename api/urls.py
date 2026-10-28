@@ -1031,6 +1031,9 @@ urlpatterns = [
     re_path(r'^exec-meeting/meetings/?$', exec_meeting_api.meeting_list, name='exec_meeting_list'),  # GET, POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/?$', exec_meeting_api.meeting_detail, name='exec_meeting_detail'),  # GET, PATCH, DELETE
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST
+    # An employee answers from their Meetings page; the invitation email's buttons need no login (CO-211).
+    re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond-as-employee/?$', exec_meeting_api.meeting_respond_as_employee, name='exec_meeting_respond_as_employee'),  # POST
+    re_path(r'^meetings/exec-email-answer/(?P<action>accepted|rejected)/(?P<token>[^/]+)/?$', exec_meeting_api.meeting_email_answer, name='exec_meeting_email_answer'),  # GET
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/notes/?$', exec_meeting_api.meeting_notes, name='exec_meeting_notes'),  # GET, POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/notes/clear/?$', exec_meeting_api.meeting_notes_delete, name='exec_meeting_notes_delete'),  # DELETE
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/documents/?$', exec_meeting_api.meeting_documents, name='exec_meeting_documents'),  # GET
@@ -1062,6 +1065,7 @@ urlpatterns = [
     re_path(r'^exec-meeting/documents/(?P<doc_id>\d+)/?$', exec_meeting_api.standalone_document_detail, name='exec_document_detail'),  # GET, DELETE
 
     # Notifications
+    re_path(r'^exec-meeting/stats/?$', exec_meeting_api.exec_stats, name='exec_meeting_stats'),  # GET (CO-168)
     re_path(r'^exec-meeting/notifications/?$', exec_meeting_api.notification_list, name='exec_notification_list'),  # GET
     re_path(r'^exec-meeting/notifications/mark-all-read/?$', exec_meeting_api.notification_mark_all_read, name='exec_notification_mark_all_read'),  # PATCH
     re_path(r'^exec-meeting/notifications/bulk-delete/?$', exec_meeting_api.notification_bulk_delete, name='exec_notification_bulk_delete'),  # POST

@@ -106,6 +106,11 @@ export function markdownToHtml(md) {
 }
 
 // Display ISO datetime string as UTC — avoids browser timezone shifting the date
+// Who a person is in the People window: a login or an employee, and that kind's own id. Bare ids repeat across
+// the two, so picking an employee could remove a login with the same number (CO-163).
+export const userKey = (u) => `${u.user_type || 'company_user'}-${u.id}`;
+export const partKey = (p) => `${p.user_type || 'company_user'}-${p.member_id ?? p.user_id}`;
+
 export const fmtUtc = (isoStr) => {
   if (!isoStr) return '—';
   const [datePart, timePart] = isoStr.replace('Z', '').replace('+00:00', '').split('T');

@@ -91,9 +91,11 @@ class SettingsPageTests(PauseTestCase):
     def test_task_and_executive_meeting_emails_can_be_turned_off(self):
         self.buy_module(self.company, 'exec_meeting_agent')
         topics = self.topics()
-        for key in ('tasks_assigned', 'exec_meetings'):
-            self.assertEqual((topics[key]['email'], topics[key]['offers_email'], topics[key]['offers_in_app']),
-                             (True, True, False), key)
+        self.assertEqual((topics['tasks_assigned']['email'], topics['tasks_assigned']['offers_email'],
+                          topics['tasks_assigned']['offers_in_app']), (True, True, False))
+        # Executive meeting invitations and changes reach the bell too, since 28 Oct 2026 (meeting_agent.bell).
+        self.assertEqual((topics['exec_meetings']['email'], topics['exec_meetings']['offers_email'],
+                          topics['exec_meetings']['offers_in_app']), (True, True, True))
         self.assertEqual(topics['exec_meetings']['agent_label'], 'Executive Meeting')
         code, _ = self.call(settings_views.company_notification_settings, self.member,
                             {'topic': 'tasks_assigned', 'email': False}, method='patch')

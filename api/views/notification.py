@@ -575,11 +575,11 @@ def _sales_call_items(user):
 
 
 def _executive_meeting_items(user):
-    """Executive meetings this employee organises or is invited to.
-    Informational here: an invitation is answered in the Executive Meeting agent.
+    """Executive meetings this employee organises or is invited to. An invitation is accepted or declined here
+    (CO-211): the employee cannot open the Executive Meeting agent, and an unanswered invitation is busy time.
     The time is when it really is: that agent keeps it as typed (meeting_agent.clock)."""
     from django.db.models import Q
-    from meeting_agent.clock import real_start
+    from meeting_agent.clock import real_end, real_start
     from meeting_agent.models import ExecutiveMeeting
 
     logins = _dashboard_logins_of(user)
@@ -591,9 +591,12 @@ def _executive_meeting_items(user):
                 .select_related('organizer__company').prefetch_related('participants__company_user')
                 .order_by('-created_at')[:50])
     items = []
+    now = timezone.now()
     for m in meetings:
         seats = list(m.participants.all())
         mine = next((s.response for s in seats if s.company_user_id in logins), None)
+        invited = m.organizer_id not in logins and mine is not None
+        answerable = invited and m.status == 'scheduled' and (real_end(m) or now) >= now
         items.append({
             'id': m.id,
             'source': 'exec',
@@ -613,9 +616,11 @@ def _executive_meeting_items(user):
             'responses': [],
             'meeting_link': m.meeting_link or None,
             'location': '',
-            'can_respond': False,
+            # Accept or decline until it is over; an accepted one can still be declined, to free the time.
+            # No suggested time: nothing on the organiser's side acts on it.
+            'can_respond': answerable,
             'can_suggest_time': False,
-            'respond_url': None,
+            'respond_url': f'/exec-meeting/meetings/{m.id}/respond-as-employee' if answerable else None,
         })
     return items
 

@@ -2,31 +2,25 @@ import { companyApi } from './companyAuthService';
 
 const BASE = '/exec-meeting';
 
+// The zone the organiser types meeting times in. The server reads a typed time on the company's clock, and on this
+// zone when the company has none set; without it a new company's 11:00 in Karachi was taken as 11:00 UTC (CO-210).
+const browserZone = () => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+};
+const withZone = (payload) => ({ timezone_name: browserZone(), ...payload });
+
 // Backend response shapes:
 //   GET /meetings       → { status, meetings: [...], count }
 //   GET /tasks          → { status, tasks: [...], count }
 //   GET /notifications  → { status, notifications: [...] }
 
 const execMeetingService = {
-  // Stats — derive from list endpoints
+  // Stats — counted on the server. Worked out here from the first page of each list, they never went past twenty
+  // (CO-168).
   getStats: async () => {
     try {
-      const [mRes, tRes, nRes] = await Promise.all([
-        companyApi.get(`${BASE}/meetings`),
-        companyApi.get(`${BASE}/tasks`),
-        companyApi.get(`${BASE}/notifications`),
-      ]);
-      const meetings = mRes.meetings || [];
-      const tasks    = tRes.tasks    || [];
-      const notifs   = nRes.notifications || [];
-      const now = new Date();
-      return {
-        upcoming_meetings:    meetings.filter(m => m.status === 'scheduled' && new Date(m.scheduled_at) > now).length,
-        total_tasks:          tasks.length,
-        overdue_tasks:        tasks.filter(t => t.due_date && new Date(t.due_date) < now && !['done','completed'].includes(t.status)).length,
-        pending_action_items: tasks.filter(t => t.status !== 'done').length,
-        unread_notifications: notifs.filter(n => !n.is_read).length,
-      };
+      const res = await companyApi.get(`${BASE}/stats`);
+      return res.stats;
     } catch (err) {
       if (err?.status === 429) throw err;   // the screen says "too many requests" rather than showing zeros
       return { upcoming_meetings: 0, total_tasks: 0, overdue_tasks: 0, pending_action_items: 0, unread_notifications: 0 };
@@ -50,8 +44,8 @@ const execMeetingService = {
   },
   getMeetingFilterUsers: () => companyApi.get(`${BASE}/meetings-filter-users`),
   getMeeting:    (id)          => companyApi.get(`${BASE}/meetings/${id}`),
-  createMeeting: (payload)     => companyApi.post(`${BASE}/meetings`, payload),
-  updateMeeting: (id, payload) => companyApi.patch(`${BASE}/meetings/${id}`, payload),
+  createMeeting: (payload)     => companyApi.post(`${BASE}/meetings`, withZone(payload)),
+  updateMeeting: (id, payload) => companyApi.patch(`${BASE}/meetings/${id}`, withZone(payload)),
   deleteMeeting: (id)          => companyApi.delete(`${BASE}/meetings/${id}`),
   // An invited login accepts or declines (CO-65): response is 'accepted', 'rejected' or 'tentative'.
   respondToMeeting: (id, response) => companyApi.post(`${BASE}/meetings/${id}/respond`, { response }),
@@ -62,7 +56,7 @@ const execMeetingService = {
   convertActionItemToTask: (itemId, payload = {}) => companyApi.post(`${BASE}/action-items/${itemId}/convert-to-task`, payload),
   updateActionItem: (itemId, payload)   => companyApi.patch(`${BASE}/action-items/${itemId}`, payload),
   generateMeetingDescription: (title, points) => companyApi.post(`${BASE}/ai/generate-description`, { title, points }),
-  checkMeetingConflicts: (payload) => companyApi.post(`${BASE}/meetings/check-conflicts`, payload),
+  checkMeetingConflicts: (payload) => companyApi.post(`${BASE}/meetings/check-conflicts`, withZone(payload)),
 
   // Tasks — returns raw response; callers do res.tasks || []
   getTasks: (params = {}) => {
