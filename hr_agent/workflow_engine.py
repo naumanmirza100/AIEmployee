@@ -135,9 +135,10 @@ def _step_send_email(step, ctx, simulate):
     if simulate:
         return True, {'done': True, 'simulated': True, **sent}, None
     try:
+        from core.company_mail import company_from_address
         send_mail(
             subject=subject or 'HR Notification', message=body,
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            from_email=company_from_address(ctx.get('company_id')),   # in the company's name, as Recruitment's are
             recipient_list=[recipient], fail_silently=False,
         )
         return True, {'done': True, **sent}, None

@@ -766,7 +766,9 @@ FORMATTING:
         job = _find_matching_job(data["jobs"], reading['job']) if reading.get('job') else None
 
         if reading.get('candidate'):
-            dossier = self._build_candidate_dossier(company_user, reading['candidate'])
+            # Everyone the question names, not only the one the reading picked out: "and how does Mahnoor compare
+            # with him?" loaded Mahnoor alone, and the model wrote Ahmed a score, a phone and two employers of its own.
+            dossier = self._build_candidate_dossier(company_user, f"{reading['candidate']}\n{english}")
             if dossier:
                 return self._ask(english, dossier, "", [], original=question, wants=reading.get('wants'))
             return ('done', self._wrap_response(self._no_candidate_answer(data), []))
@@ -1311,7 +1313,9 @@ FORMATTING:
         if not matches:
             return ""
 
-        blocks: List[str] = ["", "=== CANDIDATE DOSSIER (full records for the person asked about) ==="]
+        blocks: List[str] = ["", "=== CANDIDATE DOSSIER (full records for the person asked about) ===",
+                             "Only the people below have records here. For anyone else the question names, say their "
+                             "record was not found; never give them a score, contact details, employers or history."]
         for cv in matches[:3]:
             parsed = json.loads(cv.parsed_json) if cv.parsed_json else {}
             insights = json.loads(cv.insights_json) if cv.insights_json else {}
