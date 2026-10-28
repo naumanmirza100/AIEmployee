@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import * as operationsService from '@/services/operationsAgentService';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 import { formatDeadline } from './formatDeadline';
 
 // An item taken out of the summary's markdown, without its ** marks (summaries saved before the server strips them).
@@ -112,6 +113,8 @@ const SummaryDetailPage = () => {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  // Delete here removed the summary at once; the bin in the list asks first, so this asks too.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -223,7 +226,7 @@ const SummaryDetailPage = () => {
             variant="ghost"
             size="sm"
             className="text-white/40 hover:text-red-400 hover:bg-red-500/10 gap-1.5 shrink-0"
-            onClick={handleDelete}
+            onClick={() => setConfirmingDelete(true)}
             disabled={deleting}
           >
             {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -505,6 +508,26 @@ const SummaryDetailPage = () => {
           </div>
         </div>
       )}
+
+      <div id="OPS-summarydetail-delete-dialog" data-testid="OPS-summarydetail-delete-dialog">
+        <ConfirmDialog
+          open={confirmingDelete}
+          onOpenChange={setConfirmingDelete}
+          title="Delete this summary?"
+          description={
+            <>
+              The summary for{' '}
+              <span className="text-white/80 font-medium">{summary.original_filename}</span>
+              {' '}will be permanently deleted, along with its stored text and indexed chunks. Knowledge Q&amp;A will
+              no longer be able to answer from it. This cannot be undone.
+            </>
+          }
+          confirmLabel="Delete summary"
+          variant="danger"
+          loading={deleting}
+          onConfirm={handleDelete}
+        />
+      </div>
     </div>
   );
 };
