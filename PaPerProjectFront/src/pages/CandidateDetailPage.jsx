@@ -196,7 +196,7 @@ const CandidateDetailPage = () => {
     const app = detail.application || null;
     const ivs = detail.interviews || [];
     const skills = (p.skills || []).join(', ');
-    const summary = ins.summary || ins.summary_text || '';
+    const summary = ins.candidate_summary || ins.summary || ins.summary_text || '';
     const exact = (q.exact_matched_skills || []).join(', ');
     const related = (q.related_matched_skills || []).join(', ');
     const missing = (q.missing_skills || []).join(', ');
@@ -326,7 +326,9 @@ const CandidateDetailPage = () => {
   const skills     = parsed.skills     || [];
   const experience = parsed.experience || parsed.work_experience || [];
   const education  = parsed.education  || [];
-  const summary    = insights.summary  || insights.summary_text  || null;
+  // The AI writes `candidate_summary`; this read `summary` only, so the summary never showed.
+  const summary    = insights.candidate_summary || insights.summary || insights.summary_text || null;
+  const achievements = Array.isArray(insights.notable_achievements) ? insights.notable_achievements : [];
   const exactSkills   = qualified.exact_matched_skills   || [];
   const relatedSkills = qualified.related_matched_skills || [];
   const missingSkills = qualified.missing_skills         || [];
@@ -486,6 +488,20 @@ const CandidateDetailPage = () => {
               {summary && (
                 <Block title="AI Summary" icon={<FileText className="h-4 w-4" />}>
                   <p className="text-sm text-white/70 leading-relaxed">{summary}</p>
+                  {(insights.education_level || insights.total_experience_years != null) && (
+                    <p className="mt-2 text-xs text-white/50">
+                      {insights.education_level && <>Highest education: {insights.education_level}. </>}
+                      {insights.total_experience_years != null && <>Experience: about {insights.total_experience_years} years.</>}
+                    </p>
+                  )}
+                </Block>
+              )}
+
+              {achievements.length > 0 && (
+                <Block title="Notable achievements" icon={<Star className="h-4 w-4" />}>
+                  <ul className="list-disc pl-5 space-y-1 text-sm text-white/70">
+                    {achievements.map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
                 </Block>
               )}
 

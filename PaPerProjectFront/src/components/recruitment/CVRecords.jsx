@@ -550,7 +550,7 @@ export function CandidateProfile({ detail, getDecisionBadge }) {
   const insights = detail.insights || {};
   const application = detail.application || null;
   const interviews = detail.interviews || [];
-  const summary = insights.summary || insights.summary_text || null;
+  const summary = insights.candidate_summary || insights.summary || insights.summary_text || null;
   const skills = parsed.skills || [];
   const experience = parsed.experience || parsed.work_experience || [];
   const education = parsed.education || [];
@@ -883,7 +883,7 @@ function LegacyCandidateDetail({ record, getDecisionBadge }) {
   const parsed = record.parsed || {};
   const qualified = record.qualified || {};
   const app = record.application || null;
-  const summary = record.insights?.summary || record.summary?.summary;
+  const summary = record.insights?.candidate_summary || record.insights?.summary || record.summary?.summary;
   const skills = parsed.skills || [];
   const displayName = app
     ? `${app.first_name} ${app.last_name}`.trim()

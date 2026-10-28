@@ -852,7 +852,9 @@ FORMATTING:
                     phone = parsed.get("phone") or parsed.get("Phone") or parsed.get("contact") or ""
                 summary = ""
                 if isinstance(insights_json, dict):
-                    summary = insights_json.get("summary") or insights_json.get("executive_summary") or ""
+                    # The summariser writes `candidate_summary`; reading `summary` gave the AI no summary at all.
+                    summary = (insights_json.get("candidate_summary") or insights_json.get("summary")
+                               or insights_json.get("executive_summary") or "")
                 if isinstance(summary, dict):
                     summary = summary.get("text", "") if isinstance(summary.get("text"), str) else ""
                 candidates.append({
@@ -1334,8 +1336,10 @@ FORMATTING:
                 blocks.append(f"{label}: {str(val)[:900]}")
 
             for label, key in (
-                ('Summary', 'summary'), ('Strengths', 'strengths'),
+                ('Summary', 'candidate_summary'), ('Summary', 'summary'), ('Strengths', 'strengths'),
                 ('Weaknesses', 'weaknesses'), ('Key highlights', 'key_highlights'),
+                ('Achievements', 'notable_achievements'), ('Highest education', 'education_level'),
+                ('Years of experience', 'total_experience_years'),
             ):
                 val = insights.get(key)
                 if not val:
