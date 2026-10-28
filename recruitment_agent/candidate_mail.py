@@ -5,10 +5,9 @@ address with no reply-to: the company's name appeared nowhere, the follow-up sai
 nobody reads, and the footer of the same email said not to reply. `who_hires` gives the templates the company's name
 and whom to contact; `send` sends from '<Company> via Pay Per Project' with Reply-To that person.
 """
-from email.utils import formataddr, parseaddr
-
-from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
+
+from core.company_mail import from_address as _from_address
 
 
 def _job_of(interview):
@@ -34,12 +33,6 @@ def who_hires(interview=None, job=None) -> dict:
         'contact_name': ((contact.full_name or '').strip() if contact else ''),
         'contact_email': email,
     }
-
-
-def _from_address(company_name) -> str:
-    name, address = parseaddr(getattr(settings, 'DEFAULT_FROM_EMAIL', '') or 'noreply@example.com')
-    shown = f'{company_name} via Pay Per Project' if company_name else (name or 'Pay Per Project')
-    return formataddr((' '.join(shown.split()), address))
 
 
 def send(subject, text, html, to, *, interview=None, job=None, fail_silently=False) -> int:

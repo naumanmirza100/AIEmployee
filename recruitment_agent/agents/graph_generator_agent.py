@@ -15,6 +15,11 @@ from core.api_key_service import KeyServiceError
 
 logger = logging.getLogger(__name__)
 
+# Words that point the AI to a data set, given to it only: the list of charts a refusal shows people is the plain one.
+CHOICE_HINTS = {
+    'interviews_by_date': 'use it for "interviews per day", "this week\'s interviews", "upcoming interviews"',
+}
+
 
 class GraphGeneratorAgent:
     """
@@ -469,7 +474,8 @@ class GraphGeneratorAgent:
             "named, trends over time are line charts. Give an orientation only when the request names one (vertical "
             "bars, columns or a histogram: vertical; sideways bars: horizontal), else null. A time series keeps "
             "\"order\": \"none\".\n\nData sets:\n"
-            + "\n".join(f"- {name}: {about}" for name, (about, _) in datasets.items()))
+            + "\n".join(f"- {name}: {about}{' (' + CHOICE_HINTS[name] + ')' if name in CHOICE_HINTS else ''}"
+                        for name, (about, _) in datasets.items()))
         try:
             response_text = self.groq_client.send_prompt_text(system_prompt, f"Chart request: {prompt}")
             choice = json.loads(self._strip_fences(response_text))
@@ -514,8 +520,7 @@ class GraphGeneratorAgent:
             'interviews_by_outcome': ('interviews by outcome or decision (hired, rejected...)', ivs['by_outcome']),
             'interviews_by_type': ('online and onsite interviews', ivs['by_type']),
             'interviews_by_job': ('interviews per job role', ivs.get('by_job_role', {})),
-            'interviews_by_date': ('interviews by the day they take place (booked times, two weeks back to a month '
-                                   'ahead): "interviews per day", "this week\'s interviews"',
+            'interviews_by_date': ('interviews by the day they take place (two weeks back to a month ahead)',
                                    ivs.get('by_interview_date') or []),
             'interviews_daily': ('interviews made (candidates invited) per day, last 30 days (trend)',
                                  ivs['over_time_daily']),

@@ -204,3 +204,45 @@ class SummaryYearsTests(SimpleTestCase):
                                'and 4 years of React experience.')
         self.assertEqual(agent._say_total_years('Has 3+ years of experience.', 3.0), 'Has about 3 years of experience.')
         self.assertIsNone(agent._say_total_years(None, 3.0))
+
+
+class CompareTests(TestCase):
+    """The picture run's follow-up "and how does Mahnoor compare with him?" loaded only Mahnoor's record, and the
+    answer gave Ahmed a score of 85 (his is 92), another phone and two employers that are not in his CV."""
+
+    def setUp(self):
+        company = Company.objects.create(name='Margalla Software', email='hello@margalla.test')
+        self.owner = CompanyUser.objects.create(company=company, email='sana@margalla.test', full_name='Sana',
+                                                role='owner', password_hash='x', is_active=True)
+        job = JobDescription.objects.create(title='Senior Frontend Engineer', description='React.', company=company,
+                                            company_user=self.owner)
+        for name, score in (('Ahmed Raza', 92), ('Mahnoor Khalid', 90), ('Iqra Javed', 44)):
+            CVRecord.objects.create(file_name=f'{name}.pdf', job_description=job, role_fit_score=score,
+                                    qualification_decision='INTERVIEW', parsed_json=json.dumps({'name': name}))
+        self.agent = RecruitmentQAAgent(groq_client=mock.Mock())
+
+    def test_everyone_the_question_names_is_loaded(self):
+        reading = {'kind': 'data', 'english': 'How does Mahnoor Khalid compare with Ahmed Raza?', 'job': None,
+                   'exclude_jobs': [], 'candidate': 'Mahnoor', 'wants': 'compare', 'area': None}
+        plan = self.agent._plan_from_reading('and how does Mahnoor compare with him?', self.owner, reading)
+        text = plan[2]
+        self.assertIn('--- Mahnoor Khalid', text)
+        self.assertIn('--- Ahmed Raza', text)
+        self.assertIn('Score: 92', text)
+        self.assertNotIn('--- Iqra Javed', text)
+        self.assertIn('never give them a score', text)
+
+
+class ChartRefusalTextTests(TestCase):
+    """A refused chart lists what can be charted in plain words; the hints that steer the AI stay in its prompt."""
+
+    def test_the_hint_is_for_the_ai_only(self):
+        company = Company.objects.create(name='Margalla Software', email='hello@margalla.test')
+        owner = CompanyUser.objects.create(company=company, email='sana@margalla.test', full_name='Sana', role='owner',
+                                           password_hash='x', is_active=True)
+        llm = mock.Mock()
+        llm.send_prompt_text.return_value = '{"dataset": "none"}'
+        result = GraphGeneratorAgent(llm, owner).generate_graph('Our monthly revenue as a line chart')
+        self.assertIn('interviews by the day they take place', result['error'])
+        self.assertNotIn('interviews per day', result['error'])
+        self.assertIn('"interviews per day"', llm.send_prompt_text.call_args.args[0])

@@ -110,6 +110,8 @@ class WorkflowCompanyWallTests(HRTestCase):
         self.member_emp.refresh_from_db()
         self.assertEqual((self.member_emp.job_title, self.member_emp.manager_id), ('Designer', self.admin_emp.id))
         self.assertEqual(len(mail.outbox), 1)
+        # In the company's name, as Recruitment's emails are: a new hire's welcome came from the bare platform address.
+        self.assertIn(f'{self.company.name} via Pay Per Project', mail.outbox[0].from_email)
 
 
 class WorkflowAdminOnlyTests(HRTestCase):
