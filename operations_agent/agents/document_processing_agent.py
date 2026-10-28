@@ -90,6 +90,30 @@ def _as_text(value) -> str:
     return '' if value is None else str(value).strip()
 
 
+def rows_as_lines(df, sheet_name='') -> str:
+    """A sheet as one line per row, each value with its column's name: "Month: 2026-09; Cloud hosting: 2.0; …".
+
+    It was printed as one wide grid under a single header row. Cut into passages, a row lost its header, and the AI
+    read the wrong column: "what did cloud hosting cost in September?" got 4.1, which was mobile-app revenue from
+    the other sheet; the sheet says 2.0 (Operations clean run, 28 Oct 2026)."""
+    import math
+    columns = [str(c).strip() for c in df.columns]
+    named = [not c.lower().startswith('unnamed') for c in columns]
+    prefix = f'[{sheet_name}] ' if sheet_name else ''
+    lines = [prefix + 'Columns: ' + ' | '.join(c for c, keep in zip(columns, named) if keep)] if any(named) else []
+    for values in df.itertuples(index=False, name=None):
+        cells = []
+        for column, keep, value in zip(columns, named, values):
+            if value is None or (isinstance(value, float) and math.isnan(value)) or str(value).strip() == '':
+                continue
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            cells.append(f'{column}: {value}' if keep else str(value))
+        if cells:
+            lines.append(prefix + '; '.join(cells))
+    return '\n'.join(lines)
+
+
 def clean_items(values, *, items=10, chars=300) -> list:
     """The AI's list as short strings, empty ones dropped. The Documents tab saved whatever parsed, and an item that
     came back as an object could not be printed: the document's page failed to draw (CO-268)."""
@@ -550,7 +574,7 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             for sheet_name in xls.sheet_names:
                 df = pd.read_excel(xls, sheet_name=sheet_name, nrows=MAX_SHEET_ROWS + 1)
                 all_text.append(f'--- Sheet: {sheet_name} ---')
-                all_text.append(df.head(MAX_SHEET_ROWS).to_string(index=False))
+                all_text.append(rows_as_lines(df.head(MAX_SHEET_ROWS), sheet_name))
                 if len(df) > MAX_SHEET_ROWS:
                     all_text.append(f'[Only the first {MAX_SHEET_ROWS:,} rows of the sheet "{sheet_name}" were read.]')
             return True, '\n\n'.join(all_text), len(xls.sheet_names), None
@@ -580,7 +604,7 @@ class DocumentProcessingAgent(MarketingBaseAgent):
                     "This CSV appears to be empty or has no readable rows. "
                     "Please check the file has a header row and at least one data row, then re-upload."
                 )
-            text = df.head(MAX_SHEET_ROWS).to_string(index=False)
+            text = rows_as_lines(df.head(MAX_SHEET_ROWS))
             if len(df) > MAX_SHEET_ROWS:
                 text += f'\n[Only the first {MAX_SHEET_ROWS:,} rows were read.]'
             return True, text, 1, None

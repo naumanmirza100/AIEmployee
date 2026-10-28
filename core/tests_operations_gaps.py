@@ -132,6 +132,26 @@ class WholeFileReadTests(TestCase):
         self.assertEqual(agent.page_starts[0][1], 1)                    # slide 1 starts the text (CO-278)
 
 
+class SpreadsheetRowsTests(TestCase):
+    """Clean run: "what did cloud hosting cost in September?" got 4.1, mobile-app revenue from the other sheet; the
+    grid's rows had lost their header once cut into passages."""
+
+    def test_each_row_carries_its_sheet_and_columns(self):
+        from openpyxl import Workbook
+        book = Workbook()
+        book.active.title = 'Revenue'
+        book.active.append(['Month', 'Mobile apps', 'Total'])
+        book.active.append(['2026-09', 4.1, 21.3])
+        costs = book.create_sheet('Costs')
+        costs.append(['Month', 'Cloud hosting', 'Total'])
+        costs.append(['2026-09', 2.0, 14.6])
+        path = a_file('.xlsx')
+        book.save(path)
+        text = DocumentProcessingAgent()._extract_text(path, 'xlsx')[1]
+        self.assertIn('[Costs] Month: 2026-09; Cloud hosting: 2; Total: 14.6', text)
+        self.assertIn('[Revenue] Month: 2026-09; Mobile apps: 4.1; Total: 21.3', text)
+
+
 class AnyScriptTests(TestCase):
     """CO-215: Urdu-script passages and number-only stretches were thrown away as junk."""
 
