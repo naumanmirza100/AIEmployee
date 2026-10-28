@@ -76,3 +76,24 @@ class OwnerTests(base.EmployeeCase):
         self.assertEqual(views._member_named(self.company, 'sana'), self.seat_login)
         self.assertEqual(views._member_named(self.company, 'Nadia Rehman'), self.nadia)
         self.assertIsNone(views._member_named(self.company, 'Nobody Here'))
+
+    def test_an_employees_action_item_becomes_their_task_and_they_hear_of_it(self):
+        # Clean run, 29 Oct: the seat is never an active login, so the task made from Usman's item went to nobody,
+        # and an employee given a task got nothing in their bell.
+        from core.models import Notification
+        from meeting_agent.models import MeetingActionItem
+        item = MeetingActionItem.objects.create(meeting=self.board, title='Send the acceptance', assignee=self.seat_login,
+                                                due_date='2026-11-06')
+        code, body = self.call(views.action_item_convert_to_task, self.nadia, item_id=item.id)
+        self.assertEqual(code, 201, body)
+        self.assertEqual([a['id'] for a in body['task']['assignees']], [self.seat_login.id])
+        told = Notification.objects.get(user=self.sana, type='exec_task_assigned')
+        self.assertIn('06 Nov 2026', told.message)
+
+    def test_a_new_task_for_an_employee_reaches_their_bell(self):
+        from core.models import Notification
+        code, body = self.call(views.task_list, self.nadia, data={
+            'title': 'Hiring plan', 'due_date': '2026-11-04',
+            'assignees': [{'id': self.seat_login.id, 'user_type': 'company_user'}]})
+        self.assertEqual(code, 201, body)
+        self.assertTrue(Notification.objects.filter(user=self.sana, type='exec_task_assigned').exists())
