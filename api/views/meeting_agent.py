@@ -2261,7 +2261,9 @@ def action_item_convert_to_task(request, item_id):
         parent_task_id=parent_task_id,
     )
     # The person the notes say does it gets the task, and is told, as anyone given a task is.
-    owner = item.assignee if item.assignee_id and item.assignee.is_active else None
+    # An employee owns it through their seat, which is never an active login: they were skipped, so the task made
+    # from Usman's item was given to nobody (clean run, 29 Oct 2026).
+    owner = item.assignee if item.assignee_id else None
     if owner and owner.company_id == company_user.company_id:
         task.assignees.set([owner])
         if owner.email and owner.id != company_user.id:
@@ -2353,16 +2355,27 @@ def _tell_task_changed(people, task, by, changed):
         _email_login(cu, 'tasks_assigned', f'Task changed: {task.title}', html)
 
 
+def _day_text(value):
+    """A date as people write it (29 Oct 2026). A task just made still holds the date as sent ('2026-10-29')."""
+    try:
+        return f'{value:%d %b %Y}'
+    except (TypeError, ValueError):
+        try:
+            return f"{datetime.strptime(str(value)[:10], '%Y-%m-%d'):%d %b %Y}"
+        except ValueError:
+            return str(value)
+
+
 def _tell_assigned(people, task, given_by):
-    """The bell of each person newly given the task. The email is sent separately."""
-    from core.notification_utils import notify_company_users
-    due = f' It is due on {task.due_date}.' if task.due_date else ''
-    notify_company_users(
-        [cu for cu in people if cu.id != task.company_user_id],
-        title=f'New task: {task.title}'[:255],
-        message=f'{given_by.full_name or given_by.email} gave you a task in Executive Meeting.{due}',
-        link=EXEC_TASKS_LINK, kind='exec_task_assigned', email=False,
-        data={'exec_task_id': task.id})
+    """The bell of each person newly given the task, an employee's in My Space (meeting_agent.bell): the login-only
+    bell skipped employees, so they never saw a task given to them. The email is sent separately."""
+    from meeting_agent.bell import ring
+    due = f' It is due on {_day_text(task.due_date)}.' if task.due_date else ''
+    ring([cu for cu in people if cu.id != task.company_user_id],
+         title=f'New task: {task.title}'[:255],
+         message=f'{given_by.full_name or given_by.email} gave you a task in Executive Meeting.{due}',
+         kind='exec_task_assigned', link=EXEC_TASKS_LINK, employee_link='/me/tasks', email=False,
+         data={'exec_task_id': task.id})
 
 
 def _tell_owner_of_progress(task, by):
