@@ -142,6 +142,41 @@ const EnrichedProfile = ({ enriched }) => {
   );
 };
 
+// The AI's research on the candidate (docx item 3): from the CV, the apply form and their public GitHub.
+const ResearchProfile = ({ enriched }) => {
+  const r = (enriched || {}).research;
+  const gh = (enriched || {}).github;
+  if (!r && !gh) return null;
+  const list = (title, items, tone) => (items && items.length > 0 ? (
+    <div className="mt-3">
+      <p className="text-[10px] text-white/40 uppercase tracking-wider font-semibold mb-1.5">{title}</p>
+      <ul className={`list-disc pl-5 space-y-1 text-sm ${tone}`}>{items.map((x, i) => <li key={i}>{x}</li>)}</ul>
+    </div>
+  ) : null);
+  return (
+    <Block title="Research" icon={<TrendingUp className="h-4 w-4" />}>
+      <div data-testid="REC-candidate-research">
+        {r?.headline && <p className="text-sm text-white/80">{r.headline}</p>}
+        {r?.seniority && r.seniority !== 'Unclear' && <p className="mt-1 text-xs text-white/50">AI's view of seniority: {r.seniority}</p>}
+        {list('Strengths', r?.strengths, 'text-emerald-200/80')}
+        {list('Gaps against the job', r?.gaps, 'text-amber-200/80')}
+        {list('Check in the interview', r?.verify, 'text-sky-200/80')}
+        {gh && (
+          <div className="mt-4 rounded-lg border border-white/10 p-3 text-xs text-white/70">
+            <a href={gh.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-violet-300 hover:underline">GitHub: {gh.login}</a>
+            <span className="text-white/50"> · {gh.public_repos} public repositories{gh.account_years != null ? ` · ${gh.account_years} years on GitHub` : ''}</span>
+            {gh.top_languages?.length > 0 && <div className="mt-1">Languages: {gh.top_languages.join(', ')}</div>}
+            {gh.recent?.length > 0 && (
+              <div className="mt-1">Recent work: {gh.recent.map((x) => x.name).join(', ')}</div>
+            )}
+          </div>
+        )}
+        {r?.based_on?.length > 0 && <p className="mt-3 text-[11px] text-white/35">Based on: {r.based_on.join(', ')}</p>}
+      </div>
+    </Block>
+  );
+};
+
 /* ── main page ── */
 const CandidateDetailPage = () => {
   const { id } = useParams();
@@ -527,6 +562,7 @@ const CandidateDetailPage = () => {
             </div>
 
             <div className="space-y-6">
+              <ResearchProfile enriched={detail.enriched} />
               <EnrichedProfile enriched={detail.enriched} />
 
               {(exactSkills.length > 0 || relatedSkills.length > 0 || missingSkills.length > 0) && (

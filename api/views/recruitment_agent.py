@@ -85,7 +85,8 @@ def _make_agents(company):
         # asking whose candidate that is, and two addresses below take that data
         # straight from the request. The pipelines that really screen CVs write the
         # record themselves, by an id they created.
-        'enrich_agent': LeadResearchEnrichmentAgent(log_service=log_service, sql_repository=None),
+        'enrich_agent': LeadResearchEnrichmentAgent(log_service=log_service, sql_repository=None,
+                                                    groq_client=groq_client),
         'qualify_agent': LeadQualificationAgent(log_service=log_service, sql_repository=None),
         'job_desc_agent': JobDescriptionParserAgent(groq_client=groq_client, log_service=log_service),
         'interview_agent': InterviewSchedulingAgent(log_service=log_service),
@@ -372,7 +373,9 @@ def process_cvs(request):
                 summary = _own_data_only(summary)
                 
                 # Enrich
-                enriched = enrich_agent.enrich(parsed, summary)
+                _rec = CVRecord.objects.select_related('job_application').filter(id=result.get('record_id')).first()
+                enriched = enrich_agent.enrich(parsed, summary, application=_rec.job_application if _rec else None,
+                                               job=job_desc, job_keywords=job_kw_list)
                 # Ensure enriched is a dict
                 if not isinstance(enriched, dict):
                     enriched = enriched[0] if isinstance(enriched, list) and len(enriched) > 0 else {}

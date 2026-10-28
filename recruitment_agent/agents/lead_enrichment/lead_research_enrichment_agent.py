@@ -5,23 +5,28 @@ from recruitment_agent.log_service import LogService
 
 class LeadResearchEnrichmentAgent:
     """
-    Enriches parsed CV data and existing candidate insights without external calls.
+    Enriches parsed CV data and existing candidate insights.
     - Normalizes skills/job titles
     - Infers primary role and seniority
     - Buckets experience
     - Extracts leadership/technical signals
     - Flags missing critical fields
+    - With an AI client: the candidate's public GitHub (when the apply form gave it) and an AI research profile
+      (headline, strengths, gaps, what to verify), in `research.py`. It was word rules only.
     """
 
     def __init__(
         self,
         log_service: Optional[LogService] = None,
         sql_repository: Optional[Any] = None,  # Can be SQLRepository or DjangoRepository
+        groq_client: Optional[Any] = None,
     ) -> None:
         self.log_service = log_service or LogService()
         self.sql_repository = sql_repository
+        self.groq_client = groq_client
 
-    def enrich(self, parsed_cv: Dict[str, Any], candidate_insights: Dict[str, Any]) -> Dict[str, Any]:
+    def enrich(self, parsed_cv: Dict[str, Any], candidate_insights: Dict[str, Any], *, application=None,
+               job=None, job_keywords=None) -> Dict[str, Any]:
         self._log_step("enrichment_start", {"has_insights": bool(candidate_insights)})
 
         normalized_skills = self._normalize_skills(parsed_cv.get("skills") or [])
@@ -48,6 +53,14 @@ class LeadResearchEnrichmentAgent:
             "profile_completeness_score": completeness_score,
             "missing_critical_fields": missing_fields or None,
         }
+        if self.groq_client is not None:
+            from recruitment_agent.agents.lead_enrichment import research
+            github = research.github_facts(getattr(application, 'github_url', None)) if application is not None else None
+            enriched["github"] = github
+            enriched["research"] = research.profile(
+                self.groq_client, parsed_cv=parsed_cv, summary=candidate_insights,
+                job_title=getattr(job, 'title', ''), job_keywords=job_keywords, application=application,
+                github=github)
 
         record_id = candidate_insights.get("record_id") or parsed_cv.get("record_id")
         if self.sql_repository and record_id:
