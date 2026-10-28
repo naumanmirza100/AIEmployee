@@ -2,6 +2,13 @@ import { companyApi } from './companyAuthService';
 
 const BASE = '/exec-meeting';
 
+// The zone the organiser types meeting times in. The server reads a typed time on the company's clock, and on this
+// zone when the company has none set; without it a new company's 11:00 in Karachi was taken as 11:00 UTC (CO-210).
+const browserZone = () => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+};
+const withZone = (payload) => ({ timezone_name: browserZone(), ...payload });
+
 // Backend response shapes:
 //   GET /meetings       → { status, meetings: [...], count }
 //   GET /tasks          → { status, tasks: [...], count }
@@ -50,8 +57,8 @@ const execMeetingService = {
   },
   getMeetingFilterUsers: () => companyApi.get(`${BASE}/meetings-filter-users`),
   getMeeting:    (id)          => companyApi.get(`${BASE}/meetings/${id}`),
-  createMeeting: (payload)     => companyApi.post(`${BASE}/meetings`, payload),
-  updateMeeting: (id, payload) => companyApi.patch(`${BASE}/meetings/${id}`, payload),
+  createMeeting: (payload)     => companyApi.post(`${BASE}/meetings`, withZone(payload)),
+  updateMeeting: (id, payload) => companyApi.patch(`${BASE}/meetings/${id}`, withZone(payload)),
   deleteMeeting: (id)          => companyApi.delete(`${BASE}/meetings/${id}`),
   // An invited login accepts or declines (CO-65): response is 'accepted', 'rejected' or 'tentative'.
   respondToMeeting: (id, response) => companyApi.post(`${BASE}/meetings/${id}/respond`, { response }),
@@ -62,7 +69,7 @@ const execMeetingService = {
   convertActionItemToTask: (itemId, payload = {}) => companyApi.post(`${BASE}/action-items/${itemId}/convert-to-task`, payload),
   updateActionItem: (itemId, payload)   => companyApi.patch(`${BASE}/action-items/${itemId}`, payload),
   generateMeetingDescription: (title, points) => companyApi.post(`${BASE}/ai/generate-description`, { title, points }),
-  checkMeetingConflicts: (payload) => companyApi.post(`${BASE}/meetings/check-conflicts`, payload),
+  checkMeetingConflicts: (payload) => companyApi.post(`${BASE}/meetings/check-conflicts`, withZone(payload)),
 
   // Tasks — returns raw response; callers do res.tasks || []
   getTasks: (params = {}) => {

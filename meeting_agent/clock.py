@@ -12,9 +12,13 @@ Meetings page. It is read here on the company's clock (Company profile, time
 zone): the digits stored are taken as a time of day there. A company with no
 time zone set is read as UTC, which is the instant that was stored.
 
-The agent's own reminders and its "this meeting is over" sweep still compare
-the stored time with the clock, and so run late or early by the company's
-offset. That is a fault of its own, older than this module.
+A company with no time zone set is read on the meeting's own zone instead: the
+organiser's browser sends it with the meeting since 28 Oct 2026 (CO-210). Read
+as UTC, a new company's 11:00 in Karachi was reminded five hours late.
+
+The agent's reminders, its "this meeting is over" sweep, its emails and its AI
+helpers' "today" all go through here (CO-210). They compared the stored time
+with the clock, and ran late or early by the company's offset.
 """
 from __future__ import annotations
 
@@ -24,13 +28,18 @@ from zoneinfo import ZoneInfo
 from django.utils import timezone
 
 
-def company_zone(company) -> str:
-    """The company's time zone, or UTC when it has none set."""
+def company_zone(company, fallback='') -> str:
+    """The company's time zone; when it has none set, `fallback` (a zone sent by the browser), else UTC."""
     from core.scheduling import zone_name
-    return zone_name(getattr(company, 'timezone_name', ''))
+    return zone_name(getattr(company, 'timezone_name', ''), default='') or zone_name(fallback)
 
 
-def real_instant(stored: datetime | None, company) -> datetime | None:
+def meeting_zone(meeting) -> str:
+    """The zone this meeting's typed time is on: the company's, else the one sent with the meeting."""
+    return company_zone(meeting.organizer.company, getattr(meeting, 'timezone_name', ''))
+
+
+def real_instant(stored: datetime | None, company, fallback='') -> datetime | None:
     """The instant meant by a time kept the agent's way, for this company."""
     if stored is None:
         return None
@@ -38,12 +47,45 @@ def real_instant(stored: datetime | None, company) -> datetime | None:
         typed = stored
     else:
         typed = stored.astimezone(dt_timezone.utc).replace(tzinfo=None)
-    return typed.replace(tzinfo=ZoneInfo(company_zone(company)))
+    return typed.replace(tzinfo=ZoneInfo(company_zone(company, fallback)))
 
 
 def real_start(meeting) -> datetime | None:
     """When this executive meeting really starts."""
-    return real_instant(meeting.scheduled_at, meeting.organizer.company)
+    return real_instant(meeting.scheduled_at, meeting.organizer.company, getattr(meeting, 'timezone_name', ''))
+
+
+def real_end(meeting) -> datetime | None:
+    """When it really ends."""
+    start = real_start(meeting)
+    return start + timedelta(minutes=meeting.duration_minutes or 0) if start else None
+
+
+def today(company, fallback='') -> date:
+    """Today's date on the company's clock: what "today" means to the agent's AI helpers and defaults."""
+    return timezone.now().astimezone(ZoneInfo(company_zone(company, fallback))).date()
+
+
+def today_for(company_id, fallback='') -> date:
+    """`today` for the AI helpers, which know only the company's id. They used the server's (UTC) date: after
+    7 pm in New York, or before 5 am in Karachi, "tomorrow" was a day off (CO-210)."""
+    from core.models import Company
+    company = Company.objects.filter(id=company_id).first() if company_id else None
+    return today(company, fallback)
+
+
+def typed_now(company, fallback='') -> datetime:
+    """Now, kept the agent's way (the wall-clock digits filed as UTC), to compare with stored times in a query."""
+    wall = timezone.now().astimezone(ZoneInfo(company_zone(company, fallback))).replace(tzinfo=None)
+    return wall.replace(tzinfo=dt_timezone.utc)
+
+
+def when_text(meeting) -> str:
+    """The meeting's time for an email or alert, with its zone named ("... at 11:00 AM Asia/Karachi").
+    The emails printed the typed digits with "UTC" after them."""
+    from core.scheduling import when_text as shared_when_text
+    zone = meeting_zone(meeting)
+    return shared_when_text(real_start(meeting), zone)
 
 
 def held_on(meeting) -> date:
@@ -51,9 +93,9 @@ def held_on(meeting) -> date:
 
     The note-taker works out "by Friday" from this day. A meeting with no time,
     or one whose notes are written before its day comes, counts as held today."""
-    today = timezone.now().astimezone(ZoneInfo(company_zone(meeting.organizer.company))).date()
+    day = timezone.now().astimezone(ZoneInfo(meeting_zone(meeting))).date()
     start = real_start(meeting)
-    return min(start.date(), today) if start else today
+    return min(start.date(), day) if start else day
 
 
 def resync_company(company) -> int:

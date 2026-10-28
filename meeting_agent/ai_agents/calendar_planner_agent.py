@@ -49,7 +49,8 @@ class CalendarPlannerAgent(BaseAgent):
         self.log_action("plan_week", {"meetings": len(meetings), "tasks": len(tasks),
                                        "hours": f"{work_start_hour}-{work_end_hour}"})
         if not week_start:
-            week_start = timezone.now().strftime('%Y-%m-%d')
+            from meeting_agent.clock import today_for
+            week_start = today_for(self.company_id).isoformat()   # the company's today (CO-210)
         try:
             work_start_hour = max(0, min(23, int(work_start_hour)))
             work_end_hour = max(work_start_hour + 1, min(24, int(work_end_hour)))
@@ -317,7 +318,8 @@ Return ONLY the JSON array."""
         try:
             date = datetime.strptime(date_str, '%Y-%m-%d')
         except ValueError:
-            date = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            from meeting_agent.clock import today_for
+            date = datetime.combine(today_for(self.company_id), datetime.min.time())
 
         day_start = timezone.make_aware(date.replace(hour=9, minute=0, second=0, microsecond=0))
         day_end = timezone.make_aware(date.replace(hour=18, minute=0, second=0, microsecond=0))

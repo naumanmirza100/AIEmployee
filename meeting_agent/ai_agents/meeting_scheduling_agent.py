@@ -39,6 +39,12 @@ class MeetingSchedulingAgent(BaseAgent):
         self.agent_key_name = 'exec_meeting_agent'
         self.system_prompt = SYSTEM_PROMPT
 
+    def _today_line(self) -> str:
+        """Today on the company's clock, with its weekday, so "next Tuesday" is counted from the right day (CO-210)."""
+        from meeting_agent.clock import today_for
+        day = today_for(self.company_id)
+        return f"{day:%A}, {day.isoformat()}"
+
     def parse_meeting_request(self, message: str, company_user_id: int) -> dict:
         """Parse a natural-language meeting request into structured JSON."""
         self.log_action("parse_meeting_request", {"message_len": len(message)})
@@ -60,7 +66,7 @@ Return JSON with these fields:
   "meeting_link": ""
 }}
 
-Use today's date as reference: {timezone.now().strftime('%Y-%m-%d')}.
+Use today's date as reference: {self._today_line()}.
 If any field is unclear, use sensible defaults. Return ONLY JSON, no explanation."""
 
         raw = self._call_llm(prompt, self.system_prompt, temperature=0.1, max_tokens=600)
@@ -113,7 +119,8 @@ If any field is unclear, use sensible defaults. Return ONLY JSON, no explanation
         try:
             base = datetime.strptime(preferred_date, '%Y-%m-%d')
         except ValueError:
-            base = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            from meeting_agent.clock import today_for
+            base = datetime.combine(today_for(self.company_id), datetime.min.time())
 
         slots = []
         candidate = base.replace(hour=9, minute=0, second=0, microsecond=0)

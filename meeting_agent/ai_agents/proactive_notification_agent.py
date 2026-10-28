@@ -10,9 +10,14 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
+from django.db import models
 from django.utils import timezone
 
 from project_manager_agent.ai_agents.base_agent import BaseAgent
+
+# Where the bell's Executive Meeting alerts open.
+AGENT_TASKS = '/exec-meeting/dashboard?tab=tasks'
+AGENT_MEETINGS = '/exec-meeting/dashboard?tab=meetings'
 
 logger = logging.getLogger(__name__)
 
@@ -48,107 +53,82 @@ class ProactiveNotificationAgent(BaseAgent):
             ExecutiveMeeting, ExecutiveMeetingParticipant,
             ExecutiveTask, MeetingActionItem, ExecNotification,
         )
-        now = timezone.now()
+        from core.models import CompanyUser
+        from meeting_agent import clock
+        from meeting_agent.bell import ring, task_people
+        owner = CompanyUser.objects.select_related('company').filter(id=company_user_id).first()
+        if owner is None:
+            return []
+        # Today on the company's clock, not the server's (CO-210).
+        today = clock.today(owner.company)
         created = []
 
-        # --- Meeting reminders: meetings in next 15 minutes ---
-        upcoming = ExecutiveMeeting.objects.filter(
-            organizer_id=company_user_id,
-            status='scheduled',
-            scheduled_at__gte=now,
-            scheduled_at__lte=now + timedelta(minutes=15),
-        )
-        for meeting in upcoming:
-            exists = ExecNotification.objects.filter(
-                company_user_id=company_user_id,
-                notification_type='meeting_reminder',
-                meeting=meeting,
-                created_at__gte=now - timedelta(minutes=20),
-            ).exists()
-            if not exists:
-                notif = ExecNotification.objects.create(
-                    company_user_id=company_user_id,
-                    notification_type='meeting_reminder',
-                    severity='warning',
-                    title=f"Meeting starting soon: {meeting.title}",
-                    message=f"Your meeting '{meeting.title}' starts in less than 15 minutes.",
-                    meeting=meeting,
-                    data={'meeting_id': meeting.id, 'scheduled_at': meeting.scheduled_at.isoformat()},
-                )
-                created.append({'id': notif.id, 'type': 'meeting_reminder', 'title': notif.title})
+        # Meeting reminders are the five-minute job's (meeting_agent.tasks.send_meeting_reminders). This scan raised
+        # the organiser's too, and when it ran first the job skipped the people invited (CO-259).
 
+        # Each alert is raised once per due date: it came twice a day for as long as the task stayed open, and a
+        # deleted one came back within fifteen minutes (CO-169). It reaches the owner and the people it is assigned
+        # to, in the bell as well as on this agent's page.
         # --- Overdue tasks ---
-        overdue_tasks = ExecutiveTask.objects.filter(
-            company_user_id=company_user_id,
-            status__in=['todo', 'in_progress', 'review'],
-            due_date__lt=now.date(),
-        )
-        for task in overdue_tasks[:10]:
-            exists = ExecNotification.objects.filter(
+        overdue_tasks = (ExecutiveTask.objects.filter(company_user_id=company_user_id,
+                                                      status__in=['todo', 'in_progress', 'review'],
+                                                      due_date__lt=today)
+                         .exclude(overdue_alerted_for=models.F('due_date'))
+                         .prefetch_related('assignees'))
+        for task in overdue_tasks[:50]:
+            notif = ExecNotification.objects.create(
                 company_user_id=company_user_id,
                 notification_type='task_overdue',
-                data__task_id=task.id,
-                created_at__gte=now - timedelta(hours=12),
-            ).exists()
-            if not exists:
-                notif = ExecNotification.objects.create(
-                    company_user_id=company_user_id,
-                    notification_type='task_overdue',
-                    severity='critical',
-                    title=f"Overdue task: {task.title}",
-                    message=f"Task '{task.title}' was due on {task.due_date} and is still {task.get_status_display()}.",
-                    data={'task_id': task.id, 'due_date': str(task.due_date), 'priority': task.priority},
-                )
-                created.append({'id': notif.id, 'type': 'task_overdue', 'title': notif.title})
+                severity='critical',
+                title=f"Overdue task: {task.title}"[:255],
+                message=f"Task '{task.title}' was due on {task.due_date:%d %b %Y} and is still {task.get_status_display()}.",
+                data={'task_id': task.id, 'due_date': str(task.due_date), 'priority': task.priority},
+            )
+            ring(task_people(task), title=notif.title, message=notif.message, kind='exec_task_overdue',
+                 link=f'{AGENT_TASKS}', employee_link='/me/tasks', severity='critical',
+                 data={'task_id': task.id})
+            ExecutiveTask.objects.filter(id=task.id).update(overdue_alerted_for=task.due_date)
+            created.append({'id': notif.id, 'type': 'task_overdue', 'title': notif.title})
 
         # --- Overdue action items ---
-        overdue_actions = MeetingActionItem.objects.filter(
-            meeting__organizer_id=company_user_id,
-            status__in=['open', 'in_progress'],
-            due_date__lt=now.date(),
-        )
-        for item in overdue_actions[:10]:
-            exists = ExecNotification.objects.filter(
+        overdue_actions = (MeetingActionItem.objects.filter(meeting__organizer_id=company_user_id,
+                                                            status__in=['open', 'in_progress'],
+                                                            due_date__lt=today)
+                           .exclude(overdue_alerted_for=models.F('due_date'))
+                           .select_related('meeting', 'assignee'))
+        for item in overdue_actions[:50]:
+            notif = ExecNotification.objects.create(
                 company_user_id=company_user_id,
                 notification_type='action_item_overdue',
-                data__action_item_id=item.id,
-                created_at__gte=now - timedelta(hours=12),
-            ).exists()
-            if not exists:
-                notif = ExecNotification.objects.create(
-                    company_user_id=company_user_id,
-                    notification_type='action_item_overdue',
-                    severity='warning',
-                    title=f"Overdue action item: {item.title}",
-                    message=f"Action item '{item.title}' from meeting '{item.meeting.title}' is overdue.",
-                    meeting=item.meeting,
-                    data={'action_item_id': item.id, 'meeting_id': item.meeting_id, 'due_date': str(item.due_date)},
-                )
-                created.append({'id': notif.id, 'type': 'action_item_overdue', 'title': notif.title})
+                severity='warning',
+                title=f"Overdue action item: {item.title}"[:255],
+                message=f"Action item '{item.title}' from meeting '{item.meeting.title}' was due on {item.due_date:%d %b %Y}.",
+                meeting=item.meeting,
+                data={'action_item_id': item.id, 'meeting_id': item.meeting_id, 'due_date': str(item.due_date)},
+            )
+            ring([owner, item.assignee], title=notif.title, message=notif.message, kind='exec_action_item_overdue',
+                 link=f'{AGENT_MEETINGS}', severity='warning', data={'action_item_id': item.id})
+            MeetingActionItem.objects.filter(id=item.id).update(overdue_alerted_for=item.due_date)
+            created.append({'id': notif.id, 'type': 'action_item_overdue', 'title': notif.title})
 
         # --- Tasks due today ---
-        due_today = ExecutiveTask.objects.filter(
-            company_user_id=company_user_id,
-            status__in=['todo', 'in_progress'],
-            due_date=now.date(),
-        )
-        for task in due_today[:5]:
-            exists = ExecNotification.objects.filter(
+        due_today = (ExecutiveTask.objects.filter(company_user_id=company_user_id,
+                                                  status__in=['todo', 'in_progress'], due_date=today)
+                     .exclude(due_today_alerted_for=models.F('due_date'))
+                     .prefetch_related('assignees'))
+        for task in due_today[:50]:
+            notif = ExecNotification.objects.create(
                 company_user_id=company_user_id,
                 notification_type='task_due',
-                data__task_id=task.id,
-                created_at__gte=now.replace(hour=0, minute=0, second=0, microsecond=0),
-            ).exists()
-            if not exists:
-                notif = ExecNotification.objects.create(
-                    company_user_id=company_user_id,
-                    notification_type='task_due',
-                    severity='info',
-                    title=f"Task due today: {task.title}",
-                    message=f"Task '{task.title}' [{task.get_priority_display()}] is due today.",
-                    data={'task_id': task.id, 'priority': task.priority},
-                )
-                created.append({'id': notif.id, 'type': 'task_due', 'title': notif.title})
+                severity='info',
+                title=f"Task due today: {task.title}"[:255],
+                message=f"Task '{task.title}' [{task.get_priority_display()}] is due today.",
+                data={'task_id': task.id, 'priority': task.priority},
+            )
+            ring(task_people(task), title=notif.title, message=notif.message, kind='exec_task_due',
+                 link=f'{AGENT_TASKS}', employee_link='/me/tasks', data={'task_id': task.id})
+            ExecutiveTask.objects.filter(id=task.id).update(due_today_alerted_for=task.due_date)
+            created.append({'id': notif.id, 'type': 'task_due', 'title': notif.title})
 
         return created
 
@@ -167,9 +147,13 @@ Be direct and actionable. No fluff."""
     def generate_daily_digest(self, company_user_id: int, company_user_name: str = '') -> dict:
         """Generate an AI daily digest summarizing what needs attention."""
         self.log_action("generate_daily_digest")
+        from core.models import CompanyUser
+        from meeting_agent import clock
         from meeting_agent.models import ExecutiveMeeting, ExecutiveTask, MeetingActionItem
         now = timezone.now()
-        today = now.date()
+        # Today on the company's clock; the typed times of today's meetings carry today's date (CO-210).
+        owner = CompanyUser.objects.select_related('company').filter(id=company_user_id).first()
+        today = clock.today(owner.company) if owner else now.date()
 
         todays_meetings = list(ExecutiveMeeting.objects.filter(
             organizer_id=company_user_id,

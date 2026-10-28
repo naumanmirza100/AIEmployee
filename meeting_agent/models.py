@@ -173,6 +173,9 @@ class MeetingActionItem(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
     ai_extracted = models.BooleanField(default=False, help_text='True if extracted by AI from transcript')
+    # The due date its overdue alert was raised for: once per due date. It came twice a day for as long as the
+    # item stayed open, and a deleted alert came back within fifteen minutes (CO-169).
+    overdue_alerted_for = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -215,6 +218,9 @@ class ExecutiveTask(models.Model):
     due_date = models.DateField(null=True, blank=True)
     estimated_hours = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
     ai_reasoning = models.TextField(blank=True, default='', help_text='AI explanation for priority assignment')
+    # The due dates its overdue and due-today alerts were raised for: once each per due date (CO-169).
+    overdue_alerted_for = models.DateField(null=True, blank=True)
+    due_today_alerted_for = models.DateField(null=True, blank=True)
     assignees = models.ManyToManyField(
         'core.CompanyUser',
         blank=True,

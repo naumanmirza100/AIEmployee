@@ -5,6 +5,7 @@ Both company-user endpoints and admin endpoints.
 
 import json
 import logging
+from html import escape
 from datetime import datetime
 
 from django.core.cache import cache
@@ -28,6 +29,8 @@ from core.scheduling import (
     people_for, zone_name,
 )
 from meeting_agent.ai_agents import ExecAgentRegistry
+from meeting_agent.clock import held_on, when_text as clock_when_text
+from rest_framework.permissions import IsAuthenticated
 from meeting_agent.models import (
     ExecutiveMeeting,
     ExecutiveMeetingParticipant,
@@ -180,7 +183,7 @@ def _email_login(company_user, topic, subject, html_body):
 
 
 def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_fields):
-    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    scheduled = clock_when_text(meeting)   # when it really is, its zone named; it said "UTC" (CO-210)
     changed_str = ', '.join(changed_fields) if changed_fields else 'details'
     link_row = _email_detail_row('Link', f'<a href="{meeting.meeting_link}" style="color:#7c3aed;">{meeting.meeting_link}</a>') if meeting.meeting_link else ''
     desc_block = (
@@ -226,7 +229,7 @@ def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_
 
 
 def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
-    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    scheduled = clock_when_text(meeting)   # when it really is, its zone named; it said "UTC" (CO-210)
     first_name = (participant_cu.full_name or '').split()[0] if participant_cu.full_name else 'there'
     join_block = ''
     if meeting.meeting_link:
@@ -249,6 +252,10 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
           </td>
         </tr>
       </table>"""
+    # Accept or decline from the email (CO-211): an employee cannot open the agent to answer.
+    seat = ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user=participant_cu).first()
+    if seat is not None:
+        join_block += _answer_buttons(seat)
     desc_block = (
         f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{meeting.description}</p>'
         if meeting.description else ''
@@ -414,7 +421,7 @@ def _send_subtask_added_email(recipient_cu, parent_task, subtask, added_by_name)
 
 
 def _send_meeting_removal_email(cu, meeting, removed_by_name):
-    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    scheduled = clock_when_text(meeting)   # when it really is, its zone named; it said "UTC" (CO-210)
     first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
     content = f"""
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -633,16 +640,30 @@ def _calendar_people(company_users):
     return sorted(i for i in ids if i)
 
 
-def _company_zone(company_user) -> str:
-    """A company holiday is a whole day on the company's own clock."""
-    return zone_name(company_user.company.timezone_name)
+def _today(company_user):
+    """Today on the company's clock, for the agent's defaults; the server's UTC date was a day off at night (CO-210)."""
+    from meeting_agent.clock import today
+    return today(company_user.company)
 
 
-def _real(company_user, typed):
+def _company_zone(company_user, fallback='') -> str:
+    """A company holiday is a whole day on the company's own clock; with none set, the browser's (CO-210)."""
+    from meeting_agent.clock import company_zone
+    return company_zone(company_user.company, fallback)
+
+
+def _real(company_user, typed, fallback=''):
     """The instant a time kept by this agent means. It is kept as typed and
-    filed as UTC; the shared calendar needs when it really is (meeting_agent.clock)."""
+    filed as UTC; the shared calendar needs when it really is (meeting_agent.clock).
+    `fallback` is the zone sent with the meeting, for a company with none set."""
     from meeting_agent.clock import real_instant
-    return real_instant(typed, company_user.company)
+    return real_instant(typed, company_user.company, fallback)
+
+
+def _browser_zone(request, meeting=None) -> str:
+    """The zone the organiser's browser sends with a meeting, else the one it was made with ('' if none)."""
+    return zone_name(request.data.get('timezone_name'), default='') or (
+        zone_name(getattr(meeting, 'timezone_name', ''), default='') if meeting else '')
 
 
 def _participant_for(user_id, user_type, company):
@@ -681,7 +702,7 @@ def _picked_people(company, picks):
     return ids
 
 
-def _shared_clashes(people, typed, duration, company_user, exclude_id=None):
+def _shared_clashes(people, typed, duration, company_user, exclude_id=None, fallback=''):
     """What these people have then on the calendar every agent shares: other
     meetings, interviews, sales calls, leave, a company holiday. In the shape
     `check_conflicts` answers with, and each marked ``blocking``: the meeting
@@ -689,7 +710,7 @@ def _shared_clashes(people, typed, duration, company_user, exclude_id=None):
     keeps it."""
     if not people:
         return []
-    zone, starts = _company_zone(company_user), _real(company_user, typed)
+    zone, starts = _company_zone(company_user, fallback), _real(company_user, typed, fallback)
     found = find_conflicts(people, starts, starts + timedelta(minutes=duration),
                            exclude=[('exec', exclude_id)] if exclude_id else (),
                            viewer_source='exec', tz_name=zone)
@@ -710,10 +731,28 @@ def _all_clashes(own, shared):
             + [c for c in shared if not c['id'] or c['id'] not in known])
 
 
+def _bell_invited(people, meeting, organizer_name):
+    """The invitation in each person's bell too (meeting_agent.bell); the email is sent on its own."""
+    from meeting_agent.bell import ring
+    ring(people, title=f'{organizer_name} invited you: {meeting.title}'[:255],
+         message=f'{clock_when_text(meeting)}. Accept or decline it in your meetings.',
+         kind='exec_meeting_invite', link='/exec-meeting/dashboard?tab=meetings', email=False,
+         data={'meeting_id': meeting.id})
+
+
+def _bell_changed(people, meeting, what):
+    """A change to a meeting someone is in, in their bell (the email is sent on its own)."""
+    from meeting_agent.bell import ring
+    ring(people, title=f'{meeting.title}: {what}'[:255], message=f'{meeting.title}, {clock_when_text(meeting)}: {what}.',
+         kind='exec_meeting_changed', link='/exec-meeting/dashboard?tab=meetings', email=False,
+         data={'meeting_id': meeting.id})
+
+
 def _invite_all(targets, meeting, organizer_name):
     """Email each person their invitation, off the request: a meeting with ten
     people must not make the organiser wait for ten emails."""
     import threading
+    _bell_invited(targets, meeting, organizer_name)
     targets = [t for t in targets if t.email]
     if not targets:
         return
@@ -985,7 +1024,8 @@ def schedule_meeting_ai(request):
             conflicts = agent.check_conflicts(company_user.id, scheduled_at, duration)
             # And anything the organiser has in another agent, their leave, or a company holiday.
             conflicts = _all_clashes(conflicts, _shared_clashes(_calendar_people([company_user]), scheduled_at,
-                                                                duration, company_user))
+                                                                duration, company_user,
+                                                                fallback=_browser_zone(request)))
 
             if conflicts:
                 result['conflicts'] = conflicts
@@ -1008,7 +1048,7 @@ def schedule_meeting_ai(request):
                     meeting_link=parsed.get('meeting_link', ''),
                     scheduled_at=scheduled_at,
                     duration_minutes=duration,
-                    timezone_name=parsed.get('timezone_name', 'UTC'),
+                    timezone_name=_browser_zone(request) or 'UTC',
                     recurrence=parsed.get('recurrence', 'none'),
                     recurrence_end_date=rec_end,
                 )
@@ -1122,7 +1162,8 @@ def meeting_list(request):
         # Refused if the organiser or anyone invited is busy anywhere: another agent's meeting, an
         # interview, a sales call, leave, a company holiday.
         with booking_guard(people):
-            ensure_free(people, _real(company_user, scheduled_at), duration, tz_name=_company_zone(company_user),
+            zone = _browser_zone(request)
+            ensure_free(people, _real(company_user, scheduled_at, zone), duration, tz_name=_company_zone(company_user, zone),
                         viewer_source='exec')
             meeting = ExecutiveMeeting.objects.create(
                 organizer=company_user,
@@ -1132,7 +1173,7 @@ def meeting_list(request):
                 meeting_link=meeting_link,
                 scheduled_at=scheduled_at,
                 duration_minutes=duration,
-                timezone_name=zone_name(request.data.get('timezone_name')),
+                timezone_name=zone or 'UTC',
                 recurrence=request.data.get('recurrence', 'none'),
             )
             for target in targets:
@@ -1194,7 +1235,10 @@ def meeting_detail(request, meeting_id):
 
     if request.method == 'PATCH':
         updatable = ['title', 'description', 'agenda', 'meeting_link',
-                     'duration_minutes', 'timezone_name', 'status', 'recurrence']
+                     'duration_minutes', 'status', 'recurrence']
+        # The browser's zone comes with every save (CO-210); it is not a change to tell anyone about.
+        if _browser_zone(request):
+            meeting.timezone_name = _browser_zone(request)
         changed_fields = []
         was = (_occupies_people(meeting), meeting.scheduled_at, meeting.duration_minutes)
         for field in updatable:
@@ -1213,8 +1257,10 @@ def meeting_detail(request, meeting_id):
             people = people_for('exec', meeting)
             try:
                 with booking_guard(people):
-                    ensure_free(people, _real(company_user, meeting.scheduled_at), meeting.duration_minutes,
-                                tz_name=_company_zone(company_user), exclude=[('exec', meeting.id)],
+                    ensure_free(people, _real(company_user, meeting.scheduled_at, meeting.timezone_name),
+                                meeting.duration_minutes,
+                                tz_name=_company_zone(company_user, meeting.timezone_name),
+                                exclude=[('exec', meeting.id)],
                                 viewer_source='exec')
                     meeting.save()
             except ScheduleConflict as clash:
@@ -1238,9 +1284,16 @@ def meeting_detail(request, meeting_id):
                 from meeting_agent.models import ExecutiveMeeting as _EM
                 try:
                     _meeting = _EM.objects.get(id=meeting_id_snap)
-                    for _p in _meeting.participants.select_related('company_user').all():
-                        _cu = _p.company_user
-                        if _cu.email and _cu.id != company_user.id:
+                    # Not to people who declined, and a meeting that is not on tells nobody unless its status
+                    # changed: editing a cancelled or finished one emailed everyone "Meeting updated" (CO-257).
+                    if not _occupies_people(_meeting) and 'status' not in changed_snap:
+                        return
+                    told = [_p.company_user for _p in _meeting.participants.select_related('company_user')
+                            .exclude(response='rejected') if _p.company_user_id != company_user.id]
+                    what = 'cancelled' if _meeting.status == 'cancelled' else 'changed: ' + ', '.join(changed_snap)
+                    _bell_changed(told, _meeting, what)
+                    for _cu in told:
+                        if _cu.email:
                             _send_meeting_update_email(_cu, _meeting, organizer_name_snap, changed_snap)
                 except Exception as _e:
                     logger.error("Meeting update notify error: %s", _e)
@@ -1250,8 +1303,17 @@ def meeting_detail(request, meeting_id):
         return Response({'status': 'success', 'meeting': _serialize_meeting(meeting)})
 
     if request.method == 'DELETE':
+        was_on = _occupies_people(meeting)
         meeting.status = 'cancelled'
         meeting.save()
+        # The people invited are told; cancelling here said nothing to anyone.
+        if was_on:
+            told = [p.company_user for p in meeting.participants.select_related('company_user')
+                    .exclude(response='rejected') if p.company_user_id != company_user.id]
+            _bell_changed(told, meeting, 'cancelled')
+            for cu in told:
+                if cu.email:
+                    _send_meeting_update_email(cu, meeting, company_user.full_name, ['status'])
         return Response({'status': 'success', 'message': 'Meeting cancelled.'})
 
 
@@ -1499,15 +1561,21 @@ def meeting_participants(request, meeting_id):
         try:
             with booking_guard(people):
                 if _occupies_people(meeting):
-                    ensure_free(people, _real(company_user, meeting.scheduled_at), meeting.duration_minutes,
-                                tz_name=_company_zone(company_user), exclude=[('exec', meeting.id)],
+                    ensure_free(people, _real(company_user, meeting.scheduled_at, meeting.timezone_name),
+                                meeting.duration_minutes,
+                                tz_name=_company_zone(company_user, meeting.timezone_name),
+                                exclude=[('exec', meeting.id)],
                                 viewer_source='exec')
                 p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
         except ScheduleConflict as clash:
             return clash.response()
-        if target.email:
-            _send_meeting_invite_email(target, meeting, company_user.full_name)
-        return Response({'status': 'success', 'participant': {
+        # Invited once, and only to a meeting that is on: picking someone already in it sent a second
+        # invitation, and a cancelled or finished meeting still said "You're invited" (CO-257).
+        if created and _occupies_people(meeting):
+            _bell_invited([target], meeting, company_user.full_name)
+            if target.email:
+                _send_meeting_invite_email(target, meeting, company_user.full_name)
+        return Response({'status': 'success', 'invited': bool(created and _occupies_people(meeting)), 'participant': {
             'id': p.id, 'user_id': target.id, 'full_name': target.full_name,
             'email': target.email, 'role': target.role, 'response': p.response,
         }}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
@@ -1535,8 +1603,13 @@ def meeting_participants(request, meeting_id):
         elif user_id:
             ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user_id=user_id).delete()
         # Send removal email
-        if removed_cu and removed_cu.email and removed_cu.id != company_user.id:
-            _send_meeting_removal_email(removed_cu, meeting, company_user.full_name)
+        if removed_cu and removed_cu.id != company_user.id:
+            from meeting_agent.bell import ring
+            ring([removed_cu], title=f'Taken off: {meeting.title}'[:255],
+                 message=f'{company_user.full_name} took you off "{meeting.title}" ({clock_when_text(meeting)}).',
+                 kind='exec_meeting_removed', email=False, data={'meeting_id': meeting.id})
+            if removed_cu.email:
+                _send_meeting_removal_email(removed_cu, meeting, company_user.full_name)
         elif removed_cu and removed_cu.id == company_user.id:
             logger.info("Participant remove: skipping email — user removed themselves")
         return Response({'status': 'success'})
@@ -1568,41 +1641,147 @@ def meeting_respond(request, meeting_id):
     if participant is None:
         return Response({'status': 'error', 'message': 'You are not invited to this meeting.'},
                         status=status.HTTP_403_FORBIDDEN)
-    participant.response = response_val
-    participant.reason = reason
-    participant.responded_at = timezone.now()
-
-    if response_val == 'counter_proposed' and counter_time_str:
-        ct = _parse_datetime(counter_time_str)
-        if ct:
-            participant.counter_proposed_time = ct
-
-    participant.save()
-
-    # Notify organizer
-    ExecNotification.objects.create(
-        company_user=meeting.organizer,
-        notification_type='participant_response',
-        severity='info',
-        title=f"{company_user.full_name} {response_val} your meeting",
-        message=f"{company_user.full_name} has {response_val} the meeting '{meeting.title}'." + (f" Reason: {reason}" if reason else ''),
-        meeting=meeting,
-        data={'participant_id': company_user.id, 'response': response_val, 'meeting_id': meeting.id},
-    )
-    # And in the bell: the alert above shows only on Executive Meeting's own page.
-    from core.notification_utils import notify_company_users
-    said = {'accepted': 'accepted', 'rejected': 'declined', 'tentative': 'tentatively accepted',
-            'counter_proposed': 'suggested another time for'}[response_val]
-    notify_company_users(
-        [meeting.organizer], title=f'{company_user.full_name} {said} {meeting.title}'[:255],
-        message=f'{company_user.full_name} {said} the meeting "{meeting.title}".' + (f' Reason: {reason}' if reason else ''),
-        link='/exec-meeting/dashboard?tab=meetings', kind='exec_meeting_reply',
-        data={'meeting_id': meeting.id})
-
+    counter = _parse_datetime(counter_time_str) if response_val == 'counter_proposed' and counter_time_str else None
+    _record_answer(meeting, participant, response_val, reason, counter)
     return Response({'status': 'success', 'participant': {
         'response': participant.response,
         'responded_at': participant.responded_at.isoformat(),
     }})
+
+
+# ---------------------------------------------------------------------------
+# Answering an invitation (CO-211). A dashboard login answers in the agent (above); an employee, who takes part
+# through a seat and cannot open the agent, answers on their own Meetings page or from the invitation email. An
+# unanswered invitation is busy time on the shared calendar, so until now they could not free themselves.
+# ---------------------------------------------------------------------------
+
+EXEC_ANSWER_SALT = 'exec.meeting.email-answer.v1'
+EXEC_ANSWER_MAX_AGE = 14 * 24 * 3600
+_SAID = {'accepted': 'accepted', 'rejected': 'declined', 'tentative': 'tentatively accepted',
+         'counter_proposed': 'suggested another time for'}
+
+
+def _record_answer(meeting, participant, response_val, reason='', counter_time=None):
+    """Save an invitee's answer and tell the organiser, on the agent's page and in the bell. Saving the seat
+    re-syncs the shared calendar, so a decline frees the person's time."""
+    who = participant.company_user.full_name or participant.company_user.email
+    participant.response = response_val
+    participant.reason = reason
+    participant.responded_at = timezone.now()
+    if counter_time:
+        participant.counter_proposed_time = counter_time
+    participant.save()
+    said = _SAID[response_val]
+    ExecNotification.objects.create(
+        company_user=meeting.organizer,
+        notification_type='participant_response',
+        severity='info',
+        title=f"{who} {said} your meeting"[:255],
+        message=f"{who} {said} the meeting '{meeting.title}'." + (f" Reason: {reason}" if reason else ''),
+        meeting=meeting,
+        data={'participant_id': participant.company_user_id, 'response': response_val, 'meeting_id': meeting.id},
+    )
+    # And in the bell: the alert above shows only on Executive Meeting's own page.
+    from core.notification_utils import notify_company_users
+    notify_company_users(
+        [meeting.organizer], title=f'{who} {said} {meeting.title}'[:255],
+        message=f'{who} {said} the meeting "{meeting.title}".' + (f' Reason: {reason}' if reason else ''),
+        link='/exec-meeting/dashboard?tab=meetings', kind='exec_meeting_reply',
+        data={'meeting_id': meeting.id})
+    return participant
+
+
+def _not_answerable(meeting):
+    """Why an invitation to this meeting can no longer be answered, or None."""
+    from meeting_agent.clock import real_end
+    if meeting.status == 'cancelled':
+        return f'The meeting "{meeting.title}" was cancelled. There is nothing to answer.'
+    if meeting.status == 'completed' or (real_end(meeting) and real_end(meeting) < timezone.now()):
+        return f'The meeting "{meeting.title}" is over.'
+    return None
+
+
+def answer_link(participant, action):
+    """The Accept or Decline button of an invitation email: a signed link for this seat, good for 14 days."""
+    from django.conf import settings as django_settings
+    from django.core.signing import TimestampSigner
+    base = (getattr(django_settings, 'BACKEND_PUBLIC_URL', None) or getattr(django_settings, 'PUBLIC_BACKEND_URL', None)
+            or 'http://localhost:8000').rstrip('/')
+    token = TimestampSigner(salt=EXEC_ANSWER_SALT).sign(str(int(participant.id)))
+    return f'{base}/api/meetings/exec-email-answer/{action}/{token}/'
+
+
+def _answer_buttons(seat) -> str:
+    """The invitation email's Accept and Decline buttons."""
+    def button(label, href, colour):
+        return (f'<td style="padding:0 6px;"><a href="{escape(href, quote=True)}" target="_blank" style="display:'
+                f'inline-block;padding:11px 26px;background:{colour};border-radius:8px;color:#ffffff;font-size:14px;'
+                f'font-weight:600;text-decoration:none;">{label}</a></td>')
+    return (
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 0;"><tr>'
+        '<td align="center"><p style="margin:0 0 10px;color:#6b7280;font-size:13px;">Can you come?</p>'
+        '<table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr>'
+        + button('Accept', answer_link(seat, 'accepted'), '#059669')
+        + button('Decline', answer_link(seat, 'rejected'), '#6b7280')
+        + '</tr></table></td></tr></table>')
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def meeting_respond_as_employee(request, meeting_id):
+    """An employee accepts or declines an executive meeting from their Meetings page. Their seat is found the way
+    the shared calendar finds them (linked by HR, or the same address in the same company). Accept and decline only:
+    nothing on the organiser's side acts on a suggested time."""
+    from api.views.notification import _dashboard_logins_of
+    seat = (ExecutiveMeetingParticipant.objects.select_related('meeting__organizer__company', 'company_user')
+            .filter(meeting_id=meeting_id, company_user_id__in=_dashboard_logins_of(request.user)).first())
+    if seat is None:
+        return Response({'status': 'error', 'message': 'You are not invited to this meeting.'},
+                        status=status.HTTP_404_NOT_FOUND)
+    action = str(request.data.get('action') or request.data.get('response') or '').strip()
+    if action not in ('accepted', 'rejected'):
+        return Response({'status': 'error', 'message': 'Answer with accept or decline.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    problem = _not_answerable(seat.meeting)
+    if problem:
+        return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
+    if seat.response != action:           # the same answer again tells the organiser nothing new
+        _record_answer(seat.meeting, seat, action, str(request.data.get('reason') or '').strip()[:1000])
+    return Response({'status': 'success', 'response': seat.response})
+
+
+def meeting_email_answer(request, action, token):
+    """The Accept and Decline buttons of an invitation email. No login: the signed link is the proof, as for
+    Project Manager's invitations (api/views/notification.meeting_email_action)."""
+    from html import escape
+    from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+    from api.views.notification import _render_email_action_page
+
+    def page(heading, text, color='#10b981'):
+        # The page puts its text into HTML as given; a meeting's title is the organiser's text.
+        return _render_email_action_page(escape(heading), escape(text), color=color)
+    try:
+        seat_id = int(TimestampSigner(salt=EXEC_ANSWER_SALT).unsign(token, max_age=EXEC_ANSWER_MAX_AGE))
+    except (BadSignature, SignatureExpired, ValueError):
+        return page('Link expired or invalid', 'This invitation link is no longer valid. Ask the organiser to '
+                    'invite you again, or answer on your Meetings page.', color='#ef4444')
+    seat = (ExecutiveMeetingParticipant.objects.select_related('meeting__organizer__company', 'company_user')
+            .filter(id=seat_id).first())
+    if seat is None or action not in ('accepted', 'rejected'):
+        return page('Invitation not found', 'You are no longer invited to this meeting, or it was deleted.',
+                    color='#ef4444')
+    problem = _not_answerable(seat.meeting)
+    if problem:
+        return page('Nothing to answer', problem, color='#9ca3af')
+    title = seat.meeting.title
+    if seat.response == action:
+        return page(f'Already {_SAID[action]}', f'You have already {_SAID[action]} "{title}". Nothing more to do.')
+    _record_answer(seat.meeting, seat, action)
+    if action == 'accepted':
+        return page('Accepted', f'You accepted "{title}". {seat.meeting.organizer.full_name or "The organiser"} '
+                    'has been told.')
+    return page('Declined', f'You declined "{title}". The organiser has been told, and the time is free in your '
+                'calendar again.', color='#6b7280')
 
 
 @api_view(['GET'])
@@ -1612,7 +1791,7 @@ def meeting_respond(request, meeting_id):
 def meeting_suggest_slots(request):
     """Suggest free time slots for a meeting."""
     company_user = request.user
-    preferred_date = request.query_params.get('date', timezone.now().strftime('%Y-%m-%d'))
+    preferred_date = request.query_params.get('date', _today(company_user).isoformat())
     duration = int(request.query_params.get('duration_minutes', 60))
     num_slots = min(int(request.query_params.get('num_slots', 5)), 10)
 
@@ -1660,7 +1839,8 @@ def meeting_check_conflicts(request):
                   if exclude_id else None)
         if moving is not None:
             people |= set(people_for('exec', moving))
-        shared = _shared_clashes(sorted(people), scheduled_at, duration, company_user, exclude_id)
+        shared = _shared_clashes(sorted(people), scheduled_at, duration, company_user, exclude_id,
+                                 fallback=_browser_zone(request, moving))
         return Response({'status': 'success', 'conflicts': _all_clashes(conflicts, shared),
                          'blocking': bool(shared)})
     except Exception as e:
@@ -2193,7 +2373,8 @@ def task_prioritize_ai(request):
 
     try:
         agent = _get_agent('task_prioritization', company_user)
-        result = [_clean_priority_suggestion(item) for item in agent.prioritize_tasks(tasks_data, context)]
+        result = [_clean_priority_suggestion(item, _today(company_user))
+                  for item in agent.prioritize_tasks(tasks_data, context)]
         # `apply: false` only suggests: the Tasks screen shows the suggestions and applies the ones ticked
         # (task_prioritize_apply). Without it the suggestions are applied at once, as before.
         updated = _apply_priority_suggestions(company_user, result) if request.data.get('apply', True) else 0
@@ -2214,11 +2395,11 @@ def task_prioritize_apply(request):
     if not isinstance(items, list) or not items:
         return Response({'status': 'error', 'message': 'items must be a non-empty list.'},
                         status=status.HTTP_400_BAD_REQUEST)
-    items = [_clean_priority_suggestion(dict(item)) for item in items if isinstance(item, dict)]
+    items = [_clean_priority_suggestion(dict(item), _today(request.user)) for item in items if isinstance(item, dict)]
     return Response({'status': 'success', 'updated_count': _apply_priority_suggestions(request.user, items)})
 
 
-def _clean_priority_suggestion(item):
+def _clean_priority_suggestion(item, today=None):
     """One AI suggestion made safe to show and to save. Priority is clamped to low/medium/high (a stray 'critical'
     becomes 'high'), and a suggested date before today is pulled up to today. Weekends are allowed."""
     p = str(item.get('priority', '')).strip().lower()
@@ -2229,7 +2410,7 @@ def _clean_priority_suggestion(item):
     raw = item.get('suggested_due_date')
     if raw:
         try:
-            due = max(datetime.strptime(str(raw)[:10], '%Y-%m-%d').date(), timezone.now().date())
+            due = max(datetime.strptime(str(raw)[:10], '%Y-%m-%d').date(), today or timezone.now().date())
         except (ValueError, TypeError):
             due = None
     item['suggested_due_date'] = due.isoformat() if due else None
@@ -2286,7 +2467,7 @@ def task_workload_analysis(request):
 def calendar_plan_week(request):
     """Generate an AI weekly calendar plan."""
     company_user = request.user
-    week_start = request.data.get('week_start', timezone.now().strftime('%Y-%m-%d'))
+    week_start = request.data.get('week_start', _today(company_user).isoformat())
     include_past_tasks = bool(request.data.get('include_past_tasks', False))
     # Work-hours window the user wants tasks scheduled within (defaults 9–17).
     try:
@@ -2301,7 +2482,7 @@ def calendar_plan_week(request):
     try:
         _week_start_date = datetime.strptime(week_start, '%Y-%m-%d').date()
     except ValueError:
-        _week_start_date = timezone.now().date()
+        _week_start_date = _today(company_user)
     _week_end_date = _week_start_date + _td(days=6)
 
     meetings = []
@@ -2431,7 +2612,7 @@ def calendar_plan_week(request):
 def calendar_free_slots(request):
     """Get free calendar slots for a given date."""
     company_user = request.user
-    date = request.query_params.get('date', timezone.now().strftime('%Y-%m-%d'))
+    date = request.query_params.get('date', _today(company_user).isoformat())
     duration = int(request.query_params.get('duration_minutes', 60))
 
     try:
@@ -2519,7 +2700,8 @@ def document_draft(request):
                 attendees_minutes = list(meeting.participants.values_list('company_user__full_name', flat=True))
             content = agent.write_minutes(
                 meeting.title if meeting else request.data.get('title', 'Meeting'),
-                request.data.get('date', timezone.now().strftime('%Y-%m-%d')),
+                # The day it was held, not the day the minutes were written (CO-167).
+                request.data.get('date') or (held_on(meeting) if meeting else _today(request.user)).isoformat(),
                 attendees_minutes,
                 summary, action_items, decisions,
             )

@@ -62,18 +62,21 @@ TOPICS = (
     # may or may not be a dashboard login: `address_wants_email` asks the login
     # with that address in the company, and sends when there is none.
     Topic('meeting_reminders', 'Meeting reminders',
-          'Before a meeting in Project Manager, HR or Frontline that you organise or are in, and when '
+          'Before a meeting in Project Manager, HR, Frontline or Executive Meeting that you organise or are in, and when '
           "invitees to yours haven't replied. Project Manager's are always in the bell; the bell is how "
           'a reminder is sent only once.',
-          ('project_manager_agent', 'hr_agent', 'frontline_agent'), kinds=('hr_meeting_reminder', 'frontline_meeting_reminder'),
+          ('project_manager_agent', 'hr_agent', 'frontline_agent', 'exec_meeting_agent'),
+          kinds=('hr_meeting_reminder', 'frontline_meeting_reminder', 'exec_meeting_reminder'),
           email_default=True, in_app_locked=True),
     Topic('tasks_assigned', 'Tasks assigned to you',
           'Someone gives you a task in Project Manager or from an executive meeting, adds to one of '
           'yours, or takes one away.',
           ('project_manager_agent', 'exec_meeting_agent'), email_default=True, in_app=False),
     Topic('tasks_overdue', 'Your tasks that become overdue',
-          'The morning after one of your Project Manager tasks was due, if it is still open.',
-          'project_manager_agent', kinds=('pm_task_overdue',)),
+          'One of your Project Manager or Executive Meeting tasks, or an action item from your meeting, is past '
+          'its due date and still open. Once for each due date.',
+          ('project_manager_agent', 'exec_meeting_agent'),
+          kinds=('pm_task_overdue', 'exec_task_overdue', 'exec_action_item_overdue')),
     Topic('meeting_replies', 'Replies to meetings you organise',
           'An invitee accepts, declines or suggests another time, in Project Manager, HR or Executive Meeting.',
           ('project_manager_agent', 'hr_agent', 'exec_meeting_agent'),
@@ -138,11 +141,14 @@ TOPICS = (
           'recruitment_agent', kinds=('recruitment_workflow_notice',)),
     Topic('exec_meetings', 'Executive meeting invitations and changes',
           'You are invited to an executive meeting, its time or details change, or you are taken off it.',
-          'exec_meeting_agent', email_default=True, in_app=False),
+          'exec_meeting_agent', kinds=('exec_meeting_invite', 'exec_meeting_changed', 'exec_meeting_removed'),
+          email_default=True),
     Topic('exec_tasks', 'Executive Meeting tasks',
-          'Someone gives you a task in Executive Meeting, or moves on a task you gave them. '
+          'Someone gives you a task in Executive Meeting, moves on a task you gave them, or one of your tasks is '
+          'due today. '
           'The email for a new task is under "Tasks assigned to you".',
-          'exec_meeting_agent', kinds=('exec_task_assigned', 'exec_task_progress'), email=False),
+          'exec_meeting_agent', kinds=('exec_task_assigned', 'exec_task_progress', 'exec_task_due',
+                                       'exec_task_changed'), email=False),
     Topic('marketing_action', 'Marketing campaigns that need you',
           "A campaign of yours cannot go on without you: it could not start, its mailbox stopped "
           "sending, or something else needs a decision. At most once a day for each.",

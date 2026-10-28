@@ -9,6 +9,8 @@ from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
+AGENT_MEETINGS = '/exec-meeting/dashboard?tab=meetings'
+
 
 @shared_task(name='meeting_agent.send_meeting_reminders')
 def send_meeting_reminders():
@@ -16,17 +18,22 @@ def send_meeting_reminders():
     Run every 5 minutes.
     Create ExecNotification reminders for meetings starting within the next 15 minutes.
     """
+    from meeting_agent.bell import ring
+    from meeting_agent.clock import real_start, when_text
     from meeting_agent.models import ExecutiveMeeting, ExecNotification
     now = timezone.now()
     window_end = now + timedelta(minutes=15)
 
+    # Times are kept as typed (meeting_agent.clock), so the query takes the widest offset either side and each
+    # meeting is then held to its real start. Compared as stored, Karachi's reminders came five hours late (CO-210).
     from core.modules import active_company_ids
-    upcoming = ExecutiveMeeting.objects.filter(
+    candidates = ExecutiveMeeting.objects.filter(
         organizer__company_id__in=active_company_ids('exec_meeting_agent'),   # not for a lapsed agent
         status='scheduled',
-        scheduled_at__gte=now,
-        scheduled_at__lte=window_end,
-    ).select_related('organizer')
+        scheduled_at__gte=now - timedelta(hours=15),
+        scheduled_at__lte=window_end + timedelta(hours=15),
+    ).select_related('organizer__company')
+    upcoming = [m for m in candidates if now <= real_start(m) <= window_end]
 
     created_count = 0
     for meeting in upcoming:
@@ -36,24 +43,29 @@ def send_meeting_reminders():
             meeting=meeting,
             created_at__gte=now - timedelta(minutes=20),
         ).exists()
-        if already_notified:
-            continue
 
-        minutes_until = max(0, int((meeting.scheduled_at - now).total_seconds() / 60))
-        ExecNotification.objects.create(
-            company_user=meeting.organizer,
-            notification_type='meeting_reminder',
-            severity='warning',
-            title=f"Meeting in {minutes_until} min: {meeting.title}",
-            message=f"Your meeting '{meeting.title}' starts in approximately {minutes_until} minutes.",
-            meeting=meeting,
-            data={
-                'meeting_id': meeting.id,
-                'scheduled_at': meeting.scheduled_at.isoformat(),
-                'duration_minutes': meeting.duration_minutes,
-            },
-        )
-        created_count += 1
+        minutes_until = max(0, int((real_start(meeting) - now).total_seconds() / 60))
+        # Skipping the whole meeting once the organiser had a reminder left the people invited with none (CO-259).
+        # Each reminder also reaches the bell (meeting_agent.bell): this agent's own page is not where anyone looks.
+        when = when_text(meeting)
+        if not already_notified:
+            ring([meeting.organizer], title=f'Meeting in {minutes_until} min: {meeting.title}'[:255],
+                 message=f"Your meeting '{meeting.title}' starts at {when}.", kind='exec_meeting_reminder',
+                 link=AGENT_MEETINGS, severity='warning', data={'meeting_id': meeting.id})
+            ExecNotification.objects.create(
+                company_user=meeting.organizer,
+                notification_type='meeting_reminder',
+                severity='warning',
+                title=f"Meeting in {minutes_until} min: {meeting.title}",
+                message=f"Your meeting '{meeting.title}' starts in approximately {minutes_until} minutes.",
+                meeting=meeting,
+                data={
+                    'meeting_id': meeting.id,
+                    'scheduled_at': meeting.scheduled_at.isoformat(),
+                    'duration_minutes': meeting.duration_minutes,
+                },
+            )
+            created_count += 1
 
         # Also notify accepted participants
         for participant in meeting.participants.filter(
@@ -66,6 +78,11 @@ def send_meeting_reminders():
                 created_at__gte=now - timedelta(minutes=20),
             ).exists()
             if not already_p:
+                ring([participant.company_user], title=f'Meeting in {minutes_until} min: {meeting.title}'[:255],
+                     message=f"'{meeting.title}' starts at {when}." + (
+                         f' Join: {meeting.meeting_link}' if meeting.meeting_link else ''),
+                     kind='exec_meeting_reminder', link=AGENT_MEETINGS, severity='warning',
+                     data={'meeting_id': meeting.id})
                 ExecNotification.objects.create(
                     company_user=participant.company_user,
                     notification_type='meeting_reminder',
@@ -90,48 +107,37 @@ def run_proactive_notifications():
     run the ProactiveNotificationAgent to scan and create notifications.
     Keeps it lightweight — only runs for users with pending tasks or upcoming meetings.
     """
-    from meeting_agent.models import ExecutiveMeeting, ExecutiveTask
+    from meeting_agent.models import ExecutiveTask, MeetingActionItem
     from core.models import CompanyUser
+    from core.modules import active_company_ids
 
-    now = timezone.now()
-
-    # Find company users who have tasks or meetings that need attention
-    user_ids_with_tasks = set(
-        ExecutiveTask.objects.filter(
-            status__in=['todo', 'in_progress'],
-            due_date__lte=(now + timedelta(days=1)).date(),
-        ).values_list('company_user_id', flat=True)[:200]
-    )
-    user_ids_with_meetings = set(
-        ExecutiveMeeting.objects.filter(
-            status='scheduled',
-            scheduled_at__lte=now + timedelta(hours=24),
-        ).values_list('organizer_id', flat=True)[:200]
-    )
-
-    target_user_ids = user_ids_with_tasks | user_ids_with_meetings
-    if not target_user_ids:
+    # Everyone with an open task due by tomorrow, or an open action item past due, in a company with the agent.
+    # It took the first 200 rows across every company, then 100 people, so once the platform had more, most people
+    # were never checked (CO-260). Tomorrow covers every company's clock; the scan uses its own today.
+    companies = active_company_ids('exec_meeting_agent')
+    soon = (timezone.now() + timedelta(days=1)).date()
+    owners = set(ExecutiveTask.objects.filter(company_user__company_id__in=companies,
+                                              status__in=['todo', 'in_progress', 'review'], due_date__lte=soon)
+                 .order_by().values_list('company_user_id', flat=True).distinct())
+    owners |= set(MeetingActionItem.objects.filter(meeting__organizer__company_id__in=companies,
+                                                   status__in=['open', 'in_progress'], due_date__lte=soon)
+                  .order_by().values_list('meeting__organizer_id', flat=True).distinct())
+    if not owners:
         return {'scanned': 0, 'total_created': 0}
 
-    from core.modules import active_company_ids
-    active_users = CompanyUser.objects.filter(
-        id__in=target_user_ids,
-        is_active=True,
-        company_id__in=active_company_ids('exec_meeting_agent'),   # not for a lapsed agent
-    ).select_related('company')[:100]
-
-    total_created = 0
-    for company_user in active_users:
+    scanned = total_created = 0
+    from meeting_agent.ai_agents import ProactiveNotificationAgent
+    for company_user in CompanyUser.objects.filter(id__in=owners, is_active=True).iterator(chunk_size=200):
+        scanned += 1
         try:
-            from meeting_agent.ai_agents import ProactiveNotificationAgent
             agent = ProactiveNotificationAgent(company_id=company_user.company_id)
-            created = agent.scan_and_create_notifications(company_user.id)
-            total_created += len(created)
+            total_created += len(agent.scan_and_create_notifications(company_user.id))
         except Exception as e:
             logger.warning("[ExecMeeting] proactive scan failed for user %s: %s", company_user.id, e)
 
-    logger.info("[ExecMeeting] run_proactive_notifications: scanned %d users, created %d notifications", len(active_users), total_created)
-    return {'scanned': len(active_users), 'total_created': total_created}
+    logger.info("[ExecMeeting] run_proactive_notifications: scanned %d users, created %d notifications",
+                scanned, total_created)
+    return {'scanned': scanned, 'total_created': total_created}
 
 
 @shared_task(name='meeting_agent.cleanup_old_notifications')
@@ -154,14 +160,16 @@ def mark_completed_meetings():
     Mark meetings whose scheduled_at + duration has passed as 'completed'
     if they are still in 'scheduled' or 'in_progress' status.
     """
+    from meeting_agent.clock import real_end
     from meeting_agent.models import ExecutiveMeeting
-    from datetime import timedelta as td
     now = timezone.now()
 
+    # Over when it really ends: west of UTC, comparing the typed time marked a meeting completed hours before it
+    # started, which also took it off the shared calendar (CO-210).
     completed_count = 0
-    for meeting in ExecutiveMeeting.objects.filter(status__in=['scheduled', 'in_progress']):
-        meeting_end = meeting.scheduled_at + td(minutes=meeting.duration_minutes)
-        if meeting_end < now:
+    for meeting in (ExecutiveMeeting.objects.filter(status__in=['scheduled', 'in_progress'])
+                    .select_related('organizer__company')):
+        if real_end(meeting) < now:
             meeting.status = 'completed'
             meeting.save(update_fields=['status'])
             completed_count += 1

@@ -40,7 +40,8 @@ class TaskPrioritizationAgent(BaseAgent):
         """Re-prioritize a list of tasks using AI reasoning."""
         self.log_action("prioritize_tasks", {"task_count": len(tasks)})
         from django.utils import timezone
-        today = timezone.now().strftime('%Y-%m-%d')
+        from meeting_agent.clock import today_for
+        today = today_for(self.company_id).isoformat()   # the company's today, not the server's (CO-210)
         tasks_text = json.dumps(tasks[:30], indent=2)
         prompt = f"""You are prioritising a company user's tasks. Today is {today}.
 
@@ -103,7 +104,8 @@ Return ONLY the JSON array. Empty array if no bottlenecks found."""
         """Suggest realistic deadlines for tasks without due dates."""
         self.log_action("suggest_deadlines")
         from django.utils import timezone
-        today = timezone.now().strftime('%Y-%m-%d')
+        from meeting_agent.clock import today_for
+        today = today_for(self.company_id).isoformat()   # the company's today, not the server's (CO-210)
         tasks_without_dates = [t for t in tasks if not t.get('due_date')][:20]
         if not tasks_without_dates:
             return []
@@ -130,7 +132,8 @@ Return ONLY the JSON array."""
         """Analyze workload and return a summary with risk flags."""
         self.log_action("analyze_workload")
         from django.utils import timezone
-        today = timezone.now().strftime('%Y-%m-%d')
+        from meeting_agent.clock import today_for
+        today = today_for(self.company_id).isoformat()   # the company's today, not the server's (CO-210)
         prompt = f"""Analyze the workload for {company_user_name or 'this executive'}. Today is {today}.
 
 Tasks:
@@ -161,7 +164,8 @@ Return ONLY the JSON object."""
         """
         from django.utils import timezone
         self.log_action("parse_task_request", {"message_len": len(message)})
-        today = timezone.now().strftime('%Y-%m-%d')
+        from meeting_agent.clock import today_for
+        today = today_for(self.company_id).isoformat()   # the company's today, not the server's (CO-210)
         prompt = f"""Parse this task request and return ONLY valid JSON:
 
 Request: "{message}"
