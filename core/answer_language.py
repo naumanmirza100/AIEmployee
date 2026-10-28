@@ -22,8 +22,9 @@ _SCRIPT = {
 
 
 def line(asked, english, language=None):
-    """'' for a question in English, else the LANGUAGE line. `language` is the reading's ("english", "roman_urdu",
-    "urdu", "other"); without one, a question whose restatement differs from it is taken as not English."""
+    """The LANGUAGE line. `language` is the reading's ("english", "roman_urdu", "urdu", "other"); for English it says
+    to answer in English. Without a reading, '' for a question that is its own restatement, else the line asking for
+    the language the person wrote in."""
     asked, english = (asked or '').strip(), (english or '').strip()
     if not asked:
         return ''
@@ -34,6 +35,9 @@ def line(asked, english, language=None):
                 f'language and script: {_ROMAN_URDU} English if they wrote English. Names, numbers, amounts, dates and '
                 'document titles stay as they are.\n\n')
     if language == 'english':
-        return ''
+        # Said, not left out: with no line, an English question after a Roman Urdu answer was answered in Roman Urdu
+        # too, the model carrying on in the conversation's language (Operations' clean run, 28 Oct 2026).
+        return ('LANGUAGE: this question is in English. Write the whole answer in English, whatever language earlier '
+                'messages in the conversation used.\n\n')
     return (f'LANGUAGE: the person asked, in their own words: "{asked[:600]}". Write the whole answer in '
             f'{_SCRIPT[language]} Names, numbers, amounts, dates and document titles stay as they are.\n\n')

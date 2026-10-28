@@ -287,7 +287,7 @@ class AnswerLanguageTests(SimpleTestCase):
         prompt = agent._answer_prompt('How does Mahnoor Khalid compare with Ahmed Raza?', 'CONTEXT',
                                       original='and how does Mahnoor compare with him?', wants='compare',
                                       language='english')
-        self.assertNotIn('LANGUAGE:', prompt)
+        self.assertTrue(prompt.startswith('LANGUAGE: this question is in English'))
         roman = agent._answer_prompt("What are Ahmed Raza's skills?", 'CONTEXT',
                                      original='Ahmed Raza ki skills batao', language='roman_urdu')
         self.assertTrue(roman.startswith('LANGUAGE: the person asked'))

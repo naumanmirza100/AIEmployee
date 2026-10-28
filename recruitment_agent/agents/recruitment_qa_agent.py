@@ -1969,7 +1969,7 @@ FORMATTING:
                        language=None) -> str:
         prompt = self._answer_instructions(question, context, wants)
         from core.answer_language import LANGUAGES, line as language_line
-        if original and language in ('urdu', 'other'):
+        if original and language in ('english', 'urdu', 'other'):
             return language_line(original, question, language) + prompt
         # The reading's language when it gave one: a line whenever the restatement differs meant every English
         # follow-up got it, and "and how does Mahnoor compare with him?" was answered in Roman Urdu (28 Oct 2026).

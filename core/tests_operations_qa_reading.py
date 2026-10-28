@@ -90,6 +90,23 @@ class ReadingTests(QATestCase):
         self.ask('FinEdge mein late payment ka jurmana kitna hai?', ai)
         self.assertTrue(ai.prompts[-1].startswith('LANGUAGE: the person asked'))
 
+    def test_a_question_in_urdu_script_finds_the_urdu_notice(self):
+        # Searched only as "What are the new office hours?", it matched no word of the Urdu notice (clean run).
+        notice = OperationsDocument.objects.create(company=self.company, title='Office notice', original_filename='n.txt',
+                                                   file='', is_processed=True, processing_status='ready')
+        OperationsDocumentChunk.objects.create(document=notice, chunk_index=0,
+                                               content='یکم نومبر 2026 سے دفتر کے اوقات صبح نو بجے سے شام چھ بجے تک ہوں گے۔')
+        ai = FakeAI(reading(english='What are the new office hours?', language='urdu'))
+        self.ask('دفتر کے نئے اوقات کیا ہیں؟', ai)
+        self.assertIn('صبح نو بجے', ai.prompts[-1])
+        self.assertIn('Urdu script', ai.prompts[-1].split('\n')[0])
+
+    def test_an_english_question_after_roman_urdu_is_answered_in_english(self):
+        history = [{'role': 'user', 'content': 'penalty kitni hai?'}, {'role': 'assistant', 'content': 'Penalty 2% hai.'}]
+        ai = FakeAI(reading(english='What is the late payment penalty capped at?', language='english'))
+        self.ask('and what is it capped at?', ai, history=history)
+        self.assertTrue(ai.prompts[-1].startswith('LANGUAGE: this question is in English'))
+
     def test_an_opinion_on_the_documents_is_not_small_talk(self):
         ai = FakeAI(reading(english='Is the late payment penalty in the FinEdge agreement fair?'))
         answer = self.ask('Do you think the late payment penalty is fair?', ai)['answer']
