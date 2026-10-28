@@ -61,8 +61,18 @@ class FiguresTests(TestCase):
         items = self.msa.metadata['figures']['items']
         self.assertEqual(items[0], {'label': 'Contract value', 'value': 1250000.0, 'unit': 'PKR', 'period': '2026'})
         self.assertEqual(items[1]['value'], 99.9)
-        self.assertIsNone(items[2]['value'])                        # not a number: kept, with no value
+        self.assertIsNone(items[2]['value'])                        # not a number: kept, with its words
+        self.assertEqual(items[2]['text'], 'business hours')
+        self.assertNotIn('text', items[0])
         self.assertIn('FinEdge MSA', llm.call_args[0][0])
+
+    def test_a_figure_with_nothing_to_show_is_left_out_and_an_empty_unit_dropped(self):
+        # On the live site: "Potential loss of profit from FinEdge: —" and "Team size: 42 units".
+        rows = figures.parse('[{"label": "Potential loss of profit from FinEdge", "value": null, "unit": "PKR"},'
+                             ' {"label": "Team size", "value": 42, "unit": "units", "period": "current"},'
+                             ' {"label": "Clients", "value": 18, "unit": "clients"}]')
+        self.assertEqual([(r['label'], r['value'], r['unit']) for r in rows],
+                         [('Team size', 42, ''), ('Clients', 18, 'clients')])
 
     def test_reading_again_replaces_them_and_keeps_the_rest_of_the_metadata(self):
         self.msa.metadata = {'pages': 12}

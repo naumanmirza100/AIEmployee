@@ -166,7 +166,7 @@ const ReferenceDocsPickerDialog = ({
                   <div className="flex-1 min-w-0">
                     <div className="text-sm text-white/90 truncate">{d.title || d.original_filename}</div>
                     <div className="text-[10px] text-white/45 truncate">
-                      {d.file_type?.toUpperCase()} · {d.page_count || 0} pages · {d.document_type}
+                      {d.file_type?.toUpperCase()} · {d.page_count || 0} {d.page_count === 1 ? 'page' : 'pages'} · {d.document_type}
                     </div>
                   </div>
                   <input

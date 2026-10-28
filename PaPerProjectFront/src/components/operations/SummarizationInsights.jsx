@@ -288,7 +288,7 @@ const SummarizationInsights = () => {
                           <p className="text-sm font-semibold text-white truncate">{s.original_filename}</p>
                           <SummaryStatus s={s} />
                           <div className="flex items-center gap-3 mt-1 text-[11px] text-white/30 flex-wrap">
-                            <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" /> {s.page_count} pages</span>
+                            <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" /> {s.page_count} {s.page_count === 1 ? 'page' : 'pages'}</span>
                             <span>{formatFileSize(s.file_size)}</span>
                             <span>{s.word_count?.toLocaleString()} words</span>
                             <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatDate(s.created_at)}</span>

@@ -389,7 +389,7 @@ const SummaryDetailPage = () => {
                         {items.map((v, i) => (
                           <span key={i} id={`OPS-summarydetail-entity-${key}-${i}`} data-testid={`OPS-summarydetail-entity-${key}-${i}`} className="text-[11px] px-2 py-0.5 rounded-md"
                             style={{ background: `${color}15`, color: `${color}cc` }}>
-                            {v}
+                            {key === 'dates' ? formatDeadline(v) : v}
                           </span>
                         ))}
                       </div>

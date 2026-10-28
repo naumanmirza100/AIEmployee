@@ -422,7 +422,7 @@ const DocumentProcessing = () => {
                           )}
                           <div className="flex items-center gap-4 text-[11px] text-white/30 flex-wrap">
                             <span className="flex items-center gap-1"><File className="h-3 w-3" />{fc.label} &middot; {formatFileSize(doc.file_size)}</span>
-                            {doc.page_count > 0 && <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" />{doc.page_count} pages</span>}
+                            {doc.page_count > 0 && <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" />{doc.page_count} {doc.page_count === 1 ? 'page' : 'pages'}</span>}
                             <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{formatDate(doc.created_at)}</span>
                             {doc.uploaded_by && <span className="hidden sm:flex items-center gap-1"><User className="h-3 w-3" />{doc.uploaded_by}</span>}
                           </div>
