@@ -699,6 +699,7 @@ urlpatterns = [
     re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/update/?$', operations_agent.update_generated_document, name='operations_authoring_update'),  # PATCH
     re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/delete/?$', operations_agent.delete_generated_document, name='operations_authoring_delete'),  # DELETE
     re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/regenerate/?$', operations_agent.regenerate_document, name='operations_authoring_regenerate'),  # POST
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/restore/?$', operations_agent.restore_generated_document_version, name='operations_authoring_restore'),  # POST
     re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/export/pdf/?$', operations_agent.export_generated_document_pdf, name='operations_authoring_export_pdf'),  # GET
     re_path(r'^operations/authoring/generate/stream/?$', operations_agent.stream_generate_document, name='operations_authoring_generate_stream'),  # POST
 

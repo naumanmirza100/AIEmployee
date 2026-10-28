@@ -20,7 +20,7 @@ from functools import reduce
 from typing import Dict, List, Optional, Tuple
 
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
 from operations_agent.models import (
@@ -239,9 +239,11 @@ _STOPWORDS = {
 
 
 def _tokenize(text: str) -> List[str]:
+    """The question's words of two letters or more, in any script (CO-215: a question in Urdu script had no words
+    at all, and was told no documents match without a search)."""
     if not text:
         return []
-    words = re.findall(r"[A-Za-z0-9]{2,}", text.lower())
+    words = re.findall(r"[^\W_]{2,}", text.lower())
     return [w for w in words if w not in _STOPWORDS]
 
 
@@ -253,9 +255,9 @@ _OFF_TOPIC_PATTERNS = [
                r"family|wife|husband|spouse|partner|girlfriend|boyfriend|pets?|dogs?|cats?|"
                r"siblings?|brothers?|sisters?|parents?|mom|dad|mother|father)\b", re.I),
     re.compile(r"\b(are|were|r)\s+you\s+(married|single|divorced|alive|dead|human|real|"
-               r"sentient|conscious|happy|sad|tired|bored|ok|okay|fine|sure|there|here|"
+               r"sentient|conscious|happy|sad|tired|bored|ok|okay|fine|there|here|"
                r"a\s+(bot|robot|ai|machine|person|human|man|woman|girl|boy))\b", re.I),
-    re.compile(r"\bhow\s+(are|r|do|did)\s+you(?:\s+(doing|feel|feeling|today))?\b", re.I),
+    re.compile(r"\bhow\s+(are|r)\s+you(?:\s+(doing|feeling|today))?\b", re.I),
     re.compile(r"\bhow'?s\s+(it\s+going|your\s+day|life)\b", re.I),
     re.compile(r"\b(what'?s|what\s+is|what\s+are)\s+your\s+(name|age|favou?rite|"
                r"opinion|view|gender|religion|hobby|job|salary)\b", re.I),
@@ -263,8 +265,7 @@ _OFF_TOPIC_PATTERNS = [
     re.compile(r"\bwhat\s+are\s+you\b", re.I),
     re.compile(r"\btell\s+me\s+(a\s+)?(joke|story|secret|riddle|poem|something\s+funny)\b", re.I),
     re.compile(r"\b(what'?s|what\s+is|how'?s|how\s+is)\s+the\s+weather\b", re.I),
-    re.compile(r"\bdo\s+you\s+(like|love|hate|enjoy|prefer|believe|think|feel|dream|sleep|eat|"
-               r"drink|exist|live)\b", re.I),
+    re.compile(r"\bdo\s+you\s+(like|love|hate|enjoy|dream|sleep|eat|drink|exist|live)\b", re.I),
     re.compile(r"\bcan\s+you\s+(sing|dance|cook|drive|swim|fly|cry|laugh|feel|dream)\b", re.I),
     # Pure greetings / small talk with nothing else of substance. Allow a short
     # trailing address like "hi there" / "hello team" but not a full sentence.
@@ -277,10 +278,22 @@ _OFF_TOPIC_PATTERNS = [
 
 def _looks_off_topic(question: str) -> bool:
     """True for personal, conversational, or general-knowledge questions that have
-    nothing to do with the user's uploaded operations documents."""
+    nothing to do with the user's uploaded operations documents.
+
+    A pattern counts only at the start of the question (CO-175): "Which clause, do you think, …" or "How do you read
+    the penalty in …" were refused as small talk."""
     if not question:
         return False
-    return any(pat.search(question) for pat in _OFF_TOPIC_PATTERNS)
+    return any(pat.match(question.strip()) for pat in _OFF_TOPIC_PATTERNS)
+
+
+# A question that is only a request for the library listing (the word rules, without a reading).
+_LIBRARY_QUESTION = re.compile(
+    r"^\s*(please\s+)?((list|show)(\s+me)?(\s+(all|my|the))?(\s+(of\s+)?(my|the))?(\s+uploaded)?\s+(documents|files|docs)"
+    r"|(what|which)\s+(documents|files|docs)\s+(do\s+i|do\s+we)\s+have"
+    r"|how\s+many\s+(documents|files|docs)(\s+(do\s+i|do\s+we)\s+have|\s+are\s+there|\s+have\s+i\s+uploaded)?"
+    r"|(what|which)\s+(documents|files|docs)\s+(are|have\s+been)\s+uploaded)\s*[?.!]*\s*$",
+    re.I)
 
 
 def _score_chunk(chunk_text: str, question_tokens: List[str]) -> int:
@@ -379,20 +392,36 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
                     out['timing_ms'] = {'total': int((time.time() - _t_overall) * 1000), 'cache': True}
                     return out
 
-            # Route: "list/show all documents" style meta-questions answered from metadata
-            meta_answer = self._maybe_answer_meta(question, company_id)
-            if meta_answer is not None:
-                return meta_answer
+            # The AI reading of the question (operations_agent/intent.py) chooses the path, and its standalone
+            # English restatement is what the documents are searched with. Without a reading, the word rules.
+            from operations_agent import intent
+            reading = intent.read(question, chat_history, agent=self)
+            search_text = question
+            if reading is not None:
+                if reading['kind'] == 'off_topic':
+                    return self._off_topic_response(question, company_id)
+                canned = intent.reply(reading)
+                if canned is not None:
+                    return {'success': True, 'answer': canned, 'sources': [],
+                            'suggested_title': self._suggest_title(question)}
+                if reading['kind'] == 'library':
+                    return self._library_answer(company_id)
+                search_text = reading.get('english') or question
+            else:
+                # Route: "list/show all documents" style meta-questions answered from metadata
+                meta_answer = self._maybe_answer_meta(question, company_id)
+                if meta_answer is not None:
+                    return meta_answer
 
-            # Fast path: obvious off-topic / conversational questions — never feed
-            # document context to the LLM, just politely redirect.
-            if _looks_off_topic(question):
-                return self._off_topic_response(question, company_id)
+                # Fast path: obvious off-topic / conversational questions — never feed
+                # document context to the LLM, just politely redirect.
+                if _looks_off_topic(question):
+                    return self._off_topic_response(question, company_id)
 
             # Retrieve relevant chunks
             _t_retr = time.time()
             context_text, sources, is_relevant = self._build_context(
-                question, company_id, document_ids,
+                search_text, company_id, document_ids,
             )
             timing_ms['retrieval'] = int((time.time() - _t_retr) * 1000)
             timing_ms['retrieval_breakdown'] = dict(self.last_retrieval_timing)
@@ -438,9 +467,16 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
                     "- Do NOT summarise the recent-document context as if it were the answer. "
                     "Do NOT include a `## Sources` section in this case."
                 )
+            if reading is not None and reading.get('full_list'):
+                instructions += (" The person wants a complete list: give every item the excerpts contain, not a "
+                                 "selection, and say if the excerpts may not hold all of them.")
+            restated = (f"THE QUESTION AS ONE STANDALONE QUESTION IN ENGLISH:\n{search_text}\n\n"
+                        if search_text.strip().lower() != question.strip().lower() else '')
             prompt = (
+                f"{intent.language_line(question, search_text if reading is not None else '')}"
                 f"{history_block}"
                 f"USER QUESTION:\n{question}\n\n"
+                f"{restated}"
                 f"{context_header}\n{context_text}\n\n"
                 f"{instructions}"
             )
@@ -473,7 +509,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             # sources so the user isn't misled into thinking those docs answered them.
             if is_relevant and '## Sources' not in answer_text and sources:
                 answer_text += '\n\n## Sources\n' + '\n'.join(
-                    f"- **{s.get('title')}** (page {s.get('page') or 'n/a'})" for s in sources
+                    f"- **{s.get('title')}**" + (f" (page {s['page']})" if s.get('page') else '') for s in sources
                 )
 
             timing_ms['total'] = int((time.time() - _t_overall) * 1000)
@@ -514,16 +550,16 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
     # Meta-question handling (document listing / counts)
     # ──────────────────────────────────────────────
     def _maybe_answer_meta(self, question: str, company_id: int) -> Optional[Dict]:
-        q = question.lower()
-        list_trigger = any(p in q for p in [
-            'list all documents', 'list my documents', 'list the documents',
-            'show all documents', 'show me all documents', 'show my documents',
-            'what documents', 'which documents', 'how many documents',
-            'documents do i have', 'uploaded documents',
-        ])
-        if not list_trigger:
-            return None
+        """The library listing, for a question that is only a request for it (the word rules, without a reading).
 
+        Any question that merely contained "which documents" or "uploaded documents" got the file list (CO-175):
+        "Which documents mention the late-payment penalty?" was never searched."""
+        if not _LIBRARY_QUESTION.match(question or ''):
+            return None
+        return self._library_answer(company_id)
+
+    def _library_answer(self, company_id: int) -> Dict:
+        """Which documents and summarised files the company has, as tables."""
         docs = OperationsDocument.objects.filter(company_id=company_id).order_by('-created_at')
         total = docs.count()
         # Files summarised via the Summarization tab are a separate library, but
@@ -666,8 +702,6 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         _t_all = time.time()
 
         tokens = _tokenize(question)
-        if not tokens:
-            return '', [], False
 
         # Chunks come from EITHER a processed document (Documents tab) OR a
         # summarised file (Summarization tab). Both are searched together so QA
@@ -686,19 +720,31 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         # in which case we lean entirely on the keyword path below (no regression
         # from the previous keyword-only behaviour).
         semantic_hits = self._semantic_hits(question, company_id, chunk_qs)
+        # A question of only common words ("What is it about?") still gets the meaning-based search; it used to be
+        # told no documents match without one (CO-175).
+        if not tokens and not semantic_hits:
+            return '', [], False
 
         # ---- 2. Keyword retrieval (DB-side icontains) ----------------------
+        # The 200 kept are those holding the most of the question's words. Taken in their order inside each file,
+        # a library of a few dozen files kept only the first passages of each, and a fact further in was never
+        # scored (CO-176).
         _t_kw = time.time()
-        keyword_q = reduce(operator.or_, (Q(content__icontains=tok) for tok in set(tokens)))
-        candidate_rows = list(
-            chunk_qs.filter(keyword_q)
-            .order_by('chunk_index')
-            .values(
-                'id', 'content', 'page_number', 'document_id', 'summary_id',
-                'document__title', 'document__original_filename',
-                'summary__original_filename',
-            )[:200]
-        )
+        candidate_rows = []
+        if tokens:
+            keyword_q = reduce(operator.or_, (Q(content__icontains=tok) for tok in set(tokens)))
+            words_present = sum((Case(When(content__icontains=tok, then=Value(1)), default=Value(0),
+                                      output_field=IntegerField()) for tok in set(tokens)), Value(0))
+            candidate_rows = list(
+                chunk_qs.filter(keyword_q)
+                .annotate(words_present=words_present)
+                .order_by('-words_present', 'chunk_index')
+                .values(
+                    'id', 'content', 'page_number', 'document_id', 'summary_id',
+                    'document__title', 'document__original_filename',
+                    'summary__original_filename',
+                )[:200]
+            )
         keyword_scores: Dict[int, float] = {}
         row_by_id: Dict[int, Dict] = {}
         for row in candidate_rows:
@@ -756,7 +802,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         # Legacy summaries created before summary-chunking still have no chunks —
         # fall back to scoring their rich_summary text so they remain searchable.
         # New summaries are chunked above and skipped here to avoid double-counting.
-        if not document_ids:
+        if not document_ids and tokens:
             for s, srow in self._score_summaries(company_id, tokens):
                 scored.append((float(s), srow))
 
@@ -791,7 +837,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         for _, row in top:
             title = row.get('document__title') or row.get('document__original_filename')
             page = row.get('page_number')
-            header = f"[Source: {title} | Page {page or 'n/a'}]"
+            header = f"[Source: {title}" + (f" | Page {page}]" if page else "]")
             content = (row.get('content') or '').strip()
             # Trim very long chunks
             if len(content) > 2500:

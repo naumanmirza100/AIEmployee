@@ -9,7 +9,7 @@ import re
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
@@ -41,6 +41,13 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 1000       # ~1000 chars per chunk
 CHUNK_OVERLAP = 150     # overlap between chunks
 
+# What one file may be read to (CO-216): about 500 pages of text, 1,000 PDF pages, 20,000 rows a sheet, and a Word,
+# Excel or PowerPoint file that unpacks to no more than 200 MB.
+MAX_TEXT_CHARS = 1_500_000
+MAX_PDF_PAGES = 1000
+MAX_SHEET_ROWS = 20_000
+MAX_UNPACKED_BYTES = 200 * 1024 * 1024
+
 # The agent key Operations resolves against — matches the name used for its LLM
 # calls, so embeddings draw on the same BYOK/managed/platform key.
 OPERATIONS_AGENT_KEY = 'operations_agent'
@@ -71,6 +78,52 @@ def build_embedding_service(company_id):
             logger.debug("EmbeddingService has no per-company support yet; "
                          "falling back to env-keyed construction.")
     return EmbeddingService()
+
+
+def _as_text(value) -> str:
+    """One item from the AI as plain text: an object such as {"value": 18500000, "currency": "PKR"} becomes
+    "18500000 PKR", a list is joined."""
+    if isinstance(value, dict):
+        return ' '.join(_as_text(v) for v in value.values() if v not in (None, '')).strip()
+    if isinstance(value, (list, tuple)):
+        return ', '.join(_as_text(v) for v in value if v not in (None, '')).strip()
+    return '' if value is None else str(value).strip()
+
+
+def clean_items(values, *, items=10, chars=300) -> list:
+    """The AI's list as short strings, empty ones dropped. The Documents tab saved whatever parsed, and an item that
+    came back as an object could not be printed: the document's page failed to draw (CO-268)."""
+    if not isinstance(values, (list, tuple)):
+        values = [values] if values not in (None, '', {}) else []
+    out = []
+    for value in values:
+        text = _as_text(value)[:chars]
+        if text and text not in out:
+            out.append(text)
+    return out[:items]
+
+
+def clean_entities(entities) -> dict:
+    """The AI's groups of names, dates and amounts: each a list of strings, anything else dropped."""
+    if not isinstance(entities, dict):
+        return {}
+    return {str(key)[:50]: clean_items(values, items=15, chars=200)
+            for key, values in entities.items() if clean_items(values)}
+
+
+#: What the processing returns when the entry was deleted while it was being processed (CO-172).
+DELETED_MEANWHILE = 'The document was deleted while it was being processed.'
+
+
+def _deleted_meanwhile(file_path):
+    """Stop quietly for an entry deleted during processing: remove the uploaded file, make nothing."""
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except OSError:
+        pass
+    logger.info("Operations: %s (%s)", DELETED_MEANWHILE, file_path)
+    return {'success': False, 'error': DELETED_MEANWHILE, 'deleted': True}
 
 
 def _invalidate_operations_indexes(company_id, has_embeddings: bool) -> None:
@@ -165,9 +218,11 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         placeholder = None
         if existing_doc_id:
             placeholder = OperationsDocument.objects.filter(id=existing_doc_id).first()
-            if placeholder:
-                placeholder.processing_status = 'processing'
-                placeholder.save(update_fields=['processing_status', 'updated_at'])
+            if placeholder is None:
+                # Deleted before the work started: nothing to make (it used to fall through to a brand-new entry).
+                return _deleted_meanwhile(file_path)
+            placeholder.processing_status = 'processing'
+            placeholder.save(update_fields=['processing_status', 'updated_at'])
 
         # 1. Validate
         ext = Path(original_filename).suffix.lower()
@@ -206,6 +261,10 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             'word_count': len(extracted_text.split()),
             'page_count': page_count,
         }
+        if getattr(self, 'read_note', ''):
+            metadata['partly_read'] = self.read_note      # shown on the document's page (CO-216)
+        if getattr(self, 'page_starts', None):
+            metadata['page_starts'] = self.page_starts    # each passage's real page, also when re-indexed (CO-278)
 
         # 6. Save OperationsDocument
         company = Company.objects.get(pk=company_id)
@@ -236,10 +295,15 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             processing_status='processing',
         )
         if placeholder is not None:
-            # Async flow: fill in the pre-created placeholder row.
+            # Async flow: fill in the pre-created placeholder row. Only an update: a plain save re-created an entry
+            # deleted during the AI steps, under the same id, searchable and with its 'is ready' alert (CO-172).
             for k, v in doc_fields.items():
                 setattr(placeholder, k, v)
-            placeholder.save()
+            try:
+                with transaction.atomic():          # its own savepoint, so a refused update leaves nothing broken
+                    placeholder.save(force_update=True)
+            except DatabaseError:
+                return _deleted_meanwhile(file_path)
             doc = placeholder
         else:
             doc = OperationsDocument.objects.create(**doc_fields)
@@ -248,20 +312,25 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         #      here fails or the process dies, the row stays 'processing' with
         #      its file intact and the chunks roll back — recoverable, never a
         #      half-ready doc.
-        with transaction.atomic():
-            chunk_count, embedded, embed_model = self._chunk_embed_and_store(
-                doc, extracted_text, page_count, resolved_doc_type,
-            )
-            doc.chunks_total = chunk_count
-            doc.chunks_processed = chunk_count
-            doc.is_indexed = embedded
-            doc.embedding_model = embed_model or ''
-            doc.processing_status = 'ready'
-            doc.is_processed = True
-            doc.save(update_fields=[
-                'chunks_total', 'chunks_processed', 'is_indexed',
-                'embedding_model', 'processing_status', 'is_processed', 'updated_at',
-            ])
+        try:
+            with transaction.atomic():
+                chunk_count, embedded, embed_model = self._chunk_embed_and_store(
+                    doc, extracted_text, page_count, resolved_doc_type,
+                )
+                doc.chunks_total = chunk_count
+                doc.chunks_processed = chunk_count
+                doc.is_indexed = embedded
+                doc.embedding_model = embed_model or ''
+                doc.processing_status = 'ready'
+                doc.is_processed = True
+                doc.save(update_fields=[
+                    'chunks_total', 'chunks_processed', 'is_indexed',
+                    'embedding_model', 'processing_status', 'is_processed', 'updated_at',
+                ])
+        except DatabaseError:
+            if not OperationsDocument.objects.filter(pk=doc.pk).exists():
+                return _deleted_meanwhile(file_path)     # deleted while its passages were being stored
+            raise
 
         # 9. Only NOW that the row is durably 'ready' is it safe to drop the
         #    source file — a crash before this point leaves the file reusable.
@@ -303,7 +372,41 @@ class DocumentProcessingAgent(MarketingBaseAgent):
     # Text extraction
     # ------------------------------------------------------------------
     def _extract_text(self, file_path: str, file_type: str) -> Tuple[bool, str, int, Optional[str]]:
-        """Returns (success, text, page_count, error)."""
+        """Returns (success, text, page_count, error). ``self.read_note`` says when only part of the file was read.
+
+        Nothing limited what a file could expand to (CO-216): a Word, Excel or PowerPoint file is a zip and was
+        unpacked whole in the web process, a spreadsheet was printed whole, and the text had no ceiling, so one file
+        could become thousands of passages and hundreds of summary calls. The unpacked size is checked first, PDF
+        pages and spreadsheet rows are capped, and the text is cut at MAX_TEXT_CHARS, each with a note the user sees.
+        """
+        self.read_note = ''
+        self.page_starts = None
+        if file_type in ('docx', 'xlsx', 'pptx'):
+            import zipfile
+            try:
+                with zipfile.ZipFile(file_path) as archive:
+                    unpacked = sum(info.file_size for info in archive.infolist())
+            except (zipfile.BadZipFile, OSError):
+                return False, '', 0, ("We couldn't read this file. It may be corrupted or saved in an older format "
+                                      "(.doc, .xls, .ppt are not read): please save it again as .docx, .xlsx or .pptx.")
+            if unpacked > MAX_UNPACKED_BYTES:
+                return False, '', 0, (f'This file unpacks to {unpacked / 1024 / 1024:.0f} MB, more than the '
+                                      f'{MAX_UNPACKED_BYTES // 1024 // 1024} MB that can be read. Please split it '
+                                      'into smaller files.')
+        success, text, page_count, error = self._extract_by_type(file_path, file_type)
+        if success and file_type == 'pptx':
+            # A slide is a deck's page: where each one starts (slides with no text are not in the text).
+            self.page_starts = [[m.start(), int(m.group(1))]
+                                for m in re.finditer(r'^--- Slide (\d+) ---$', text or '', re.M)] or None
+        notes = re.findall(r'\[Only the first [^\]]+\]', text or '')
+        if success and text and len(text) > MAX_TEXT_CHARS:
+            notes.append(f'[Only the first {MAX_TEXT_CHARS:,} characters of {len(text):,} were read: the file is '
+                         'too long to read whole. Split it to have the rest read.]')
+            text = text[:MAX_TEXT_CHARS]
+        self.read_note = ' '.join(n.strip('[]') for n in notes)
+        return success, text, page_count, error
+
+    def _extract_by_type(self, file_path: str, file_type: str) -> Tuple[bool, str, int, Optional[str]]:
         try:
             if file_type == 'pdf':
                 return self._extract_pdf(file_path)
@@ -329,22 +432,34 @@ class DocumentProcessingAgent(MarketingBaseAgent):
                 "please check it opens correctly and re-upload."
             )
 
-    @staticmethod
-    def _extract_pdf(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
+    def _join_pages(self, pages_text, total):
+        """The pages joined, with where each starts kept in ``self.page_starts`` as [offset, page number]."""
+        starts, pos = [], 0
+        for number, text in enumerate(pages_text, 1):
+            starts.append([pos, number])
+            pos += len(text) + 2
+        self.page_starts = starts
+        if total > len(pages_text):
+            pages_text = pages_text + [f'[Only the first {len(pages_text):,} pages of {total:,} were read.]']
+        return '\n\n'.join(pages_text)
+
+    def _extract_pdf(self, file_path: str) -> Tuple[bool, str, int, Optional[str]]:
         try:
             import pdfplumber
             pages_text = []
             with pdfplumber.open(file_path) as pdf:
-                for page in pdf.pages:
+                total = len(pdf.pages)
+                for page in pdf.pages[:MAX_PDF_PAGES]:
                     text = page.extract_text() or ''
                     pages_text.append(text)
-            return True, '\n\n'.join(pages_text), len(pages_text), None
+                    getattr(page, 'flush_cache', lambda: None)()    # keep memory flat on long files
+            return True, self._join_pages(pages_text, total), len(pages_text), None
         except ImportError:
             try:
                 from PyPDF2 import PdfReader
                 reader = PdfReader(file_path)
-                pages_text = [p.extract_text() or '' for p in reader.pages]
-                return True, '\n\n'.join(pages_text), len(pages_text), None
+                pages_text = [p.extract_text() or '' for p in reader.pages[:MAX_PDF_PAGES]]
+                return True, self._join_pages(pages_text, len(reader.pages)), len(pages_text), None
             except ImportError:
                 return False, '', 0, 'The server is missing a required library to read PDF files. Please contact support.'
         except Exception as e:
@@ -356,12 +471,58 @@ class DocumentProcessingAgent(MarketingBaseAgent):
 
     @staticmethod
     def _extract_docx(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
+        """The body in order, tables included row by row, then headers, footers and text boxes.
+
+        Only the body's paragraphs were read: a fee schedule or a price list in a table, and anything in a header,
+        footer or text box, was left out of the text, the summary and the search, with no warning (CO-177)."""
         try:
             from docx import Document
+            from docx.oxml.ns import qn
+            from docx.table import Table
+            from docx.text.paragraph import Paragraph
             doc = Document(file_path)
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            page_count = max(1, len(paragraphs) // 40)  # ~40 paragraphs per page estimate
-            return True, '\n\n'.join(paragraphs), page_count, None
+
+            def table_lines(table):
+                lines = []
+                for row in table.rows:
+                    cells, seen = [], set()
+                    for cell in row.cells:
+                        if id(cell._tc) in seen:       # a merged cell is listed once per column it spans
+                            continue
+                        seen.add(id(cell._tc))
+                        text = ' '.join(cell.text.split())
+                        if text:
+                            cells.append(text)
+                    if cells:
+                        lines.append(' | '.join(cells))
+                return lines
+
+            blocks = []
+            for child in doc.element.body.iterchildren():
+                tag = child.tag.rsplit('}', 1)[-1]
+                if tag == 'p':
+                    text = Paragraph(child, doc).text
+                    if text.strip():
+                        blocks.append(text)
+                elif tag == 'tbl':
+                    lines = table_lines(Table(child, doc))
+                    if lines:
+                        blocks.append('\n'.join(lines))
+            extra = []
+            for section in doc.sections:
+                for part in (section.header, section.footer):
+                    try:
+                        text = '\n'.join(p.text for p in part.paragraphs if p.text.strip())
+                    except Exception:
+                        text = ''
+                    if text and text not in extra:
+                        extra.append(text)
+            for box in doc.element.body.iter(qn('w:txbxContent')):
+                text = ' '.join(''.join(t.text or '' for t in box.iter(qn('w:t'))).split())
+                if text and text not in extra:
+                    extra.append(text)
+            page_count = max(1, len(blocks) // 40)  # ~40 paragraphs per page estimate
+            return True, '\n\n'.join(blocks + extra), page_count, None
         except ImportError:
             return False, '', 0, 'The server is missing a required library to read Word files. Please contact support.'
         except Exception as e:
@@ -378,9 +539,11 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             xls = pd.ExcelFile(file_path)
             all_text = []
             for sheet_name in xls.sheet_names:
-                df = pd.read_excel(xls, sheet_name=sheet_name)
+                df = pd.read_excel(xls, sheet_name=sheet_name, nrows=MAX_SHEET_ROWS + 1)
                 all_text.append(f'--- Sheet: {sheet_name} ---')
-                all_text.append(df.to_string(index=False))
+                all_text.append(df.head(MAX_SHEET_ROWS).to_string(index=False))
+                if len(df) > MAX_SHEET_ROWS:
+                    all_text.append(f'[Only the first {MAX_SHEET_ROWS:,} rows of the sheet "{sheet_name}" were read.]')
             return True, '\n\n'.join(all_text), len(xls.sheet_names), None
         except ImportError:
             return False, '', 0, 'The server is missing a required library to read Excel files. Please contact support.'
@@ -396,19 +559,22 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         try:
             import pandas as pd
             try:
-                df = pd.read_csv(file_path)
+                df = pd.read_csv(file_path, nrows=MAX_SHEET_ROWS + 1)
             except pd.errors.ParserError:
                 # Ragged rows (uneven column counts) are the most common cause of
                 # a "failed" CSV. Retry tolerantly by skipping the bad lines so a
                 # slightly-malformed file still imports instead of hard-failing.
                 logger.warning('CSV %s had malformed rows; retrying with on_bad_lines=skip', file_path)
-                df = pd.read_csv(file_path, on_bad_lines='skip', engine='python')
+                df = pd.read_csv(file_path, on_bad_lines='skip', engine='python', nrows=MAX_SHEET_ROWS + 1)
             if df.empty:
                 return False, '', 0, (
                     "This CSV appears to be empty or has no readable rows. "
                     "Please check the file has a header row and at least one data row, then re-upload."
                 )
-            return True, df.to_string(index=False), 1, None
+            text = df.head(MAX_SHEET_ROWS).to_string(index=False)
+            if len(df) > MAX_SHEET_ROWS:
+                text += f'\n[Only the first {MAX_SHEET_ROWS:,} rows were read.]'
+            return True, text, 1, None
         except ImportError:
             return False, '', 0, 'The server is missing a required library to read CSV files. Please contact support.'
         except UnicodeDecodeError:
@@ -427,13 +593,36 @@ class DocumentProcessingAgent(MarketingBaseAgent):
     def _extract_pptx(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
         try:
             from pptx import Presentation
+            from pptx.enum.shapes import MSO_SHAPE_TYPE
             prs = Presentation(file_path)
+
+            def shape_texts(shape):
+                # Tables, shapes inside groups and the speaker notes were skipped (CO-177).
+                try:
+                    is_group = shape.shape_type == MSO_SHAPE_TYPE.GROUP
+                except Exception:
+                    is_group = False
+                if is_group:
+                    for inner in shape.shapes:
+                        yield from shape_texts(inner)
+                elif getattr(shape, 'has_table', False):
+                    for row in shape.table.rows:
+                        cells = [' '.join(c.text.split()) for c in row.cells]
+                        cells = [c for c in cells if c]
+                        if cells:
+                            yield ' | '.join(cells)
+                elif getattr(shape, 'has_text_frame', False) and shape.text_frame.text.strip():
+                    yield shape.text_frame.text
+
             slides_text = []
             for i, slide in enumerate(prs.slides, 1):
-                texts = []
-                for shape in slide.shapes:
-                    if hasattr(shape, 'text') and shape.text.strip():
-                        texts.append(shape.text)
+                texts = [t for shape in slide.shapes for t in shape_texts(shape)]
+                try:
+                    notes = slide.notes_slide.notes_text_frame.text.strip() if slide.has_notes_slide else ''
+                except Exception:
+                    notes = ''
+                if notes:
+                    texts.append(f'Speaker notes: {notes}')
                 if texts:
                     slides_text.append(f'--- Slide {i} ---\n' + '\n'.join(texts))
             return True, '\n\n'.join(slides_text), len(prs.slides), None
@@ -464,7 +653,7 @@ class DocumentProcessingAgent(MarketingBaseAgent):
     # Chunking + embedding (RAG)
     # ------------------------------------------------------------------
     def _chunk_embed_and_store(self, doc, text: str, page_count: int,
-                               document_type: str, owner_kind: str = 'document'):
+                               document_type: str, owner_kind: str = 'document', page_starts=None):
         """Chunk (section-aware, TOC filtered), embed in batches, and persist.
 
         ``owner_kind`` is 'document' or 'summary' — the chunk rows link to the
@@ -476,7 +665,9 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         """
         from operations_agent.models import OperationsDocumentChunk
 
-        chunk_pairs = self._chunk_pairs(text, page_count, document_type)
+        if page_starts is None and owner_kind == 'document':
+            page_starts = (getattr(doc, 'metadata', None) or {}).get('page_starts')
+        chunk_pairs = self._chunk_pairs(text, page_count, document_type, page_starts)
         if not chunk_pairs:
             return 0, False, ''
 
@@ -527,34 +718,48 @@ class DocumentProcessingAgent(MarketingBaseAgent):
                 token_count=len(content.split()),
                 embedding=emb,
             ))
-        OperationsDocumentChunk.objects.bulk_create(rows)
+        # In batches: one insert of thousands of rows (with their vectors) was what failed on large files (CO-178).
+        OperationsDocumentChunk.objects.bulk_create(rows, batch_size=200)
         return len(rows), any_vector, (embed_model if any_vector else '')
 
-    def _chunk_pairs(self, text: str, page_count: int, document_type: str):
+    def _chunk_pairs(self, text: str, page_count: int, document_type: str, page_starts=None):
         """Return a list of ``(content, heading, page_number)`` tuples.
 
         Section-aware doc types use the heading-aware chunker (which also drops
         TOC/index junk); everything else uses a fixed-window chunker that still
-        skips junk chunks. Page numbers are estimated proportionally.
+        skips junk chunks.
+
+        A passage's page is the real one: where it starts, looked up in ``page_starts`` ([offset, page] for each PDF
+        page or slide). It was its position in the text times the page count, right only if every page held the
+        same amount of text; Word files got a "page" per 40 paragraphs and text files one per 3,000 characters, and
+        a passage that could not be found was stamped page 1 (CO-278). A file type with no pages gets none.
         """
+        import bisect
         from operations_agent.chunking import (
             chunk_with_headings, looks_like_toc_or_index, SECTION_AWARE_TYPES,
         )
 
-        total = max(1, len(text))
+        starts = [int(p[0]) for p in page_starts] if page_starts else []
 
-        def _page_for(offset: int) -> int:
-            return min(max(page_count, 1), max(1, int((offset / total) * max(page_count, 1)) + 1))
+        def _page_for(offset):
+            if not starts or offset is None or offset < 0:
+                return None
+            return int(page_starts[max(0, bisect.bisect_right(starts, offset) - 1)][1])
 
         pairs = []
         if document_type in SECTION_AWARE_TYPES:
+            searched_from = 0
             for content, heading in chunk_with_headings(
                 text, max_chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP,
             ):
-                # Recover an approximate page from where the chunk starts.
-                off = text.find(content[:60]) if content else -1
-                page = _page_for(off if off >= 0 else 0)
-                pairs.append((content, heading, page))
+                # Where the passage starts: searched onward from the last one, so a repeated line is not taken for an
+                # earlier page.
+                off = text.find(content[:60], searched_from) if content else -1
+                if off < 0 and content:
+                    off = text.find(content[:60])
+                if off >= 0:
+                    searched_from = off
+                pairs.append((content, heading, _page_for(off if off >= 0 else None)))
             if pairs:
                 return pairs
 
@@ -628,7 +833,7 @@ Return ONLY valid JSON. No explanation."""
             cleaned = result.strip()
             if cleaned.startswith('```'):
                 cleaned = cleaned.split('\n', 1)[-1].rsplit('```', 1)[0]
-            entities = json.loads(cleaned)
+            entities = clean_entities(json.loads(cleaned))
             return {'entities': entities}
         except Exception as e:
             from core.api_key_service import KeyServiceError
@@ -669,9 +874,11 @@ No explanation outside the JSON."""
             if cleaned.startswith('```'):
                 cleaned = cleaned.split('\n', 1)[-1].rsplit('```', 1)[0]
             parsed = json.loads(cleaned)
+            if not isinstance(parsed, dict):
+                return {'summary': '', 'key_insights': []}
             return {
-                'summary': parsed.get('summary', ''),
-                'key_insights': parsed.get('key_insights', []),
+                'summary': _as_text(parsed.get('summary', ''))[:3000],
+                'key_insights': clean_items(parsed.get('key_insights', []), items=8),
             }
         except Exception as e:
             from core.api_key_service import KeyServiceError

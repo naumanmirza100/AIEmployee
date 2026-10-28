@@ -444,6 +444,16 @@ export const updateGeneratedDocument = async (docId, payload) => {
   }
 };
 
+/** Put an earlier version of a generated document back (the one replaced is kept too). */
+export const restoreGeneratedDocumentVersion = async (docId, version) => {
+  try {
+    return await companyApi.post(`/operations/authoring/documents/${docId}/restore`, { version });
+  } catch (error) {
+    console.error('Restore generated document version error:', error);
+    throw error;
+  }
+};
+
 /** Delete a generated document */
 export const deleteGeneratedDocument = async (docId) => {
   try {
@@ -598,6 +608,7 @@ export default {
   listGeneratedDocuments,
   getGeneratedDocument,
   updateGeneratedDocument,
+  restoreGeneratedDocumentVersion,
   deleteGeneratedDocument,
   regenerateDocument,
   getOperationsAnalytics,

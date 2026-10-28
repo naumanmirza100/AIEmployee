@@ -213,10 +213,15 @@ const DocumentAuthoring = () => {
   const loadAvailable = useCallback(async () => {
     try {
       setLoadingAvailable(true);
-      const res = await operationsService.listDocuments({ page_size: 50, is_processed: true });
-      if (res?.status === 'success') {
-        setAvailableDocs(res.documents || []);
+      // Every processed document, page by page (up to 500): only the 50 newest could be chosen (CO-214).
+      const all = [];
+      for (let page = 1; page <= 10; page += 1) {
+        const res = await operationsService.listDocuments({ page, page_size: 50, is_processed: true });
+        if (res?.status !== 'success') break;
+        all.push(...(res.documents || []));
+        if (page >= (res.total_pages || 1)) break;
       }
+      setAvailableDocs(all);
     } catch (err) {
       console.error('Load available docs failed:', err);
     } finally {
@@ -271,6 +276,13 @@ const DocumentAuthoring = () => {
           signal: controller.signal,
           onMeta: (meta) => {
             if (meta?.title) setStreamingTitle(meta.title);
+            // Files that did not fit were skipped without a word (CO-214).
+            if (meta?.references_left_out?.length) {
+              toast({
+                title: `${meta.references_left_out.length} reference${meta.references_left_out.length === 1 ? '' : 's'} left out`,
+                description: `Too much to read at once, so the document is not based on: ${meta.references_left_out.join(', ')}. Choose fewer files to include them.`,
+              });
+            }
           },
           onText: (chunk) => {
             setStreamingContent((prev) => prev + (chunk || ''));
@@ -370,6 +382,30 @@ const DocumentAuthoring = () => {
     setPrompt('');
     setTitle('');
     setSelectedRefIds([]);
+  };
+
+  // Put an earlier version back. Regenerate and Save said the old version was archived, and nothing could open
+  // it (CO-213).
+  const handleRestore = async (version) => {
+    if (!currentDoc) return;
+    try {
+      setSaving(true);
+      const res = await operationsService.restoreGeneratedDocumentVersion(currentDoc.id, version);
+      if (res?.status === 'success' && res.document) {
+        setCurrentDoc(res.document);
+        setEditTitle(res.document.title);
+        setEditContent(res.document.content);
+        setEditMode(false);
+        loadGenerated();
+        toast({ title: `Version ${version} restored`, description: `Now version ${res.document.version}; the one replaced is kept too.` });
+      } else {
+        throw new Error(res?.message || 'Restore failed');
+      }
+    } catch (err) {
+      toast({ title: 'Restore failed', description: err?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -753,6 +789,7 @@ const DocumentAuthoring = () => {
               tab={tab}
               setTab={setTab}
               onSave={handleSave}
+              onRestore={handleRestore}
               onRegenerate={handleRegenerate}
               onDelete={handleDelete}
               onCopy={handleCopy}
@@ -1250,9 +1287,10 @@ const StreamingView = ({ scrollRef, title, content, onCancel, showSidebar, setSh
 const ViewView = ({
   scrollRef, doc, editMode, setEditMode, editTitle, setEditTitle,
   editContent, setEditContent, saving, regenerating, tab, setTab,
-  onSave, onRegenerate, onDelete, onCopy, onBack,
+  onSave, onRestore, onRegenerate, onDelete, onCopy, onBack,
   showSidebar, setShowSidebar,
 }) => {
+  const [showVersions, setShowVersions] = React.useState(false);
   if (!doc) {
     return (
       <div
@@ -1406,9 +1444,50 @@ const ViewView = ({
           </TabButton>
         </span>
         {doc.edit_history && doc.edit_history.length > 0 && (
-          <div className="ml-auto flex items-center gap-1.5 text-[11px] text-white/45">
-            <History className="h-3 w-3" />
-            {doc.edit_history.length} edit{doc.edit_history.length === 1 ? '' : 's'}
+          <div className="ml-auto relative">
+            <button
+              type="button"
+              id="OPS-authoring-versions-btn"
+              data-testid="OPS-authoring-versions-btn"
+              onClick={() => setShowVersions((v) => !v)}
+              className="flex items-center gap-1.5 text-[11px] text-white/55 hover:text-white/85 transition-colors"
+            >
+              <History className="h-3 w-3" />
+              {doc.edit_history.length} earlier version{doc.edit_history.length === 1 ? '' : 's'}
+            </button>
+            {showVersions && (
+              <div
+                id="OPS-authoring-versions-list"
+                data-testid="OPS-authoring-versions-list"
+                className="absolute right-0 top-6 z-20 w-72 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-[#141018] p-1.5 shadow-xl"
+              >
+                {[...doc.edit_history].reverse().map((h, i) => (
+                  <div key={`${h.version}-${i}`} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-white/[0.04]"
+                    id={`OPS-authoring-version-${h.version}-${i}`} data-testid={`OPS-authoring-version-${h.version}-${i}`}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-white/85">Version {h.version}</p>
+                      <p className="text-[10px] text-white/40 truncate">
+                        {h.action ? `before ${h.action}` : 'before an edit'}
+                        {h.edited_at ? ` · ${new Date(h.edited_at).toLocaleString()}` : ''}
+                        {h.edited_by ? ` · ${h.edited_by}` : ''}
+                      </p>
+                    </div>
+                    {h.restorable ? (
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => { setShowVersions(false); onRestore?.(h.version); }}
+                        className="text-[11px] px-2 py-0.5 rounded-md border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-40"
+                        id={`OPS-authoring-version-restore-${h.version}-${i}`}
+                        data-testid={`OPS-authoring-version-restore-${h.version}-${i}`}
+                      >
+                        Restore
+                      </button>
+                    ) : <span className="text-[10px] text-white/30">text not kept</span>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

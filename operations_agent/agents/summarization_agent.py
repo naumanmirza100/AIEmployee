@@ -11,12 +11,39 @@ import re
 from pathlib import Path
 from typing import Dict
 
+from django.db import DatabaseError, transaction
+
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
-from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
+from operations_agent.agents.document_processing_agent import DocumentProcessingAgent, _deleted_meanwhile
 
 logger = logging.getLogger(__name__)
 
 _WHOLE_FENCE = re.compile(r'^\s*```[\w-]*[ \t]*\r?\n(.*?)\r?\n?```\s*$', re.S)
+
+# A file up to this is summarised in one call; the single prompt reads this much of it.
+SINGLE_PASS_CHARS = 10000
+# A longer file: at most this many sections of 8,000 characters (about 300,000 characters), and the final call reads
+# the section summaries condensed to COMBINE_LIMIT (CO-212).
+MAX_SECTIONS = 40
+COMBINE_LIMIT = 10000
+
+
+def clean_deadlines(values) -> list:
+    """Each deadline as {"date": "YYYY-MM-DD" or None, "description": ...}, at most five.
+
+    They were kept as loose sentences, so the 'deadline within a week' alert, which counts down to a date, could
+    never fire, and Analytics' 'Upcoming deadlines' had no date to sort or filter by (CO-277)."""
+    from operations_agent.signals import _parse_deadline_date
+    out = []
+    for value in values if isinstance(values, (list, tuple)) else []:
+        if isinstance(value, dict):
+            description = str(value.get('description') or value.get('title') or value.get('text') or '').strip()
+            when = _parse_deadline_date(value.get('date') or value.get('deadline'))
+        else:
+            description, when = str(value or '').strip(), None
+        if description or when:
+            out.append({'date': when.isoformat() if when else None, 'description': description[:300] or 'Deadline'})
+    return out[:5]
 
 
 def unfence(text: str) -> str:
@@ -70,9 +97,11 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
         placeholder = None
         if existing_summary_id:
             placeholder = OperationsDocumentSummary.objects.filter(id=existing_summary_id).first()
-            if placeholder:
-                placeholder.processing_status = 'processing'
-                placeholder.save(update_fields=['processing_status'])
+            if placeholder is None:
+                # Deleted before the work started: nothing to make (it used to fall through to a brand-new entry).
+                return _deleted_meanwhile(file_path)
+            placeholder.processing_status = 'processing'
+            placeholder.save(update_fields=['processing_status'])
 
         def _fail(message):
             if placeholder is not None:
@@ -109,8 +138,9 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
 
         word_count = len(extracted_text.split())
 
-        # 2. Generate rich summary
-        if len(extracted_text) > 12000:
+        # 2. Generate rich summary. A file up to SINGLE_PASS_CHARS is read in one go; a longer one section by section.
+        # (The one-go path read the first 10,000 characters of files up to 12,000, so their ending was lost.)
+        if len(extracted_text) > SINGLE_PASS_CHARS:
             summary_result = self._summarize_large(extracted_text, original_filename, page_count)
         else:
             summary_result = self._summarize_single(extracted_text, original_filename, page_count)
@@ -118,8 +148,15 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
         if not summary_result.get('success'):
             return _fail(summary_result.get('error') or 'Summarization failed')
 
-        # 3. Extract proper insights via dedicated LLM call
-        insights = self._extract_insights(extracted_text, original_filename)
+        # Say on the summary when only part of the file was read (CO-212, CO-216).
+        notes = [n for n in (self._doc_agent.read_note, summary_result.get('note')) if n]
+        if notes:
+            summary_result['rich_summary'] = (f"> **Only part of this file was read.** {' '.join(notes)}\n\n"
+                                              + summary_result['rich_summary'])
+
+        # 3. Extract proper insights via dedicated LLM call: from the whole file's section summaries for a long one,
+        # not its first 10,000 characters (CO-212).
+        insights = self._extract_insights(summary_result.get('digest') or extracted_text, original_filename)
 
         # 4. Save summary + insights
         company = Company.objects.get(pk=company_id)
@@ -156,9 +193,15 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             processing_error='',
         )
         if placeholder is not None:
+            # Only an update: a plain save re-created a summary deleted while it was being written, with its alerts
+            # (CO-172).
             for k, v in summary_fields.items():
                 setattr(placeholder, k, v)
-            placeholder.save()
+            try:
+                with transaction.atomic():          # its own savepoint, so a refused update leaves nothing broken
+                    placeholder.save(force_update=True)
+            except DatabaseError:
+                return _deleted_meanwhile(file_path)
             summary_obj = placeholder
         else:
             summary_obj = OperationsDocumentSummary.objects.create(**summary_fields)
@@ -173,6 +216,7 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             with _txn.atomic():
                 chunk_count, embedded, embed_model = self._doc_agent._chunk_embed_and_store(
                     summary_obj, extracted_text, page_count, doc_cat, owner_kind='summary',
+                    page_starts=self._doc_agent.page_starts,
                 )
                 summary_obj.is_indexed = embedded
                 summary_obj.embedding_model = embed_model or ''
@@ -184,6 +228,8 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
                 mark_index_dirty(company_id)
                 invalidate_answer_cache_for_company(company_id)
         except Exception:
+            if not OperationsDocumentSummary.objects.filter(pk=summary_obj.pk).exists():
+                return _deleted_meanwhile(file_path)     # deleted while its passages were being stored
             logger.exception("Operations: failed to chunk/embed summarised file %s", original_filename)
             # The summary itself is valid even if chunking failed — it stays
             # searchable via legacy rich_summary scoring. Don't strand it in
@@ -258,7 +304,8 @@ Return this exact JSON structure:
   }},
   "risks": ["risk or concern 1", "risk or concern 2"],
   "opportunities": ["opportunity 1", "opportunity 2"],
-  "deadlines": ["deadline description with date if available"]
+  "deadlines": [{{"date": "YYYY-MM-DD, only when the document gives the full date, else null",
+                  "description": "what is due"}}]
 }}
 
 Rules:
@@ -296,7 +343,7 @@ Rules:
             insights['topics'] = [str(t)[:100] for t in insights.get('topics', [])][:6]
             insights['risks'] = [str(r)[:300] for r in insights.get('risks', [])][:5]
             insights['opportunities'] = [str(o)[:300] for o in insights.get('opportunities', [])][:5]
-            insights['deadlines'] = [str(d)[:300] for d in insights.get('deadlines', [])][:5]
+            insights['deadlines'] = clean_deadlines(insights.get('deadlines', []))
 
             # Sanitize entities
             entities = insights.get('entities', {})
@@ -393,6 +440,11 @@ IMPORTANT:
     # Chunked summary (> 12K chars)
     # ------------------------------------------------------------------
     def _summarize_large(self, text: str, filename: str, page_count: int) -> Dict:
+        """Section by section, then the section summaries combined in rounds until they fit one final call.
+
+        The final summary was written from the first 8,000 characters of the section summaries joined (two to five
+        sections), while every section of the file was still sent to the AI and the rest thrown away (CO-212). The
+        number of sections has a ceiling; a file past it is summarised from its first part, and says so."""
         chunk_size = 8000
         overlap = 500
         chunks = []
@@ -401,6 +453,11 @@ IMPORTANT:
             end = start + chunk_size
             chunks.append(text[start:end])
             start = end - overlap
+        note = ''
+        if len(chunks) > MAX_SECTIONS:
+            note = (f'The summary covers the first {MAX_SECTIONS} of its {len(chunks)} sections (about '
+                    f'{MAX_SECTIONS * (chunk_size - overlap):,} characters).')
+            chunks = chunks[:MAX_SECTIONS]
 
         # Phase 1: Summarize each chunk.
         # Run concurrently — a 65k-char doc is ~9 chunks, and doing them one at a
@@ -450,13 +507,13 @@ Provide a detailed bullet-point summary. Be thorough and specific."""
         if not chunk_summaries:
             return {'success': False, 'error': 'Failed to summarize any section'}
 
-        # Phase 2: Combine
-        combined = '\n\n'.join(chunk_summaries)
+        # Phase 2: Combine, in rounds until the whole file fits the final call.
+        combined = self._fit_summaries(chunk_summaries, filename)
         final_prompt = f"""You are a professional document analyst. Below are section-by-section summaries of "{filename}" ({page_count} pages).
 
 Combine into ONE comprehensive summary in **Markdown format**:
 
-{combined[:8000]}
+{combined}
 
 ---
 
@@ -499,6 +556,8 @@ Be thorough, use proper markdown, include all significant details. Return ONLY t
                 'rich_summary': rich_summary,
                 'key_findings': key_findings,
                 'action_items': action_items,
+                'digest': combined,          # the whole file, condensed: what the insights are read from
+                'note': note,
             }
         except Exception as e:
             from core.api_key_service import KeyServiceError
@@ -506,6 +565,41 @@ Be thorough, use proper markdown, include all significant details. Return ONLY t
                 raise
             logger.error(f'Large doc summarization failed: {e}', exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    def _fit_summaries(self, summaries, filename, limit=None):
+        """The section summaries joined, condensed in rounds until they fit `limit` characters: neighbouring ones
+        are summarised together, then those results, and so on. A group that fails to condense is cut, not lost."""
+        limit = limit or COMBINE_LIMIT
+        rounds = 0
+        while len('\n\n'.join(summaries)) > limit and len(summaries) > 1 and rounds < 4:
+            rounds += 1
+            groups, current = [], []
+            for s in summaries:
+                if current and len('\n\n'.join(current + [s])) > limit:
+                    groups.append(current)
+                    current = []
+                current.append(s)
+            if current:
+                groups.append(current)
+            condensed = []
+            for i, group in enumerate(groups):
+                joined = '\n\n'.join(group)
+                if len(group) == 1:
+                    condensed.append(joined[:limit // max(1, len(groups))])
+                    continue
+                prompt = (f'Below are consecutive section summaries of "{filename}". Merge them into one shorter '
+                          'bullet-point summary that keeps every key point, name, date, amount, risk and deadline.\n\n'
+                          f'{joined}')
+                try:
+                    merged = self._call_llm_for_reasoning(prompt, temperature=0.2, max_tokens=1200)
+                except Exception as e:
+                    from core.api_key_service import KeyServiceError
+                    if isinstance(e, KeyServiceError):
+                        raise
+                    merged = ''
+                condensed.append((merged or '').strip() or joined[:limit // max(1, len(groups))])
+            summaries = condensed
+        return '\n\n'.join(summaries)[:limit]
 
     # ------------------------------------------------------------------
     @staticmethod

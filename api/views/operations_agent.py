@@ -63,59 +63,62 @@ def upload_document(request):
         file_hash = hashlib.sha256(file_bytes).hexdigest()
         uploaded_file.seek(0)
 
-        # Cheap pre-check (nice error) — the DB constraint below is the real,
-        # race-safe guard.
-        existing = OperationsDocument.objects.filter(
-            company=company, file_hash=file_hash,
-        ).only('id').first()
-        if existing:
-            return Response({
-                'status': 'error',
-                'message': f'Document "{uploaded_file.name}" already exists',
-                'document_id': existing.id,
-            }, status=status.HTTP_409_CONFLICT)
+        def already_exists(existing_id=None):
+            body = {'status': 'error', 'message': f'Document "{uploaded_file.name}" already exists'}
+            if existing_id:
+                body['document_id'] = existing_id
+            return Response(body, status=status.HTTP_409_CONFLICT)
 
         # Fail fast on a bad/missing API key BEFORE writing the file or a row,
         # so a bad key never leaves an orphan file on disk.
         from core.api_key_service import resolve_for_call
         resolve_for_call(company, 'operations_agent')
 
-        # Save to disk.
         upload_dir = Path(settings.LOCAL_STORAGE_ROOT) / 'operations' / 'documents' / str(company.id)
         upload_dir.mkdir(parents=True, exist_ok=True)
         file_path = upload_dir / f"{file_hash[:16]}_{uploaded_file.name}"
+
+        # Look for the same content and create the entry as one step, under a lock on the company's row. The database
+        # rule against two identical uploads arriving together is conditional, and MySQL leaves such rules out, so
+        # both were accepted and one deleted the file the other was reading (CO-265). A matching entry that failed is
+        # replaced rather than refused: the screens tell the user to upload it again, and that upload was answered
+        # "already exists" (CO-262).
+        from django.db import IntegrityError
+        from core.models import Company
+        try:
+            with transaction.atomic():
+                Company.objects.select_for_update().filter(pk=company.pk).values_list('pk', flat=True).first()
+                existing = OperationsDocument.objects.filter(company=company, file_hash=file_hash).first()
+                if existing is not None and existing.processing_status != 'failed':
+                    return already_exists(existing.id)
+                if existing is not None:
+                    old_file = str(existing.file or '')
+                    existing.delete()
+                    if old_file and old_file != str(file_path) and os.path.exists(old_file):
+                        try:
+                            os.remove(old_file)
+                        except OSError:
+                            pass
+                placeholder = OperationsDocument.objects.create(
+                    company=company,
+                    uploaded_by=company_user,
+                    title=title or Path(uploaded_file.name).stem,
+                    original_filename=uploaded_file.name,
+                    file=str(file_path),
+                    file_type='other',
+                    file_size=uploaded_file.size,
+                    file_hash=file_hash,
+                    tags=tags,
+                    is_processed=False,
+                    processing_status='pending',
+                )
+        except IntegrityError:
+            return already_exists()
+
+        # Save to disk, now that this upload owns the entry.
         with open(file_path, 'wb') as f:
             for chunk in uploaded_file.chunks():
                 f.write(chunk)
-
-        # Create the pending placeholder. The unique (company, file_hash)
-        # constraint rejects a concurrent duplicate here — catch it, clean up
-        # the file, and return 409 instead of orphaning a second row/file.
-        from django.db import IntegrityError
-        try:
-            placeholder = OperationsDocument.objects.create(
-                company=company,
-                uploaded_by=company_user,
-                title=title or Path(uploaded_file.name).stem,
-                original_filename=uploaded_file.name,
-                file=str(file_path),
-                file_type='other',
-                file_size=uploaded_file.size,
-                file_hash=file_hash,
-                tags=tags,
-                is_processed=False,
-                processing_status='pending',
-            )
-        except IntegrityError:
-            if file_path.exists():
-                try:
-                    os.remove(file_path)
-                except OSError:
-                    pass
-            return Response({
-                'status': 'error',
-                'message': f'Document "{uploaded_file.name}" already exists',
-            }, status=status.HTTP_409_CONFLICT)
 
         # Process in the background (thread — not Celery — because the pipeline
         # needs the per-company key resolved from this request context).
@@ -396,15 +399,35 @@ def reprocess_document(request, document_id):
         if not doc:
             return Response({'status': 'error', 'message': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if not (doc.parsed_text or '').strip():
-            return Response({
-                'status': 'error',
-                'message': 'This document has no stored text to reprocess. Please re-upload it.',
-            }, status=status.HTTP_400_BAD_REQUEST)
-
         # Fail fast on a bad key before backgrounding.
         from core.api_key_service import resolve_for_call
         resolve_for_call(company, 'operations_agent')
+
+        if not (doc.parsed_text or '').strip():
+            # No text was read: start again from the stored file, which a failed entry keeps. It answered "Please
+            # re-upload it", and the re-upload was refused as "already exists" (CO-262).
+            stored = str(doc.file or '')
+            if not stored or not os.path.exists(stored):
+                return Response({
+                    'status': 'error',
+                    'message': 'This file is no longer stored. Delete this entry and upload the file again.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+            doc.processing_status, doc.processing_error = 'pending', ''
+            doc.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
+            from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
+            from operations_agent.tasks import process_document_in_background
+            agent = DocumentProcessingAgent()
+            agent.company_id = company.id
+            agent.agent_key_name = 'operations_agent'
+            process_document_in_background(
+                agent=agent, file_path=stored, original_filename=doc.original_filename, company_id=company.id,
+                uploaded_by_id=doc.uploaded_by_id, existing_doc_id=doc.id, title=doc.title, tags=doc.tags,
+            )
+            return Response({
+                'status': 'accepted',
+                'message': 'Reading the file again.',
+                'document': {'id': doc.id, 'processing_status': 'pending'},
+            }, status=status.HTTP_202_ACCEPTED)
 
         from operations_agent.tasks import reindex_document_in_background
         reindex_document_in_background(doc.id)
@@ -637,6 +660,9 @@ def list_summaries(request):
                 'opportunities': s.opportunities or [],
                 'deadlines': s.deadlines or [],
                 'document_category': s.document_category or '',
+                # A failed or still-running summary was listed like a finished one with an empty page (CO-179).
+                'processing_status': s.processing_status,
+                'processing_error': s.processing_error or '',
                 'created_by': s.created_by.full_name if s.created_by else None,
                 'created_at': s.created_at.isoformat(),
             })
@@ -691,6 +717,9 @@ def get_summary(request, summary_id):
                 'opportunities': s.opportunities or [],
                 'deadlines': s.deadlines or [],
                 'document_category': s.document_category or '',
+                # A failed or still-running summary was listed like a finished one with an empty page (CO-179).
+                'processing_status': s.processing_status,
+                'processing_error': s.processing_error or '',
                 'created_by': s.created_by.full_name if s.created_by else None,
                 'created_at': s.created_at.isoformat(),
             },
@@ -1244,7 +1273,9 @@ def _serialize_generated(doc, include_content=True):
         'tone': doc.tone,
         'prompt': doc.prompt,
         'version': doc.version,
-        'edit_history': doc.edit_history or [],
+        'edit_history': [{k: v for k, v in h.items() if k != 'previous_content'}
+                         | {'restorable': bool(h.get('previous_content'))}
+                         for h in (doc.edit_history or []) if isinstance(h, dict)],
         'reference_documents': refs,
         'generated_by': doc.generated_by.full_name if doc.generated_by else None,
         'created_at': doc.created_at.isoformat(),
@@ -1446,15 +1477,7 @@ def update_generated_document(request, doc_id):
                 changed = True
 
         if isinstance(new_content, str) and new_content != doc.content:
-            history = doc.edit_history or []
-            history.append({
-                'version': doc.version,
-                'edited_at': timezone.now().isoformat(),
-                'edited_by': user.full_name if hasattr(user, 'full_name') else None,
-                'previous_length': len(doc.content or ''),
-            })
-            # Cap history to last 20 entries
-            doc.edit_history = history[-20:]
+            _remember_version(doc, user, 'edit')
             doc.content = new_content
             doc.version += 1
             changed = True
@@ -1471,6 +1494,66 @@ def update_generated_document(request, doc_id):
             {'status': 'error', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+#: Versions of an authored document kept with their text: the last 10, each up to 200,000 characters (CO-213).
+KEPT_VERSION_TEXTS = 10
+KEPT_VERSION_CHARS = 200_000
+
+
+def _remember_version(doc, user, action):
+    """Add the version about to be replaced to the history, with its text.
+
+    The history kept only the old text's length, while the screen said "The current version will be archived in
+    history": regenerating or saving overwrote it for good (CO-213). The text is kept for the last
+    KEPT_VERSION_TEXTS entries; older entries keep their line without it."""
+    history = [h for h in (doc.edit_history or []) if isinstance(h, dict)]
+    history.append({
+        'version': doc.version,
+        'edited_at': timezone.now().isoformat(),
+        'edited_by': getattr(user, 'full_name', None),
+        'action': action,
+        'title': doc.title,
+        'previous_length': len(doc.content or ''),
+        'previous_content': (doc.content or '')[:KEPT_VERSION_CHARS],
+    })
+    history = history[-20:]
+    for h in history[:-KEPT_VERSION_TEXTS]:
+        h.pop('previous_content', None)
+    doc.edit_history = history
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def restore_generated_document_version(request, doc_id):
+    """Put an earlier version back. The version replaced is kept in the history too, so a restore can be undone."""
+    try:
+        user = request.user
+        doc = OperationsGeneratedDocument.objects.filter(company=user.company, pk=doc_id).first()
+        if not doc:
+            return Response({'status': 'error', 'message': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            wanted = int(request.data.get('version'))
+        except (TypeError, ValueError):
+            return Response({'status': 'error', 'message': 'Say which version to restore.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        entry = next((h for h in reversed(doc.edit_history or [])
+                      if isinstance(h, dict) and h.get('version') == wanted and h.get('previous_content')), None)
+        if entry is None:
+            return Response({'status': 'error', 'message': f'Version {wanted} is no longer kept, so it cannot be '
+                                                          'restored.'}, status=status.HTTP_404_NOT_FOUND)
+        text = entry['previous_content']
+        _remember_version(doc, user, f'restore v{wanted}')
+        doc.content = text
+        doc.version += 1
+        doc.save()
+        return Response({'status': 'success', 'document': _serialize_generated(doc, include_content=True)})
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error(f'restore_generated_document_version error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['DELETE'])
@@ -1555,15 +1638,7 @@ def regenerate_document(request, doc_id):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        history = doc.edit_history or []
-        history.append({
-            'version': doc.version,
-            'edited_at': timezone.now().isoformat(),
-            'edited_by': user.full_name if hasattr(user, 'full_name') else None,
-            'action': 'regenerate',
-            'previous_length': len(doc.content or ''),
-        })
-        doc.edit_history = history[-20:]
+        _remember_version(doc, user, 'regenerate')
         doc.prompt = prompt
         doc.template_type = template_type if template_type in dict(
             OperationsGeneratedDocument.TEMPLATE_TYPE_CHOICES
@@ -1734,7 +1809,10 @@ def stream_generate_document(request):
                 # then sees a failure, retries, and ends up with two identical
                 # v1 documents. Reuse an untouched identical doc saved moments
                 # ago instead of creating another.
-                doc = (
+                # The same request only: the same title asked for and the same references too. Changing either and
+                # generating again straight away showed the new text stream in, then the old document take its place
+                # (CO-263).
+                recent = (
                     OperationsGeneratedDocument.objects
                     .filter(
                         company=company,
@@ -1746,8 +1824,11 @@ def stream_generate_document(request):
                         created_at__gte=timezone.now() - timedelta(seconds=DUPLICATE_GENERATION_WINDOW_SECONDS),
                     )
                     .order_by('-created_at')
-                    .first()
+                    .prefetch_related('reference_documents')
                 )
+                doc = next((d for d in recent[:5]
+                            if (not title or d.title == title[:500])
+                            and {r.id for r in d.reference_documents.all()} == set(valid_ref_ids)), None)
                 if doc:
                     logger.info(
                         'stream_generate_document: reusing recent identical doc %s for company %s',
@@ -1766,8 +1847,11 @@ def stream_generate_document(request):
                         edit_history=[],
                         tokens_used=final_payload.get('tokens_used') or {},
                     )
-                    if valid_refs:
-                        doc.reference_documents.set(valid_refs)
+                    # Linked to the files actually used, not every file chosen (CO-214).
+                    used_ids = {r.get('id') for r in (final_payload.get('references') or []) if isinstance(r, dict)}
+                    used_refs = [d for d in valid_refs if d.id in used_ids]
+                    if used_refs:
+                        doc.reference_documents.set(used_refs)
             except Exception as db_err:
                 logger.error(f'stream_generate_document DB save error: {db_err}', exc_info=True)
                 yield _emit('error', {'message': f'Could not save document: {db_err}'})
@@ -1892,12 +1976,23 @@ def operations_analytics(request):
                 lookback_days = days_total
                 bucket_days = max(1, days_total // 30)
 
-        # Build the bucket edges once.
+        # Build the bucket edges once: calendar days in the company's time zone, the last one today. They were
+        # 24-hour blocks ending now, each labelled with the UTC date it began on, so today's activity sat under
+        # yesterday's date and no bar was ever today (CO-267).
+        from datetime import datetime as _datetime, time as _time
+        from zoneinfo import ZoneInfo
+        try:
+            zone = ZoneInfo(company.timezone_name or 'UTC')
+        except Exception:
+            zone = ZoneInfo('UTC')
+        today = timezone.localtime(now, zone).date()
         buckets = []  # list of (start, end, label)
-        for i in range(lookback_days, 0, -bucket_days):
-            b_start = now - timedelta(days=i)
-            b_end = now - timedelta(days=i - bucket_days)
-            buckets.append((b_start, b_end, b_start.strftime('%b %d')))
+        day = today - timedelta(days=lookback_days - 1)
+        while day <= today:
+            end_day = min(day + timedelta(days=bucket_days), today + timedelta(days=1))
+            buckets.append((_datetime.combine(day, _time.min, tzinfo=zone),
+                            _datetime.combine(end_day, _time.min, tzinfo=zone), day.strftime('%b %d')))
+            day = end_day
         window_start = buckets[0][0] if buckets else now
 
         def _bucketise(timestamps):
@@ -1982,8 +2077,18 @@ def operations_analytics(request):
                         'source': s.original_filename,
                     })
 
-        # Keep top deadlines (first 10, arbitrary order)
-        upcoming_deadlines = upcoming_deadlines[:10]
+        # Upcoming means from today on, soonest first; then the ones with no date. They were the first ten found, in
+        # no order, past ones included (CO-277).
+        from operations_agent.signals import _parse_deadline_date
+        today = timezone.localdate()
+        dated, undated = [], []
+        for d in upcoming_deadlines:
+            when = _parse_deadline_date(d.get('date'))
+            if when is None:
+                undated.append(d)
+            elif when >= today:
+                dated.append((when, {**d, 'date': when.isoformat(), 'days_left': (when - today).days}))
+        upcoming_deadlines = ([d for _w, d in sorted(dated, key=lambda x: x[0])] + undated)[:10]
 
         # ── Template breakdown (for generated docs) ─
         template_breakdown = []

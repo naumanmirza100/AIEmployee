@@ -619,6 +619,10 @@ FRONTLINE_AI_INTENT = os.getenv('FRONTLINE_AI_INTENT', 'true').strip().lower() n
 # The Recruitment assistant (AI Questions): what a question asks for, the job and the person it names, read by one AI
 # call instead of word lists (recruitment_agent/intent.py). RECRUITMENT_AI_INTENT=false goes back to the word lists.
 RECRUITMENT_AI_INTENT = os.getenv('RECRUITMENT_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
+# Operations' Knowledge Q&A reads each question with one AI call (operations_agent/intent.py): a request to upload,
+# delete, summarise or write is told where it is done, a question is searched in English and answered in the asker's
+# language. OPERATIONS_AI_INTENT=false goes back to the word lists.
+OPERATIONS_AI_INTENT = os.getenv('OPERATIONS_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
 
 PM_AGENT_LLM_CONFIG = {
     'defaults': {
