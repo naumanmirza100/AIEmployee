@@ -16,6 +16,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import { API_BASE_URL } from '@/config/apiConfig';
+import { awaitsAnswer, canAnswer, isAnswered } from '@/utils/meetingAnswers';
 
 /**
  * MeetingsView — /me/meetings
@@ -136,16 +137,7 @@ export default function MeetingsView() {
     respond(m, 'counter_proposed', { counter_time, reason: rejectReason });
   };
 
-  // The server decides (`can_respond`); the fallback is the old PM-only rule.
-  const canAct = (m) => (typeof m.can_respond === 'boolean'
-    ? m.can_respond
-    : (m.my_status === 'pending' || m.my_status === 'counter_proposed'
-      || m.status === 'pending' || m.status === 'counter_proposed')
-      && m.my_status !== 'accepted' && m.status !== 'withdrawn');
-
-  // An answered invitation can still be changed, but it is no longer waiting.
-  const answered = (m) => m.my_status === 'accepted' || m.my_status === 'rejected';
-  const pendingCount = meetings.filter((m) => canAct(m) && !answered(m)).length;
+  const pendingCount = meetings.filter(awaitsAnswer).length;
 
   return (
     <div className="max-w-4xl mx-auto space-y-4">
@@ -180,7 +172,7 @@ export default function MeetingsView() {
         <div className="space-y-3">
           {meetings.map((m) => {
             const sc = STATUS_COLORS[m.status] || STATUS_COLORS.pending;
-            const showActions = canAct(m);
+            const showActions = canAnswer(m);
             const key = meetingKey(m);
             const showReject = rejectFor === key;
             const showSuggest = suggestFor === key;
@@ -282,7 +274,7 @@ export default function MeetingsView() {
                       {/* Three distinct actions — no more "Reject / Suggest Time" combo. */}
                       {!showReject && !showSuggest && (
                         <div className="flex flex-wrap items-center gap-2">
-                          {answered(m) && (
+                          {isAnswered(m) && (
                             <span className="text-xs text-white/50">
                               You {m.my_status === 'accepted' ? 'accepted' : 'declined'}; you can still change it.
                             </span>
