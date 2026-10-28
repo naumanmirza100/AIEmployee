@@ -883,6 +883,14 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                   data-testid={`REC-settings-job-option-${job.id}`}
                                   type="button"
                                   onClick={() => {
+                                    // The job already shown: keep its settings. Clearing them here with no reload
+                                    // (the job did not change) left the defaults showing, and Save then wrote them
+                                    // over the job's real interview times.
+                                    if (job.id === selectedJobId) {
+                                      setJobSearchOpen(false);
+                                      setJobSearchQuery('');
+                                      return;
+                                    }
                                     setSelectedJobId(job.id);
                                     setInterviewSettings({
                                       schedule_from_date: '',
