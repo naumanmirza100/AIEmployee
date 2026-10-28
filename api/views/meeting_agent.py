@@ -26,7 +26,7 @@ from datetime import timedelta
 from core.api_key_service import KeyServiceError
 from core.scheduling import (
     ScheduleConflict, booking_guard, ensure_free, find_conflicts, login_user_id_for_company_user,
-    people_for, zone_name,
+    people_for, suggest_slots, zone_name,
 )
 from meeting_agent.ai_agents import ExecAgentRegistry
 from meeting_agent.clock import held_on, when_text as clock_when_text
@@ -789,6 +789,16 @@ def _shared_clashes(people, typed, duration, company_user, exclude_id=None, fall
              'duration_minutes': int((clash.ends_at - clash.starts_at).total_seconds() // 60),
              'status': 'busy', 'source': clash.source, 'blocking': True}
             for clash in found]
+
+
+def _free_times(people, typed, duration, company_user, exclude_id=None, fallback='', limit=6):
+    """When everyone is free instead, that day and then the next weekdays, as times this agent keeps them
+    (wall-clock, no zone), so the screen can put one straight into the form. A refused time named no other."""
+    from zoneinfo import ZoneInfo
+    zone = _company_zone(company_user, fallback)
+    starts = suggest_slots(people, _real(company_user, typed, fallback), duration, tz_name=zone,
+                           exclude=[('exec', exclude_id)] if exclude_id else (), limit=limit)
+    return [s.astimezone(ZoneInfo(zone)).replace(tzinfo=None).isoformat(timespec='minutes') for s in starts]
 
 
 def _all_clashes(own, shared):
@@ -1984,10 +1994,12 @@ def meeting_check_conflicts(request):
                   if exclude_id else None)
         if moving is not None:
             people |= set(people_for('exec', moving))
-        shared = _shared_clashes(sorted(people), scheduled_at, duration, company_user, exclude_id,
-                                 fallback=_browser_zone(request, moving))
+        fallback = _browser_zone(request, moving)
+        shared = _shared_clashes(sorted(people), scheduled_at, duration, company_user, exclude_id, fallback=fallback)
+        free = (_free_times(sorted(people), scheduled_at, duration, company_user, exclude_id, fallback=fallback)
+                if shared else [])
         return Response({'status': 'success', 'conflicts': _all_clashes(conflicts, shared),
-                         'blocking': bool(shared)})
+                         'blocking': bool(shared), 'free_times': free})
     except Exception as e:
         logger.error("meeting_check_conflicts error: %s", e)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -36,6 +36,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [linkError, setLinkError] = useState('');
   const [conflicts, setConflicts] = useState(null); // clashing meetings awaiting confirmation
+  const [freeTimes, setFreeTimes] = useState([]); // when everyone is free instead, from the same check
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
     if (k === 'meeting_link') {
@@ -176,6 +177,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
       });
       const found = res.conflicts || [];
       if (found.length > 0) {
+        setFreeTimes(res.free_times || []);
         setConflicts(found);
         setLoading(false);
         return;
@@ -388,6 +390,8 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
         conflicts={conflicts}
         onCancel={() => setConflicts(null)}
         onConfirm={doCreate}
+        freeTimes={freeTimes}
+        onPick={(t) => { set('scheduled_at', t); setConflicts(null); }}
         loading={loading}/>
     </Dialog>
   );
@@ -399,8 +403,9 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
 // (another meeting, an interview, a sales call, leave, a company holiday, for
 // the organiser or anyone invited) is `blocking`: the server will refuse the
 // meeting, so the only way on is another time. One that only the agent's own
-// check finds is a warning, and the user may still book over it.
-const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading }) => {
+// check finds is a warning, and the user may still book over it. A refused
+// time comes with the times when everyone is free; a press puts one in the form.
+const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading, freeTimes = [], onPick }) => {
   const blocked = (conflicts || []).some(c => c.blocking);
   return (
     <Dialog open={!!conflicts && conflicts.length > 0} onOpenChange={v => { if (!v) onCancel(); }}>
@@ -428,6 +433,19 @@ const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading }) => {
             </div>
           ))}
           {!blocked && <p className="text-xs text-white/40 pt-1">Do you still want to add another meeting in this slot?</p>}
+          {blocked && freeTimes.length > 0 && onPick && (
+            <div className="pt-2 space-y-1.5" data-testid="exec-meeting-free-times">
+              <p className="text-xs text-white/60">Everyone is free at:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {freeTimes.map(t => (
+                  <Button key={t} size="sm" variant="outline" onClick={() => onPick(t)}
+                    className="h-7 text-xs border-violet-500/40 text-violet-200 hover:bg-violet-500/10">
+                    {fmtUtc(t)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} className="border-white/10 text-white/70">Pick another time</Button>
@@ -457,6 +475,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [linkError, setLinkError] = useState('');
   const [conflicts, setConflicts] = useState(null);
+  const [freeTimes, setFreeTimes] = useState([]);
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
     if (k === 'meeting_link') {
@@ -557,6 +576,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
       });
       const found = res.conflicts || [];
       if (found.length > 0) {
+        setFreeTimes(res.free_times || []);
         setConflicts(found);
         setLoading(false);
         return;
@@ -672,6 +692,8 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
         conflicts={conflicts}
         onCancel={() => setConflicts(null)}
         onConfirm={doSave}
+        freeTimes={freeTimes}
+        onPick={(t) => { set('scheduled_at', t); setConflicts(null); }}
         loading={loading}
       />
     </Dialog>

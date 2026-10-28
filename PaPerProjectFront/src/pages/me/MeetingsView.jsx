@@ -143,7 +143,9 @@ export default function MeetingsView() {
       || m.status === 'pending' || m.status === 'counter_proposed')
       && m.my_status !== 'accepted' && m.status !== 'withdrawn');
 
-  const pendingCount = meetings.filter(canAct).length;
+  // An answered invitation can still be changed, but it is no longer waiting.
+  const answered = (m) => m.my_status === 'accepted' || m.my_status === 'rejected';
+  const pendingCount = meetings.filter((m) => canAct(m) && !answered(m)).length;
 
   return (
     <div className="max-w-4xl mx-auto space-y-4">
@@ -279,7 +281,13 @@ export default function MeetingsView() {
                     <div className="pt-3 border-t border-white/5 space-y-2">
                       {/* Three distinct actions — no more "Reject / Suggest Time" combo. */}
                       {!showReject && !showSuggest && (
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {answered(m) && (
+                            <span className="text-xs text-white/50">
+                              You {m.my_status === 'accepted' ? 'accepted' : 'declined'}; you can still change it.
+                            </span>
+                          )}
+                          {m.my_status !== 'accepted' && (
                           <Button
                             size="sm"
                             onClick={() => respond(m, 'accepted')}
@@ -288,6 +296,7 @@ export default function MeetingsView() {
                           >
                             <CheckCircle className="h-3 w-3 mr-1" /> Accept
                           </Button>
+                          )}
                           {m.can_suggest_time !== false && (
                             <Button
                               size="sm"
@@ -299,6 +308,7 @@ export default function MeetingsView() {
                               <ArrowRightLeft className="h-3 w-3 mr-1" /> Suggest a different time
                             </Button>
                           )}
+                          {m.my_status !== 'rejected' && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -308,6 +318,7 @@ export default function MeetingsView() {
                           >
                             <XCircle className="h-3 w-3 mr-1" /> Reject
                           </Button>
+                          )}
                         </div>
                       )}
 

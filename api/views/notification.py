@@ -605,7 +605,8 @@ def _executive_meeting_items(user):
             'organizer_email': _visible_email(m.organizer.email),
             'title': m.title,
             'description': m.description or '',
-            'agenda': m.agenda or [],
+            # Kept as plain text by this agent; My Meetings reads {item, done}, as the other agents send it.
+            'agenda': [a if isinstance(a, dict) else {'item': str(a), 'done': False} for a in (m.agenda or []) if a],
             'proposed_time': real_start(m).isoformat(),
             'duration_minutes': m.duration_minutes,
             'status': m.status,

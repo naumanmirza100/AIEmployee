@@ -147,6 +147,13 @@ class AnswerTests(EmployeeCase):
         self.assertFalse(item['can_suggest_time'])
         self.assertEqual(item['respond_url'], f'/exec-meeting/meetings/{self.board.id}/respond-as-employee')
 
+    def test_the_agenda_reaches_my_meetings_as_items(self):
+        # This agent keeps the agenda as plain text; My Meetings reads {item, done}, or shows empty bullets.
+        self.board.agenda = ['Q4 plan', '', 'FinEdge renewal']
+        self.board.save(update_fields=['agenda'])
+        self.assertEqual(self.mine()['agenda'], [{'item': 'Q4 plan', 'done': False},
+                                                 {'item': 'FinEdge renewal', 'done': False}])
+
     def test_the_employee_declines_and_the_organiser_is_told(self):
         code, body = self.call(views.meeting_respond_as_employee, self.sana, meeting_id=self.board.id,
                                data={'action': 'rejected', 'reason': 'On leave that day'})

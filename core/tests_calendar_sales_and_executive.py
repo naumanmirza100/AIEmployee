@@ -505,7 +505,7 @@ class ExecutiveMeetingsOnTheCalendarTests(BothLoginsTestCase):
 
     def test_it_asks_about_the_people_picked_too(self):
         self.busy_elsewhere(self.sam, hour=11)
-        self.assertEqual(self.check(), {'status': 'success', 'conflicts': [], 'blocking': False})
+        self.assertEqual(self.check(), {'status': 'success', 'conflicts': [], 'blocking': False, 'free_times': []})
         body = self.check(participants=[self.pick(self.sam)])
         self.assertIs(body['blocking'], True)
         self.assertIn('Sam is busy', body['conflicts'][0]['title'])
@@ -514,6 +514,15 @@ class ExecutiveMeetingsOnTheCalendarTests(BothLoginsTestCase):
         self.busy_elsewhere(self.rae, hour=11)
         picked = [{'user_id': self.rae_login.id, 'user_type': 'company_user'}]
         self.assertIs(self.check(actor=self.dee_login, participants=picked)['blocking'], True)
+
+    def test_a_refused_time_comes_with_times_everyone_is_free(self):
+        # The screen showed only what was in the way; the free times were in the 409 alone (live run, 29 Oct 2026).
+        self.busy_elsewhere(self.sam, hour=11)
+        free = self.check(participants=[self.pick(self.sam)])['free_times']
+        self.assertTrue(free)
+        for start in map(datetime.fromisoformat, free):
+            self.assertEqual(start.date(), self.day)                       # the asked-for day first, as typed times
+            self.assertFalse(start < self.at(12).replace(tzinfo=None) and start + timedelta(hours=1) > self.at(11).replace(tzinfo=None))
 
     def test_someone_in_another_company_is_not_asked_about(self):
         rival = Company.objects.create(name='Rival', email='rival@test.local')

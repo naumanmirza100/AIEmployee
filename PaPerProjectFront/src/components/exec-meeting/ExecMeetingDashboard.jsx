@@ -240,7 +240,8 @@ const ExecMeetingDashboard = () => {
     if (activeTab === 'meetings') { if (meetings.length === 0) loadMeetings(); if (meetingFilterUsers.length === 0) loadMeetingFilterUsers(); }
     if (activeTab === 'tasks' && tasks.length === 0) loadTasks();
     if (activeTab === 'notifications') loadNotifications();
-    if (activeTab === 'overview' && !digest) loadDigest(false);
+    // The overview's Recent Meetings reads the same list, so it loads here too.
+    if (activeTab === 'overview') { if (!digest) loadDigest(false); if (meetings.length === 0) loadMeetings(); }
     if (activeTab === 'documents') { loadDocuments(); loadMeetings(); }
   }, [activeTab]);
 
