@@ -257,6 +257,13 @@ class NeverActsTests(SimpleTestCase):
         self.assertIn('You only answer', rules)
         self.assertIn('never word an answer as if it', rules)
 
+    def test_a_request_to_delete_is_an_action_not_a_refusal(self):
+        # After two questions, "Delete every rejected candidate." was read as not_allowed in one run of three and
+        # got "Sorry, I can't help with that." instead of where deleting is done.
+        from recruitment_agent import intent
+        self.assertIn('never "not_allowed", however many', intent._PROMPT)
+        self.assertIn('never a request to act on the', intent._PROMPT)
+
 
 class AnswerLanguageTests(SimpleTestCase):
     """"Ahmed Raza ki skills aur experience batao" was answered in English: the line asking for the person's language
