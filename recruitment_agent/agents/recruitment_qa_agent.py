@@ -1968,10 +1968,8 @@ FORMATTING:
     def _answer_prompt(self, question: str, context: str, direct_answer: str = "", original=None, wants=None,
                        language=None) -> str:
         prompt = self._answer_instructions(question, context, wants)
-        from core.answer_language import LANGUAGES, _same_words, line as language_line, normalize
-        language = normalize(language)
-        if original and language in (None, 'roman_urdu', 'other') and _same_words(original, question):
-            language = 'english'      # the restatement is the question itself
+        from core.answer_language import LANGUAGES, line as language_line, settle
+        language = settle(original, question, language) if original else language
         if original and language in ('english', 'urdu', 'other'):
             return language_line(original, question, language) + prompt
         # The reading's language when it gave one: a line whenever the restatement differs meant every English

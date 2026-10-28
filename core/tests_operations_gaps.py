@@ -329,6 +329,8 @@ class LiveRunFixesTests(OpsCase):
         question = 'What are the payment terms in the FinEdge agreement?'
         for said in ('English', 'roman_urdu', None):
             self.assertIn('in English', line(question, question, said), said)
+        # Urdu letters are Urdu script, whatever the reading said (live: answered in Roman Urdu).
+        self.assertIn('Urdu script', line('دفتر کے نئے اوقات کیا ہیں؟', 'What are the new office hours?', 'roman_urdu'))
         roman = line('FinEdge contract mein critical problem ka response time kitna hai?',
                      'What is the response time for a critical problem in the FinEdge contract?', None)
         self.assertNotIn('in English', roman)
