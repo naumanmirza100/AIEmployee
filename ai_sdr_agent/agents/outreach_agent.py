@@ -327,6 +327,11 @@ def unsubscribe_address(company_id, email_addr: str) -> None:
         SDRLead.all_objects.filter(
             company_user__company_id=company_id, email__iexact=email_addr,
         ).update(status='disqualified')
+    # A lead who opted out keeps no call, by the email's link as by a reply (the link left the call booked: manual
+    # run, 30 Oct). Outside the transaction: each call is saved on its own so the shared calendar drops it too.
+    from ai_sdr_agent.reply_actions import cancel_meetings_of
+    cancel_meetings_of(SDRCampaignEnrollment.objects.filter(
+        campaign__company_user__company_id=company_id, lead__email__iexact=email_addr))
 
 
 def apply_unsubscribe(enrollment) -> None:

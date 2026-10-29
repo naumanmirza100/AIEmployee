@@ -744,3 +744,20 @@ class ReturnDateTests(TestCase):
     def test_a_day_first_return_date_is_read(self):
         when = EmailAssistantAgent._extract_return_date('I am out of the office until 5 November with limited access.')
         self.assertEqual((when.month, when.day), (11, 6))
+
+
+class UnsubscribeLinkTests(SDRBase):
+    """Found writing the manual (30 Oct): the email's Unsubscribe link left the lead's booked call in place, while a
+    reply asking to stop cancelled it."""
+
+    def test_the_link_cancels_the_open_calls_and_keeps_the_finished(self):
+        from ai_sdr_agent.agents.outreach_agent import unsubscribe_address
+        lead = self.make_lead('sana@clinic.example')
+        enrollment = self.enroll(lead)
+        booked = SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=enrollment, status='scheduled')
+        done = SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=enrollment, status='completed')
+        unsubscribe_address(self.company.id, 'SANA@clinic.example')
+        booked.refresh_from_db()
+        done.refresh_from_db()
+        self.assertEqual((booked.status, done.status), ('cancelled', 'completed'))
+        self.assertTrue(is_blocked(self.company.id, 'sana@clinic.example'))
