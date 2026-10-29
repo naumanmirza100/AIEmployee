@@ -28,9 +28,16 @@ class ClickLinkTests(MarketingTestCase):
                                                     tracking_token='tok-123')
 
     def click(self, url):
-        # The email's /token is answered by the usual redirect to /token/; this is the request after it.
+        # The address exactly as the email has it, /token without the slash.
         parts = urlsplit(url)
-        return Client().get(parts.path.rstrip('/') + '/', {k: v[0] for k, v in parse_qs(parts.query).items()})
+        return Client().get(parts.path, {k: v[0] for k, v in parse_qs(parts.query).items()})
+
+    def test_the_emails_own_address_is_answered_without_a_redirect(self):
+        """Found in the live run of 29 Oct: /token?t=... went through a 301 to /token/ before it counted."""
+        response = Client().get('/token', {'t': 'tok-123'})
+        self.assertEqual((response.status_code, response['Content-Type']), (200, 'image/gif'))
+        self.sent.refresh_from_db()
+        self.assertEqual(self.sent.status, 'opened')
 
     def test_a_link_with_two_parameters_arrives_whole(self):
         offer = 'https://acme.test/offer?a=1&b=2#top'
@@ -653,3 +660,127 @@ class DocumentImageTests(MarketingTestCase):
                                    document_id=self.posts.id)
         self.assertEqual((code, body['error']), (400, 'image_not_made'))
         self.assertIn('OpenAI key', body['message'])
+
+
+class LeadImportTextTests(MarketingTestCase):
+    """Found in the live run of 29 Oct: an address "n/a" was reported as missing (pandas read it as empty), and a phone
+    number lost its leading 0."""
+
+    def test_cells_are_read_as_typed(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from api.views import marketing_agent as views
+        campaign = self.campaign(self.ann, status='draft')
+        sheet = ('first_name,last_name,email,phone\n'
+                 'Hina,Butt,n/a,0300\n'
+                 'Asad,Javed,asad@customer.test,03001234567\n')
+        result, error = views._upload_leads_from_file(campaign, self.ann, SimpleUploadedFile('leads.csv', sheet.encode()))
+        self.assertIsNone(error)
+        self.assertEqual([(r['field'], r['reason'], r['value']) for r in result['rejected_rows']],
+                         [('email', 'Not an email address', 'n/a')])
+        self.assertEqual(campaign.leads.get().phone, '03001234567')
+
+
+class LeadStatusTests(MarketingTestCase):
+    """Found in the live run of 29 Oct: every lead of a sequence stayed "New" after its emails and replies."""
+
+    def setUp(self):
+        super().setUp()
+        from marketing_agent.models import CampaignContact
+        self.spring = self.campaign(self.ann)
+        self.faisal = self.lead(self.ann, 'faisal@clinic.test', campaign=self.spring)
+        self.contact = CampaignContact.objects.create(campaign=self.spring, lead=self.faisal)
+
+    def reply(self, level):
+        from marketing_agent.models import Reply
+        return Reply.objects.create(contact=self.contact, campaign=self.spring, lead=self.faisal, interest_level=level,
+                                    reply_content='...')
+
+    def status(self):
+        self.faisal.refresh_from_db()
+        return self.faisal.status
+
+    def test_a_sequence_email_makes_the_lead_contacted(self):
+        self.mailbox(self.ann, 'ann@acme.test', is_default=True)
+        self.spring.email_account = EmailAccount.objects.get(email='ann@acme.test')
+        self.spring.save()
+        self.sequence(self.spring)
+        from unittest import mock
+        from marketing_agent.services import email_service as service
+        with mock.patch.object(service, 'EmailMultiAlternatives', create=True) as mail, \
+                mock.patch('django.core.mail.EmailMultiAlternatives.send', return_value=1):
+            template = self.spring.email_templates.first()
+            service.email_service.send_email(template, self.faisal, self.spring)
+        self.assertEqual(self.status(), 'contacted')
+
+    def test_replies_move_the_lead_on_and_never_back(self):
+        self.reply('neutral')
+        self.assertEqual(self.status(), 'contacted')
+        later = self.reply('not_analyzed')
+        later.interest_level = 'requested_info'         # the AI read it afterwards
+        later.save()
+        self.assertEqual(self.status(), 'qualified')
+        self.reply('neutral')
+        self.assertEqual(self.status(), 'qualified')
+        self.reply('unsubscribe')
+        self.assertEqual(self.status(), 'lost')
+        self.reply('positive')
+        self.assertEqual(self.status(), 'lost')
+
+    def test_a_status_a_person_set_stays(self):
+        self.faisal.status = 'converted'
+        self.faisal.save()
+        self.reply('unsubscribe')
+        self.assertEqual(self.status(), 'converted')
+
+    def test_the_backfill_applies_the_rule_to_older_leads(self):
+        import importlib
+        from django.apps import apps
+        from marketing_agent.models import Lead, Reply
+        backfill = importlib.import_module('marketing_agent.migrations.0048_lead_status_from_history')
+        template = self.template(self.spring)
+        mehwish = self.lead(self.ann, 'mehwish@clinic.test', campaign=self.spring)
+        tariq = self.lead(self.ann, 'tariq@clinic.test', campaign=self.spring)
+        EmailSendHistory.objects.create(campaign=self.spring, lead=mehwish, email_template=template, subject='Hi',
+                                        recipient_email=mehwish.email, status='opened')
+        Reply.objects.create(contact=self.contact, campaign=self.spring, lead=tariq, interest_level='unsubscribe',
+                             reply_content='stop')
+        Lead.objects.update(status='new')               # as the leads were before
+        backfill.fill_in(apps, None)
+        self.assertEqual(dict(Lead.objects.values_list('email', 'status')),
+                         {'faisal@clinic.test': 'new', 'mehwish@clinic.test': 'contacted', 'tariq@clinic.test': 'lost'})
+
+
+class GraphRequestTests(MarketingTestCase):
+    """Found in the live run of 29 Oct: "pie chart of reply types" drew replies per campaign, and "draw me a cat" drew
+    campaigns by status."""
+
+    def setUp(self):
+        super().setUp()
+        from marketing_agent.models import CampaignContact, Reply
+        self.spring = self.campaign(self.ann)
+        for email, levels in (('faisal@clinic.test', ('neutral', 'positive')), ('tariq@clinic.test', ('unsubscribe',)),
+                              ('nadia@clinic.test', ('negative',))):
+            lead = self.lead(self.ann, email, campaign=self.spring)
+            contact = CampaignContact.objects.create(campaign=self.spring, lead=lead)
+            for level in levels:
+                Reply.objects.create(contact=contact, campaign=self.spring, lead=lead, interest_level=level,
+                                     reply_content='...')
+
+    def graph(self, answer, prompt):
+        from unittest import mock
+        from marketing_agent.agents.graph_generator_agent import GraphGeneratorAgent as Graphs
+        agent = Graphs.__new__(Graphs)
+        agent.user = self.ann
+        with mock.patch.object(Graphs, '_call_llm', create=True, return_value=answer):
+            return agent.generate_graph(prompt)
+
+    def test_reply_types_count_people_by_their_last_reply(self):
+        result = self.graph('{"chart_type": "pie", "metric": "reply_types", "title": "x", "data": {}}',
+                            'pie chart of reply types')
+        self.assertEqual(result['chart']['title'], 'Replies by Type')
+        self.assertEqual(result['chart']['data'], {'Interested': 1, 'Asked to stop': 1, 'Not interested': 1})
+
+    def test_a_request_that_is_not_a_chart_of_the_data_is_answered_in_words(self):
+        result = self.graph('{"chart_type": "bar", "metric": "none", "title": "Cat", "data": {}}', 'draw me a cat')
+        self.assertIsNone(result['chart'])
+        self.assertIn('I draw charts of your marketing data', result['answer'])

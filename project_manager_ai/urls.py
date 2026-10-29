@@ -68,6 +68,8 @@ urlpatterns += [
 
     # Simple token tracking (root level - /token?t=TOKEN for opens, /token?t=TOKEN&url=... for clicks)
     path('token/', views_email_tracking.simple_track_open, name='root_simple_track_open'),
+    # The emails carry /token?t=... without the slash: answered here, not through a 301 to /token/ first.
+    path('token', views_email_tracking.simple_track_open),
     path('token/<str:tracking_token>/', views_email_tracking.simple_track_click, name='root_simple_track_click'),
 
     # Public meeting booking page (no auth — token in URL)

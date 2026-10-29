@@ -114,7 +114,8 @@ for the image to post with it.""",
 - Facebook / Instagram: 3 variants, each with primary text (at most 125 characters), a headline (at most 40) and a
   call-to-action button (Learn more, Sign up, Book now, Contact us or Get offer).
 - LinkedIn: 2 variants, each with intro text (at most 150 characters) and a headline (at most 70).
-Keep strictly to the character limits.""",
+Keep strictly to the character limits. After the Facebook / Instagram table and after the LinkedIn table, on its own
+line in italics, an idea for the image to run with those ads (the Pictures panel offers these).""",
     }
     COPY_SYSTEM_PROMPT = """You are a marketing copywriter. You write short, specific copy that sounds like a real business,
 not like an AI: no hype words (revolutionary, game-changing, unlock, elevate), no invented facts, prices, statistics,

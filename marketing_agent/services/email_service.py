@@ -358,6 +358,8 @@ class EmailService:
                 send_history.message_id = message_id.strip('<>')  # Store without < >
                 send_history.email_account = email_account
                 send_history.save()
+                if hasattr(lead, 'move_to'):
+                    lead.move_to('contacted')
 
             self.sent_count += 1
 
@@ -907,11 +909,7 @@ class EmailService:
             
             result = self.send_email(template, lead, campaign)
             if result['success']:
-                results['sent'] += 1
-                # Update lead status
-                if lead.status == 'new':
-                    lead.status = 'contacted'
-                    lead.save()
+                results['sent'] += 1        # send_email moved the lead to Contacted
             else:
                 results['failed'] += 1
                 results['errors'].append({
