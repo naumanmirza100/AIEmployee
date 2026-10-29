@@ -313,13 +313,13 @@ const Campaigns = ({ onRefresh }) => {
                       {campaign.target_leads != null && (
                         <span className="inline-flex items-center gap-1.5" title="Target leads">
                           <Users className="h-3.5 w-3.5 text-white/30" />
-                          <span className="text-white/80 font-medium">{campaign.target_leads}</span> leads
+                          Target <span className="text-white/80 font-medium">{campaign.target_leads}</span> leads
                         </span>
                       )}
                       {campaign.target_conversions != null && (
                         <span className="inline-flex items-center gap-1.5" title="Target conversions">
                           <Target className="h-3.5 w-3.5 text-white/30" />
-                          <span className="text-white/80 font-medium">{campaign.target_conversions}</span> conversions
+                          Target <span className="text-white/80 font-medium">{campaign.target_conversions}</span> conversions
                         </span>
                       )}
                       {campaign.type && (
