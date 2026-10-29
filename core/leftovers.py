@@ -201,9 +201,10 @@ def _marketing(login, company, now):
     # Nothing is sent for a lapsed agent, but a campaign left active starts
     # again by itself the day the company comes back. Campaigns belong to a
     # user: the one this login acts as (see marketing's own lookup).
-    from django.contrib.auth import get_user_model
     from marketing_agent.models import Campaign
-    owner = get_user_model().objects.filter(email=login.email).first() if login.email else None
+    # The user record this login is linked to: found by email it could be another company's login's, or none
+    # (CO-232). A login with no link has made no campaigns.
+    owner = login.login_user if getattr(login, 'login_user_id', None) else None
     if owner is None:
         return
     for campaign in Campaign.objects.filter(owner=owner, status='active').order_by('name'):

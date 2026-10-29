@@ -312,13 +312,14 @@ const CampaignDetail = () => {
   // Warn immediately on opening a campaign if the company has no sender email
   // accounts at all — don't wait for the user to hit Launch and discover it there.
   useEffect(() => {
-    marketingAgentService.listEmailAccounts().then((res) => {
+    // The campaign's maker's mailboxes: it sends from one of those, also when an admin opened a colleague's campaign.
+    marketingAgentService.listEmailAccounts({ campaign_id: id }).then((res) => {
       if (res?.status === 'success' && Array.isArray(res.data)) {
         setEmailAccounts(res.data);
         if (res.data.length === 0) setNoEmailAccountDialogOpen(true);
       }
     }).catch(() => {});
-  }, []);
+  }, [id]);
 
   // Auto-refresh Analytics & dashboard every 30 seconds (silent refresh, no loading spinner)
   const POLL_INTERVAL_MS = 30 * 1000;
@@ -724,6 +725,12 @@ const CampaignDetail = () => {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{campaign.name}</h1>
             <p className="text-sm text-muted-foreground">Created {formatDate(campaign.created_at)}</p>
+            {campaign.is_own === false && (
+              <p data-testid="MKT-colleague-campaign-note" className="text-xs text-amber-300/90 mt-1">
+                {campaign.made_by || 'A colleague'}'s campaign. You can manage it because you run the company; it
+                sends from their mailbox, and only they can delete it.
+              </p>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -801,12 +808,14 @@ const CampaignDetail = () => {
               Edit
             </Button>
           </HoverTip>
+          {campaign.is_own !== false && (
           <HoverTip tip="Delete this campaign permanently">
             <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)} disabled={!!actionLoading}>
               <Trash2 className="mr-2 h-4 w-4" />
               Delete
             </Button>
           </HoverTip>
+          )}
         </div>
       </div>
 
@@ -1031,7 +1040,7 @@ const CampaignDetail = () => {
                   <div className="rounded-lg border p-4 text-center">
                     <MessageSquare className="h-6 w-6 mx-auto mb-1 text-muted-foreground" />
                     <div className="text-2xl font-bold">{emailStats.total_replied ?? 0}</div>
-                    <div className="text-xs text-muted-foreground">Reply rate: {analytics.reply_rate ?? 0}%</div>
+                    <div className="text-xs text-muted-foreground">Replied · {analytics.reply_rate ?? 0}% of leads emailed</div>
                   </div>
                   <div className="rounded-lg border p-4 text-center">
                     <TrendingUp className="h-6 w-6 mx-auto mb-1 text-muted-foreground" />
@@ -1059,7 +1068,7 @@ const CampaignDetail = () => {
                     { key: 'unsubscribe', label: 'Unsubscribe', color: '#6b7280' },
                     { key: 'not_analyzed', label: 'Not Analyzed', color: '#9ca3af' },
                   ];
-                  const totalReplies = emailStats.total_replied ?? 0;
+                  const totalReplies = emailStats.reply_messages ?? emailStats.total_replied ?? 0;  // messages, as the bars count
                   const shown = REPLY_TYPES
                     .map(t => ({ ...t, count: emailStats.reply_breakdown[t.key] ?? 0 }))
                     .filter(t => t.count > 0)
@@ -1151,7 +1160,7 @@ const CampaignDetail = () => {
                             {(analytics.leads_progress ?? 0).toFixed(1)}% Complete
                             {(emailStats.total_replied ?? 0) > 0 && (
                               <span className="ml-4 pl-4 border-l border-border">
-                                <span className="text-amber-800 dark:text-amber-200">Total Replies: <strong>{emailStats.total_replied ?? 0}</strong></span>
+                                <span className="text-amber-800 dark:text-amber-200">Total Replies: <strong>{emailStats.reply_messages ?? emailStats.total_replied ?? 0}</strong></span>
                                 <span className="ml-3 text-emerald-600">Positive/Neutral: <strong>{emailStats.positive_replies ?? 0}</strong></span>
                                 <span className="ml-3 text-red-600">Negative: <strong>{emailStats.negative_replies ?? 0}</strong></span>
                               </span>

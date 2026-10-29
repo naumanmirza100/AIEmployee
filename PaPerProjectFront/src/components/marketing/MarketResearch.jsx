@@ -128,163 +128,6 @@ function markdownToHtml(markdown) {
   return out.join('\n');
 }
 
-/** Normalize topic for comparison: trim, lower, remove trailing punctuation, collapse spaces, remove zero-width chars */
-function normalizeTopic(topic) {
-  if (!topic || typeof topic !== 'string') return '';
-  return topic
-    .replace(/\u200B|\u200C|\u200D|\uFEFF/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-    .replace(/[?!.,;:]+\s*$/, '');
-}
-
-/** Fix common typos in normalized text so intent detection still works (used only for matching, not sent to API) */
-function fixCommonTyposForDetection(text) {
-  if (!text || typeof text !== 'string') return '';
-  let t = text;
-  const fixes = [
-    [/\bwaht\b/g, 'what'], [/\bwhta\b/g, 'what'], [/\bwnat\b/g, 'what'], [/\bwat\b/g, 'what'],
-    [/\bthigns\b/g, 'things'], [/\bthigs\b/g, 'things'], [/\btings\b/g, 'things'],
-    [/\bknwo\b/g, 'know'], [/\bkonw\b/g, 'know'], [/\bkno\b/g, 'know'],
-    [/\babuot\b/g, 'about'], [/\babotu\b/g, 'about'], [/\bboaut\b/g, 'about'],
-    [/\btaht\b/g, 'that'], [/\btehm\b/g, 'them'],
-    [/\bhelo\b/g, 'hello'], [/\bhelloo\b/g, 'hello'],
-    [/\bques\b/g, 'question'], [/\bqustion\b/g, 'question'], [/\bquetsion\b/g, 'question'], [/\bqueston\b/g, 'question'],
-    [/\baswer\b/g, 'answer'], [/\banwer\b/g, 'answer'], [/\banser\b/g, 'answer'], [/\basnwer\b/g, 'answer'],
-  ];
-  fixes.forEach(([pattern, replacement]) => { t = t.replace(pattern, replacement); });
-  return t;
-}
-
-/** Normalized topic with typo fixes – use only for intent detection (greeting/meta/dismissive/etc.) */
-function topicForDetection(topic) {
-  return fixCommonTyposForDetection(normalizeTopic(topic));
-}
-
-/** True if topic is greeting/small talk – do not call research API */
-function isGreetingOrSmallTalk(topic) {
-  const t = topicForDetection(topic);
-  if (!t) return true;
-  if (t.length > 40) return false;
-  const smallTalk = new Set([
-    'hi', 'hii', 'hiii', 'hello', 'helloo', 'hey', 'heyy', 'heyyy', 'helo', 'heloo',
-    'hi there', 'hello there', 'hey there', 'good morning', 'good afternoon', 'good evening', 'howdy',
-    'yo', 'sup', "what's up", 'whats up', 'wassup', 'greetings', 'nm', 'nvm', 'nothing', 'idk', 'lol',
-    'how are you', 'how are u', 'how r u', 'how r you', 'howre you', "how's it going", 'hows it going',
-    'how are you doing', 'how u doing', "what's going on", 'how do you do', 'how is it going',
-    'thanks', 'thank you', 'thx', 'ok', 'okay', 'oky', 'okey', 'okie', 'k', 'kk', 'bye', 'goodbye', 'good by', 'cya',
-    'good', 'great', 'nice', 'cool', 'alright', 'fine', 'good to know', 'got it', 'understood',
-    'perfect', 'sure', 'yeah', 'yep', 'yup', 'nope', 'no', 'yes', 'what', 'why', 'help', 'please',
-    'ok good', 'okay good', 'oky good', 'ok god', 'oky god', 'okay god',
-    'okya', 'okya good', 'okya god', 'okie good', 'gud', 'gud good',
-    'olly', 'oli',
-    'lets start', "let's start", 'let us start', 'start', 'ready', 'im ready', "i'm ready", 'we can start', 'can we start',
-  ]);
-  if (smallTalk.has(t)) return true;
-  if (t.length <= 30 && (t.startsWith('how are') || t.startsWith("how's it") || t.startsWith('hows it') || t.startsWith('how do you do'))) return true;
-  if (t.length <= 25 && (t.startsWith('lets start') || t.startsWith("let's start") || t.startsWith('can we start') || t.startsWith('we can start'))) return true;
-  if (t.length <= 14 && /^ok[a-z]*\s*(good|god|gud)?$/.test(t)) return true;
-  return false;
-}
-
-/** True if topic is a definition/general-knowledge question (full form of X, what is X) – not research */
-function isDefinitionOrGeneralQuestion(topic) {
-  const t = topicForDetection(topic);
-  if (!t || t.length > 80) return false;
-  const definitionPhrases = [
-    'full form of', 'full form', 'what is the full form', 'fullform of',
-    'what does ', 'what is ', 'meaning of', 'what do you mean by',
-    'define ', 'definition of', 'abbreviation of', 'stand for',
-  ];
-  return definitionPhrases.some((p) => t.includes(p));
-}
-
-/** True if topic is a meta question (what can I ask, how can you help) – do not run full research */
-function isMetaQuestion(topic) {
-  const t = topicForDetection(topic);
-  if (!t || t.length > 80) return false;
-  const metaPhrases = [
-    'what question', 'what questions', 'what can i ask', 'what i can ask', 'what can you answer',
-    'what can u answer', 'what question u can answer', 'what questions can u answer',
-    'how can you help', 'how can i use', 'what do you do', 'what do you know',
-    'what can you tell', 'what can you do', 'how does this work', 'what should i ask',
-    'give me examples', 'example questions', 'example topics', 'what to ask',
-    'help me', 'what research', 'what can you research', 'what topics',
-    'what can u ask', 'what can i ask you', 'what can i ask u',
-    'what are the things', 'things you know', 'things u know', 'what do u know', 'what u know',
-    'what do you know about', 'what do u know about',
-  ];
-  return metaPhrases.some((p) => t.includes(p));
-}
-
-/** True if topic is dismissive/off-topic (e.g. "ok u dont know about it") – do not run research */
-function isDismissiveOrOffTopic(topic) {
-  const t = topicForDetection(topic);
-  if (!t || t.length > 60) return false;
-  const offTopicPhrases = [
-    'u dont know', 'you dont know', "don't know about", 'dont know about',
-    'you don\'t know', 'u don\'t know', 'okay u dont know', 'ok u dont know',
-    'k u dont know', 'okay you dont know', 'ok you dont know',
-    'dont know bout', "don't know bout", 'u dont know bout', 'you dont know bout',
-  ];
-  return offTopicPhrases.some((p) => t.includes(p));
-}
-
-/** Short response for meta questions (no API call) */
-const META_RESPONSE = {
-  success: true,
-  research_id: null,
-  insights: 'I can help you research:\n\n**Market Trends** - Emerging patterns in your industry\n**Competitor Analysis** - Study competitors\' strategies\n**Customer Behavior** - Understand your audience\n**Opportunities** - Identify growth areas\n**Risks & Threats** - Analyze potential challenges\n\nJust enter a specific topic and choose a research type above!',
-  opportunities: [],
-  risks: [],
-  recommendations: [],
-};
-
-/** True if topic is about the user’s own campaigns/company data – direct to Q&A agent, no research */
-function isCampaignOrCompanyQuestion(topic) {
-  const t = topicForDetection(topic);
-  if (!t || t.length > 120) return false;
-  const campaignCompanyPhrases = [
-    'how many campaign', 'how many campaigns', 'campaigns do you have', 'campaign do you have',
-    'do you have campaign', 'do you have any campaign', 'any info about campaign', 'any info on campaign',
-    'list my campaign', 'list campaign', 'my campaign', 'my campaigns', 'our campaign', 'our campaigns',
-    'company info', 'company data', 'my company', 'our company', 'how many campaign do u',
-    'campaigns do u have', 'campaign info', 'campaign data', 'details about campaign',
-  ];
-  return campaignCompanyPhrases.some((p) => t.includes(p));
-}
-
-/** Short response directing user to Q&A for campaign/company questions */
-const CAMPAIGN_QA_RESPONSE = {
-  success: true,
-  research_id: null,
-  insights: 'For details about **your campaigns**, **company data**, or **marketing analytics**, please use the **Q&A** tab. I specialize in market and competitive research (trends, competitors, opportunities).\n\nTry asking me about:\n- Market trends in your industry\n- Competitor strategies\n- Customer behavior patterns\n- Growth opportunities\n- Market risks',
-  opportunities: [],
-  risks: [],
-  recommendations: [],
-};
-
-/** Short response for definition/general questions – this agent does research only */
-const NOT_RESEARCH_RESPONSE = {
-  success: true,
-  research_id: null,
-  insights: 'I focus on **market and competitive research** only (trends, competitors, opportunities, risks).\n\nTry rephrasing as a research topic:\n- "Market trends for [industry]" \n- "Competitor analysis for [company]" \n- "Customer behavior in [sector]" \n- "Opportunities in [market]"',
-  opportunities: [],
-  risks: [],
-  recommendations: [],
-};
-
-/** Short response for dismissive/off-topic input – prompt for a real research topic */
-const OFF_TOPIC_RESPONSE = {
-  success: true,
-  research_id: null,
-  insights: 'That doesn\'t look like a research topic. Ask me about:\n\n- **Specific markets** (e.g., "cloud adoption in UK")\n- **Competitors** (e.g., "competitor analysis for Amazon")\n- **Trends** (e.g., "AI marketing trends 2024")\n- **Customer behavior** (e.g., "buying patterns in e-commerce")',
-  opportunities: [],
-  risks: [],
-  recommendations: [],
-};
-
 /** Normalize chat to { id, messages: [{ role, topic?, researchType?, context?, response? }], timestamp } */
 function normalizeChat(c) {
   if (!c.messages || !Array.isArray(c.messages)) {
@@ -496,45 +339,8 @@ const MarketResearch = () => {
       context: { competitors, industry, geographicRegion } 
     };
 
-    // Check for special cases
-    if (isGreetingOrSmallTalk(trimmedTopic)) {
-      const friendlyResponse = {
-        success: true,
-        research_id: null,
-        insights: "👋 Hello! I'm your Market Research Assistant. I can help you analyze:\n\n• **Market Trends** - Emerging patterns in your industry\n• **Competitors** - Study competitors' strategies\n• **Customer Behavior** - Understand your audience\n• **Opportunities** - Identify growth areas\n• **Risks** - Analyze potential challenges\n\nWhat would you like to research today?",
-        opportunities: [],
-        risks: [],
-        recommendations: [],
-      };
-      const assistantMsg = { role: 'assistant', response: friendlyResponse };
-      handleResponse(userMsg, assistantMsg);
-      return;
-    }
-
-    if (isMetaQuestion(trimmedTopic)) {
-      const assistantMsg = { role: 'assistant', response: META_RESPONSE };
-      handleResponse(userMsg, assistantMsg);
-      return;
-    }
-
-    if (isCampaignOrCompanyQuestion(trimmedTopic)) {
-      const assistantMsg = { role: 'assistant', response: CAMPAIGN_QA_RESPONSE };
-      handleResponse(userMsg, assistantMsg);
-      return;
-    }
-
-    if (isDefinitionOrGeneralQuestion(trimmedTopic)) {
-      const assistantMsg = { role: 'assistant', response: NOT_RESEARCH_RESPONSE };
-      handleResponse(userMsg, assistantMsg);
-      return;
-    }
-
-    if (isDismissiveOrOffTopic(trimmedTopic)) {
-      const assistantMsg = { role: 'assistant', response: OFF_TOPIC_RESPONSE };
-      handleResponse(userMsg, assistantMsg);
-      return;
-    }
-
+    // Every message goes to the server, whose AI reading answers greetings, questions about this tool and
+    // off-topic messages itself. Keyword checks here turned ordinary research questions away (CO-139).
     // Perform actual research
     try {
       cancelledRef.current = false;
@@ -1126,6 +932,36 @@ const MarketResearch = () => {
                                       ))}
                                     </ul>
                                   </motion.div>
+                                )}
+
+                                {/* Where the answer came from: the pages the web search read, or a note that it
+                                    could not search this time. Answers saved before 29 Oct 2026 carry neither. */}
+                                {msg.response?.checked_on_web === true && (
+                                  <div data-testid="MKT-research-sources" className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                    <h5 className="flex items-center gap-2 font-semibold text-sm mb-1">
+                                      <Globe className="h-4 w-4 text-sky-400" />
+                                      Sources
+                                    </h5>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      Searched on the web when you asked. Check a figure on its page before you rely on it.
+                                    </p>
+                                    <ul className="space-y-1">
+                                      {(msg.response.source_urls || []).filter((s) => /^https?:\/\//.test(s?.url || '')).map((s, j) => (
+                                        <li key={j} className="text-sm">
+                                          <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">
+                                            {s.title || s.site}
+                                          </a>
+                                          {s.site && <span className="text-xs text-muted-foreground"> · {s.site}</span>}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {msg.response?.checked_on_web === false && (
+                                  <p data-testid="MKT-research-not-searched" className="text-xs text-muted-foreground">
+                                    This answer is from the AI's own knowledge: it could not search the web this time, so
+                                    figures may be out of date. Ask again for an answer with sources.
+                                  </p>
                                 )}
                               </div>
                             </div>

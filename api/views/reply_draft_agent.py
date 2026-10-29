@@ -2023,9 +2023,8 @@ def delete_reply_account(request):
       removes it from the reply-draft picker.
     - If the row also has ``is_marketing_account=True``, we keep the
       row in place. Marketing list still surfaces it, SMTP creds for
-      campaign sending stay intact, IMAP sync turns off (reply-draft
-      was the IMAP consumer; marketing campaigns mostly don't need it,
-      and a fresh marketing edit can re-enable it explicitly).
+      campaign sending stay intact, and IMAP sync stays on: Marketing
+      reads the same mailbox for replies to its campaigns (CO-155).
     - Otherwise the row is fully deleted.
     """
     gate = _enforce_module(request.user)
@@ -2050,7 +2049,10 @@ def delete_reply_account(request):
         # request returns in milliseconds even on large mailboxes.
         keep_for_marketing = bool(account.is_marketing_account)
         account.is_reply_agent_account = False
-        account.enable_imap_sync = False
+        # Marketing still reads this mailbox for replies to its campaigns: switching the reading off for both
+        # stopped it noticing replies without a word (CO-155).
+        if not keep_for_marketing:
+            account.enable_imap_sync = False
         account.save(update_fields=[
             'is_reply_agent_account', 'enable_imap_sync', 'updated_at',
         ])
@@ -2071,7 +2073,8 @@ def delete_reply_account(request):
                     'message': (
                         f'{account_email} disconnected from Reply Draft Agent. '
                         'All inbox mail, drafts, and attachments are being deleted in the background. '
-                        'The account is still in your Marketing accounts list.'
+                        'The account is still in your Marketing accounts list, and Marketing still reads it '
+                        'for replies to your campaigns.'
                     ),
                 },
             })

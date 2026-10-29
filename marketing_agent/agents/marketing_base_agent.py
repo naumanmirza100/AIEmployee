@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 # gpt-4o-mini) needs longer than a question; both stay under the 60 s the proxy in front of the API allows.
 QA_TIMEOUT = 30.0
 WRITING_TIMEOUT = 50.0
+# A web search reads pages before it answers; it must still leave room under the proxy's 60 s.
+SEARCH_TIMEOUT = 40.0
+IMAGE_TIMEOUT = 50.0        # one picture takes about 10 s
+
+
+class ImageNotMade(Exception):
+    """A picture could not be made; the message says why, for the screen."""
 
 
 class MarketingBaseAgent:
@@ -422,7 +429,111 @@ class MarketingBaseAgent:
             from core.api_key_service import raise_if_auth_error
             raise_if_auth_error(last_error, key_ctx)
             raise last_error
-    
+
+    def _call_with_web_search(self, prompt, system_prompt=None, max_tokens=1500):
+        """Answer with OpenAI's web_search tool (the user's decision of 29 Oct 2026): on the company's OpenAI key, or
+        on the platform's when the company runs on free tokens through Groq (marketing_agent/services/web_search.py
+        says why not Groq's own search).
+
+        Returns (text, sources), sources being [{'title', 'url', 'site'}] of the pages it cited, or None when there is
+        no OpenAI key to search with or the search failed: the caller then answers without it and says so. A key or
+        quota problem is raised as for any other call."""
+        from marketing_agent.services import web_search
+
+        resolved_client, key_ctx = self._openai_for_tools()
+        if resolved_client is None:
+            return None
+        started = time.monotonic()
+        model = getattr(settings, 'OPENAI_MODEL', 'gpt-4o-mini')
+        try:
+            response = resolved_client.responses.create(
+                model=model, instructions=system_prompt or None, input=prompt, tools=[{'type': 'web_search'}],
+                tool_choice='required',     # left to choose, it sometimes answered from memory with no source
+                include=web_search.INCLUDE, max_output_tokens=max_tokens, timeout=SEARCH_TIMEOUT)
+            text, sources = web_search.answer_and_sources(response)
+            usage = getattr(response, 'usage', None)
+            tokens = (getattr(usage, 'input_tokens', 0) or 0, getattr(usage, 'output_tokens', 0) or 0)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError, raise_if_auth_error
+            if isinstance(e, KeyServiceError):
+                raise
+            self._log_call(model, started, False)
+            raise_if_auth_error(e, key_ctx)
+            logger.warning("%s web search failed, answering without it: %s", self.agent_name, str(e)[:300])
+            return None
+
+        total = sum(tokens)
+        self.last_llm_used = True
+        self.last_token_usage = {'provider': key_ctx.provider, 'model': model, 'prompt_tokens': tokens[0],
+                                 'completion_tokens': tokens[1], 'total_tokens': total, 'estimated': False}
+        if total:
+            try:
+                from core.api_key_service import record_usage
+                record_usage(key_ctx, total)
+            except Exception as e:
+                logger.warning("marketing quota decrement failed: %s", e)
+        self._log_call(model, started, True, self.last_token_usage)
+        if not (text or '').strip():
+            return None
+        return text, sources
+
+    def _openai_for_tools(self):
+        """(OpenAI client, key context) for the tools only OpenAI has here, web search and images: the company's
+        OpenAI key, or the platform's when the company runs on free tokens through Groq. (None, None) when it has
+        its own Groq key or there is no OpenAI key."""
+        resolved_client, key_ctx = self._resolve_company_client()
+        if resolved_client is None or key_ctx.provider == 'openai':
+            return resolved_client, key_ctx
+        from core.api_key_service import platform_context_for
+        key_ctx = platform_context_for(key_ctx, 'openai')
+        if key_ctx is None:
+            return None, None
+        return OpenAI(api_key=key_ctx.api_key, timeout=30.0, max_retries=0), key_ctx
+
+    def _make_image(self, prompt, size='1024x1024'):
+        """One picture from OpenAI's image model as JPEG bytes (the user's decision of 29 Oct 2026), its tokens
+        counted like any other call. Raises ImageNotMade with a message for the screen."""
+        import base64
+
+        client, key_ctx = self._openai_for_tools()
+        if client is None:
+            raise ImageNotMade('Pictures are made with OpenAI. Add an OpenAI key on the API Keys page to make them.')
+        model = getattr(settings, 'OPENAI_IMAGE_MODEL', 'gpt-image-1-mini')
+        started = time.monotonic()
+        try:
+            response = client.images.generate(model=model, prompt=prompt, size=size, n=1, quality='low',
+                                              output_format='jpeg', output_compression=85, timeout=IMAGE_TIMEOUT)
+            picture = base64.b64decode(response.data[0].b64_json)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError, raise_if_auth_error
+            if isinstance(e, KeyServiceError):
+                raise
+            self._log_call(model, started, False)
+            raise_if_auth_error(e, key_ctx)
+            logger.warning("%s image failed: %s", self.agent_name, str(e)[:300])
+            said = str(e).lower()
+            if 'safety' in said or 'moderation' in said or 'content_policy' in said:
+                raise ImageNotMade('OpenAI would not draw that. Describe the picture differently and try again.')
+            if 'timeout' in said or 'timed out' in said:
+                raise ImageNotMade('The picture took too long. Please try again.')
+            raise ImageNotMade('The picture could not be made. Please try again in a moment.')
+
+        usage = getattr(response, 'usage', None)
+        total = getattr(usage, 'total_tokens', 0) or 0
+        self.last_llm_used = True
+        self.last_token_usage = {'provider': 'openai', 'model': model,
+                                 'prompt_tokens': getattr(usage, 'input_tokens', 0) or 0,
+                                 'completion_tokens': getattr(usage, 'output_tokens', 0) or 0,
+                                 'total_tokens': total, 'estimated': False}
+        if total:
+            try:
+                from core.api_key_service import record_usage
+                record_usage(key_ctx, total)
+            except Exception as e:
+                logger.warning("marketing quota decrement failed: %s", e)
+        self._log_call(model, started, True, self.last_token_usage)
+        return picture
+
     def _call_llm_for_writing(self, prompt, system_prompt=None, temperature=0.7, max_tokens=4000, timeout=WRITING_TIMEOUT):
         """
         Call LLM optimized for document writing tasks.

@@ -53,11 +53,11 @@ class MarketingBellTests(BellTestCase):
         self.alert('Open rate is up 12%', action_required=False)
         self.assertEqual(self.bell(), [])
 
-    def test_the_same_alert_raised_again_reaches_the_bell_once_a_day(self):
+    def test_the_same_alert_is_raised_once_a_week_even_after_it_is_read(self):
         first = self.alert('Mailbox stopped sending')
-        MarketingNotification.objects.filter(pk=first.pk).update(is_read=True)   # read, so Marketing raises it again
-        again = self.alert('Mailbox stopped sending')
-        self.assertIsNotNone(again)
+        MarketingNotification.objects.filter(pk=first.pk).update(is_read=True)
+        # Read is not "raise it again": it came back within half an hour, every day (CO-133).
+        self.assertIsNone(self.alert('Mailbox stopped sending'))
         self.assertEqual(len(self.bell()), 1)
 
 

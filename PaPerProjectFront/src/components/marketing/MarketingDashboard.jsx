@@ -177,6 +177,7 @@ const MarketingDashboard = () => {
   const [campaignsFiltering, setCampaignsFiltering] = useState(false); // subtle: search / filter refetch
   const [emailAccountsLoading, setEmailAccountsLoading] = useState(false);
   const [emailAccounts, setEmailAccounts] = useState([]);
+  const [emailsSentTotal, setEmailsSentTotal] = useState(null);   // from the server: every email once (CO-194)
   const [stats, setStats] = useState({
     totalCampaigns: 0,
     activeCampaigns: 0,
@@ -309,7 +310,8 @@ const MarketingDashboard = () => {
   useEffect(() => {
     if (activeTab === 'dashboard') {
       fetchCampaigns(campaignsPage);
-      getSavedGraphPrompts()
+      // Every saved graph, not the first page of ten: a pinned one further down was never shown (CO-236).
+      getSavedGraphPrompts({ page_size: 100 })
         .then((res) => {
           if (res?.status === 'success' && Array.isArray(res.data)) {
             setDashboardGraphPrompts(res.data.filter(isGraphPromptOnDashboard));
@@ -423,7 +425,7 @@ const MarketingDashboard = () => {
       toast({ title: 'Error', description: `${failCount} campaign${failCount > 1 ? 's' : ''} failed to delete`, variant: 'destructive' });
     }
     fetchCampaigns(campaignsPage);
-    fetchDashboardData();
+    fetchStats();   // fetchDashboardData did not exist: the totals stayed as they were (CO-237)
   };
 
   const fetchEmailAccounts = async () => {
@@ -432,6 +434,7 @@ const MarketingDashboard = () => {
       const response = await marketingAgentService.listEmailAccounts();
       const list = response?.status === 'success' && response?.data ? response.data : [];
       setEmailAccounts(list);
+      setEmailsSentTotal(typeof response?.total_sent === 'number' ? response.total_sent : null);
       return list;
     } catch {
       setEmailAccounts([]);
@@ -711,7 +714,7 @@ const MarketingDashboard = () => {
     }
   };
 
-  const totalEmailsSent = emailAccounts.reduce((sum, account) => sum + (Number(account?.sent_count) || 0), 0);
+  const totalEmailsSent = emailsSentTotal ?? emailAccounts.reduce((sum, account) => sum + (Number(account?.sent_count) || 0), 0);
 
   return (
     <div

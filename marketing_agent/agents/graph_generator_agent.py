@@ -186,6 +186,8 @@ class GraphGeneratorAgent(MarketingBaseAgent):
 
         return None
 
+    METRICS = ('status', 'emails_sent', 'open_rate', 'clicks', 'bounces', 'replies', 'leads', 'conversions', 'goals')
+
     def _infer_metric_intent(self, prompt: str) -> str:
         """Infer which metric the user asked to visualize."""
         p = self._normalize_prompt_text(prompt)
@@ -267,8 +269,9 @@ class GraphGeneratorAgent(MarketingBaseAgent):
         email_stats = {}
         if campaign_ids:
             sent_statuses = ['sent', 'delivered', 'opened', 'clicked']
+            # The campaign's own emails (from a template), as on the campaign page (CO-136).
             for row in (
-                EmailSendHistory.objects.filter(campaign_id__in=campaign_ids)
+                EmailSendHistory.objects.filter(campaign_id__in=campaign_ids, email_template__isnull=False)
                 .values('campaign_id')
                 .annotate(
                     total_sent=Count('id', filter=Q(status__in=sent_statuses)),
@@ -287,20 +290,14 @@ class GraphGeneratorAgent(MarketingBaseAgent):
                 Reply.objects.filter(campaign_id__in=campaign_ids)
                 .values('campaign_id')
                 .annotate(
-                    total_replied=Count('id'),
+                    # People, not messages; a conversion is a reply with interest (CO-195).
+                    total_replied=Count('lead_id', distinct=True),
                     positive_replies=Count(
-                        'id',
-                        filter=Q(
-                            interest_level__in=[
-                                'positive',
-                                'neutral',
-                                'requested_info',
-                                'objection',
-                            ]
-                        ),
+                        'lead_id', distinct=True,
+                        filter=Q(interest_level__in=['positive', 'requested_info']),
                     ),
                     negative_replies=Count(
-                        'id',
+                        'lead_id', distinct=True,
                         filter=Q(
                             interest_level__in=['negative', 'unsubscribe']
                         ),
@@ -437,6 +434,11 @@ class GraphGeneratorAgent(MarketingBaseAgent):
                 by_campaign_open_rate[c['name']] = c['open_rate']
         by_campaign_leads = {c['name']: c['leads_count'] for c in campaigns_data}
         by_campaign_replies = {c['name']: c['emails_replied'] for c in campaigns_data}
+        by_campaign_clicks = {c['name']: c['emails_clicked'] for c in campaigns_data}
+        by_campaign_bounces = {c['name']: c['emails_bounced'] for c in campaigns_data}
+        by_campaign_conversions = {c['name']: c['conversions'] for c in campaigns_data}
+        by_campaign_goal_progress = {c['name']: c['conversion_progress'] for c in campaigns_data
+                                     if c.get('conversion_progress') is not None}
 
         return {
             'campaigns': campaigns_data,
@@ -451,10 +453,14 @@ class GraphGeneratorAgent(MarketingBaseAgent):
             'by_campaign_open_rate': by_campaign_open_rate,
             'by_campaign_leads': by_campaign_leads,
             'by_campaign_replies': by_campaign_replies,
+            'by_campaign_clicks': by_campaign_clicks,
+            'by_campaign_bounces': by_campaign_bounces,
+            'by_campaign_conversions': by_campaign_conversions,
+            'by_campaign_goal_progress': by_campaign_goal_progress,
         }
 
     def _build_single_campaign_chart(
-        self, campaign: Dict, prompt: str, chart_type: str
+        self, campaign: Dict, prompt: str, chart_type: str, metric: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Build a day-by-day timeline chart for a single campaign.
 
@@ -464,7 +470,8 @@ class GraphGeneratorAgent(MarketingBaseAgent):
         """
         from django.db.models.functions import TruncDate
 
-        metric_intent = self._infer_metric_intent(prompt)
+        # The metric the AI read from the request; the keyword guess only when it named none.
+        metric_intent = metric if metric in self.METRICS else self._infer_metric_intent(prompt)
         campaign_id = campaign.get('id')
         name = campaign.get('name', 'Campaign')
         start_date = campaign.get('start_date')
@@ -958,7 +965,8 @@ SPECIFIC CAMPAIGN DATA (user is asking about THIS campaign only):
 The user wants to see data for "{specific_campaign['name']}" ONLY. Do NOT include other campaigns.
 For line/area charts, if the campaign has timeline metrics, use them as data points with dates as labels. If no timeline metrics, show the campaign's key stats (emails sent, opened, replied, leads) as data points.
 Include start_date and end_date in each data point if available.
-Format: {{"chart_type":"bar"|"pie"|"line"|"area","title":"...","data":[{{"label":"x","value":y,"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}],"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
+Format: {{"chart_type":"bar"|"pie"|"line"|"area","metric":"emails_sent"|"open_rate"|"clicks"|"bounces"|"replies"|"leads"|"conversions"|"goals","title":"...","data":[{{"label":"x","value":y,"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}],"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
+metric: what the chart shows. If the user names a chart type (line, bar, pie, area), use it.
 Rules: Use actual data values. Only show data for this specific campaign."""
         else:
             data_summary = f"""
@@ -972,7 +980,8 @@ Replies: {json.dumps(marketing_data['by_campaign_replies'], separators=(',', ':'
 """
             system_prompt = f"""Generate chart JSON from marketing data. Respond with ONLY valid JSON, no markdown.
 {data_summary}
-Format: {{"chart_type":"bar"|"pie"|"line"|"area","title":"...","data":{{"label":value}} for bar/pie OR [{{"label":"x","value":y,"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}] for line/area,"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
+Format: {{"chart_type":"bar"|"pie"|"line"|"area","metric":"status"|"emails_sent"|"open_rate"|"clicks"|"bounces"|"replies"|"leads"|"conversions"|"goals","title":"...","data":{{"label":value}} for bar/pie OR [{{"label":"x","value":y,"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}] for line/area,"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
+metric: what the chart shows (goals = progress towards each campaign's conversion target). If the user names a chart type (line, bar, pie, area), use it.
 Rules: Use actual data values. Only include non-zero values. Sort bar data by value descending. Choose best chart type for the request. For "top N", take N highest. For line/area charts where data points are campaigns, include start_date and end_date fields from the campaign data in each data point."""
 
         try:
@@ -1003,12 +1012,9 @@ Rules: Use actual data values. Only include non-zero values. Sort bar data by va
 
             chart_config = json.loads(response_text)
 
-            # Respect explicit user chart requests like "line chart" even if LLM returns aliases.
-            requested_chart_type = self._get_requested_chart_type(prompt)
-            chart_config['chart_type'] = self._normalize_chart_type(
-                chart_config.get('chart_type'),
-                requested_chart_type=requested_chart_type,
-            )
+            # The AI chose the chart type, told to use one the user names; only its aliases are normalised (a
+            # keyword list overrode it, 29 Oct 2026).
+            chart_config['chart_type'] = self._normalize_chart_type(chart_config.get('chart_type'))
             if 'title' not in chart_config:
                 chart_config['title'] = 'Generated Chart'
             if 'data' not in chart_config:
@@ -1022,7 +1028,7 @@ Rules: Use actual data values. Only include non-zero values. Sort bar data by va
             if specific_campaign:
                 print(f"[Graph] Specific campaign detected: '{specific_campaign.get('name')}' (id={specific_campaign.get('id')})")
                 single_chart = self._build_single_campaign_chart(
-                    specific_campaign, prompt, chart_config['chart_type']
+                    specific_campaign, prompt, chart_config['chart_type'], metric=chart_config.get('metric')
                 )
                 if single_chart:
                     print(f"[Graph] Using single-campaign chart data: {len(single_chart.get('data', []))} points")
@@ -1058,16 +1064,18 @@ Rules: Use actual data values. Only include non-zero values. Sort bar data by va
                     chart_config['insights'] = f'Aggregate stats for {name}.{di}'
             else:
                 # For multi-campaign requests, enforce deterministic data slices
+                # The figures the AI said the chart shows, built from the data; a keyword guess only when it named
+                # none. The title comes with the data: "Conversions by Campaign" sat over status counts (CO-135).
+                ai_metric = chart_config.get('metric')
                 enforced = self._generate_fallback_chart(
                     prompt,
                     marketing_data,
-                    forced_intent=self._infer_metric_intent(prompt),
+                    forced_intent=ai_metric if ai_metric in self.METRICS else self._infer_metric_intent(prompt),
                     forced_chart_type=chart_config['chart_type'],
                 )
                 if enforced and enforced.get('chart'):
                     chart_config['data'] = enforced['chart'].get('data', chart_config['data'])
-                    if not chart_config.get('title'):
-                        chart_config['title'] = enforced['chart'].get('title', 'Generated Chart')
+                    chart_config['title'] = enforced['chart'].get('title') or chart_config.get('title') or 'Generated Chart'
 
             if 'colors' not in chart_config:
                 chart_config['colors'] = [
@@ -1361,6 +1369,31 @@ Rules: Use actual data values. Only include non-zero values. Sort bar data by va
                     'color': '#8b5cf6',
                 },
                 'insights': 'Email replies per campaign.',
+            }
+
+        # Clicks, bounces, conversions and progress to target: these fell through to "campaigns by status" under
+        # whatever title was asked for (CO-135).
+        series = {
+            'clicks': ('by_campaign_clicks', 'Clicks by Campaign', '#0ea5e9', 'Tracked link clicks per campaign.'),
+            'bounces': ('by_campaign_bounces', 'Bounced Emails by Campaign', '#ef4444', 'Emails that bounced per campaign.'),
+            'conversions': ('by_campaign_conversions', 'Conversions by Campaign', '#10b981',
+                            'Leads who replied with interest or asked for more, per campaign.'),
+            'goals': ('by_campaign_goal_progress', 'Progress to Conversion Target by Campaign (%)', '#8b5cf6',
+                      'Conversions as a share of each campaign\'s target (campaigns with a target only).'),
+        }
+        if metric_intent in series:
+            key, title, color, note = series[metric_intent]
+            values = data.get(key) or {}
+            sorted_data = dict(sorted(((k, v) for k, v in values.items() if v), key=lambda x: x[1], reverse=True)[:10])
+            if not sorted_data:
+                sorted_data = {'No Data': 0}
+            chart_type = requested_chart_type if requested_chart_type in {'line', 'area', 'bar', 'pie'} else 'bar'
+            chart_data = (self._build_line_area_data(sorted_data, campaigns)
+                          if chart_type in {'line', 'area'} else sorted_data)
+            return {
+                'chart': {'type': chart_type, 'title': title, 'data': chart_data,
+                          'colors': [color, '#3b82f6', '#10b981'], 'color': color},
+                'insights': note,
             }
 
         # Default: campaigns by status

@@ -45,17 +45,18 @@ import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import HoverTip from '@/components/common/HoverTip';
 
-/** Backend may send /marketing/campaigns/{id}/ (old) or /marketing/dashboard/campaign/{id} (new). Normalize to in-app path. */
+/** Backend may send /marketing/campaigns/{id}/ (old) or /marketing/dashboard/campaign/{id}/... (new). Normalize to an
+ *  in-app page that exists: the campaign, its sequences or its sending status. Alerts saved with /leads/upload/,
+ *  /edit/ or /email-templates/ opened a blank page (CO-134). */
+const CAMPAIGN_PAGES = { sequences: 'sequences', 'email-templates': 'sequences', 'email-status': 'email-status' };
 const normalizeCampaignActionUrl = (actionUrl) => {
   if (!actionUrl || typeof actionUrl !== 'string') return null;
   const u = actionUrl.replace(/\/+$/, '').trim();
-  if (u.startsWith('/marketing/dashboard/campaign/')) return u;
-  const match = u.match(/^\/marketing\/campaigns\/(\d+)(?:\/(.*))?$/);
-  if (!match) return null;
+  const match = u.match(/^\/marketing\/(?:dashboard\/campaign|campaigns)\/(\d+)(?:\/([^/]+))?/);
+  if (!match) return u.startsWith('/marketing') ? u : null;
   const [, id, sub] = match;
   const base = `/marketing/dashboard/campaign/${id}`;
-  if (sub === 'sequences') return `${base}/sequences`;
-  return base;
+  return CAMPAIGN_PAGES[sub] ? `${base}/${CAMPAIGN_PAGES[sub]}` : base;
 };
 
 /**

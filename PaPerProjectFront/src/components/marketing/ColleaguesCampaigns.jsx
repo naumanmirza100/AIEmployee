@@ -4,12 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Pause, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { companyApi } from '@/services/companyAuthService';
 
-// For an owner or admin: the campaigns of everyone else in the company, with a
-// Stop button on the ones that are running. A campaign belongs to the login that
-// made it, so without this nobody could stop the campaign of someone who had
-// left. Shown to nobody else, and not at all when there are none.
+// For an owner or admin: the campaigns of everyone else in the company. Each
+// opens on its own page, where they can see its leads and replies, edit, pause,
+// resume and launch it (the user's decision of 29 Oct 2026); running ones also
+// have a Pause button here. Shown to nobody else, and not at all when there are none.
 
 const STATUS_CLASS = {
   active: 'border-emerald-400/50 text-emerald-300',
@@ -51,8 +52,8 @@ export default function ColleaguesCampaigns() {
           <Users className="h-4 w-4" /> Colleagues' campaigns
         </CardTitle>
         <p className="text-xs text-white/60">
-          Campaigns made by other logins in your company. You see them because you run the company. You can pause
-          one that is running; only the person who made it can open or change it.
+          Campaigns made by other logins in your company. You see them because you run the company: open one to see
+          its leads and replies, change, pause or launch it. It still sends from its maker's mailbox.
         </p>
       </CardHeader>
       <CardContent className="pt-0">
@@ -62,7 +63,8 @@ export default function ColleaguesCampaigns() {
             return (
               <div key={c.id} data-testid="MKT-colleagues-campaign" className="flex items-center justify-between gap-3 py-2.5">
                 <div className="min-w-0">
-                  <p className="text-sm text-white truncate">{c.name}</p>
+                  <Link to={`/marketing/dashboard/campaign/${c.id}`} data-testid="MKT-colleagues-campaign-open"
+                    className="text-sm text-white truncate block hover:underline">{c.name}</Link>
                   <p className="text-xs text-white/50">
                     {c.owner.name}{c.owner.is_active ? '' : ' · login switched off'} · {c.leads} lead{c.leads === 1 ? '' : 's'}
                   </p>

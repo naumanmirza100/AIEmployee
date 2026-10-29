@@ -115,6 +115,19 @@ Ignore typos and casual language. Reply with only one word: greeting, platform_q
                 return token
         return None
 
+    BUSINESS_CHECK_SYSTEM = (
+        "Answer with one word, yes or no. Is this message about a business, a product, a market, customers, "
+        "pricing, competitors or a business decision, in any language and with any typos? Small talk, the weather, "
+        "jokes and general knowledge are no.")
+
+    def _is_business_question(self, text: str) -> bool:
+        try:
+            out = self._call_llm_for_reasoning(f'Message: "{text[:500]}"', self.BUSINESS_CHECK_SYSTEM,
+                                               temperature=0.0, max_tokens=3)
+        except Exception:
+            return False
+        return (out or '').strip().lower().startswith('yes')
+
     def _classify_intent(self, topic: str) -> str:
         """
         Use the LLM to classify user intent so any phrasing/typos are handled.
@@ -150,17 +163,10 @@ Ignore typos and casual language. Reply with only one word: greeting, platform_q
                     # Safety net: rejecting a real question is the worst
                     # outcome here ("i have a project that works as pay before
                     # u use so should i convert it in saas?" was refused as
-                    # off-topic). A substantial message that mentions business
-                    # vocabulary is researched regardless of the verdict.
-                    low = t.lower()
-                    business_words = (
-                        'market', 'product', 'saas', 'pricing', 'price', 'customer',
-                        'business', 'competitor', 'revenue', 'subscription',
-                        'startup', 'company', 'industry', 'demand', 'growth',
-                        'risk', 'strategy', 'launch', 'sell', 'brand', 'model',
-                        'project', 'service', 'users', 'clients',
-                    )
-                    if len(t.split()) >= 6 and any(w in low for w in business_words):
+                    # off-topic). A second, narrower AI reading asks only whether
+                    # it is about a business at all; a business-word list did
+                    # this before (29 Oct 2026: no word lists in front of the AI).
+                    if self._is_business_question(t):
                         self.log_action("Overriding off_topic verdict", {"topic": t[:120]})
                         return 'research'
                     return 'off_topic'
@@ -331,7 +337,7 @@ Reply only with the definition, no preamble."""
             user = User.objects.get(id=user_id)
             market_research = MarketResearch.objects.create(
                 research_type=effective_type,
-                topic=topic,
+                topic=topic[:200],          # the column's limit: a longer question failed after the research (CO-138)
                 findings=research_findings.get('findings', {}),
                 insights=research_findings.get('insights', ''),
                 source_urls=research_findings.get('source_urls', []),
@@ -339,9 +345,10 @@ Reply only with the definition, no preamble."""
             )
             
             research_id = market_research.id
-        except User.DoesNotExist:
+        except Exception as e:
+            # Not saved, but the answer is given: it was lost with a server error after the AI had done the work.
             research_id = None
-            self.log_action("Warning: User not found, research not saved", {"user_id": user_id})
+            self.log_action("Warning: research not saved", {"user_id": user_id, "error": str(e)[:200]})
         
         return {
             'success': True,
@@ -356,7 +363,8 @@ Reply only with the definition, no preamble."""
             'opportunities': research_findings.get('opportunities', []),
             'risks': research_findings.get('risks', []),
             'recommendations': research_findings.get('recommendations', []),
-            'source_urls': research_findings.get('source_urls', [])
+            'source_urls': research_findings.get('source_urls', []),
+            'checked_on_web': research_findings.get('checked_on_web', False),
         }
     
     def _conduct_research(self, research_type: str, topic: str, 
@@ -383,14 +391,28 @@ Reply only with the definition, no preamble."""
         else:
             prompt = self._build_research_prompt(research_type, topic, additional_context)
         
-        # Get AI-generated research
+        # Searched on the web with the company's key, the pages it read kept as sources (the user's decision of
+        # 29 Oct 2026). A key that cannot search, or a search that failed, gets the AI's own answer, marked as such.
+        searched = None
         try:
-            research_response = self._call_llm_for_reasoning(
-                prompt,
-                self.system_prompt,
-                temperature=0.5,
-                max_tokens=350 if brief else 1500
-            )
+            searched = self._call_with_web_search(prompt + self.SEARCH_NOTE, self.system_prompt,
+                                                  max_tokens=350 if brief else 1500)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            self.log_action("Web search failed", {"error": str(e)[:200]})
+
+        try:
+            if searched:
+                research_response = searched[0]
+            else:
+                research_response = self._call_llm_for_reasoning(
+                    prompt,
+                    self.system_prompt,
+                    temperature=0.5,
+                    max_tokens=350 if brief else 1500
+                )
         except Exception as e:
             self.log_action("Error generating research", {"error": str(e)})
             from core.api_key_service import KeyServiceError
@@ -419,9 +441,15 @@ Reply only with the definition, no preamble."""
             )
 
         findings = self._parse_research_response(research_type, research_response, additional_context)
-
+        findings['source_urls'] = searched[1] if searched else []
+        findings['checked_on_web'] = bool(findings['source_urls'])     # searched, and it says where from
         return findings
-    
+
+    SEARCH_NOTE = (
+        "\n\nSearch the web for current facts and figures and base the answer on what the pages say, citing the page "
+        "for each figure. Where the pages give no figure, say so instead of estimating one."
+    )
+
     DEPTH_SYSTEM = (
         "You judge how much depth a market-research question needs. "
         "Reply with exactly one word.\n\n"
@@ -430,6 +458,8 @@ Reply only with the definition, no preamble."""
         "couple of supporting facts, NOT a full report.\n"
         "full  - an open request to analyse, research, or map out a market, "
         "competitor set, or strategy. The user wants a structured report.\n\n"
+        "A question about prices, costs, rates or fees is brief, unless it asks "
+        "for an analysis or report.\n\n"
         "Read through typos.\n\n"
         "Examples:\n"
         "'Is the demand for SaaS products increasing or decreasing?' -> brief\n"
@@ -449,8 +479,7 @@ Reply only with the definition, no preamble."""
         """True when the question deserves a direct answer, not a full report."""
         if not topic or not isinstance(topic, str):
             return False
-        if self._PRICE_QUESTION.search(topic) and not self._REPORT_REQUEST.search(topic):
-            return True
+        # The AI decides, price questions too (its instructions say so): a word list chose first (29 Oct 2026).
         try:
             out = self._call_llm_for_reasoning(
                 'Question: "%s"' % topic.strip()[:300],

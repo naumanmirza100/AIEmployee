@@ -6,6 +6,7 @@ Supports: PDF, PPTX (DOCX removed)
 import io
 import re
 from typing import Optional, List, Tuple
+from xml.sax.saxutils import escape
 from django.http import HttpResponse
 from marketing_agent.models import MarketingDocument
 
@@ -47,10 +48,14 @@ PDF_MARGIN = 0.75 * inch
 
 
 def _bold_markdown(text: str) -> str:
-    """Convert **text** to <b>text</b> (all occurrences) for ReportLab Paragraph."""
+    """The AI's text as ReportLab Paragraph markup: escaped first, then **text** as <b>text</b>.
+
+    It went in as trusted markup (CO-132): an image tag in it made the server fetch that address, a bare <br>
+    failed the download, and "<name@company.com>" was left out without a word. Escaping before the bold tags
+    are added fixes all three, and "R&D" too."""
     if not text:
         return text
-    return re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    return re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', escape(str(text)))
 
 
 def _parse_markdown_table(lines: List[str], start: int) -> Tuple[Optional[List[List[str]]], int]:
@@ -180,6 +185,30 @@ class DocumentGenerator:
     """Generate documents in various formats"""
 
     @staticmethod
+    def _add_images_to_pdf(elements, document, styles):
+        """The pictures made for the posts or ads (29 Oct 2026), each above what it shows. A file that has gone
+        missing is left out rather than stopping the PDF."""
+        from reportlab.platypus import Image as PdfImage, KeepTogether
+
+        pictures = list(document.images.all()) if document.pk else []
+        if not pictures:
+            return
+        elements.append(Paragraph('Pictures', styles['CustomH2']))
+        for picture in pictures:
+            try:
+                with picture.image.open('rb') as f:
+                    data = io.BytesIO(f.read())
+            except Exception:
+                continue
+            width, height = {'landscape': (4.5, 3.0), 'portrait': (3.0, 4.5)}.get(picture.shape, (4.0, 4.0))
+            elements.append(KeepTogether([
+                PdfImage(data, width=width * inch, height=height * inch, hAlign='LEFT'),
+                Spacer(1, 0.08 * inch),
+                Paragraph(escape(picture.idea), styles['CustomNormal']),
+                Spacer(1, 0.25 * inch),
+            ]))
+
+    @staticmethod
     def generate_pdf(document: MarketingDocument) -> HttpResponse:
         """Generate PDF file with proper header, footer, tables, and headings."""
         if not PDF_AVAILABLE:
@@ -200,7 +229,7 @@ class DocumentGenerator:
 
         # ---- Document title (first page only, in body)
         title_style = styles['CustomTitle']
-        elements.append(Paragraph(document.title, title_style))
+        elements.append(Paragraph(escape(document.title or ''), title_style))
         elements.append(Spacer(1, 0.15 * inch))
 
         # ---- Metadata as a small table
@@ -227,6 +256,7 @@ class DocumentGenerator:
         # ---- Body content (headings, paragraphs, lists, tables)
         content = document.content or ''
         DocumentGenerator._add_content_to_pdf(elements, content, styles)
+        DocumentGenerator._add_images_to_pdf(elements, document, styles)
 
         # ---- Header/footer callbacks
         doc_title = document.title
@@ -366,7 +396,8 @@ class DocumentGenerator:
                     # Wrap cell content in Paragraph so long text wraps and does not overflow
                     try:
                         wrap_style = styles['CustomNormal']
-                        table_data_wrapped = [[Paragraph(str(cell)[:500], wrap_style) for cell in row] for row in table_data]
+                        table_data_wrapped = [[Paragraph(_bold_markdown(str(cell)[:500]), wrap_style) for cell in row]
+                                              for row in table_data]
                     except Exception:
                         table_data_wrapped = table_data
                     table = Table(table_data_wrapped, colWidths=col_widths, repeatRows=1)

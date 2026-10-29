@@ -17,31 +17,19 @@ def sync_campaign_performance(campaign: Campaign):
     Metrics written (matching dashboard formulas):
       impressions      = emails sent (sent/delivered/opened/clicked)
       clicks           = emails clicked
-      conversions      = positive replies (positive/neutral/requested_info/objection)
+      conversions      = leads who replied with interest or asked for more (people, not messages)
       engagement       = % of leads who opened, clicked, or replied
       open_rate        = (opened / sent) * 100
       click_through_rate = (clicked / opened) * 100
     """
     today = date.today()
-    # Exclude reply-draft agent's one-off sends (template_id=None from send_raw_email);
-    # they belong to the reply agent, not the marketing campaign's metrics.
-    email_sends = EmailSendHistory.objects.filter(
-        campaign=campaign, email_template__isnull=False
-    )
-
-    total_sent = email_sends.filter(
-        status__in=['sent', 'delivered', 'opened', 'clicked']
-    ).count()
-    total_opened = email_sends.filter(
-        status__in=['opened', 'clicked']
-    ).count()
-    total_clicked = email_sends.filter(status='clicked').count()
-    total_replied = Reply.objects.filter(campaign=campaign).count()
-
-    positive_replies = Reply.objects.filter(
-        campaign=campaign,
-        interest_level__in=['positive', 'neutral', 'requested_info', 'objection'],
-    ).count()
+    # The same figures as the campaign page and every AI answer (services/campaign_numbers.py, CO-136/195).
+    from marketing_agent.services.campaign_numbers import campaign_sends, numbers
+    shared = numbers(campaign)
+    email_sends = campaign_sends(campaign)
+    total_sent, total_opened, total_clicked = shared['sent'], shared['opened'], shared['clicked']
+    total_replied = shared['replied_leads']
+    positive_replies = shared['conversions']        # people who replied with interest, not messages
 
     # Leads engagement: % of leads (sent at least one email) who opened/clicked/replied
     leads_sent_to = (
@@ -62,7 +50,7 @@ def sync_campaign_performance(campaign: Campaign):
     open_rate = round((total_opened / total_sent) * 100, 2) if total_sent > 0 else 0
     click_rate = round((total_clicked / total_sent) * 100, 2) if total_sent > 0 else 0
     ctr = round((total_clicked / total_opened) * 100, 2) if total_opened > 0 else 0
-    reply_rate = round((total_replied / total_sent) * 100, 2) if total_sent > 0 else 0
+    reply_rate = shared['reply_rate']
 
     # Target values from campaign
     target_leads = campaign.target_leads

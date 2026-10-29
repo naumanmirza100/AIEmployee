@@ -79,7 +79,7 @@ def email_account_detail(request, account_id):
                 'smtp_host': account.smtp_host,
                 'smtp_port': account.smtp_port,
                 'smtp_username': account.smtp_username,
-                'smtp_password': account.smtp_password,  # Note: In production, use encryption
+                # No passwords back to the page (CO-126); it sends one only to change it.
                 'use_tls': account.use_tls,
                 'use_ssl': account.use_ssl,
                 'is_gmail_app_password': account.is_gmail_app_password,
@@ -88,7 +88,6 @@ def email_account_detail(request, account_id):
                 'imap_port': account.imap_port,
                 'imap_use_ssl': account.imap_use_ssl,
                 'imap_username': account.imap_username,
-                'imap_password': account.imap_password,
                 'enable_imap_sync': account.enable_imap_sync,
                 'is_active': account.is_active,
                 'is_default': account.is_default,
@@ -105,7 +104,7 @@ def email_account_detail(request, account_id):
             account.smtp_host = data.get('smtp_host', account.smtp_host)
             account.smtp_port = int(data.get('smtp_port', account.smtp_port))
             account.smtp_username = data.get('smtp_username', account.smtp_username)
-            if 'smtp_password' in data:
+            if data.get('smtp_password'):      # left empty: kept (the page is no longer sent the password)
                 account.smtp_password = data['smtp_password']
             account.use_tls = data.get('use_tls', account.use_tls)
             account.use_ssl = data.get('use_ssl', account.use_ssl)
@@ -119,8 +118,8 @@ def email_account_detail(request, account_id):
                 account.imap_use_ssl = data.get('imap_use_ssl', True)
             if 'imap_username' in data:
                 account.imap_username = data.get('imap_username', '')
-            if 'imap_password' in data:
-                account.imap_password = data.get('imap_password', '')
+            if data.get('imap_password'):
+                account.imap_password = data['imap_password']
             if 'enable_imap_sync' in data:
                 account.enable_imap_sync = data.get('enable_imap_sync', False)
             account.is_active = data.get('is_active', account.is_active)

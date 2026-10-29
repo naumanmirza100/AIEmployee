@@ -799,18 +799,13 @@ Respond with comma-separated category keys only (from: any, positive, negative, 
             )
             
             # Process leads file if provided
-            leads_count = 0
-            if leads_file:
-                try:
-                    leads_count = self._process_leads_file(leads_file, campaign, user_id)
-                except Exception as e:
-                    self.log_action("Error processing leads file", {"error": str(e)})
-                    # Don't fail campaign creation if leads upload fails
-                    leads_count = 0
-            
+            leads_count, leads_note = self._import_leads(leads_file, campaign) if leads_file else (0, '')
+
             message = f'Campaign "{campaign.name}" created successfully'
             if leads_count > 0:
                 message += f' with {leads_count} leads uploaded'
+            if leads_note:
+                message += f'. {leads_note}'
             
             return {
                 'success': True,
@@ -831,6 +826,23 @@ Respond with comma-separated category keys only (from: any, positive, negative, 
             self.log_action("Error creating campaign", {"error": str(e)})
             return {'success': False, 'error': str(e)}
     
+    def _import_leads(self, leads_file, campaign):
+        """Leads from a file sent with Create or Launch, read by the same importer as the campaign's Upload button:
+        it checks addresses and the do-not-email list and says which rows it left out. The older one here skipped
+        rows silently, overwrote existing leads and still reported success (CO-235). Returns (added, note)."""
+        from api.views.marketing_agent import _upload_leads_from_file
+        try:
+            summary, error = _upload_leads_from_file(campaign, campaign.owner, leads_file)
+        except Exception as e:
+            self.log_action("Error processing leads file", {"error": str(e)})
+            return 0, 'The leads file could not be read; upload it again from the campaign.'
+        if error:
+            return 0, f'The leads file was not read: {error}'
+        left_out = summary.get('rejected_count') or 0
+        note = (f'{left_out} row(s) of the file were left out (no email or name, not an email address, or on the '
+                "do-not-email list); the campaign's Upload shows which." if left_out else '')
+        return summary.get('created_count') or 0, note
+
     def _process_leads_file(self, leads_file, campaign: Campaign, user_id: int) -> int:
         """
         Process uploaded leads file and associate leads with campaign
@@ -1293,8 +1305,9 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
                     elif end_date:
                         campaign.end_date = end_date
 
-            # Validate dates: no past dates when launching (use today as minimum)
-            today = datetime.now().date()
+            # Validate dates: no past dates when launching (today on the company's clock)
+            from marketing_agent.services import launch_checks
+            today = launch_checks.today_for(campaign.owner)
             if campaign.start_date and campaign.start_date < today:
                 return {
                     'success': False,
@@ -1312,52 +1325,18 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
                     'error': 'End date must be on or after start date. Please correct the dates and try again.'
                 }
 
-            # Check if campaign has at least one email sequence with steps (active or inactive; launching will reactivate them)
+            # The same checks as a scheduled start makes (marketing_agent/services/launch_checks.py, CO-130).
             from marketing_agent.models import EmailTemplate, EmailSequence
-            all_sequences = EmailSequence.objects.filter(campaign=campaign)
-            has_sequence_with_steps = False
-            for seq in all_sequences:
-                if seq.steps.exists():
-                    has_sequence_with_steps = True
-                    break
-            if not has_sequence_with_steps:
-                return {
-                    'success': False,
-                    'error': 'No email sequences found. Please create at least one email sequence with steps before launching. Go to Sequence Management to add sequences.'
-                }
+            problem = launch_checks.launch_problem(campaign)
+            if problem:
+                return {'success': False, 'error': problem[0], 'error_code': problem[1]}
 
-            # Check for at least one email template (active or inactive)
-            email_templates = EmailTemplate.objects.filter(campaign=campaign)
-            if not email_templates.exists():
-                return {
-                    'success': False,
-                    'error': 'No email templates found. Please create at least one email template before launching the campaign.'
-                }
-
-            # Require an email account on the campaign (or every sequence overriding
-            # one). Otherwise sends would silently fall back to whichever active
-            # account the owner happens to have first — surprising behavior at best.
-            campaign_has_account = bool(campaign.email_account_id)
-            if not campaign_has_account:
-                seqs_without_account = list(
-                    EmailSequence.objects.filter(campaign=campaign, email_account__isnull=True)
-                    .values_list('id', flat=True)
-                )
-                if seqs_without_account:
-                    return {
-                        'success': False,
-                        'error': (
-                            'No sending account is set for this campaign. Click '
-                            '"Set sending account" on the campaign and pick the email '
-                            'account you want to send from before launching.'
-                        ),
-                        'error_code': 'no_email_account',
-                    }
-
-            # Update campaign status and reactivate sequences (and templates) so launch works after a pause
-            campaign.status = 'active'
+            # Update campaign status and reactivate sequences (and templates) so launch works after a pause.
+            # A start date still to come is kept as scheduled: the starter activates it on the day (CO-121).
             if not campaign.start_date:
-                campaign.start_date = datetime.now().date()
+                campaign.start_date = today
+            later = campaign.start_date > today
+            campaign.status = 'scheduled' if later else 'active'
             campaign.save()
 
             # Reactivate all email sequences for this campaign (they may have been inactive due to pause)
@@ -1369,22 +1348,18 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
             self._initialize_performance_tracking(campaign)
             
             # Process leads file if provided
-            leads_count = 0
-            if leads_file:
-                try:
-                    leads_count = self._process_leads_file(leads_file, campaign, user_id)
-                except Exception as e:
-                    self.log_action("Error processing leads file during launch", {"error": str(e)})
-                    # Don't fail campaign launch if leads upload fails
-                    leads_count = 0
+            leads_count, leads_note = self._import_leads(leads_file, campaign) if leads_file else (0, '')
             
             # Note: Emails are ONLY sent through sequences, not individually
             # Sequence emails will be sent automatically by the send_sequence_emails management command
             # based on the delays configured in each sequence step
             
-            message = f'Campaign "{campaign.name}" launched successfully'
+            message = (f'Campaign "{campaign.name}" is scheduled to start on {campaign.start_date:%d %b %Y}'
+                       if later else f'Campaign "{campaign.name}" launched successfully')
             if leads_count > 0:
                 message += f' with {leads_count} leads uploaded'
+            if leads_note:
+                message += f'. {leads_note}'
             message += f'\n\nEmails will be sent automatically through active email sequences.'
             message += f'\nCheck the "Email Sending Status" page to monitor email sending activity.'
             
@@ -1539,6 +1514,19 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
                         except (ValueError, TypeError):
                             pass
                     campaign.end_date = end_date
+                # Schedule took a past date and made no checks; the campaign then started with whatever it had
+                # (CO-130). The same checks as Launch, with today on the company's clock.
+                from marketing_agent.services import launch_checks
+                today = launch_checks.today_for(campaign.owner)
+                if not campaign.start_date:
+                    return {'success': False, 'error': 'Choose the day the campaign should start.'}
+                if campaign.start_date < today:
+                    return {'success': False, 'error': 'Start date cannot be in the past. Pick today or a later day.'}
+                if campaign.end_date and campaign.end_date < campaign.start_date:
+                    return {'success': False, 'error': 'End date must be on or after start date.'}
+                problem = launch_checks.launch_problem(campaign)
+                if problem:
+                    return {'success': False, 'error': problem[0], 'error_code': problem[1]}
                 campaign.status = 'scheduled'
                 campaign.save()
             

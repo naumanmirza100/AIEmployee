@@ -19,7 +19,7 @@ AgentTokenQuota.used_tokens and hard-blocks when exhausted.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from django.db import transaction
@@ -650,6 +650,21 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
 
     # Step 5 — no platform key configured
     raise NoKeyAvailable()
+
+
+def platform_context_for(ctx: CallContext, provider: str) -> Optional[CallContext]:
+    """The same free-token call on the platform's key of another provider, or None.
+
+    Only for a call already on platform tokens, and only to a provider the agent may use; the tokens still come off
+    the company's free quota, counted under that provider. Marketing's web search runs on OpenAI while its other
+    calls stay on Groq, whose platform key allows too few tokens a minute for a search (29 Oct 2026)."""
+    if ctx.mode != 'platform' or ctx.provider == provider or not provider_supported(ctx.agent_name, provider):
+        return None
+    platform = PlatformAPIKey.objects.filter(provider=provider, status='active').first()
+    plaintext = platform.get_plaintext_key() if platform else None
+    if not plaintext:
+        return None
+    return replace(ctx, provider=provider, api_key=plaintext, key_id=platform.id)
 
 
 def _check_quota_notifications(quota_id: int) -> None:

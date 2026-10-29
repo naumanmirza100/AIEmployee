@@ -14,7 +14,7 @@ Usage:
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from django.db.models import Q, F
+from django.db.models import Q, F, Max
 from datetime import timedelta, datetime
 from marketing_agent.models import (
     Campaign, EmailSequence, EmailSequenceStep, EmailSendHistory,
@@ -113,8 +113,16 @@ class Command(BaseCommand):
         from marketing_agent.services.subscription import PayingCampaigns
         paying = PayingCampaigns()
 
+        from marketing_agent.services.launch_checks import sending_window, today_for
+        todays = {}
         for campaign in campaigns:
             if not paying.allows(campaign):
+                continue
+            # Inside its dates only, on the company's day: a future start sent at once, and an ended campaign
+            # went on until a daily job ran (CO-121).
+            if campaign.owner_id not in todays:
+                todays[campaign.owner_id] = today_for(campaign.owner)
+            if sending_window(campaign, todays[campaign.owner_id]):
                 continue
             # Get active main sequences (not sub-sequences)
             sequences = campaign.email_sequences.filter(is_active=True, is_sub_sequence=False)
@@ -145,10 +153,12 @@ class Command(BaseCommand):
 
             # Reactivate contacts that were marked completed but have more steps now
             for seq in sequences:
-                total_steps = seq.steps.count()
+                # The last step's number, not the count: steps can have a gap (CO-233). Not a contact given up
+                # after failed sends or a bounce (CO-122, CO-192): that one stays stopped.
+                total_steps = seq.steps.aggregate(last=Max('step_order'))['last'] or 0
                 reactivated = CampaignContact.objects.filter(
                     campaign=campaign, sequence=seq,
-                    completed=True, current_step__lt=total_steps,
+                    completed=True, current_step__lt=total_steps, gave_up=False,
                 ).update(completed=False, completed_at=None)
                 if reactivated:
                     self.stdout.write(self.style.SUCCESS(
@@ -225,15 +235,14 @@ class Command(BaseCommand):
         if step_count == 0:
             return 'skipped'
 
-        next_step_number = run.step + 1
-        if next_step_number > step_count:
+        # The next step that exists: a step taken out left a gap, and every lead stopped at it (CO-233).
+        next_step = steps.filter(step_order__gt=run.step).first()
+        if not next_step:
             run.completed = True
             run.save(update_fields=['completed', 'updated_at'])
             return 'stopped'
-
-        next_step = steps.filter(step_order=next_step_number).first()
-        if not next_step:
-            return 'skipped'
+        next_step_number = next_step.step_order
+        last_step = not steps.filter(step_order__gt=next_step_number).exists()
 
         # Timing: first step anchors off the reply time; later steps off last send.
         delay = timedelta(
@@ -267,6 +276,8 @@ class Command(BaseCommand):
         # confirmation: its first email goes out, and only that one.
         confirmation = run.interest_level == 'unsubscribe'
         email_account = sub_sequence.get_sending_account()
+        if email_account is not None and not email_account.is_active:
+            return 'skipped'                    # a switched-off mailbox sends nothing (CO-190)
         result = email_service.send_email(
             template=next_step.template, lead=lead,
             campaign=campaign, email_account=email_account,
@@ -280,7 +291,7 @@ class Command(BaseCommand):
         if result.get('success'):
             run.step = next_step_number
             run.last_sent_at = timezone.now()
-            if next_step_number >= step_count or confirmation:
+            if last_step or confirmation:
                 run.completed = True
             run.save(update_fields=['step', 'last_sent_at', 'completed', 'updated_at'])
             self.stdout.write(self.style.SUCCESS(
@@ -315,15 +326,12 @@ class Command(BaseCommand):
         if step_count == 0:
             return 'skipped'
 
-        next_step_number = contact.current_step + 1
-
-        if next_step_number > step_count:
+        # The next step that exists, not exactly the next number: a gap stopped every lead there (CO-233).
+        next_step = steps.filter(step_order__gt=contact.current_step).first()
+        if not next_step:
             contact.mark_completed()
             return 'stopped'
-
-        next_step = steps.filter(step_order=next_step_number).first()
-        if not next_step:
-            return 'skipped'
+        next_step_number = next_step.step_order
 
         # NOTE: We rely on current_step tracking (not EmailSendHistory) to determine
         # which step to send next. The current_step is advanced after each successful
@@ -334,6 +342,23 @@ class Command(BaseCommand):
             return 'skipped'
 
         return self._send_sequence_email(contact, campaign, sequence, next_step, next_step_number, step_count, dry_run)
+
+    CLAIM_MINUTES = 10
+
+    def _claim(self, contact):
+        """Take this contact's next send for this run, or say another run (or a pause, a reply, an earlier failure)
+        stands in the way.
+
+        One conditional update: the step must still be the one read, the lead not replied, the campaign still
+        active, and no retry time ahead. A short lease in retry_after holds it while the email goes; a success or a
+        failure replaces it. Pressing Pause did not stop a run under way, and a run past 30 minutes was joined by a
+        second one that sent the same emails again (CO-191)."""
+        now = timezone.now()
+        return bool(CampaignContact.objects.filter(
+            pk=contact.pk, current_step=contact.current_step, replied=False, completed=False,
+            campaign__status='active',
+        ).filter(Q(retry_after__isnull=True) | Q(retry_after__lte=now))
+            .update(retry_after=now + timedelta(minutes=self.CLAIM_MINUTES)))
 
     def _should_send_email(self, contact, campaign, next_step):
         """Determine if it's time to send the next email in main sequence"""
@@ -373,27 +398,35 @@ class Command(BaseCommand):
 
         if not dry_run:
             email_account = sequence.get_sending_account()
+            if email_account is not None and not email_account.is_active:
+                # Switched off: nothing is sent from it (CO-190), and nothing is written.
+                return 'skipped'
+            if not self._claim(contact):
+                return 'skipped'
             result = email_service.send_email(
                 template=next_step.template, lead=lead,
                 campaign=campaign, email_account=email_account
             )
 
             if result.get('success'):
-                contact.advance_step(sent_at=timezone.now())
+                contact.advance_step(sent_at=timezone.now(), to_step=next_step_number)
                 self.stdout.write(self.style.SUCCESS(
                     f'  [SENT] Step {next_step_number}/{step_count} -> {lead.email} ({next_step.template.subject})'
                 ))
 
-                if next_step_number >= step_count:
+                if not sequence.steps.filter(step_order__gt=next_step_number).exists():
                     contact.mark_completed()
                     return 'stopped'
                 return 'sent'
             elif result.get('blocked'):
                 # On the do-not-email list. Not a failure, and nothing to retry.
+                CampaignContact.objects.filter(pk=contact.pk).update(retry_after=None)
                 return 'skipped'
             else:
+                contact.note_send_failure()
                 self.stdout.write(self.style.ERROR(
                     f'  [FAIL] Step {next_step_number} -> {lead.email}: {result.get("error", "Unknown")}'
+                    + (' (given up)' if contact.gave_up else f' (next try after {contact.retry_after:%H:%M})')
                 ))
                 return 'skipped'
         else:
