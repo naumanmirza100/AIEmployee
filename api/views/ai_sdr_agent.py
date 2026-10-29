@@ -341,6 +341,10 @@ def leads_list(request):
             if status_f:
                 qs = qs.filter(status=status_f)
 
+            # The Enroll dialog leaves out leads already in that campaign (CO-146).
+            not_in = request.GET.get('not_in_campaign', '').strip()
+            if not_in.isdigit():
+                qs = qs.exclude(campaign_enrollments__campaign_id=int(not_in))
             source_f = request.GET.get('source', '').strip()
             if source_f:
                 qs = qs.filter(source=source_f)
@@ -803,6 +807,13 @@ def fetch_apify_leads(request):
         actor = request.data.get('actor')  # optional override
         icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
 
+        # The person's own Apify account only: on the platform's key it imported whatever that account ran last,
+        # including searches run for other companies (CO-142).
+        own = SDRAgentSettings.objects.filter(company_user=company_user).first()
+        if not (own and (own.apify_api_token or '').strip()):
+            return Response({'status': 'error', 'code': 'no_lead_source',
+                             'message': 'Add your own Apify API token in SDR Agent → Settings to fetch your runs.'},
+                            status=400)
         researcher = _get_research_agent(company_user.company, company_user=company_user)
         raw_leads = researcher.fetch_apify_runs(max_leads=max_leads, actor=actor)
         if not raw_leads:
@@ -1334,6 +1345,7 @@ def _serialize_meeting(m: SDRMeeting) -> dict:
         'campaign_id': campaign.id if campaign else None,
         'campaign_name': campaign.name if campaign else None,
         'campaign_status': campaign.status if campaign else None,   # active/completed/paused
+        'campaign_removed': not m.is_manual and campaign is None,
         'title': m.title,
         'notes': m.notes,
         'reply_snippet': m.reply_snippet,
@@ -1524,6 +1536,16 @@ def sdr_campaign_detail(request, campaign_id):
                     setattr(campaign, field, d[field])
             if campaign.status != status_before:
                 campaign.paused_reason = ''        # a person changed it: the product's own reason is history
+            if campaign.status == 'active' and status_before in ('draft', 'completed', 'scheduled'):
+                # Start campaign: a later start date makes it Scheduled (CO-149).
+                start = campaign.start_date
+                if isinstance(start, str):
+                    from datetime import date as _d
+                    start = _d.fromisoformat(start)
+                if start and start > timezone.now().date():
+                    campaign.status = 'scheduled'
+                else:
+                    campaign.activated_at = timezone.now()
             if 'smtp_port' in d:
                 campaign.smtp_port = int(d['smtp_port'])
             if 'imap_port' in d:
@@ -1541,8 +1563,12 @@ def sdr_campaign_detail(request, campaign_id):
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=500)
 
-    # DELETE
-    campaign.delete()
+    # DELETE: its open calls are cancelled first; they stayed booked, blocking the calendar, but hidden (CO-148).
+    from django.db import transaction
+    from ai_sdr_agent.reply_actions import cancel_meetings_of
+    with transaction.atomic():
+        cancel_meetings_of(campaign.enrollments.all())
+        campaign.delete()
     return Response({'status': 'success', 'message': 'Campaign deleted.'})
 
 
@@ -1568,14 +1594,20 @@ def sdr_clear_campaign_leads(request, campaign_id):
             qs = campaign.enrollments.filter(id__in=enrollment_ids)
         else:
             qs = campaign.enrollments.all()
-        deleted_count, _ = qs.delete()
-        # Recount from DB after deletion
-        from django.db.models import Count
-        campaign.total_leads      = campaign.enrollments.count()
-        campaign.emails_sent      = campaign.outreach_logs.filter(status='sent').count()
-        campaign.replies_received = campaign.enrollments.filter(replied_at__isnull=False).count()
-        campaign.meetings_booked  = campaign.meetings.count()
-        campaign.save(update_fields=['emails_sent', 'replies_received', 'meetings_booked', 'total_leads'])
+        # Open calls cancelled, then the recount. The recount used relations a campaign does not have, so every
+        # Clear Leads ended in an error after the delete, with the old figures left (CO-147, CO-148).
+        from django.db import transaction
+        from ai_sdr_agent.reply_actions import cancel_meetings_of
+        with transaction.atomic():
+            cancel_meetings_of(qs)
+            deleted_count = qs.count()
+            qs.delete()
+            campaign.total_leads = campaign.enrollments.count()
+            campaign.emails_sent = SDROutreachLog.objects.filter(
+                enrollment__campaign=campaign, status='sent', action_type='email').count()
+            campaign.replies_received = campaign.enrollments.filter(replied_at__isnull=False).count()
+            campaign.meetings_booked = SDRMeeting.objects.filter(enrollment__campaign=campaign).count()
+            campaign.save(update_fields=['emails_sent', 'replies_received', 'meetings_booked', 'total_leads'])
         logger.info("SDR: cleared %d enrollments from campaign %s", deleted_count, campaign_id)
         return Response({
             'status': 'success',
@@ -1878,29 +1910,17 @@ def sdr_enroll_leads(request, campaign_id):
             )
             enrolled += 1
 
+        # Adding leads no longer starts the campaign: a draft's first email went out within five minutes of
+        # "Enroll Selected", with no warning (CO-149). Start campaign does it.
         campaign.total_leads = campaign.enrollments.count()
-        update_fields = ['total_leads']
-        # Enrolling starts a draft/finished campaign, but must not override a user's
-        # pause, jump a future start date, or activate a campaign with no steps.
-        if enrolled and campaign.status in ('draft', 'completed') and first_step:
-            start = campaign.start_date
-            if isinstance(start, str):
-                from datetime import date as _d
-                start = _d.fromisoformat(start)
-            if start and start > timezone.now().date():
-                campaign.status = 'scheduled'
-            else:
-                campaign.status = 'active'
-                campaign.activated_at = timezone.now()
-                update_fields.append('activated_at')
-            update_fields.append('status')
-        campaign.save(update_fields=update_fields)
+        campaign.save(update_fields=['total_leads'])
 
         resp = {
             'status': 'success',
             'enrolled': enrolled,
             'skipped': skipped,
             'total_leads': campaign.total_leads,
+            'campaign_status': campaign.status,
         }
         if skipped_reasons:
             resp['skipped_reasons'] = skipped_reasons
@@ -2293,10 +2313,8 @@ def sdr_meetings_list(request):
                 'lead', 'enrollment', 'enrollment__campaign'
             ).order_by(*ordering)
 
-            # Always exclude orphaned meetings (campaign or enrollment was deleted)
-            qs = qs.filter(
-                Q(enrollment__isnull=False, enrollment__campaign__isnull=False) | Q(is_manual=True)
-            )
+            # A call whose campaign was removed is shown ("campaign removed"), no longer hidden: it could not be
+            # opened or cancelled (CO-148).
 
             # campaign_status filter overrides active_only when provided
             if campaign_status:

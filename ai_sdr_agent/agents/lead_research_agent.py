@@ -265,6 +265,11 @@ class LeadResearchAgent:
             return self._search_apify(icp_profile, count)
         raise NoLeadSource(NO_SOURCE_MESSAGE)
 
+    def _apify_headers(self) -> dict:
+        """The token goes in a header: in the web address it was written into the log, the research record and the
+        message on the customer's screen by any failed request (CO-142)."""
+        return {'Authorization': f'Bearer {self.apify_token}'}
+
     @property
     def source_label(self) -> str:
         if self.apollo_api_key:
@@ -396,7 +401,7 @@ class LeadResearchAgent:
                 run_resp = requests.post(
                     f"{APIFY_BASE}/acts/{actor_id}/runs",
                     json=actor_input,
-                    params={'token': self.apify_token},
+                    headers=self._apify_headers(),
                     timeout=30,
                 )
                 if run_resp.status_code != 400:
@@ -437,7 +442,7 @@ class LeadResearchAgent:
                 time.sleep(5)
                 status_resp = requests.get(
                     f"{APIFY_BASE}/actor-runs/{run_id}",
-                    params={'token': self.apify_token},
+                    headers=self._apify_headers(),
                     timeout=15,
                 )
                 status_resp.raise_for_status()
@@ -455,7 +460,7 @@ class LeadResearchAgent:
             dataset_id = run_data.get('defaultDatasetId')
             items_resp = requests.get(
                 f"{APIFY_BASE}/datasets/{dataset_id}/items",
-                params={'token': self.apify_token, 'limit': count, 'clean': 'true'},
+                params={'limit': count, 'clean': 'true'}, headers=self._apify_headers(),
                 timeout=30,
             )
             items_resp.raise_for_status()
@@ -503,7 +508,7 @@ class LeadResearchAgent:
         # List recent runs (newest first). This read works on the free plan.
         runs_resp = requests.get(
             f"{APIFY_BASE}/acts/{actor_id}/runs",
-            params={'token': self.apify_token, 'desc': '1', 'limit': 10},
+            params={'desc': '1', 'limit': 10}, headers=self._apify_headers(),
             timeout=25,
         )
         if runs_resp.status_code == 404:
@@ -526,7 +531,7 @@ class LeadResearchAgent:
             try:
                 items_resp = requests.get(
                     f"{APIFY_BASE}/datasets/{ds}/items",
-                    params={'token': self.apify_token, 'clean': 'true', 'limit': max_leads},
+                    params={'clean': 'true', 'limit': max_leads}, headers=self._apify_headers(),
                     timeout=30,
                 )
                 items_resp.raise_for_status()

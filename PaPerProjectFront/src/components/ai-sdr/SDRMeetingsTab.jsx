@@ -1335,6 +1335,8 @@ const SDRMeetingsTab = () => {
                           <span style={{ fontSize: 12, color: '#818cf8', background: 'rgba(99,102,241,0.1)', borderRadius: 6, padding: '2px 9px', fontWeight: 600 }}>
                             {m.campaign_name}
                           </span>
+                        ) : m.campaign_removed ? (
+                          <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Campaign removed</span>
                         ) : '—'}
                       </td>
 

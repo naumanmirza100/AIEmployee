@@ -8,11 +8,11 @@ CO-243: a lead in two campaigns who replied once was answered twice.
 from datetime import timedelta
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-from ai_sdr_agent.models import SDRCampaign, SDRCampaignEnrollment, SDRMeeting
+from ai_sdr_agent.models import SDRCampaign, SDRCampaignEnrollment, SDRMeeting, SDROutreachLog
 from ai_sdr_agent.reply_actions import handle_inbox_reply
 from ai_sdr_agent.tests import SDRBase
 from core.do_not_email import UNSUBSCRIBED, block, is_blocked
@@ -144,3 +144,101 @@ class MeetingEmailTests(SDRBase):
         message = server.sendmail.call_args[0][2]
         self.assertIn('/api/sdr/unsubscribe/', message)
         self.assertIn('List-Unsubscribe:', message)
+
+
+class ApifyKeyTests(SDRBase):
+    """CO-142: the Apify key went in the web address, so any failed request wrote it into the log, the research record
+    and the red message on the customer's screen."""
+
+    def test_the_key_goes_in_a_header_not_the_address(self):
+        from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+        runs = mock.MagicMock(status_code=200)
+        runs.json.return_value = {'data': {'items': []}}
+        with mock.patch('requests.get', return_value=runs) as get, self.assertRaises(ValueError):
+            LeadResearchAgent(apify_token='secret-tok', apify_actor='a/b').fetch_apify_runs()
+        self.assertNotIn('secret-tok', str(get.call_args.kwargs.get('params')) + get.call_args.args[0])
+        self.assertEqual(get.call_args.kwargs['headers'], {'Authorization': 'Bearer secret-tok'})
+
+    def test_fetching_runs_needs_the_persons_own_key(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from api.views import ai_sdr_agent as views
+        request = APIRequestFactory().post('/x', {}, format='json')
+        force_authenticate(request, user=self.cu)
+        with override_settings(APIFY_API_TOKEN='platform-tok'), mock.patch('requests.get') as get:
+            response = views.fetch_apify_leads(request)
+        self.assertEqual((response.status_code, response.data['code']), (400, 'no_lead_source'))
+        get.assert_not_called()
+
+
+class ClearingTests(SDRBase):
+    """CO-147: Clear Leads always ended in an error after removing the leads, with the old figures left.
+    CO-148: deleting a campaign or clearing its leads left its booked calls alive but hidden."""
+
+    def call(self, view, method='post', data=None, **kwargs):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        request = getattr(APIRequestFactory(), method)('/x', data or {}, format='json')
+        force_authenticate(request, user=self.cu)
+        return view(request, **kwargs)
+
+    def booked(self, status='scheduled'):
+        lead = self.make_lead(f'{status}@clinic.example')
+        enrollment = self.enroll(lead)
+        SDROutreachLog.objects.create(enrollment=enrollment, action_type='email', status='sent', sent_at=timezone.now())
+        return SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=enrollment, status=status,
+                                         scheduled_at=timezone.now() + timedelta(days=1))
+
+    def test_clear_leads_answers_success_with_true_figures_and_cancels_open_calls(self):
+        from api.views import ai_sdr_agent as views
+        open_call, done_call = self.booked('scheduled'), self.booked('completed')
+        response = self.call(views.sdr_clear_campaign_leads, campaign_id=self.campaign.id)
+        self.assertEqual(response.status_code, 200)
+        self.campaign.refresh_from_db()
+        self.assertEqual((self.campaign.total_leads, self.campaign.emails_sent, self.campaign.meetings_booked),
+                         (0, 0, 0))
+        open_call.refresh_from_db(); done_call.refresh_from_db()
+        self.assertEqual((open_call.status, done_call.status), ('cancelled', 'completed'))
+
+    def test_a_deleted_campaigns_calls_are_cancelled_and_still_listed(self):
+        from api.views import ai_sdr_agent as views
+        call = self.booked('scheduled')
+        self.call(views.sdr_campaign_detail, 'delete', campaign_id=self.campaign.id)
+        call.refresh_from_db()
+        self.assertEqual(call.status, 'cancelled')
+        [row] = self.call(views.sdr_meetings_list, 'get').data['results']
+        self.assertTrue(row['campaign_removed'])
+
+
+class EnrolTests(SDRBase):
+    """CO-146: only the 25 highest-scoring leads could ever be put into a campaign.
+    CO-149: adding leads to a draft started it, the first email going out within five minutes."""
+
+    def call(self, view, method='post', data=None, **kwargs):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        request = getattr(APIRequestFactory(), method)('/x', data or {}, format='json')
+        force_authenticate(request, user=self.cu)
+        return view(request, **kwargs)
+
+    def test_adding_leads_to_a_draft_leaves_it_a_draft_until_start(self):
+        from api.views import ai_sdr_agent as views
+        SDRCampaign.objects.filter(pk=self.campaign.pk).update(status='draft')
+        response = self.call(views.sdr_enroll_leads, data={'lead_ids': [self.make_lead().id]},
+                             campaign_id=self.campaign.id)
+        self.assertEqual(response.data['campaign_status'], 'draft')
+        with mock.patch.object(views, '_validate_mail_settings', return_value=None):
+            self.call(views.sdr_campaign_detail, 'put', {'status': 'active'}, campaign_id=self.campaign.id)
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.status, 'active')
+        self.assertIsNotNone(self.campaign.activated_at)
+
+    def test_the_dialog_can_reach_every_lead_not_yet_in_the_campaign(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from api.views import ai_sdr_agent as views
+        inside = self.make_lead('in@clinic.example')
+        self.enroll(inside)
+        for i in range(30):
+            self.make_lead(f'lead{i}@clinic.example')
+        request = APIRequestFactory().get('/x', {'not_in_campaign': self.campaign.id, 'page': 2, 'page_size': 25})
+        force_authenticate(request, user=self.cu)
+        data = views.leads_list(request).data
+        self.assertEqual((data['pagination']['total_count'], len(data['data'])), (30, 5))
+        self.assertNotIn('in@clinic.example', [l['email'] for l in data['data']])

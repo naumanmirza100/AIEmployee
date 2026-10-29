@@ -61,8 +61,14 @@ def handle_inbox_reply(campaign, reply, *, email_agent, outreach_agent=None):
 
 
 def cancel_open_meetings(enrollment):
-    """A lead who opted out keeps no call: row by row, so the shared calendar and Google drop it too."""
-    for meeting in SDRMeeting.objects.filter(enrollment=enrollment, status__in=OPEN_MEETING):
+    """A lead who opted out keeps no call."""
+    cancel_meetings_of([enrollment])
+
+
+def cancel_meetings_of(enrollments):
+    """Cancel the open calls of these enrolments, row by row so the shared calendar and Google drop them too.
+    Finished calls stay as history (CO-148: a deleted campaign left its booked calls alive but hidden)."""
+    for meeting in SDRMeeting.objects.filter(enrollment__in=enrollments, status__in=OPEN_MEETING):
         meeting.status = 'cancelled'
         meeting.save(update_fields=['status', 'updated_at'])
 

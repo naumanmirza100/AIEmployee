@@ -69,11 +69,12 @@ export const saveIcpProfile = async (data) => {
 // --------------------------------------------------------------------------
 export const listLeads = async ({
   search = '', temperature = '', status = '', source = '',
-  sort = 'score_desc', page = 1, page_size = 25,
+  sort = 'score_desc', page = 1, page_size = 25, not_in_campaign = '',
 } = {}) => {
   try {
     const params = new URLSearchParams();
     if (search)      params.set('search', search);
+    if (not_in_campaign) params.set('not_in_campaign', not_in_campaign);
     if (temperature) params.set('temperature', temperature);
     if (status)      params.set('status', status);
     if (source)      params.set('source', source);

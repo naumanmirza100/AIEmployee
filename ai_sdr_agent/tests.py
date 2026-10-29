@@ -535,7 +535,11 @@ class ApiTests(SDRBase):
         self.call(views.sdr_enroll_leads, 'post',
                   data={'lead_ids': [self.make_lead('z@z.com').id]}, campaign_id=other.id)
         other.refresh_from_db()
-        self.assertEqual(other.status, 'scheduled')
+        self.assertEqual(other.status, 'draft')            # adding leads starts nothing (CO-149)
+        with mock.patch.object(views, '_validate_mail_settings', return_value=None):
+            self.call(views.sdr_campaign_detail, 'put', data={'status': 'active'}, campaign_id=other.id)
+        other.refresh_from_db()
+        self.assertEqual(other.status, 'scheduled')        # Start campaign keeps the later start date
 
     def test_enroll_does_not_activate_a_campaign_without_steps(self):
         empty = SDRCampaign.objects.create(
