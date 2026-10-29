@@ -26,7 +26,10 @@ class AutoLeadResearchMiddleware:
 
     def __init__(self, get_response):
         self.get_response = get_response
-        self._start_background_thread()
+        # The same rule as the scheduler: not on a developer's dev server unless asked for (CO-141).
+        from ai_sdr_agent.apps import scheduler_may_run
+        if scheduler_may_run():
+            self._start_background_thread()
         logger.info("AutoLeadResearchMiddleware initialized")
 
     def _start_background_thread(self):

@@ -1066,14 +1066,32 @@ Return exactly this JSON:
 
     def _send_email(self, campaign, to_email: str, subject: str,
                     plain: str, html: str = None) -> None:
+        from ai_sdr_agent.agents.outreach_agent import build_unsubscribe_url, refuse_if_suppressed
+        refuse_if_suppressed(campaign.company_user, to_email)
         if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
             raise ValueError(
                 "Campaign SMTP credentials not configured. "
                 "Add SMTP settings in campaign Settings before sending."
             )
 
+        # The footer said only "reply with unsubscribe"; it now carries the link, as the campaign's own emails do
+        # (CO-144). The reply still works too.
+        enrollment = (campaign.enrollments.select_related('lead', 'campaign__company_user')
+                      .filter(lead__email__iexact=to_email).first())
+        unsubscribe_url = build_unsubscribe_url(enrollment) if enrollment else ''
+        if unsubscribe_url:
+            html = (html or '').replace(
+                'simply reply with <strong>unsubscribe</strong>.',
+                f'reply with <strong>unsubscribe</strong> or <a href="{unsubscribe_url}" '
+                f'style="color:#6b7280;">unsubscribe here</a>.')
+            plain = plain.replace("Reply 'unsubscribe' to opt out.",
+                                  f"Reply 'unsubscribe' or open {unsubscribe_url} to opt out.")
+
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
+        if unsubscribe_url:
+            msg['List-Unsubscribe'] = f'<{unsubscribe_url}>'
+            msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
         display_name = campaign.sender_name or campaign.sender_company or ''
         from_addr = campaign.from_email or campaign.smtp_username
         msg['From'] = f"{display_name} <{from_addr}>" if display_name else from_addr

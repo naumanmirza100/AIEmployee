@@ -205,6 +205,21 @@ def claim_reply(enrollment, reply: dict) -> bool:
         key = hashlib.sha1(raw.encode('utf-8', 'replace')).hexdigest()
     key = key[:255]
 
+    # Per company and address, not per enrolment: a lead in two campaigns who replied once was answered twice, two
+    # meetings and two 'pick a time' emails (CO-243). The other enrolment only stops its own emails.
+    lead_email = (getattr(enrollment.lead, 'email', '') or '').strip()
+    if lead_email:
+        company_id = enrollment.campaign.company_user.company_id
+        others = (SDRCampaignEnrollment.objects
+                  .filter(campaign__company_user__company_id=company_id, lead__email__iexact=lead_email)
+                  .exclude(id=enrollment.id))
+        if others.filter(last_reply_message_id=key).exists():
+            SDRCampaignEnrollment.objects.filter(id=enrollment.id).exclude(last_reply_message_id=key).update(
+                last_reply_message_id=key)
+            SDRCampaignEnrollment.objects.filter(id=enrollment.id, status='active').update(
+                status='replied', replied_at=received_at or timezone.now())
+            return False
+
     claimed = (
         SDRCampaignEnrollment.objects.filter(id=enrollment.id)
         .exclude(last_reply_message_id=key)
@@ -225,6 +240,17 @@ def is_email_suppressed(company_user, email_addr: str) -> bool:
     """
     from core.do_not_email import is_blocked
     return is_blocked(getattr(company_user, 'company_id', None), email_addr)
+
+
+class OnDoNotEmailList(ValueError):
+    """The address unsubscribed or bounced in this company, so nothing more is sent to it."""
+
+
+def refuse_if_suppressed(company_user, email_addr: str) -> None:
+    """Every email to a lead asks the do-not-email list first: the meeting emails, the AI's 'more information' answer
+    and 'We missed you' did not, so someone who unsubscribed by link still got the reminder (CO-144)."""
+    if is_email_suppressed(company_user, email_addr):
+        raise OnDoNotEmailList(f'{email_addr} is on the do-not-email list, so nothing was sent.')
 
 
 def make_unsubscribe_token(enrollment_id: int, company_id=None, email: str = '') -> str:
@@ -833,6 +859,7 @@ Rules:
 
     def send_email(self, campaign, to_email: str, subject: str, body: str,
                    unsubscribe_url: str = '', in_reply_to: str = '') -> None:
+        refuse_if_suppressed(campaign.company_user, to_email)
         if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
             raise ValueError(
                 "Campaign SMTP credentials not configured. "

@@ -22,7 +22,7 @@ from core.models import Company, CompanyUser
 from project_manager_agent.models import PMNotification
 
 WANTS_MORE = {'action': 'send_info', 'category': 'wants_more_info', 'label': 'Wants more info'}
-SAYS_STOP = {'action': 'stop', 'category': 'not_interested', 'label': 'Not interested'}
+SAYS_STOP = {'action': 'unsubscribe', 'category': 'unsubscribe', 'label': 'Unsubscribe'}
 
 
 class ReplyAnswersTestCase(SDRBase):
@@ -99,10 +99,9 @@ class HeldForAPersonTests(ReplyAnswersTestCase):
         writer = mock.MagicMock()
         writer.generate_more_info_email.return_value = {'subject': 'S', 'body': 'B'}
         sender = mock.MagicMock()
-        with mock.patch('ai_sdr_agent.agents.email_assistant_agent.EmailAssistantAgent', return_value=writer), \
-                mock.patch.object(views, '_get_outreach_agent', return_value=sender):
-            result = views._apply_reply_action(self.cu, self.campaign, self.enrolment, self.lead, WANTS_MORE,
-                                               'tell me more')
+        # The button hands its own agents to the shared reply rules (ai_sdr_agent/reply_actions.py).
+        result = views._apply_reply_action(self.cu, self.campaign, self.enrolment, self.lead, WANTS_MORE,
+                                           'tell me more', email_agent=writer, outreach_agent=sender)
         sender.send_email.assert_not_called()
         self.assertEqual((result['action'], result['answer_held'], result['info_email_sent']),
                          ('answer_waiting', True, False))

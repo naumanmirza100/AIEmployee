@@ -20,13 +20,17 @@ logger = logging.getLogger(__name__)
 
 # ── Categories ────────────────────────────────────────────────────────────────
 CAT_OUT_OF_OFFICE  = 'out_of_office'
+CAT_UNSUBSCRIBE    = 'unsubscribe'
 CAT_NOT_INTERESTED = 'not_interested'
 CAT_WANTS_MORE     = 'wants_more_info'
 CAT_POSITIVE       = 'positive_interest'
 CAT_NEUTRAL        = 'neutral'
 
+# Only an explicit request to stop is 'unsubscribe' (off every campaign of the company). 'Not interested' stops this
+# campaign alone, and 'not right now' is left for a person (CO-145).
 CATEGORY_ACTION = {
     CAT_OUT_OF_OFFICE:  'pause',
+    CAT_UNSUBSCRIBE:    'unsubscribe',
     CAT_NOT_INTERESTED: 'stop',
     CAT_WANTS_MORE:     'send_info',
     CAT_POSITIVE:       'book_meeting',
@@ -35,16 +39,17 @@ CATEGORY_ACTION = {
 
 CATEGORY_LABEL = {
     CAT_OUT_OF_OFFICE:  'Out of Office',
+    CAT_UNSUBSCRIBE:    'Unsubscribe',
     CAT_NOT_INTERESTED: 'Not Interested',
     CAT_WANTS_MORE:     'Wants More Info',
     CAT_POSITIVE:       'Interested — Book Meeting',
     CAT_NEUTRAL:        'Neutral',
 }
 
-# ── Keyword banks ─────────────────────────────────────────────────────────────
+# ── Keyword banks: used only when the AI cannot be asked ───────────────────────
 _OOO = [
     'out of office', 'out of the office', 'on vacation', 'on leave',
-    'annual leave', 'away from office', 'away until', 'back on',
+    'annual leave', 'away from office', 'away until',
     'back in office', 'currently unavailable', 'auto-reply', 'automatic reply',
     'will be back', 'return on', 'returning on', 'on holiday', 'i am away',
     "i'm away", 'i will be out', "i'll be out", 'maternity leave',
@@ -52,15 +57,17 @@ _OOO = [
     'limited access to my email',
 ]
 
+_UNSUBSCRIBE = [
+    'unsubscribe', 'stop emailing', 'stop contacting', 'do not contact', "don't contact",
+    'do not email', "don't email", 'remove me', 'take me off', 'opt out', 'opt me out',
+    'please remove', 'kindly remove', 'please stop', 'stop sending',
+]
+
 _NOT_INTERESTED = [
     'not interested', 'no thanks', 'no thank you', 'not relevant',
-    'not a fit', 'not the right fit', 'please remove', 'unsubscribe',
-    'stop emailing', 'stop contacting', 'do not contact', "don't contact",
-    'remove me', 'take me off', 'opt out', 'not looking',
-    'not in the market', 'not right now', 'not at this time',
-    'not for us', 'we already have', 'we use another', 'not a priority',
+    'not a fit', 'not the right fit', 'not looking',
+    'not in the market', 'not for us', 'we already have', 'we use another',
     'no budget', 'going with someone else', 'not pursuing',
-    'please stop', 'kindly remove',
 ]
 
 _WANTS_MORE = [
@@ -78,7 +85,7 @@ _POSITIVE = [
     'schedule a call', 'book a meeting', 'book a call', 'happy to chat',
     'happy to connect', 'set up a call', 'set up a meeting',
     'yes i am interested', "yes i'm interested", 'sounds good', 'would love to',
-    'absolutely', 'definitely', 'when are you available', 'available for a call',
+    'when are you available', 'available for a call',
     'open for a meeting', 'yes please', 'count me in', "i'm in", 'i am in',
     'let us connect', 'open to a chat', 'interested in a demo', 'book a demo',
 ]
@@ -99,11 +106,22 @@ _QUOTE_START = re.compile(
 )
 
 
+# Our own footer, which a reply can quote without the 'On ... wrote:' line (a mail program in another language):
+# it says 'Unsubscribe' and must not be read as the lead's words (CO-145).
+_OUR_FOOTER = re.compile(
+    r"^[ \t>]*(?:-{2,3}[ \t]*$|.*?/api/sdr/unsubscribe/|.*?reply 'unsubscribe'|.*?don't want these emails\?)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 def strip_quoted_reply(text: str) -> str:
-    """Return only what the prospect wrote, without the quoted earlier thread."""
+    """Return only what the prospect wrote, without the quoted earlier thread or our footer."""
     if not text:
         return ''
     m = _QUOTE_START.search(text)
+    if m:
+        text = text[:m.start()]
+    m = _OUR_FOOTER.search(text)
     if m:
         text = text[:m.start()]
     return '\n'.join(
@@ -119,9 +137,16 @@ def _keyword_regex(keywords):
 
 
 _OOO_RE = _keyword_regex(_OOO)
+_UNSUBSCRIBE_RE = _keyword_regex(_UNSUBSCRIBE)
 _NOT_INTERESTED_RE = _keyword_regex(_NOT_INTERESTED)
 _WANTS_MORE_RE = _keyword_regex(_WANTS_MORE)
 _POSITIVE_RE = _keyword_regex(_POSITIVE)
+_NEGATED = re.compile(r"^\W*(?:not|no|never)\b|^\W*(?:\w+\W+){0,2}(?:not|no|never)\b")
+
+
+def _positive(lower: str) -> bool:
+    """A positive phrase not followed closely by a 'not' ('sounds good, but not now' is not a yes)."""
+    return any(not _NEGATED.match(lower[m.end():m.end() + 25]) for m in _POSITIVE_RE.finditer(lower))
 
 
 class EmailAssistantAgent:
@@ -166,29 +191,30 @@ class EmailAssistantAgent:
         if not reply_text:
             return self._result(CAT_NEUTRAL, confidence='high', reason='Reply contained only quoted text')
 
+        # The AI reads the reply. The word lists decided most replies before it was asked, and misread common ones:
+        # 'Absolutely not' booked a meeting, 'not right now' opted the person out for good (CO-145).
+        if self.groq_client:
+            result = self._ai_classify(reply_text)
+            if result['confidence'] == 'high':
+                if result['category'] == CAT_OUT_OF_OFFICE:
+                    result['resume_date'] = self._extract_return_date(full_text)
+                return result
+        return self._keyword_classify(reply_text, full_text)
+
+    def _keyword_classify(self, reply_text: str, full_text: str) -> dict:
+        """Only when the AI cannot be asked or does not answer."""
         lower = reply_text.lower()
-
-        # OOO first — most distinct signal
         if _OOO_RE.search(lower):
-            return self._result(
-                CAT_OUT_OF_OFFICE,
-                reason='Out-of-office detected',
-                resume_date=self._extract_return_date(full_text),
-            )
-
+            return self._result(CAT_OUT_OF_OFFICE, reason='Out-of-office detected',
+                                resume_date=self._extract_return_date(full_text))
+        if _UNSUBSCRIBE_RE.search(lower):
+            return self._result(CAT_UNSUBSCRIBE, reason='Asked to stop the emails')
         if _NOT_INTERESTED_RE.search(lower):
             return self._result(CAT_NOT_INTERESTED, reason='Not-interested keyword match')
-
-        if _POSITIVE_RE.search(lower):
+        if _positive(lower):
             return self._result(CAT_POSITIVE, reason='Positive-interest keyword match')
-
         if _WANTS_MORE_RE.search(lower):
             return self._result(CAT_WANTS_MORE, reason='Wants-more-info keyword match')
-
-        # Ambiguous — use AI
-        if self.groq_client:
-            return self._ai_classify(reply_text)
-
         return self._result(CAT_NEUTRAL, confidence='low', reason='No keyword match, no AI available')
 
     # ── improve_email ─────────────────────────────────────────────────────────
@@ -335,17 +361,21 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
     # ── Private ───────────────────────────────────────────────────────────────
 
     def _ai_classify(self, reply_text: str) -> dict:
-        prompt = f"""Classify this sales email reply into one category.
+        prompt = f"""Classify this reply to a sales email into one category. It may be in any language, including
+Roman Urdu; read what the person means.
 
 Reply:
-\"\"\"{reply_text[:600]}\"\"\"
+\"\"\"{reply_text[:1200]}\"\"\"
 
 Categories:
-- out_of_office    : auto-reply, vacation, away message
-- not_interested   : clearly rejecting, asking to stop, unsubscribing
-- wants_more_info  : asking questions, curious, wants details or pricing
-- positive_interest: ready to meet, schedule a call, book a demo, says yes
-- neutral          : vague, unclear, off-topic
+- out_of_office    : an automatic away or vacation message
+- unsubscribe      : explicitly asks to stop the emails or to be removed ("stop emailing me", "unsubscribe me")
+- not_interested   : declines ("not interested", "we already have a tool") without asking to stop all emails
+- wants_more_info  : asks questions, wants details or the price
+- positive_interest: wants to meet, a call or a demo, or says yes
+- neutral          : unclear, off-topic, or "not right now" / "maybe later" / "ask me next quarter"
+
+A yes with a 'not' is not a yes: "absolutely not" is not_interested.
 
 Return ONLY JSON: {{"category": "...", "reason": "one sentence explanation"}}"""
 
@@ -401,6 +431,14 @@ Return ONLY JSON: {{"category": "...", "reason": "one sentence explanation"}}"""
                     from dateutil import parser as dp
                     dt = dp.parse(m.group(1), fuzzy=True)
                     aware = timezone.make_aware(dt.replace(hour=9, minute=0, second=0))
+                    if aware < timezone.now():
+                        # 'Back on January 3', read in December, is next year's (CO-241).
+                        try:
+                            aware = aware.replace(year=aware.year + 1)
+                        except ValueError:
+                            aware = aware + timedelta(days=365)
+                        if aware < timezone.now():
+                            break
                     return aware + timedelta(days=1)  # 1-day buffer after return
                 except Exception:
                     pass
