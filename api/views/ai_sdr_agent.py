@@ -16,6 +16,8 @@ from datetime import timedelta
 from typing import Optional
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.utils import timezone
@@ -966,6 +968,7 @@ def import_leads_csv(request):
         skipped_dupes = 0
         skipped_empty = 0
         errors = []
+        refused = []
 
         # Pre-load existing emails once to avoid per-row DB hits
         existing_emails_lower = set(
@@ -1022,6 +1025,17 @@ def import_leads_csv(request):
                     skipped_empty += 1
                     continue
 
+                # An email that is not one is refused with the reason: 'sana.malik@' and 'n/a' were taken as leads
+                # (found in the live run of 29 Oct). No email at all is allowed, as when a lead is added by hand
+                # (LinkedIn steps).
+                who = full_name or company_name or f'row {i}'
+                if row_email:
+                    try:
+                        validate_email(row_email)
+                    except ValidationError:
+                        refused.append(f'row {i} ({who}): "{row_email}" is not an email address')
+                        continue
+
                 raw_size = pick('company_size')
                 digits = re.sub(r'[^\d]', '', raw_size)
                 company_size = int(digits) if digits else None
@@ -1066,9 +1080,11 @@ def import_leads_csv(request):
         if skipped_empty:
             msg += f', {skipped_empty} empty rows'
         msg += '.'
+        if refused:
+            msg += f' Not imported: {"; ".join(refused[:5])}' + (f'; and {len(refused) - 5} more' if len(refused) > 5 else '') + '.'
         if created:
             msg += ' Qualifying them in the background — scores will appear shortly.'
-        if created == 0 and not errors:
+        if created == 0 and not errors and not refused:
             msg = ('No leads imported — check the CSV has a header row with columns like '
                    'full_name / email / company_name (any capitalisation).')
         return Response({
@@ -1077,6 +1093,7 @@ def import_leads_csv(request):
             'created': created,
             'skipped_duplicates': skipped_dupes,
             'skipped_empty': skipped_empty,
+            'refused': refused,
             'errors': errors[:5],
         })
     except KeyServiceError:

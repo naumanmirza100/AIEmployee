@@ -169,7 +169,10 @@ class AnalyticsAgent:
         ]
 
         # ── Alert ─────────────────────────────────────────────────────
-        low_meetings_alert = meetings_lweek < MEETINGS_ALERT_THRESHOLD      # about the week just ended
+        # About the week just ended, and only once a campaign ran through it: a new account was greeted with a
+        # 'Low meetings alert' (found in the live run of 29 Oct).
+        ran_last_week = SDRCampaign.objects.filter(company_user=company_user, activated_at__lt=week_start).exists()
+        low_meetings_alert = ran_last_week and meetings_lweek < MEETINGS_ALERT_THRESHOLD
 
         return {
             # Summary cards

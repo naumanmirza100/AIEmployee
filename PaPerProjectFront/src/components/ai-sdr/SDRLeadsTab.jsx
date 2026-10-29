@@ -590,6 +590,13 @@ const SDRLeadsTab = () => {
   const fileInputRef = useRef(null);
 
   const [sdrKeyStatus, setSdrKeyStatus] = useState({ apollo: false, apify: false, loaded: false });
+  const hasSource = sdrKeyStatus.loaded && (sdrKeyStatus.apollo || sdrKeyStatus.apify);
+  useEffect(() => {
+    getSdrSettings().then((res) => {
+      const d = res?.data || res || {};
+      setSdrKeyStatus({ apollo: !!d.apollo_api_key_set, apify: !!d.apify_api_token_set, loaded: true });
+    }).catch(() => setSdrKeyStatus({ apollo: false, apify: false, loaded: true }));
+  }, []);
   // CSV import preview modal state.
   const [csvImport, setCsvImport] = useState(null); // { file, rows, columns, skippedEmpty } | null
   const [csvImporting, setCsvImporting] = useState(false);
@@ -942,7 +949,9 @@ const SDRLeadsTab = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
 
-      <ICPProfilePanel onSaved={openGenModal} />
+      {/* With no Apollo or Apify key, saving the profile opened a lead search that could not run. */}
+      <ICPProfilePanel onSaved={() => (hasSource ? openGenModal() : toast({
+        title: 'ICP saved', description: 'Now bring in your leads with Import CSV, or add a lead by hand.' }))} />
 
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
@@ -1145,7 +1154,9 @@ const SDRLeadsTab = () => {
             <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 20, maxWidth: 360, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
               {(search || activeFiltersCount > 0)
                 ? 'Try clearing your search or filters to see more leads.'
-                : 'Generate leads from Apollo.io / Apify, import a CSV, or add one manually to get started.'}
+                : hasSource
+                  ? 'Generate leads from Apollo.io / Apify, import a CSV, or add one manually to get started.'
+                  : 'Import a CSV of your leads, or add one by hand. Lead search needs an Apollo.io or Apify key in Settings.'}
             </p>
             {(search || activeFiltersCount > 0) ? (
               <Button onClick={() => { setSearchRaw(''); setFilterTemp(''); setFilterStatus(''); setFilterSource(''); }} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>
@@ -1153,9 +1164,11 @@ const SDRLeadsTab = () => {
               </Button>
             ) : (
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                {hasSource && (
                 <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Zap size={15} /> Generate Leads
                 </Button>
+                )}
                 <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Upload size={15} /> Import CSV
                 </Button>

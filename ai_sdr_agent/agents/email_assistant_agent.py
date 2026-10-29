@@ -324,6 +324,7 @@ Write a reply that:
 - Signs off with "Best," and then {(campaign.sender_name or campaign.sender_company or 'the sender').split()[0]} on the next line
 - Under 120 words total
 - Conversational, not salesy
+- In the same language and script as their reply (Roman Urdu stays in Latin letters)
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
 
@@ -438,13 +439,17 @@ What we offer (the ONLY facts you may use about it): {offer}
 Sender: {sender.get('name', '')}, {sender.get('title', '')} at {sender.get('company', '')}
 
 Rules:
-- Write in the language of their reply
+- Write in the same language and the same script as their reply: Roman Urdu stays in Latin letters (a Roman Urdu
+  reply was answered in Urdu script in the live run of 29 Oct)
 - Under 110 words; never state a fact, number or price that is not given above
 - Sign off with "Best," and then {signer} on the next line
+- If the reply means nothing (random letters, an empty message), answer nothing: {{"subject": "", "body": ""}}
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
         data = self._ask_json(prompt)
-        result['answer'] = {'subject': str(data.get('subject', ''))[:300], 'body': str(data.get('body', ''))}
+        body = str(data.get('body', '')).strip()
+        if body:
+            result['answer'] = {'subject': str(data.get('subject', ''))[:300], 'body': body}
         return result
 
     # ── Private ───────────────────────────────────────────────────────────────

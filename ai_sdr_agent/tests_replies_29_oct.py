@@ -604,3 +604,31 @@ class EmailAssistantTests(SDRBase):
             data = self.call(views.sdr_assistant_read, {'reply': 'I am away until Monday'}).data['data']
         self.assertIsNone(data['answer'])
         self.assertEqual(client.chat.completions.create.call_count, 1)
+
+
+class LiveRunTests(SDRBase):
+    """Found in the live run of 29 Oct."""
+
+    def test_rows_with_an_email_that_is_not_one_are_refused_with_the_reason(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from api.views import ai_sdr_agent as views
+        csv_text = ('first_name,last_name,email,company\n'
+                    'Sana,Malik,sana.malik@,Margalla Smiles\n'
+                    'Usman,Ghani,,Capital Dental\n'
+                    'Hira,Aslam,n/a,City Dental\n'
+                    'Kiran,Shah,kiran@clinic.example,Smile Line\n')
+        request = APIRequestFactory().post('/x', {'file': SimpleUploadedFile('leads.csv', csv_text.encode())},
+                                           format='multipart')
+        force_authenticate(request, user=self.cu)
+        data = views.import_leads_csv(request).data
+        self.assertEqual(data['created'], 2)                    # Kiran, and Usman with no email (as by hand)
+        self.assertEqual(len(data['refused']), 2)
+        self.assertIn('"n/a" is not an email address', data['message'])
+        self.assertIn('"sana.malik@" is not an email address', data['message'])
+
+    def test_a_new_account_is_not_told_its_meetings_are_low(self):
+        from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent
+        self.assertFalse(AnalyticsAgent().compute_metrics(self.cu)['low_meetings_alert'])
+        SDRCampaign.objects.filter(pk=self.campaign.pk).update(activated_at=timezone.now() - timedelta(days=14))
+        self.assertTrue(AnalyticsAgent().compute_metrics(self.cu)['low_meetings_alert'])
