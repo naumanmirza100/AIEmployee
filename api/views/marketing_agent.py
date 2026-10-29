@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.core.paginator import Paginator
@@ -115,6 +116,21 @@ def _get_or_create_user_for_company_user(company_user):
     why it is no longer looked up by email address."""
     from core.logins import user_for
     return user_for(company_user)
+
+
+def _campaigns_for(company_user, user):
+    """The campaigns this login may open: every one in the company for an owner or admin, else only its own (the
+    user's decision of 29 Oct 2026). Leads, mailboxes and lead files inside a campaign are its maker's, so the views
+    use campaign.owner for those, and the campaign still sends from the maker's mailbox."""
+    from marketing_agent.services.company_scope import owner_ids
+    return Campaign.objects.filter(owner_id__in=owner_ids(company_user, user))
+
+
+def _maker_name(owner_id):
+    """The name of the dashboard login whose campaign this is."""
+    from core.models import CompanyUser
+    login = CompanyUser.objects.filter(login_user_id=owner_id).order_by('-is_active').first()
+    return (login.full_name or login.email) if login else ''
 
 
 @api_view(["GET"])
@@ -477,7 +493,7 @@ def get_campaign(request, campaign_id):
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
         
-        campaign = get_object_or_404(Campaign, id=campaign_id, owner=user)
+        campaign = get_object_or_404(_campaigns_for(company_user, user), id=campaign_id)
         
         leads_count = campaign.leads.count()
         sequences = EmailSequence.objects.filter(campaign=campaign)
@@ -504,8 +520,11 @@ def get_campaign(request, campaign_id):
             'sequences_count': sequences.count(),
             'created_at': campaign.created_at.isoformat(),
             'updated_at': campaign.updated_at.isoformat(),
+            # An owner or admin may open a colleague's campaign: the page says whose it is and leaves Delete to them.
+            'is_own': campaign.owner_id == user.pk,
+            'made_by': _maker_name(campaign.owner_id),
         }
-        
+
         data = {'campaign': campaign_data}
         
         if request.GET.get('detail') == '1':
@@ -521,7 +540,7 @@ def get_campaign(request, campaign_id):
             'data': data
         }, status=status.HTTP_200_OK)
         
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("get_campaign failed")
@@ -619,7 +638,7 @@ def update_campaign(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = get_object_or_404(Campaign, id=campaign_id, owner=user)
+        campaign = get_object_or_404(_campaigns_for(company_user, user), id=campaign_id)
         data = request.data
         if data.get('name') is not None:
             campaign.name = (data.get('name') or '').strip() or campaign.name
@@ -661,7 +680,7 @@ def update_campaign(request, campaign_id):
                 campaign.email_account = None
             else:
                 try:
-                    campaign.email_account = EmailAccount.objects.get(id=eid, owner=user)
+                    campaign.email_account = EmailAccount.objects.get(id=eid, owner=campaign.owner)
                 except EmailAccount.DoesNotExist:
                     return Response(
                         {'status': 'error', 'message': 'Email account not found or not owned by you.'},
@@ -680,7 +699,7 @@ def update_campaign(request, campaign_id):
             'message': 'Campaign updated successfully',
             'data': {'campaign_id': campaign.id}
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("update_campaign failed")
@@ -698,7 +717,7 @@ def campaign_stop(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = get_object_or_404(Campaign, id=campaign_id, owner=user)
+        campaign = get_object_or_404(_campaigns_for(company_user, user), id=campaign_id)
         if campaign.status != 'active':
             return Response(
                 {'status': 'error', 'message': f'Campaign "{campaign.name}" is not active and cannot be stopped.'},
@@ -711,7 +730,7 @@ def campaign_stop(request, campaign_id):
             'message': f'Campaign "{campaign.name}" has been stopped successfully.',
             'data': {'campaign_id': campaign.id, 'status': campaign.status}
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("campaign_stop failed")
@@ -729,11 +748,17 @@ def campaign_delete(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
                 status=status.HTTP_404_NOT_FOUND
+            )
+        if campaign.owner_id != user.pk:
+            return Response(
+                {'status': 'error', 'message': 'Only the person who made this campaign can delete it. You can pause it.',
+                 'error': 'not_the_maker'},
+                status=status.HTTP_403_FORBIDDEN
             )
         name = campaign.name
         campaign.delete()
@@ -760,7 +785,7 @@ def list_campaign_leads(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = get_object_or_404(Campaign, id=campaign_id, owner=user)
+        campaign = get_object_or_404(_campaigns_for(company_user, user), id=campaign_id)
         leads = campaign.leads.all().order_by('-created_at')
         page = int(request.GET.get('page', 1))
         limit = int(request.GET.get('limit', 100))
@@ -784,7 +809,7 @@ def list_campaign_leads(request, campaign_id):
                 'limit': limit,
             }
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("list_campaign_leads failed")
@@ -802,7 +827,7 @@ def add_campaign_lead(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = get_object_or_404(Campaign, id=campaign_id, owner=user)
+        campaign = get_object_or_404(_campaigns_for(company_user, user), id=campaign_id)
         data = request.data
         email = (data.get('email') or '').strip().lower()
         if not email:
@@ -824,7 +849,7 @@ def add_campaign_lead(request, campaign_id):
                 status=status.HTTP_400_BAD_REQUEST
             )
         lead, created = Lead.objects.get_or_create(
-            email=email, owner=user,
+            email=email, owner=campaign.owner,
             defaults={
                 'first_name': (data.get('first_name') or '').strip(),
                 'last_name': (data.get('last_name') or '').strip(),
@@ -841,7 +866,7 @@ def add_campaign_lead(request, campaign_id):
             'message': 'Lead added successfully',
             'data': {'lead_id': lead.id}
         }, status=status.HTTP_201_CREATED)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("add_campaign_lead failed")
@@ -859,8 +884,8 @@ def update_campaign_lead(request, campaign_id, lead_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = get_object_or_404(Campaign, id=campaign_id, owner=user)
-        lead = get_object_or_404(Lead, id=lead_id, owner=user)
+        campaign = get_object_or_404(_campaigns_for(company_user, user), id=campaign_id)
+        lead = get_object_or_404(Lead, id=lead_id, owner=campaign.owner)
         if not campaign.leads.filter(id=lead.id).exists():
             return Response(
                 {'status': 'error', 'message': 'Lead not in this campaign'},
@@ -873,7 +898,7 @@ def update_campaign_lead(request, campaign_id, lead_id):
                 return Response({'status': 'error', 'error': 'invalid_email',
                                  'message': f'"{email}" is not an email address.'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            if Lead.objects.filter(email=email, owner=user).exclude(id=lead_id).exists():
+            if Lead.objects.filter(email=email, owner=campaign.owner).exclude(id=lead_id).exists():
                 return Response(
                     {'status': 'error', 'message': 'Email already exists'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -901,7 +926,7 @@ def update_campaign_lead(request, campaign_id, lead_id):
             'message': 'Lead updated successfully',
             'data': {'lead_id': lead.id}
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("update_campaign_lead failed")
@@ -974,8 +999,8 @@ def delete_campaign_lead(request, campaign_id, lead_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = get_object_or_404(Campaign, id=campaign_id, owner=user)
-        lead = get_object_or_404(Lead, id=lead_id, owner=user)
+        campaign = get_object_or_404(_campaigns_for(company_user, user), id=campaign_id)
+        lead = get_object_or_404(Lead, id=lead_id, owner=campaign.owner)
         campaign.leads.remove(lead)
         if lead.campaigns.count() == 0:
             lead.delete()
@@ -987,7 +1012,7 @@ def delete_campaign_lead(request, campaign_id, lead_id):
             'message': message,
             'data': {}
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("delete_campaign_lead failed")
@@ -1146,7 +1171,7 @@ def upload_campaign_leads(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -1158,7 +1183,7 @@ def upload_campaign_leads(request, campaign_id):
                 status=status.HTTP_400_BAD_REQUEST
             )
         uploaded_file = request.FILES['file']
-        result, err = _upload_leads_from_file(campaign, user, uploaded_file)
+        result, err = _upload_leads_from_file(campaign, campaign.owner, uploaded_file)
         if err:
             return Response(
                 {'status': 'error', 'message': err, 'error': 'upload_failed'},
@@ -1194,7 +1219,7 @@ def export_campaign_leads(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = get_object_or_404(Campaign, id=campaign_id, owner=user)
+        campaign = get_object_or_404(_campaigns_for(company_user, user), id=campaign_id)
         leads = campaign.leads.all().order_by('-created_at')
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="campaign_{campaign.id}_leads.csv"'
@@ -1207,7 +1232,7 @@ def export_campaign_leads(request, campaign_id):
                 lead.status, lead.source or ''
             ])
         return response
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("export_campaign_leads failed")
@@ -1407,6 +1432,13 @@ def outreach_campaign(request):
             except (TypeError, ValueError):
                 campaign_id = None
         
+        # Launching, scheduling or looking over a colleague's campaign: an owner or admin acts for its maker, whose
+        # mailbox and leads it uses. Anyone else is refused by the agent as before.
+        acting_id = user.id
+        if campaign_id and action in ('launch', 'manage', 'optimize', 'schedule'):
+            maker = _campaigns_for(company_user, user).filter(id=campaign_id).values_list('owner_id', flat=True).first()
+            acting_id = maker or user.id
+
         if action == 'create_multi_channel' and leads_file:
             result = agent.create_multi_channel_campaign(
                 user_id=user.id,
@@ -1417,7 +1449,7 @@ def outreach_campaign(request):
         elif action == 'launch' and leads_file:
             result = agent.launch_campaign(
                 campaign_id=campaign_id,
-                user_id=user.id,
+                user_id=acting_id,
                 campaign_data=campaign_data,
                 context=context,
                 leads_file=leads_file
@@ -1425,7 +1457,7 @@ def outreach_campaign(request):
         else:
             result = agent.process(
                 action=action,
-                user_id=user.id,
+                user_id=acting_id,
                 campaign_data=campaign_data,
                 campaign_id=campaign_id,
                 context=context
@@ -1541,7 +1573,7 @@ def document_detail(request, document_id):
                 'available_formats': [{'code': c, 'name': n} for c, n in available_formats],
             },
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("document_detail failed")
@@ -1582,7 +1614,7 @@ def document_download(request, document_id, format_type):
             {'status': 'error', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("document_download failed")
@@ -1606,7 +1638,7 @@ def document_delete(request, document_id):
             'status': 'success',
             'data': {'message': 'Document deleted successfully'},
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("document_delete failed")
@@ -1834,7 +1866,7 @@ def list_sequences(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -1842,7 +1874,7 @@ def list_sequences(request, campaign_id):
             )
         email_accounts = (
             EmailAccount.objects
-            .filter(owner=user, is_active=True, is_marketing_account=True)
+            .filter(owner=campaign.owner, is_active=True, is_marketing_account=True)
             .order_by('-is_default', 'email')
         )
         main_sequences = EmailSequence.objects.filter(
@@ -2029,7 +2061,7 @@ def create_sequence(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2068,7 +2100,7 @@ def create_sequence(request, campaign_id):
                     status=status.HTTP_400_BAD_REQUEST
                 )
         try:
-            mailbox = _own_sending_mailbox(user, data.get('email_account_id'))
+            mailbox = _own_sending_mailbox(campaign.owner, data.get('email_account_id'))
         except _NotYourMailbox:
             return Response({'status': 'error', 'message': 'Email account not found or not owned by you.', 'error': 'validation'},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -2120,7 +2152,7 @@ def get_sequence_details(request, campaign_id, sequence_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2192,7 +2224,7 @@ def update_sequence(request, campaign_id, sequence_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2207,7 +2239,7 @@ def update_sequence(request, campaign_id, sequence_id):
         data = request.data
         if 'email_account_id' in data:
             try:
-                sequence.email_account = _own_sending_mailbox(user, data.get('email_account_id'))
+                sequence.email_account = _own_sending_mailbox(campaign.owner, data.get('email_account_id'))
             except _NotYourMailbox:
                 return Response({'status': 'error', 'message': 'Email account not found or not owned by you.', 'error': 'validation'},
                                 status=status.HTTP_400_BAD_REQUEST)
@@ -2256,7 +2288,7 @@ def delete_sequence(request, campaign_id, sequence_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2292,7 +2324,7 @@ def classify_interest_level(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2339,7 +2371,7 @@ def generate_template_content(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2388,7 +2420,7 @@ def create_template(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2428,7 +2460,7 @@ def update_template(request, campaign_id, template_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2484,7 +2516,7 @@ def delete_template(request, campaign_id, template_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2561,7 +2593,7 @@ def test_email_template(request, campaign_id, template_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -2809,7 +2841,7 @@ def get_email_status_full(request, campaign_id):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first()
         if not campaign:
             return Response(
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
@@ -3074,6 +3106,14 @@ def list_email_accounts(request):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
+        # ?campaign_id= on a colleague's campaign lists its maker's mailboxes: it sends from one of those.
+        campaign_id = request.query_params.get('campaign_id')
+        if campaign_id:
+            campaign = _campaigns_for(company_user, user).filter(id=campaign_id).first() if campaign_id.isdigit() else None
+            if campaign is None:
+                return Response({'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
+                                status=status.HTTP_404_NOT_FOUND)
+            user = campaign.owner
         accounts = (
             EmailAccount.objects
             .filter(owner=user, is_marketing_account=True)

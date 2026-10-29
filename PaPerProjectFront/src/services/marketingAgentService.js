@@ -212,9 +212,10 @@ export const testEmailTemplate = async (campaignId, templateId, data) => {
 /**
  * List email accounts
  */
-export const listEmailAccounts = async () => {
+export const listEmailAccounts = async (params = {}) => {
   try {
-    const response = await companyApi.get('/marketing/email-accounts');
+    // { campaign_id } lists the mailboxes of that campaign's maker (a colleague's campaign opened by an admin).
+    const response = await companyApi.get('/marketing/email-accounts', params);
     return response;
   } catch (error) {
     console.error('List email accounts error:', error);

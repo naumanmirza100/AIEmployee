@@ -10,7 +10,8 @@ from urllib.parse import parse_qs, urlsplit
 from django.db import connection
 from django.test import Client, override_settings
 
-from marketing_agent.models import EmailAccount, EmailSendHistory
+from core.logins import user_for
+from marketing_agent.models import Campaign, EmailAccount, EmailSendHistory
 from marketing_agent.services import click_links
 from marketing_agent.tests.base import MarketingTestCase
 
@@ -389,3 +390,68 @@ class FiguresTests(MarketingTestCase):
         self.assertEqual(code, 200, body)
         self.assertEqual(body['total_sent'], 3)
         self.assertEqual(body['data'][0]['sent_count'], 3)
+
+
+class SharingTests(MarketingTestCase):
+    """Decision of 29 Oct: an owner or admin opens and manages any campaign of the company; it still sends from its
+    maker's mailbox and only its maker deletes it. Anyone else reaches only their own."""
+
+    def setUp(self):
+        super().setUp()
+        self.bob_login = self.login(self.acme, 'bob@acme.test', 'Bob Baig', role='marketing_agent')
+        self.bob = user_for(self.bob_login)
+        self.bob_box = self.mailbox(self.bob, 'bob@acme.test')
+        self.ann_box = self.mailbox(self.ann, 'ann@acme.test')
+        self.bobs = self.campaign(self.bob, name="Bob's launch", status='draft', email_account=self.bob_box)
+        self.anns = self.campaign(self.ann, name="Ann's own", status='draft')
+
+    def test_an_admin_opens_a_colleagues_campaign_and_sees_whose_it_is(self):
+        from api.views import marketing_agent as views
+        code, body = self.call(views.get_campaign, self.ann_login, method='get', campaign_id=self.bobs.id)
+        self.assertEqual(code, 200, body)
+        self.assertFalse(body['data']['campaign']['is_own'])
+        self.assertEqual(body['data']['campaign']['made_by'], 'Bob Baig')
+
+    def test_a_member_still_reaches_only_their_own(self):
+        from api.views import marketing_agent as views
+        code, _ = self.call(views.get_campaign, self.bob_login, method='get', campaign_id=self.anns.id)
+        self.assertEqual(code, 404)
+        code, _ = self.call(views.get_campaign, self.rita_login, method='get', campaign_id=self.bobs.id)
+        self.assertEqual(code, 404)
+
+    def test_a_lead_added_by_the_admin_is_the_makers(self):
+        from api.views import marketing_agent as views
+        code, body = self.call(views.add_campaign_lead, self.ann_login, {'email': 'sara@customer.test'},
+                               campaign_id=self.bobs.id)
+        self.assertEqual(code, 201, body)
+        self.assertEqual(self.bobs.leads.get().owner_id, self.bob.pk)
+
+    def test_the_campaign_keeps_its_makers_mailboxes(self):
+        from api.views import marketing_agent as views
+        code, body = self.call(views.list_email_accounts, self.ann_login, {'campaign_id': self.bobs.id}, method='get')
+        self.assertEqual(code, 200, body)
+        self.assertEqual([a['email'] for a in body['data']], ['bob@acme.test'])
+        code, _ = self.call(views.update_campaign, self.ann_login, {'email_account_id': self.ann_box.id},
+                            method='put', campaign_id=self.bobs.id)
+        self.bobs.refresh_from_db()
+        self.assertEqual(self.bobs.email_account_id, self.bob_box.id)
+
+    def test_only_the_maker_deletes_it(self):
+        from api.views import marketing_agent as views
+        code, body = self.call(views.campaign_delete, self.ann_login, campaign_id=self.bobs.id)
+        self.assertEqual((code, body.get('error')), (403, 'not_the_maker'))
+        self.assertTrue(Campaign.objects.filter(id=self.bobs.id).exists())
+
+    def test_the_admin_launches_it_for_its_maker(self):
+        from unittest import mock
+        from api.views import marketing_agent as views
+        agent = mock.Mock()
+        agent.process.return_value = {'success': True}
+        with mock.patch.object(views.AgentRegistry, 'get_agent', return_value=agent):
+            code, _ = self.call(views.outreach_campaign, self.ann_login,
+                                {'action': 'launch', 'campaign_id': self.bobs.id, 'campaign_data': {}})
+            self.assertEqual(code, 200)
+            self.assertEqual(agent.process.call_args.kwargs['user_id'], self.bob.pk)
+            self.call(views.outreach_campaign, self.bob_login,
+                      {'action': 'launch', 'campaign_id': self.anns.id, 'campaign_data': {}})
+            self.assertEqual(agent.process.call_args.kwargs['user_id'], self.bob.pk)

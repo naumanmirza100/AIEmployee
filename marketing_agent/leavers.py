@@ -14,8 +14,9 @@ What happens now:
   * a colleague in the same company can connect the company's mailbox, which
     used to be refused as "not available" because another login already had it.
 
-What it does not do: open a colleague's campaign, its leads or its emails. Those
-screens still belong to the login that made them.
+Since 29 Oct 2026 an owner or admin can also open a colleague's campaign, see its
+leads and replies, change, pause, resume and launch it (api/views/marketing_agent.py,
+_campaigns_for). It still sends from its maker's mailbox and only its maker deletes it.
 """
 import logging
 

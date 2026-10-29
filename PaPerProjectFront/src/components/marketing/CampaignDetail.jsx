@@ -312,13 +312,14 @@ const CampaignDetail = () => {
   // Warn immediately on opening a campaign if the company has no sender email
   // accounts at all — don't wait for the user to hit Launch and discover it there.
   useEffect(() => {
-    marketingAgentService.listEmailAccounts().then((res) => {
+    // The campaign's maker's mailboxes: it sends from one of those, also when an admin opened a colleague's campaign.
+    marketingAgentService.listEmailAccounts({ campaign_id: id }).then((res) => {
       if (res?.status === 'success' && Array.isArray(res.data)) {
         setEmailAccounts(res.data);
         if (res.data.length === 0) setNoEmailAccountDialogOpen(true);
       }
     }).catch(() => {});
-  }, []);
+  }, [id]);
 
   // Auto-refresh Analytics & dashboard every 30 seconds (silent refresh, no loading spinner)
   const POLL_INTERVAL_MS = 30 * 1000;
@@ -724,6 +725,12 @@ const CampaignDetail = () => {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{campaign.name}</h1>
             <p className="text-sm text-muted-foreground">Created {formatDate(campaign.created_at)}</p>
+            {campaign.is_own === false && (
+              <p data-testid="MKT-colleague-campaign-note" className="text-xs text-amber-300/90 mt-1">
+                {campaign.made_by || 'A colleague'}'s campaign. You can manage it because you run the company; it
+                sends from their mailbox, and only they can delete it.
+              </p>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -801,12 +808,14 @@ const CampaignDetail = () => {
               Edit
             </Button>
           </HoverTip>
+          {campaign.is_own !== false && (
           <HoverTip tip="Delete this campaign permanently">
             <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)} disabled={!!actionLoading}>
               <Trash2 className="mr-2 h-4 w-4" />
               Delete
             </Button>
           </HoverTip>
+          )}
         </div>
       </div>
 
