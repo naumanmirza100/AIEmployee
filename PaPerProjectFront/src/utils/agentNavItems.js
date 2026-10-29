@@ -233,6 +233,7 @@ const ALL_AGENTS = [
       { label: 'Outreach',  icon: Mail,            path: '/ai-sdr/outreach' },
       { label: 'Meetings',  icon: Calendar,        path: '/ai-sdr/meetings' },
       { label: 'Analytics', icon: BarChart3,       path: '/ai-sdr/analytics' },
+      { label: 'Email Assistant', icon: Sparkles,  path: '/ai-sdr/email-assistant' },
       { label: 'CRM Sync',  icon: RefreshCw,       path: '/ai-sdr/crm-sync' },
       { label: 'Settings',  icon: Settings,        path: '/ai-sdr/settings' },
       { label: 'Do-not-email list', icon: MailX,   path: '/company/settings/do-not-email' },

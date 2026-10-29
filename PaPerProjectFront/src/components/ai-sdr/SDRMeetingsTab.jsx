@@ -446,7 +446,14 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
         send_approval: sendApproval,
         browser_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
-      if (sendApproval) {
+      // What the server says happened to the email: it used to say "sent" even when it failed (CO-152).
+      if (resp.email_sent === false) {
+        toast({
+          title: sendApproval ? 'Time saved, but the lead was not emailed' : 'Meeting confirmed, but the lead was not emailed',
+          description: resp.email_error || 'The email could not be sent.',
+          variant: 'destructive',
+        });
+      } else if (sendApproval) {
         toast({ title: 'Approval email sent!', description: 'Lead will receive an email asking if the time works.' });
       } else {
         toast({ title: 'Meeting confirmed!', description: 'Confirmation email sent to the lead.' });
@@ -767,6 +774,20 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
                   style={{ ...btnBase, background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
                   onClick={() => handleStatus('no_show')}>
                   {actionLoading === 'status_no_show' ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />} Lead Didn't Show Up
+                </button>
+                {/* A booked call could only be undone through "Lead Didn't Show Up", which tells the lead they
+                    missed it (CO-200). */}
+                <button data-testid="sdr-move-call" disabled={!!actionLoading}
+                  style={{ ...btnBase, background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' }}
+                  onClick={() => setShowConfirm(true)}>
+                  <CalendarCheck size={12} /> Move Time
+                </button>
+                <button data-testid="sdr-cancel-call" disabled={!!actionLoading}
+                  style={{ ...btnBase, background: 'transparent', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
+                  onClick={() => {
+                    if (window.confirm('Cancel this call? The lead is emailed that it is cancelled.')) doStatus('cancelled');
+                  }}>
+                  {actionLoading === 'status_cancelled' ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />} Cancel Call
                 </button>
               </>
             )}
@@ -1335,6 +1356,8 @@ const SDRMeetingsTab = () => {
                           <span style={{ fontSize: 12, color: '#818cf8', background: 'rgba(99,102,241,0.1)', borderRadius: 6, padding: '2px 9px', fontWeight: 600 }}>
                             {m.campaign_name}
                           </span>
+                        ) : m.campaign_removed ? (
+                          <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Campaign removed</span>
                         ) : '—'}
                       </td>
 

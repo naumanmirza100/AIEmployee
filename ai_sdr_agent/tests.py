@@ -212,17 +212,29 @@ class ReplyProcessingTests(SDRBase):
         enr.refresh_from_db()
         self.assertEqual(enr.status, 'replied')
 
-    def test_not_interested_unsubscribes_across_campaigns(self):
+    def test_a_request_to_stop_unsubscribes_across_campaigns(self):
         lead = self.make_lead()
         enr = self.enroll(lead)
+        other = SDRCampaign.objects.create(company_user=self.cu, name='C2', status='active')
+        enr2 = SDRCampaignEnrollment.objects.create(campaign=other, lead=self.make_lead('bob@acme.com'))
+        self._run_inbox([self.reply(enr, text='please stop emailing me')],
+                        {'action': 'unsubscribe', 'category': 'unsubscribe', 'label': 'x'})
+        enr.refresh_from_db(); enr2.refresh_from_db()
+        self.assertEqual(enr.status, 'unsubscribed')
+        self.assertEqual(enr2.status, 'unsubscribed')
+        self.assertTrue(oa.is_email_suppressed(self.cu, 'BOB@acme.com'))
+
+    def test_not_interested_stops_this_campaign_only(self):
+        """CO-145: 'no thanks' put the address on the company-wide do-not-email list."""
+        enr = self.enroll(self.make_lead())
         other = SDRCampaign.objects.create(company_user=self.cu, name='C2', status='active')
         enr2 = SDRCampaignEnrollment.objects.create(campaign=other, lead=self.make_lead('bob@acme.com'))
         self._run_inbox([self.reply(enr, text='no thanks')],
                         {'action': 'stop', 'category': 'not_interested', 'label': 'x'})
         enr.refresh_from_db(); enr2.refresh_from_db()
-        self.assertEqual(enr.status, 'unsubscribed')
-        self.assertEqual(enr2.status, 'unsubscribed')
-        self.assertTrue(oa.is_email_suppressed(self.cu, 'BOB@acme.com'))
+        self.assertEqual((enr.status, enr.reply_sentiment), ('completed', 'not_interested'))
+        self.assertEqual(enr2.status, 'active')
+        self.assertFalse(oa.is_email_suppressed(self.cu, 'bob@acme.com'))
 
     def test_bounce_notice_marks_lead_bounced(self):
         lead = self.make_lead()
@@ -257,7 +269,7 @@ class ClassificationTests(TestCase):
         self.assertEqual(self.cat(text), 'neutral')
 
     def test_real_unsubscribe_still_detected(self):
-        self.assertEqual(self.cat('Please unsubscribe me'), 'not_interested')
+        self.assertEqual(self.cat('Please unsubscribe me'), 'unsubscribe')
 
     def test_im_interested_is_not_im_in(self):
         self.assertNotEqual(self.cat("I'm interested in learning more"), 'positive_interest')
@@ -523,7 +535,11 @@ class ApiTests(SDRBase):
         self.call(views.sdr_enroll_leads, 'post',
                   data={'lead_ids': [self.make_lead('z@z.com').id]}, campaign_id=other.id)
         other.refresh_from_db()
-        self.assertEqual(other.status, 'scheduled')
+        self.assertEqual(other.status, 'draft')            # adding leads starts nothing (CO-149)
+        with mock.patch.object(views, '_validate_mail_settings', return_value=None):
+            self.call(views.sdr_campaign_detail, 'put', data={'status': 'active'}, campaign_id=other.id)
+        other.refresh_from_db()
+        self.assertEqual(other.status, 'scheduled')        # Start campaign keeps the later start date
 
     def test_enroll_does_not_activate_a_campaign_without_steps(self):
         empty = SDRCampaign.objects.create(
@@ -571,6 +587,14 @@ class ApiTests(SDRBase):
         self.assertEqual(views.sdr_google_auth_start(self.rf.get('/x')).status_code, 404)
 
 
+def work_time(days):
+    """A weekday at 10:00 UTC at least `days` ahead: the booking page takes working hours only (CO-201)."""
+    when = (timezone.now() + timedelta(days=days)).replace(hour=10, minute=0, second=0, microsecond=0)
+    while when.weekday() >= 5:
+        when += timedelta(days=1)
+    return when
+
+
 class BookingTests(SDRBase):
     def setUp(self):
         super().setUp()
@@ -589,7 +613,7 @@ class BookingTests(SDRBase):
 
     def test_booking_sets_lead_status_and_creates_meet_only_once(self):
         m = self.meeting()
-        when = timezone.now() + timedelta(days=3)
+        when = work_time(3)
         with mock.patch.object(views, '_create_google_meet_link',
                                return_value='https://meet.google.com/abc') as meet, \
                 mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
@@ -604,7 +628,7 @@ class BookingTests(SDRBase):
         # The event's id was thrown away: a call that moved stayed in Google at its old time.
         from core.google_calendar import event_state
         m = self.meeting()
-        when = (timezone.now() + timedelta(days=3)).replace(microsecond=0)
+        when = work_time(3)
         made = {'event_id': 'ev-42', 'meet_url': 'https://meet.google.com/abc'}
         with mock.patch('core.google_calendar.create_google_event', return_value=made) as create:
             with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
@@ -618,14 +642,14 @@ class BookingTests(SDRBase):
         m = self.meeting()
         with mock.patch('core.google_calendar.create_google_event', return_value=None):
             with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
-                self.assertEqual(self.book(m, timezone.now() + timedelta(days=3)).status_code, 200)
+                self.assertEqual(self.book(m, work_time(3)).status_code, 200)
         m.refresh_from_db()
         self.assertEqual((m.google_event_id, m.google_event_state), ('', ''))
         self.assertTrue(m.calendar_link.startswith('https://meet.jit.si/'))
 
     def test_a_reopened_call_booked_again_moves_its_event_and_makes_no_second_one(self):
         from core.google_calendar import event_state
-        was = (timezone.now() + timedelta(days=2)).replace(microsecond=0)
+        was = work_time(2)
         m = self.meeting(scheduled_at=was, calendar_link='https://meet.google.com/abc',
                          google_event_id='ev-42', google_event_state=event_state(was, 30))
         when = was + timedelta(days=1)
@@ -647,7 +671,7 @@ class BookingTests(SDRBase):
         self.assertEqual(m.status, 'pending')
 
     def test_booking_overlapping_another_meeting_is_refused(self):
-        when = timezone.now() + timedelta(days=3)
+        when = work_time(3)
         other_lead = self.make_lead('o@o.com')
         SDRMeeting.objects.create(company_user=self.cu, lead=other_lead, status='scheduled',
                                   scheduled_at=when + timedelta(minutes=10), duration_minutes=30)
@@ -847,3 +871,90 @@ class ApifyErrorItemTests(SDRBase):
         with mock.patch('requests.get', side_effect=get):
             leads = self.agent().fetch_apify_runs(max_leads=10)
         self.assertEqual([l['email'] for l in leads], ['sam@x.com'])
+
+
+class NoMadeUpLeadsTests(SDRBase):
+    """Decided 29 Oct 2026: with no Apollo or Apify key the AI made leads up (invented people, emails at real-looking
+    domains, invented news), and a campaign could send to them. Now search says a key is needed."""
+
+    def setUp(self):
+        super().setUp()
+        self.rf = APIRequestFactory()
+        SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
+
+    def call(self, view, method, data=None, **kw):
+        req = getattr(self.rf, method)('/x', data or {}, format='json')
+        force_authenticate(req, user=self.cu)
+        return view(req, **kw)
+
+    def test_search_with_no_key_makes_nothing_up(self):
+        for source in ('auto', 'ai', 'apify', 'apollo'):
+            with self.subTest(source=source), mock.patch('requests.post') as post, mock.patch('requests.get') as get:
+                resp = self.call(views.research_leads, 'post', {'count': 5, 'source': source})
+                self.assertEqual((resp.status_code, resp.data['code']), (400, 'no_lead_source'))
+                post.assert_not_called()
+                get.assert_not_called()
+        self.assertFalse(SDRLead.objects.exists())
+
+    def test_the_sources_list_is_empty_without_keys_and_counts_the_persons_own(self):
+        self.assertEqual(self.call(views.research_sources, 'get').data['sources'], [])
+        SDRAgentSettings.objects.create(company_user=self.cu, apify_api_token='tok')
+        self.assertEqual(self.call(views.research_sources, 'get').data['sources'], ['apify'])
+
+    def test_a_lead_made_up_earlier_is_not_put_in_a_campaign(self):
+        made_up = self.make_lead('ceo@realcompany.example', source='ai_generated')
+        real = self.make_lead('sara@clinic.example', source='csv_import')
+        resp = self.call(views.sdr_enroll_leads, 'post', {'lead_ids': [made_up.id, real.id]},
+                         campaign_id=self.campaign.id)
+        self.assertEqual(list(SDRCampaignEnrollment.objects.values_list('lead__email', flat=True)),
+                         ['sara@clinic.example'])
+        self.assertIn('made up by the AI', str(resp.data))
+
+
+from django.test import SimpleTestCase
+
+
+class SchedulerStartTests(SimpleTestCase):
+    """CO-141: a laptop running the dev server against the shared database sent its campaign emails, with links to
+    localhost. The dev server now starts the scheduler only when asked, and never with localhost links."""
+
+    def test_the_dev_server_starts_it_only_when_asked(self):
+        from ai_sdr_agent.apps import should_start_scheduler
+        dev = ['manage.py', 'runserver', '--noreload']
+        self.assertFalse(should_start_scheduler(dev, {}))
+        self.assertTrue(should_start_scheduler(dev, {'SDR_SCHEDULER_ENABLED': 'true'}))
+        self.assertTrue(should_start_scheduler(['gunicorn', 'project_manager_ai.wsgi'], {}))   # the live server
+        self.assertFalse(should_start_scheduler(['gunicorn'], {'SDR_SCHEDULER_ENABLED': 'false'}))
+
+    def test_localhost_links_with_a_remote_database_stop_it(self):
+        from ai_sdr_agent import apps
+        remote = {'default': {'ENGINE': 'django.db.backends.mysql', 'HOST': 'db.example.net'}}
+        local = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'HOST': ''}}
+        for databases, base, unsafe in ((remote, 'http://localhost:8000', True),
+                                        (remote, 'https://api.payperproject.com', False),
+                                        (local, 'http://localhost:8000', False)):
+            with self.subTest(base=base), override_settings(DATABASES=databases), \
+                    mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent._backend_base', return_value=base):
+                self.assertEqual(apps.links_would_point_at_localhost(), unsafe)
+
+
+class FinishedCampaignReplyTests(SDRBase):
+    """CO-143: replies stopped being read within an hour of a campaign's last email, once it was marked Completed."""
+
+    def test_finished_and_paused_campaigns_are_read_for_thirty_days(self):
+        from ai_sdr_agent.tasks import campaigns_to_read_replies
+
+        def campaign(name, status, sent_days_ago):
+            c = SDRCampaign.objects.create(company_user=self.cu, name=name, status=status)
+            if sent_days_ago is not None:
+                e = self.enroll(self.make_lead(f'{name}@lead.example'), campaign=c)
+                SDROutreachLog.objects.create(enrollment=e, action_type='email', status='sent',
+                                              sent_at=timezone.now() - timedelta(days=sent_days_ago))
+            return c.name
+
+        campaign('done-recent', 'completed', 2)
+        campaign('paused-recent', 'paused', 10)
+        campaign('done-old', 'completed', 45)
+        campaign('draft', 'draft', None)
+        self.assertEqual(sorted(campaigns_to_read_replies().values_list('name', flat=True)),
+                         ['C1', 'done-recent', 'paused-recent'])

@@ -39,7 +39,10 @@ class AnalyticsAgent:
             SDROutreachLog, SDRMeeting,
         )
 
-        now       = timezone.now()
+        # 'Today' is the company's day, not the UTC one (CO-240).
+        from core.scheduling import zone_name
+        from core.scheduling.conflicts import zone_info
+        now       = timezone.now().astimezone(zone_info(zone_name(company_user.company.timezone_name)))
         today_start     = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start      = today_start - timedelta(days=now.weekday())          # Mon
         last_week_start = week_start - timedelta(days=7)
@@ -87,9 +90,12 @@ class AnalyticsAgent:
         # ── Enrollments / Replies ─────────────────────────────────────
         enroll_qs = SDRCampaignEnrollment.objects.filter(campaign__company_user=company_user)
         total_enrolled  = enroll_qs.count()
-        replied_week    = enroll_qs.filter(replied_at__gte=week_start).count()
-        replied_lweek   = enroll_qs.filter(replied_at__gte=last_week_start, replied_at__lt=last_week_end).count()
-        replied_total   = enroll_qs.filter(status__in=['replied', 'unsubscribed']).count()
+        # A reply is something the lead wrote, not an away message nor an unsubscribe click, which both set a
+        # reply time (CO-240).
+        answered_qs     = enroll_qs.exclude(reply_content='').exclude(reply_sentiment='out_of_office')
+        replied_week    = answered_qs.filter(replied_at__gte=week_start).count()
+        replied_lweek   = answered_qs.filter(replied_at__gte=last_week_start, replied_at__lt=last_week_end).count()
+        replied_total   = answered_qs.count()
 
         # Reply breakdown by sentiment
         sentiment_counts = {
@@ -99,12 +105,15 @@ class AnalyticsAgent:
         }
 
         # ── Meetings ──────────────────────────────────────────────────
+        # Booked means a time was settled (confirmed_at): a meeting row is made the moment a reply reads as
+        # interest, before any time, and cancelled ones were counted too (CO-240).
         meet_qs = SDRMeeting.objects.filter(company_user=company_user)
-        meetings_today  = meet_qs.filter(created_at__gte=today_start).count()
-        meetings_week   = meet_qs.filter(created_at__gte=week_start).count()
-        meetings_lweek  = meet_qs.filter(created_at__gte=last_week_start, created_at__lt=last_week_end).count()
-        meetings_month  = meet_qs.filter(created_at__gte=month_start).count()
-        meetings_total  = meet_qs.count()
+        booked_qs       = meet_qs.filter(confirmed_at__isnull=False).exclude(status='cancelled')
+        meetings_today  = booked_qs.filter(confirmed_at__gte=today_start).count()
+        meetings_week   = booked_qs.filter(confirmed_at__gte=week_start).count()
+        meetings_lweek  = booked_qs.filter(confirmed_at__gte=last_week_start, confirmed_at__lt=last_week_end).count()
+        meetings_month  = booked_qs.filter(confirmed_at__gte=month_start).count()
+        meetings_total  = booked_qs.count()
         meetings_scheduled = meet_qs.filter(status='scheduled').count()
         meetings_completed = meet_qs.filter(status='completed').count()
 
@@ -117,7 +126,7 @@ class AnalyticsAgent:
         campaign_rows = []
         for c in camp_qs.filter(status='active').order_by('-emails_sent')[:5]:
             enrolled  = c.enrollments.count()
-            replied   = c.enrollments.filter(status__in=['replied', 'unsubscribed']).count()
+            replied   = c.enrollments.exclude(reply_content='').exclude(reply_sentiment='out_of_office').count()
             reply_rate = round((replied / enrolled * 100) if enrolled else 0, 1)
             campaign_rows.append({
                 'id': c.id,
@@ -133,7 +142,7 @@ class AnalyticsAgent:
         reply_rate_week = round((replied_week / emails_week * 100) if emails_week else 0, 1)
         # Of the leads who replied, how many have a meeting. All meetings over replies counted the ones
         # added by hand too, which follow no reply, and the rate read 200%.
-        replied_with_meeting = (meet_qs.filter(enrollment__in=enroll_qs.filter(status__in=['replied', 'unsubscribed']))
+        replied_with_meeting = (booked_qs.filter(enrollment__in=answered_qs)
                                 .values('enrollment').distinct().count())
         meeting_rate    = round((replied_with_meeting / replied_total * 100) if replied_total else 0, 1)
 
@@ -147,7 +156,7 @@ class AnalyticsAgent:
                 'date': day_start.strftime('%b %d'),
                 'emails': logs_qs.filter(sent_at__gte=day_start, sent_at__lt=day_end, status='sent').count(),
                 'leads':  leads_qs.filter(created_at__gte=day_start, created_at__lt=day_end).count(),
-                'meetings': meet_qs.filter(created_at__gte=day_start, created_at__lt=day_end).count(),
+                'meetings': booked_qs.filter(confirmed_at__gte=day_start, confirmed_at__lt=day_end).count(),
             })
 
         # ── Funnel ────────────────────────────────────────────────────
@@ -160,7 +169,7 @@ class AnalyticsAgent:
         ]
 
         # ── Alert ─────────────────────────────────────────────────────
-        low_meetings_alert = meetings_week < MEETINGS_ALERT_THRESHOLD
+        low_meetings_alert = meetings_lweek < MEETINGS_ALERT_THRESHOLD      # about the week just ended
 
         return {
             # Summary cards
@@ -235,7 +244,7 @@ class AnalyticsAgent:
                 <div style="background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;padding:14px 18px;">
                   <strong style="color:#92400e;">⚠️ Alert: Low Meeting Bookings</strong><br>
                   <span style="color:#78350f;font-size:13px;">
-                    Only <strong>{m['meetings_week']}</strong> meeting(s) booked this week —
+                    Only <strong>{m['meetings_lweek']}</strong> meeting(s) booked last week —
                     below the target of {m['meetings_alert_threshold']}.
                     Consider reviewing reply rates and follow-up sequences.
                   </span>
@@ -390,7 +399,7 @@ class AnalyticsAgent:
         if not to_email:
             return False
 
-        subject = f"⚠️ SDR Alert: Only {meetings_this_week} meeting(s) booked this week (target: {MEETINGS_ALERT_THRESHOLD})"
+        subject = f"⚠️ SDR Alert: Only {meetings_this_week} meeting(s) booked last week (target: {MEETINGS_ALERT_THRESHOLD})"
 
         html = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
@@ -402,8 +411,8 @@ class AnalyticsAgent:
   </div>
   <div style="padding:28px;">
     <p style="font-size:15px;color:#1f2937;">
-      Your SDR system has only booked <strong style="color:#dc2626;">{meetings_this_week}</strong> meeting(s)
-      this week, which is below the target of <strong>{MEETINGS_ALERT_THRESHOLD}</strong>.
+      Your SDR system booked only <strong style="color:#dc2626;">{meetings_this_week}</strong> meeting(s)
+      last week, below the target of <strong>{MEETINGS_ALERT_THRESHOLD}</strong>.
     </p>
     <p style="font-size:13px;color:#6b7280;">Possible actions to improve:</p>
     <ul style="font-size:13px;color:#374151;line-height:1.8;">
@@ -415,8 +424,8 @@ class AnalyticsAgent:
     </ul>
     <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;">
     <p style="font-size:11px;color:#9ca3af;">
-      This alert fires when weekly meetings fall below {MEETINGS_ALERT_THRESHOLD}.
-      You can change this threshold in analytics_agent.py (MEETINGS_ALERT_THRESHOLD).
+      Sent on Mondays when last week had fewer than {MEETINGS_ALERT_THRESHOLD} calls booked. You can turn it off
+      under Notification settings, "Sales reports".
     </p>
   </div>
 </div>

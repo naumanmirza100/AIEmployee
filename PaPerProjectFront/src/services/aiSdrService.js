@@ -69,11 +69,12 @@ export const saveIcpProfile = async (data) => {
 // --------------------------------------------------------------------------
 export const listLeads = async ({
   search = '', temperature = '', status = '', source = '',
-  sort = 'score_desc', page = 1, page_size = 25,
+  sort = 'score_desc', page = 1, page_size = 25, not_in_campaign = '',
 } = {}) => {
   try {
     const params = new URLSearchParams();
     if (search)      params.set('search', search);
+    if (not_in_campaign) params.set('not_in_campaign', not_in_campaign);
     if (temperature) params.set('temperature', temperature);
     if (status)      params.set('status', status);
     if (source)      params.set('source', source);
@@ -230,6 +231,25 @@ export const importLeadsFromCSV = async (file) => {
 };
 
 // Campaigns
+// Email Assistant: write an email, or read a lead's reply.
+export const assistantWriteEmail = async (data) => {
+  try {
+    return await companyApi.post('/sdr/email-assistant/write/', data);
+  } catch (error) {
+    console.error('Email assistant write error:', error);
+    throw error;
+  }
+};
+
+export const assistantReadReply = async (data) => {
+  try {
+    return await companyApi.post('/sdr/email-assistant/read/', data);
+  } catch (error) {
+    console.error('Email assistant read error:', error);
+    throw error;
+  }
+};
+
 export const listCampaigns = async () => {
   try {
     return await companyApi.get('/sdr/campaigns/');
@@ -262,6 +282,15 @@ export const deleteCampaign = async (id) => {
     return await companyApi.delete(`/sdr/campaigns/${id}/`);
   } catch (error) {
     console.error('Delete campaign error:', error);
+    throw error;
+  }
+};
+
+export const retryFailedLeads = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/campaigns/${id}/retry-failed/`, {});
+  } catch (error) {
+    console.error('Retry failed leads error:', error);
     throw error;
   }
 };

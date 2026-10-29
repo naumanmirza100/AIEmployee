@@ -14,7 +14,7 @@ import {
   listCampaigns, createCampaign, deleteCampaign, updateCampaign,
   getCampaignDetail, getCampaignSteps, generateSequenceSteps,
   getCampaignContacts, enrollLeads, updateCampaignStep, listLeads,
-  clearCampaignLeads,
+  clearCampaignLeads, retryFailedLeads,
 } from '@/services/aiSdrService';
 import SDRReplyDrafts from './SDRReplyDrafts';
 
@@ -375,7 +375,10 @@ const SDROutreachTab = () => {
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [steps, setSteps] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
-  const [leads, setLeads] = useState([]);   // all leads for enroll modal
+  const [leads, setLeads] = useState([]);   // one page of the leads for enroll modal
+  // The dialog asked for the first page only, so leads beyond the top 25 could never be enrolled (CO-146).
+  const [enrollSearch, setEnrollSearch] = useState('');
+  const [enrollPage, setEnrollPage] = useState({ page: 1, total_pages: 1, total_count: 0 });
 
   const [loading, setLoading] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -536,6 +539,9 @@ const SDROutreachTab = () => {
   // ── Regenerate steps ──────────────────────────────────────────────────
   const handleGenerateSteps = async () => {
     if (!selectedCampaign) return;
+    // One click replaced every step, hand edits included, with no question (CO-245).
+    if (steps.length && !window.confirm(
+      `Replace all ${steps.length} steps with new emails written by the AI? Your changes to them will be lost.`)) return;
     setGeneratingSteps(true);
     try {
       const resp = await generateSequenceSteps(selectedCampaign.id);
@@ -575,11 +581,17 @@ const SDROutreachTab = () => {
   };
 
   // ── Enroll leads ──────────────────────────────────────────────────────
-  const openEnrollModal = async () => {
+  const loadEnrollLeads = async (search = enrollSearch, page = 1) => {
     try {
-      const resp = await listLeads();
+      const resp = await listLeads({ search, page, page_size: 25, not_in_campaign: selectedCampaign.id });
       setLeads(resp.data || []);
+      setEnrollPage(resp.pagination || { page: 1, total_pages: 1, total_count: (resp.data || []).length });
     } catch (e) { console.error(e); }
+  };
+
+  const openEnrollModal = async () => {
+    setEnrollSearch('');
+    await loadEnrollLeads('', 1);
     setSelectedLeadIds([]);
     setShowEnrollModal(true);
   };
@@ -591,7 +603,14 @@ const SDROutreachTab = () => {
     setEnrolling(true);
     try {
       const resp = await enrollLeads(selectedCampaign.id, selectedLeadIds);
-      toast({ title: `Enrolled ${resp.enrolled} leads`, description: `${resp.skipped} already enrolled.` });
+      // Adding leads starts nothing (CO-149): a draft or finished campaign waits for Start campaign.
+      const waiting = ['draft', 'completed'].includes(resp.campaign_status);
+      toast({
+        title: `Enrolled ${resp.enrolled} lead${resp.enrolled !== 1 ? 's' : ''}`,
+        description: waiting
+          ? 'Nothing is sent yet: press Start campaign when you are ready.'
+          : `${resp.skipped} skipped.${resp.skipped_reasons?.length ? ' ' + resp.skipped_reasons[0] : ''}`,
+      });
       setShowEnrollModal(false);
       setSelectedLeadIds([]);
       await loadDetail(selectedCampaign);
@@ -632,6 +651,36 @@ const SDROutreachTab = () => {
       toast({ title: isPaused ? 'Campaign resumed — Celery will process it on next cycle' : 'Campaign paused' });
     } catch (e) {
       toast({ title: 'Failed to update campaign status', description: e.message, variant: 'destructive' });
+    } finally { setPausingCampaign(false); }
+  };
+
+  // ── Put leads parked after failed sends back in the sequence ─────────
+  const handleRetryFailed = async () => {
+    try {
+      const resp = await retryFailedLeads(selectedCampaign.id);
+      toast({ title: `${resp.retried} lead${resp.retried !== 1 ? 's' : ''} back in the sequence`,
+        description: 'They are tried again within five minutes.' });
+      if (resp.data) setSelectedCampaign(resp.data);
+      await loadDetail(resp.data || selectedCampaign);
+    } catch (e) {
+      toast({ title: 'Retry failed', description: apiErrorMessage(e, e.message), variant: 'destructive' });
+    }
+  };
+
+  // ── Start a draft or finished campaign ───────────────────────────────
+  const handleStart = async () => {
+    if (!selectedCampaign) return;
+    setPausingCampaign(true);
+    try {
+      const resp = await updateCampaign(selectedCampaign.id, { status: 'active' });
+      setSelectedCampaign(resp.data);
+      await loadCampaigns();
+      toast({
+        title: resp.data?.status === 'scheduled' ? `Scheduled to start on ${resp.data.start_date}` : 'Campaign started',
+        description: resp.data?.status === 'scheduled' ? '' : 'The first emails go out within five minutes.',
+      });
+    } catch (e) {
+      toast({ title: 'Could not start the campaign', description: apiErrorMessage(e, e.message), variant: 'destructive' });
     } finally { setPausingCampaign(false); }
   };
 
@@ -1102,6 +1151,25 @@ const SDROutreachTab = () => {
               Clear Leads
             </Button>
           )}
+          {enrollments.some(e => e.reply_sentiment === 'send_failed' && e.status === 'paused') && (
+            <Button data-testid="sdr-retry-failed" onClick={handleRetryFailed} variant="outline" style={{
+              border: '1px solid rgba(248,113,113,0.4)', color: '#f87171',
+              borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+            }}>
+              <Play size={14} /> Retry failed
+            </Button>
+          )}
+          {['draft', 'completed'].includes(selectedCampaign.status) && (mine || selectedCampaign.owner.is_active) && (
+            <Button data-testid="sdr-start-campaign" onClick={handleStart}
+              disabled={pausingCampaign || !selectedCampaign.total_leads} variant="outline"
+              title={selectedCampaign.total_leads ? '' : 'Add leads first'} style={{
+                border: '1px solid rgba(16,185,129,0.4)', color: '#10b981',
+                borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+              }}>
+              {pausingCampaign ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              Start campaign
+            </Button>
+          )}
           {/* Pause / Resume — only for active or paused campaigns. No Resume on the
               campaign of a switched-off login: the server refuses it. */}
           {(selectedCampaign.status === 'active'
@@ -1178,8 +1246,17 @@ const SDROutreachTab = () => {
       }}>
         <Zap size={13} style={{ flexShrink: 0, color: '#a855f7' }} />
         <span>
+          {selectedCampaign.inbox_error ? (
+            // The inbox could not be read: the line below said it was checked every five minutes (CO-197).
+            <span data-testid="sdr-inbox-error" style={{ color: '#f87171' }}>
+              <b>Replies are not being read.</b> {selectedCampaign.inbox_error} Fix the inbox in the campaign's
+              mailbox settings; follow-ups may reach people who have replied until then.{' '}
+            </span>
+          ) : null}
           {selectedCampaign.status === 'active'
-            ? <><b style={{ color: '#10b981' }}>Automation running</b> — emails send automatically every 5 min · inbox checked every 5 min · no manual action needed.</>
+            ? (selectedCampaign.inbox_error
+              ? <><b style={{ color: '#10b981' }}>Sending</b> — emails send automatically every 5 min.</>
+              : <><b style={{ color: '#10b981' }}>Automation running</b> — emails send automatically every 5 min · inbox checked every 5 min · no manual action needed.</>)
             : selectedCampaign.status === 'scheduled'
             ? <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Scheduled</b> — campaign will auto-start on {selectedCampaign.start_date}.</>
             : selectedCampaign.status === 'paused'
@@ -1197,8 +1274,8 @@ const SDROutreachTab = () => {
               })()
               : <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Paused</b> — campaign is paused. Resume to continue sending.</>)
             : selectedCampaign.status === 'completed'
-            ? <><b style={{ color: '#6b7280' }}>Campaign Completed</b> — all leads have been processed. Enroll new leads to restart.</>
-            : <><b style={{ color: '#6b7280' }}>Draft</b> — campaign has not started yet.</>}
+            ? <><b style={{ color: '#6b7280' }}>Campaign Completed</b> — all leads have been processed. Add new leads, then press Start campaign.</>
+            : <><b style={{ color: '#6b7280' }}>Draft</b> — nothing is sent yet. Add leads, then press Start campaign.</>}
           {selectedCampaign.smtp_host && <span style={{ color: '#60a5fa' }}> · Using {selectedCampaign.smtp_host}</span>}
         </span>
       </div>
@@ -1317,6 +1394,12 @@ const SDROutreachTab = () => {
                         <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 13 }}>{enr.lead_name}</div>
                         <div style={{ color: '#6b7280', fontSize: 11, marginTop: 2 }}>{enr.lead_company}</div>
                         {enr.lead_email && <div style={{ color: '#4b5563', fontSize: 11 }}>{enr.lead_email}</div>}
+                        {enr.send_error && (
+                          // Why sending stopped for this lead: it was parked with no word (CO-198).
+                          <div data-testid="sdr-send-error" style={{ color: '#f87171', fontSize: 11, marginTop: 3, maxWidth: 260 }}>
+                            Sending failed: {enr.send_error}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: '11px 14px' }}>
                         {enr.lead_score != null ? (
@@ -1468,17 +1551,28 @@ const SDROutreachTab = () => {
             <DialogTitle style={{ color: 'var(--text-soft)' }}>Enroll Leads into Campaign</DialogTitle>
           </DialogHeader>
 
-          <div style={{ overflowY: 'auto', maxHeight: '55vh' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Search size={14} style={{ color: '#6b7280' }} />
+            <input data-testid="sdr-enroll-search" value={enrollSearch} placeholder="Search by name, company or email"
+              onChange={e => { setEnrollSearch(e.target.value); loadEnrollLeads(e.target.value, 1); }}
+              style={{ flex: 1, background: 'transparent', border: '1px solid var(--line-1)', borderRadius: 8,
+                padding: '7px 10px', color: 'var(--text-soft)', fontSize: 13 }} />
+          </div>
+          <div style={{ overflowY: 'auto', maxHeight: '50vh' }}>
             {leads.length === 0 ? (
-              <p style={{ color: '#6b7280', textAlign: 'center', padding: 30 }}>No leads available. Add leads first from the Leads tab.</p>
+              <p style={{ color: '#6b7280', textAlign: 'center', padding: 30 }}>
+                {enrollSearch ? 'No lead matches that search.' : 'No leads to add: every lead is in this campaign already, or add leads first from the Leads tab.'}
+              </p>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--sfc-1e0f38)' }}>
                     <th style={{ padding: '8px 12px', width: 36 }}>
                       <input type="checkbox"
-                        onChange={e => setSelectedLeadIds(e.target.checked ? leads.map(l => l.id) : [])}
-                        checked={selectedLeadIds.length === leads.length && leads.length > 0}
+                        onChange={e => setSelectedLeadIds(prev => e.target.checked
+                          ? [...new Set([...prev, ...leads.map(l => l.id)])]
+                          : prev.filter(id => !leads.some(l => l.id === id)))}
+                        checked={leads.length > 0 && leads.every(l => selectedLeadIds.includes(l.id))}
                       />
                     </th>
                     {['Name', 'Company', 'Score'].map(h => (
@@ -1533,8 +1627,19 @@ const SDROutreachTab = () => {
           </div>
 
           <div style={{ padding: '10px 0 0', borderTop: '1px solid var(--sfc-1e0f38)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: '#6b7280', fontSize: 13 }}>
+            <span style={{ color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 10 }}>
               {selectedLeadIds.length} lead{selectedLeadIds.length !== 1 ? 's' : ''} selected
+              {enrollPage.total_pages > 1 && (
+                <span data-testid="sdr-enroll-pages" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Button variant="outline" disabled={enrollPage.page <= 1}
+                    onClick={() => loadEnrollLeads(enrollSearch, enrollPage.page - 1)}
+                    style={{ border: '1px solid var(--line-1)', borderRadius: 6, padding: '2px 8px', height: 26 }}>‹</Button>
+                  page {enrollPage.page} of {enrollPage.total_pages}
+                  <Button variant="outline" disabled={enrollPage.page >= enrollPage.total_pages}
+                    onClick={() => loadEnrollLeads(enrollSearch, enrollPage.page + 1)}
+                    style={{ border: '1px solid var(--line-1)', borderRadius: 6, padding: '2px 8px', height: 26 }}>›</Button>
+                </span>
+              )}
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <Button variant="outline" onClick={() => setShowEnrollModal(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>

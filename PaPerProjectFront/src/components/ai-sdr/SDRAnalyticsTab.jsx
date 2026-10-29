@@ -226,7 +226,7 @@ export default function SDRAnalyticsTab() {
           <AlertTriangle size={18} style={{ color: 'hsl(var(--pt-f59e0b))', flexShrink: 0 }} />
           <div>
             <div style={{ color: 'hsl(var(--pt-fbbf24))', fontWeight: 700, fontSize: 13 }}>
-              Low Meeting Alert — only {m.meetings_week} meeting(s) this week (target: {m.meetings_alert_threshold})
+              Low Meeting Alert — only {m.meetings_lweek} meeting(s) booked last week (target: {m.meetings_alert_threshold})
             </div>
             <div style={{ color: '#92400e', fontSize: 12, marginTop: 2 }}>
               Review reply rates and follow-up sequences to improve booking rate.
@@ -278,7 +278,7 @@ export default function SDRAnalyticsTab() {
         <StatCard
           icon={Calendar} label="Meetings This Week" value={m.meetings_week}
           sub={`${m.meetings_scheduled} scheduled · ${m.meetings_total} total`}
-          color={m.low_meetings_alert ? '#f59e0b' : '#34d399'}
+          color={m.meetings_week < m.meetings_alert_threshold ? '#f59e0b' : '#34d399'}
           trend={trend(m.meetings_week, m.meetings_lweek)}
         />
       </div>

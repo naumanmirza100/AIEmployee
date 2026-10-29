@@ -6,10 +6,11 @@ Finds B2B sales leads matching the company's Ideal Customer Profile.
 Sources (in priority order):
   1. Apollo.io REST API  — if APOLLO_API_KEY is set
   2. Apify              — if APIFY_API_TOKEN is set
-  3. Groq AI generation — fallback, always available
+
+With neither key there is no search. The AI used to make leads up instead (invented people, emails at
+real-looking company domains, invented news), which a campaign could then send to; that was removed on 29 Oct 2026.
 """
 
-import json
 import logging
 import os
 import re
@@ -69,6 +70,15 @@ class ApifyApprovalRequired(ValueError):
             f"The Apify actor '{actor}' needs a one-time permission approval. "
             f"Open it on Apify and click Approve, then try again: {self.approval_url}"
         )
+
+NO_SOURCE_MESSAGE = (
+    'Lead search needs an Apollo.io or Apify key. Add one under SDR Agent → Settings, '
+    'or bring your leads in from a file (Import CSV) or add them one by one.'
+)
+
+
+class NoLeadSource(ValueError):
+    """Neither an Apollo nor an Apify key is set, so there is nothing to search: the person adds one."""
 
 # Default Apify actor — Google Search scraper (free, no Bright Data needed)
 DEFAULT_APIFY_ACTOR = "apify/google-search-scraper"
@@ -225,20 +235,8 @@ class LeadResearchAgent:
             or os.environ.get('APIFY_ACTOR_ID', '')
             or DEFAULT_APIFY_ACTOR
         ).strip()
-
-        # Groq LLM key — resolved per-company through platform key service
-        self._key_ctx = None
-        self.groq_client = None
-
-        if company is not None:
-            from ai_sdr_agent.agents.sdr_key_resolver import resolve_sdr_groq_client
-            self.groq_client, self._key_ctx = resolve_sdr_groq_client(company)
-        else:
-            logger.warning(
-                "LeadResearchAgent initialised without a company — no LLM key resolved."
-            )
-
-        self.model = getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
+        # `company` is kept for the callers; search uses no AI key since the made-up leads were removed.
+        self.company = company
 
     # ------------------------------------------------------------------
     # Public API
@@ -248,26 +246,29 @@ class LeadResearchAgent:
         """Return a list of raw lead dicts for the given ICP profile."""
         if source == 'apify':
             if not self.apify_token:
-                raise ValueError(
+                raise NoLeadSource(
                     'Apify API token not configured. '
                     'Go to SDR Agent → Settings and enter your Apify API token.'
                 )
             return self._search_apify(icp_profile, count)
         if source == 'apollo':
             if not self.apollo_api_key:
-                raise ValueError(
+                raise NoLeadSource(
                     'Apollo API key not configured. '
                     'Go to SDR Agent → Settings and enter your Apollo.io API key.'
                 )
             return self._search_apollo(icp_profile, count)
-        if source in ('ai', 'ai_generated'):
-            return self._generate_ai_leads(icp_profile, count)
         # auto priority — apify only if both token AND actor are set
         if self.apollo_api_key:
             return self._search_apollo(icp_profile, count)
         if self.apify_token and self.apify_actor:
             return self._search_apify(icp_profile, count)
-        return self._generate_ai_leads(icp_profile, count)
+        raise NoLeadSource(NO_SOURCE_MESSAGE)
+
+    def _apify_headers(self) -> dict:
+        """The token goes in a header: in the web address it was written into the log, the research record and the
+        message on the customer's screen by any failed request (CO-142)."""
+        return {'Authorization': f'Bearer {self.apify_token}'}
 
     @property
     def source_label(self) -> str:
@@ -275,15 +276,15 @@ class LeadResearchAgent:
             return 'apollo'
         if self.apify_token:
             return 'apify'
-        return 'ai_generated'
+        return ''
 
     @property
     def available_sources(self) -> list[str]:
-        sources = ['ai']
-        if self.apify_token:
-            sources.insert(0, 'apify')
+        sources = []
         if self.apollo_api_key:
-            sources.insert(0, 'apollo')
+            sources.append('apollo')
+        if self.apify_token:
+            sources.append('apify')
         return sources
 
     # ------------------------------------------------------------------
@@ -400,7 +401,7 @@ class LeadResearchAgent:
                 run_resp = requests.post(
                     f"{APIFY_BASE}/acts/{actor_id}/runs",
                     json=actor_input,
-                    params={'token': self.apify_token},
+                    headers=self._apify_headers(),
                     timeout=30,
                 )
                 if run_resp.status_code != 400:
@@ -441,7 +442,7 @@ class LeadResearchAgent:
                 time.sleep(5)
                 status_resp = requests.get(
                     f"{APIFY_BASE}/actor-runs/{run_id}",
-                    params={'token': self.apify_token},
+                    headers=self._apify_headers(),
                     timeout=15,
                 )
                 status_resp.raise_for_status()
@@ -459,7 +460,7 @@ class LeadResearchAgent:
             dataset_id = run_data.get('defaultDatasetId')
             items_resp = requests.get(
                 f"{APIFY_BASE}/datasets/{dataset_id}/items",
-                params={'token': self.apify_token, 'limit': count, 'clean': 'true'},
+                params={'limit': count, 'clean': 'true'}, headers=self._apify_headers(),
                 timeout=30,
             )
             items_resp.raise_for_status()
@@ -507,7 +508,7 @@ class LeadResearchAgent:
         # List recent runs (newest first). This read works on the free plan.
         runs_resp = requests.get(
             f"{APIFY_BASE}/acts/{actor_id}/runs",
-            params={'token': self.apify_token, 'desc': '1', 'limit': 10},
+            params={'desc': '1', 'limit': 10}, headers=self._apify_headers(),
             timeout=25,
         )
         if runs_resp.status_code == 404:
@@ -530,7 +531,7 @@ class LeadResearchAgent:
             try:
                 items_resp = requests.get(
                     f"{APIFY_BASE}/datasets/{ds}/items",
-                    params={'token': self.apify_token, 'clean': 'true', 'limit': max_leads},
+                    params={'clean': 'true', 'limit': max_leads}, headers=self._apify_headers(),
                     timeout=30,
                 )
                 items_resp.raise_for_status()
@@ -736,108 +737,3 @@ class LeadResearchAgent:
             'source': 'apify',
             'raw_data': result,
         }
-
-    # ------------------------------------------------------------------
-    # Groq AI lead generation (fallback / demo)
-    # ------------------------------------------------------------------
-
-    def _generate_ai_leads(self, icp, count: int) -> list[dict]:
-        if not self.groq_client:
-            raise ValueError(
-                "No lead source available. Configure APOLLO_API_KEY or GROQ_API_KEY."
-            )
-
-        industries = ", ".join(icp.industries) if icp.industries else "Technology, SaaS"
-        titles = ", ".join(icp.job_titles) if icp.job_titles else "CEO, VP Sales, Head of Marketing"
-        locations = ", ".join(icp.locations) if icp.locations else "United States"
-        size = (
-            f"{icp.company_size_min or 10}-{icp.company_size_max or 500}"
-            if (icp.company_size_min or icp.company_size_max)
-            else "10-500"
-        )
-        keywords = ", ".join(icp.keywords) if icp.keywords else ""
-
-        system_prompt = (
-            "You are a B2B sales data expert. "
-            "Return ONLY a valid JSON array, no markdown, no extra text."
-        )
-
-        # Generate in batches of 5 to stay within Groq free-tier TPM limits
-        BATCH_SIZE = 5
-        all_leads = []
-        batches = (count + BATCH_SIZE - 1) // BATCH_SIZE
-
-        for batch_i in range(batches):
-            batch_count = min(BATCH_SIZE, count - len(all_leads))
-            if batch_count <= 0:
-                break
-
-            user_prompt = f"""Generate {batch_count} B2B sales leads matching this ICP:
-Industries: {industries} | Titles: {titles} | Size: {size} employees | Locations: {locations}{" | Tech: " + keywords if keywords else ""}
-
-Return a JSON array with {batch_count} objects, each having these keys:
-first_name, last_name, full_name, email, phone, job_title, seniority_level, department,
-company_name, company_domain, company_industry, company_size (integer), company_size_range,
-company_location, linkedin_url, company_linkedin_url, company_website,
-company_technologies (array of 2-3 strings),
-recent_news (array with 1 object: title, date, summary),
-buying_signals (array of 2 short strings), source ("ai_generated")
-
-IMPORTANT URL rules:
-- linkedin_url must be a full URL: "https://linkedin.com/in/firstname-lastname-xxxxx"
-- company_linkedin_url must start with "https://linkedin.com/company/"
-- company_website must start with "https://" (e.g. "https://acmecorp.com")
-- email must be a real business email using company_domain (not gmail/yahoo)
-
-Use realistic varied data. Each lead must be a different person at a different company."""
-
-            try:
-                resp = self.groq_client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=0.75,
-                    max_tokens=3000,
-                )
-                from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
-                record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
-
-                content = resp.choices[0].message.content.strip()
-
-                # Strip markdown fences if present
-                if "```" in content:
-                    parts = content.split("```")
-                    for part in parts:
-                        if "[" in part or "{" in part:
-                            content = part.lstrip("json").strip()
-                            break
-
-                batch_leads = json.loads(content)
-                if not isinstance(batch_leads, list):
-                    batch_leads = [batch_leads]
-
-                for lead in batch_leads:
-                    lead.setdefault('apollo_id', '')
-                    lead.setdefault('raw_data', {})
-                    lead['source'] = 'ai_generated'
-
-                all_leads.extend(batch_leads)
-                logger.info("Batch %d/%d: got %d leads", batch_i + 1, batches, len(batch_leads))
-
-            except json.JSONDecodeError as exc:
-                logger.error("Groq returned invalid JSON in batch %d: %s", batch_i + 1, exc)
-                if not all_leads:
-                    raise ValueError("AI returned invalid JSON — please try again.") from exc
-                break
-            except Exception as exc:
-                logger.error("AI lead generation failed in batch %d: %s", batch_i + 1, exc)
-                if not all_leads:
-                    raise
-                break
-
-        if not all_leads:
-            raise ValueError("No leads generated — please try again.")
-
-        return all_leads

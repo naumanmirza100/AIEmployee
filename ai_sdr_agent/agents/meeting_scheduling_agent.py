@@ -47,6 +47,12 @@ def _backend_base() -> str:
     ).rstrip('/')
 
 
+def _video_link(meeting) -> str:
+    """The call's own room for 'Your video call link', never the campaign's scheduling page (CO-150)."""
+    link = meeting.calendar_link or ''
+    return link if link.startswith(('https://meet.jit.si/', 'https://meet.google.com/')) else ''
+
+
 def _booking_base() -> str:
     """Base URL for the browser-facing /book/<token> page.
 
@@ -479,7 +485,7 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
       </table>
 
       <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
-        See you tomorrow, {first_name}!
+        See you soon, {first_name}!
       </p>
       <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
         Just a friendly heads-up — your call is coming up.
@@ -491,7 +497,7 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
         <tr>
           <td style="padding:20px 24px;">
             <p style="margin:0 0 14px;color:#7c3aed;font-size:12px;font-weight:700;
-                      text-transform:uppercase;letter-spacing:0.06em;">Tomorrow's Call</p>
+                      text-transform:uppercase;letter-spacing:0.06em;">Your Call</p>
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               {_detail_row('Topic', title)}
               {_divider()}
@@ -528,11 +534,11 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
       <hr style="border:none;border-top:1px solid #f3f4f6;margin:20px 0;"/>
 
       <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
-        Looking forward to our conversation tomorrow!<br/>
+        Looking forward to our conversation!<br/>
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Reminder: your call is tomorrow at {scheduled_str}.")
+    return _base_html(body_html, preview_text=f"Reminder: your call is on {scheduled_str}.")
 
 
 @_escape_args
@@ -874,7 +880,7 @@ Return exactly this JSON:
         sender = campaign.sender_name or campaign.sender_company or 'the team'
         sender_title = campaign.sender_title or ''
         sender_company = campaign.sender_company or ''
-        meet_link = meeting.calendar_link or campaign.calendar_link or ''
+        meet_link = _video_link(meeting)
         scheduled_str = self._format_meeting_time(meeting)
         duration = meeting.duration_minutes or 30
         title = meeting.title or 'Discovery Call'
@@ -914,7 +920,7 @@ Return exactly this JSON:
         logger.info("Confirmation email sent to %s for meeting %s", lead.email, meeting.id)
 
     # ------------------------------------------------------------------
-    # Reminder Email  (sent ~24 hours before meeting)
+    # Reminder Email  (sent up to 26 hours before the call, worded with its time: CO-200)
     # ------------------------------------------------------------------
 
     def send_reminder_email(self, campaign, lead, meeting) -> None:
@@ -923,7 +929,7 @@ Return exactly this JSON:
         sender = campaign.sender_name or campaign.sender_company or 'the team'
         sender_title = campaign.sender_title or ''
         sender_company = campaign.sender_company or ''
-        meet_link = meeting.calendar_link or campaign.calendar_link or ''
+        meet_link = _video_link(meeting)
         scheduled_str = self._format_meeting_time(meeting)
         duration = meeting.duration_minutes or 30
         title = meeting.title or 'Discovery Call'
@@ -932,18 +938,18 @@ Return exactly this JSON:
         if getattr(meeting, 'booking_token', None):
             booking_url = f"{_booking_base()}/book/{meeting.booking_token}"
 
-        subject = f"Reminder: {title} is tomorrow — {scheduled_str}"
+        subject = f"Reminder: {title} — {scheduled_str}"
 
         plain = (
             f"Hi {first_name},\n\n"
-            f"Just a friendly reminder that your call is tomorrow!\n\n"
+            f"Just a friendly reminder of our call on {scheduled_str}.\n\n"
             f"  Topic       : {title}\n"
             f"  Date & Time : {scheduled_str}\n"
             f"  Duration    : {duration} minutes\n"
             + (f"  Join Link   : {meet_link}\n" if meet_link else '')
             + f"\nNo preparation needed — come as you are!\n\n"
             + "Need to reschedule? Just reply to this email and we'll sort it out.\n\n"
-            + f"See you tomorrow!\n\n{sender}"
+            + f"See you then!\n\n{sender}"
             + (f"\n{sender_title}" if sender_title else '')
             + (f"\n{sender_company}" if sender_company else '')
         )
@@ -1066,14 +1072,32 @@ Return exactly this JSON:
 
     def _send_email(self, campaign, to_email: str, subject: str,
                     plain: str, html: str = None) -> None:
+        from ai_sdr_agent.agents.outreach_agent import build_unsubscribe_url, refuse_if_suppressed
+        refuse_if_suppressed(campaign.company_user, to_email)
         if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
             raise ValueError(
                 "Campaign SMTP credentials not configured. "
                 "Add SMTP settings in campaign Settings before sending."
             )
 
+        # The footer said only "reply with unsubscribe"; it now carries the link, as the campaign's own emails do
+        # (CO-144). The reply still works too.
+        enrollment = (campaign.enrollments.select_related('lead', 'campaign__company_user')
+                      .filter(lead__email__iexact=to_email).first())
+        unsubscribe_url = build_unsubscribe_url(enrollment) if enrollment else ''
+        if unsubscribe_url:
+            html = (html or '').replace(
+                'simply reply with <strong>unsubscribe</strong>.',
+                f'reply with <strong>unsubscribe</strong> or <a href="{unsubscribe_url}" '
+                f'style="color:#6b7280;">unsubscribe here</a>.')
+            plain = plain.replace("Reply 'unsubscribe' to opt out.",
+                                  f"Reply 'unsubscribe' or open {unsubscribe_url} to opt out.")
+
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
+        if unsubscribe_url:
+            msg['List-Unsubscribe'] = f'<{unsubscribe_url}>'
+            msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
         display_name = campaign.sender_name or campaign.sender_company or ''
         from_addr = campaign.from_email or campaign.smtp_username
         msg['From'] = f"{display_name} <{from_addr}>" if display_name else from_addr
