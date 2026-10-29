@@ -706,3 +706,11 @@ class EmailBrandTests(TestCase):
         self.assertIn('>Margalla &amp; Co<', html)
         self.assertNotIn('AI Employee', html)
         self.assertNotIn('Smart Outreach', html)
+
+
+class ReturnDateTests(TestCase):
+    """Found in the picture run of 30 Oct: "until 5 November" was not read, so the pause ran five days."""
+
+    def test_a_day_first_return_date_is_read(self):
+        when = EmailAssistantAgent._extract_return_date('I am out of the office until 5 November with limited access.')
+        self.assertEqual((when.month, when.day), (11, 6))
