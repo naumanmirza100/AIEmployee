@@ -80,6 +80,14 @@ const SMTP_DEFAULTS = {
   smtp: { host: '', port: 587, useTLS: true, useSSL: false },
 };
 
+// The reading (IMAP) server goes with the type too: choosing Gmail left it empty here, unlike the other add windows.
+const IMAP_DEFAULTS = {
+  gmail: { host: 'imap.gmail.com', port: 993, useSSL: true },
+  hostinger: { host: 'imap.hostinger.com', port: 993, useSSL: true },
+  smtp: { host: '', port: 993, useSSL: true },
+};
+const IMAP_DEFAULT_HOSTS = Object.values(IMAP_DEFAULTS).map((d) => d.host);
+
 const defaultForm = () => ({
   name: '',
   account_type: 'smtp',
@@ -185,15 +193,23 @@ const EmailAccountsPage = () => {
 
   const applyTypeDefaults = (accountType) => {
     const d = SMTP_DEFAULTS[accountType] || SMTP_DEFAULTS.smtp;
-    setForm((prev) => ({
-      ...prev,
-      account_type: accountType,
-      smtp_host: d.host,
-      smtp_port: d.port,
-      use_tls: d.useTLS,
-      use_ssl: d.useSSL,
-      is_gmail_app_password: accountType === 'gmail',
-    }));
+    const imapD = IMAP_DEFAULTS[accountType] || IMAP_DEFAULTS.smtp;
+    setForm((prev) => {
+      // A reading server the person typed is kept; an empty one or another type's default is replaced.
+      const typed = !IMAP_DEFAULT_HOSTS.includes(prev.imap_host || '');
+      return {
+        ...prev,
+        account_type: accountType,
+        smtp_host: d.host,
+        smtp_port: d.port,
+        use_tls: d.useTLS,
+        use_ssl: d.useSSL,
+        is_gmail_app_password: accountType === 'gmail',
+        imap_host: typed ? prev.imap_host : imapD.host,
+        imap_port: typed ? prev.imap_port : imapD.port,
+        imap_use_ssl: typed ? prev.imap_use_ssl : imapD.useSSL,
+      };
+    });
   };
 
   const openAdd = () => {
