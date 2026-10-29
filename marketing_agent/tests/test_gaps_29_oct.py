@@ -286,3 +286,51 @@ class ReplyReadingTests(MarketingTestCase):
 
     def test_an_explicit_request_to_stop_is_always_one(self):
         self.assertEqual(self.read('negative', "Please don't email me again, unsubscribe me."), 'unsubscribe')
+
+
+class QAReadingTests(MarketingTestCase):
+    """The Q&A assistant's routing is the AI's reading; keyword rules only when it fails (29 Oct 2026). CO-239."""
+
+    def agent(self):
+        from marketing_agent.agents.marketing_qa_agent import MarketingQAAgent
+        agent = MarketingQAAgent.__new__(MarketingQAAgent)
+        agent.log_action = lambda *a, **k: None
+        agent.system_prompt = ''
+        return agent
+
+    def ask(self, ai_says, question, context=None):
+        from unittest import mock
+        from marketing_agent.agents.marketing_qa_agent import MarketingQAAgent
+        agent = self.agent()
+        with mock.patch.object(MarketingQAAgent, '_call_llm_for_reasoning', create=True, return_value=ai_says), \
+                mock.patch.object(MarketingQAAgent, '_handle_llm_reasoning', return_value={'answer': 'from the data'}) as data:
+            result = agent.process(question, context or {}, user_id=self.ann.id)
+        return result, data
+
+    def test_a_command_is_refused_and_an_off_topic_request_declined(self):
+        result, data = self.ask('{"kind": "command", "about": "campaigns"}', 'pause spring offer now')
+        self.assertTrue(result.get('action_refused'))
+        data.assert_not_called()
+        result, data = self.ask('{"kind": "off_topic"}', 'write a poem about my campaigns')
+        self.assertIn("outside what I can help with", result['answer'])
+        data.assert_not_called()
+
+    def test_a_data_question_reaches_the_data_with_the_ais_reading(self):
+        result, data = self.ask('{"kind": "data", "about": "leads", "continues": true}',
+                                'to which campaign do they belong?')
+        self.assertEqual(result, {'answer': 'from the data'})
+        reading = data.call_args[0][3]
+        self.assertEqual((reading['about'], reading['continues'], reading['asks_why']), ('leads', True, False))
+
+    def test_when_the_reading_fails_the_keyword_rules_decide(self):
+        result, data = self.ask('not json at all', 'delete campaign spring offer')
+        self.assertTrue(result.get('action_refused'))
+
+    def test_the_tidy_up_corrects_only_a_count_of_campaigns(self):
+        agent = self.agent()
+        campaigns = [{'name': n} for n in ('alpha', 'beta', 'gamma', 'delta')]
+        rows = '\n'.join(f'- {n}: sent: 3' for n in ('alpha', 'beta', 'gamma', 'delta'))
+        self.assertEqual(agent._fix_count_mismatch('2 campaigns match:\n' + rows, campaigns).split('\n')[0],
+                         '4 campaigns match:')
+        answer = '120 emails went out:\n' + rows
+        self.assertEqual(agent._fix_count_mismatch(answer, campaigns), answer)

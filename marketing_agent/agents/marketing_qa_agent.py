@@ -367,36 +367,25 @@ class MarketingQAAgent(MarketingBaseAgent):
         self.log_action("Processing marketing question", {"question": (question or '')[:100]})
 
         question = self._normalize_question_typos(question)
-        category = self._classify_question(question, campaigns=None)
+        # The AI reads the message first: command, greeting, platform, help, off-topic, or a question about the
+        # data (and what about). Keyword rules decide only when that reading fails.
+        names = list(Campaign.objects.filter(**({'owner_id': user_id} if user_id else {}))
+                     .order_by('-created_at').values_list('name', flat=True)[:60])
+        reading = self._read_message(question, context, names) or self._keyword_reading(question, context)
+        kind = reading['kind']
 
-        # Refuse writes before anything else — this agent is read-only.
-        # The keyword filter flags candidates; the LLM confirms, because only it
-        # reads typos ("what ahppen if i pause a comapgin" is a question, not a
-        # command). Refuse only when both agree.
-        if category == QuestionCategory.ACTION_REQUEST:
-            if self._confirm_action_with_llm(question):
-                return self._handle_action_request(question)
-            category = QuestionCategory.LLM_REASONING
-
-        # No-data replies: cheap, deterministic, and impossible to get wrong.
-        if category == QuestionCategory.GREETING:
+        # This agent is read-only: a command is refused, never passed to the model, which would claim it did it.
+        if kind == 'command':
+            return self._handle_action_request(question)
+        if kind == 'greeting':
             return self._handle_greeting(question)
-
-        if category == QuestionCategory.PLATFORM_INFO:
+        if kind == 'platform':
             return self._handle_platform_info(question)
-
-        if category == QuestionCategory.META_HELP:
+        if kind == 'help':
             return self._handle_meta_help(question)
-
-        marketing_data = self._get_marketing_data(user_id)
-
-        # Decline anything outside this account's marketing data. Answering
-        # general knowledge is how the assistant ended up asserting an invented
-        # OpenAI price as fact. Campaign names are passed in so a question that
-        # names one is never mistaken for off-topic.
-        campaign_names = [c.get('name') for c in (marketing_data.get('campaigns') or [])]
-        has_history = bool((context or {}).get('conversation_history'))
-        if self._is_out_of_scope(question, campaign_names, has_history):
+        # Decline anything outside this account's marketing data. Answering general knowledge is how the assistant
+        # ended up asserting an invented OpenAI price as fact.
+        if kind == 'off_topic':
             return self._ok(
                 "That's outside what I can help with — I answer questions about "
                 "your campaigns and marketing data.\n\nTry asking about campaign "
@@ -404,52 +393,97 @@ class MarketingQAAgent(MarketingBaseAgent):
                 question,
             )
 
-        # Everything else is a question about the data → let the LLM answer it
-        # with the full dataset in context.
-        return self._handle_llm_reasoning(question, marketing_data, context)
+        marketing_data = self._get_marketing_data(user_id)
+        return self._handle_llm_reasoning(question, marketing_data, context, reading)
 
     # ══════════════════════════════════════════════════════════
     #  HANDLERS — one per category
     # ══════════════════════════════════════════════════════════
 
-    INTENT_SYSTEM = (
-        "You decide whether a message to a READ-ONLY marketing assistant is a "
-        "COMMAND or a QUESTION. Reply with exactly one word.\n\n"
-        "command  - the user is telling the assistant to CHANGE something now: "
-        "delete/pause/launch/create/rename/send/export a campaign or its data.\n"
-        "question - anything else, including asking HOW to do those things, "
-        "WHETHER they should, WHAT WOULD HAPPEN if they did, or any request for "
-        "information.\n\n"
-        "The user often misspells words - read through typos.\n\n"
+    READ_SYSTEM = (
+        "You read one message sent to a READ-ONLY assistant that answers questions about one company's own marketing "
+        "campaigns, their leads, the emails sent, the replies and the results. Return ONLY a JSON object:\n"
+        '{"kind": "command|greeting|platform|help|off_topic|data", "about": "campaigns|leads|reply_types|emails", '
+        '"continues": true|false, "asks_why": true|false, "asks_left_out": true|false}\n\n'
+        "kind:\n"
+        "- command: tells the assistant to CHANGE something now (delete, pause, launch, create, rename, send, "
+        "export, import). Asking HOW, WHETHER, or WHAT WOULD HAPPEN is a question, not a command.\n"
+        "- greeting: hello, thanks, bye, small talk with no question in it.\n"
+        "- platform: asks what this platform (Pay Per Project) is or does.\n"
+        "- help: asks what this assistant can answer, or for example questions.\n"
+        "- off_topic: nothing to do with this company's marketing (general knowledge, the weather, prices of other "
+        "products), and ANY request for a poem, song, story or joke, even one about the campaigns.\n"
+        "- data: anything about the campaigns, leads, emails, replies, targeting (age, company size, industry, "
+        "location, language, interests), dates, results, or what to do next. A message naming one of the campaigns "
+        "listed is data. A short follow-up to the previous question is data. When unsure between data and anything "
+        "else, choose data.\n"
+        "about: what the answer should list: leads (people, contacts), reply_types (the kinds of replies), emails "
+        "(the emails or subject lines sent), else campaigns.\n"
+        "continues: true when the message only makes sense with the previous question: it refers back to its result "
+        "(they, them, those, it, the rest, just their names, why).\n"
+        "asks_why: true when it asks why about the previous answer.\n"
+        "asks_left_out: true when it asks for the ones left out of the previous answer (the rest, the remaining one, "
+        "the one that did not match).\n"
+        "Read through typos and Roman Urdu.\n\n"
         "Examples:\n"
-        "'delete campaign cmp1' -> command\n"
-        "'pause er5t6y7u89' -> command\n"
-        "'how do i delet a campaign' -> question\n"
-        "'what ahppen if i pause a comapgin' -> question\n"
-        "'shud i delete a draf comapgin' -> question\n"
-        "'which campaigns should i delete?' -> question\n"
-        "'list all the caomapgin with important info' -> question\n"
+        "'delete campaign cmp1' -> command, campaigns\n"
+        "'what ahppen if i pause a comapgin' -> data, campaigns\n"
+        "'which leads got emails but never replied?' -> data, leads\n"
+        "'to which campaign do they belong?' (after a question about leads) -> data, leads, continues\n"
+        "'what types of replies did spring offer get?' -> data, reply_types\n"
+        "'list the subject lines we sent' -> data, emails\n"
+        "'and which campaign is left?' -> data, campaigns, continues, asks_left_out\n"
+        "'write a poem about my campaigns' -> off_topic\n"
+        "'meri sab se achi campaign konsi hai?' -> data, campaigns\n"
     )
+    KINDS = ('command', 'greeting', 'platform', 'help', 'off_topic', 'data')
+    ABOUT = ('campaigns', 'leads', 'reply_types', 'emails')
 
-    def _confirm_action_with_llm(self, question: str) -> bool:
-        """Second opinion before refusing.
-
-        The keyword pre-filter cannot read typos, so it has repeatedly refused
-        ordinary questions ('what ahppen if i pause a comapgin'). Ask the model,
-        which handles misspellings natively. On any failure we keep the
-        keyword verdict, so a refusal is never skipped by accident.
-        """
+    def _read_message(self, question: str, context: Optional[Dict], campaign_names: List[str]) -> Optional[Dict]:
+        """The AI's reading of the message: what kind it is and what the answer should be about. Keyword lists
+        decided this before the AI saw the question (29 Oct 2026: no word lists in front of the AI). None when the
+        reading fails; the caller then falls back to the keyword reading."""
+        prev = self._previous_question(context) or ''
+        message = (f'Campaigns: {", ".join(n for n in campaign_names[:60] if n)}\n'
+                   f'Previous question: "{prev[:300]}"\nMessage: "{(question or "").strip()[:500]}"')
         try:
-            out = self._call_llm_for_reasoning(
-                'Message: "%s"' % (question or '').strip()[:300],
-                self.INTENT_SYSTEM, temperature=0.0, max_tokens=5,
-            )
+            out = self._call_llm_for_reasoning(message, self.READ_SYSTEM, temperature=0.0, max_tokens=80)
+            match = re.search(r'\{.*\}', out or '', re.DOTALL)
+            data = json.loads(match.group()) if match else None
         except Exception as e:
-            self.log_action("Intent confirmation failed", {"error": str(e)})
-            return True
-        if not out:
-            return True
-        return 'command' in out.strip().lower()
+            self.log_action("Message reading failed", {"error": str(e)[:200]})
+            return None
+        if not isinstance(data, dict) or data.get('kind') not in self.KINDS:
+            return None
+        return {'kind': data['kind'], 'about': data.get('about') if data.get('about') in self.ABOUT else 'campaigns',
+                'continues': bool(data.get('continues')), 'asks_why': bool(data.get('asks_why')),
+                'asks_left_out': bool(data.get('asks_left_out'))}
+
+    def _keyword_reading(self, question: str, context: Optional[Dict]) -> Dict:
+        """The reading from keyword rules, used only when the AI's reading fails."""
+        category = self._classify_question(question, campaigns=None)
+        kind = {QuestionCategory.ACTION_REQUEST: 'command', QuestionCategory.GREETING: 'greeting',
+                QuestionCategory.PLATFORM_INFO: 'platform', QuestionCategory.META_HELP: 'help'}.get(category, 'data')
+        q = (question or '').lower()
+        prev = (self._previous_question(context) or '').lower()
+        leads_follow_up = bool(re.search(r'\b(leads?|contacts?|people)\b', prev)
+                               and re.search(r'\b(they|them|their|these|those|it)\b', q)
+                               and re.search(r'\b(belong|campaign|from|part of|which)\b', q))
+        if (self._mentions(q, 'type', 'types', 'kind', 'kinds', 'interest level')
+                and self._mentions(q, 'reply', 'replies', 'replied', 'respond', 'response', 'responded')):
+            about = 'reply_types'
+        elif leads_follow_up or re.search(r'\b(which|what|who|how many)\b[^.?]{0,40}\b(leads?|contacts?|people|persons?)\b', q):
+            about = 'leads'
+        elif (re.search(r'\b(subject|subjects|email content)\b', q)
+              or re.search(r'\b(what|which|show|list|tell)\b[^.?]{0,30}\b(emails?|messages?)\b', q)):
+            about = 'emails'
+        else:
+            about = 'campaigns'
+        return {'kind': kind, 'about': about,
+                'continues': leads_follow_up or self._is_reformat_followup(question),
+                'asks_why': bool(re.match(r'^\s*(and\s+)?why\b', q)),
+                'asks_left_out': bool(re.search(r'\b(left|remaining|rest|other one|others|excluded|not included|'
+                                                r'didn.?t match|does ?n.?t match|missing one|the last one)\b', q))}
 
     def _handle_action_request(self, question: str) -> Dict:
         """Refuse, clearly. This agent has no write path — it must never imply
@@ -692,8 +726,11 @@ class MarketingQAAgent(MarketingBaseAgent):
         answer = "\n".join(f"- {_line(c)}" for c in campaigns[:10])
         return self._ok(answer, question, marketing_data)
 
-    def _handle_llm_reasoning(self, question: str, marketing_data: Dict, context: Optional[Dict]) -> Dict:
-        """Full LLM call. This is now the path for every data question."""
+    def _handle_llm_reasoning(self, question: str, marketing_data: Dict, context: Optional[Dict],
+                              reading: Optional[Dict] = None) -> Dict:
+        """Full LLM call. This is now the path for every data question. `reading` (the AI's, see _read_message)
+        says what the answer is about and whether it continues the previous question; keyword rules decided that."""
+        reading = reading or self._keyword_reading(question, context)
         full_context = self._build_context(marketing_data, context, question)
 
         # Resolve any filtering in the question here rather than trusting the
@@ -705,25 +742,17 @@ class MarketingQAAgent(MarketingBaseAgent):
         # The plan for "leads of meow" filters to that campaign, and its row of
         # sent/opened/reply-rate figures then crowded out the lead list the
         # user actually asked for.
-        q_lower = (question or '').lower()
 
         # "which leads got emails but never replied?" is about PEOPLE, but the
         # planner can only filter campaigns, so it produced a campaign-level
         # "no campaign matches" and the answer denied something that was never
         # asked. Drop that hint and let the model work from the lead rows.
-        asks_about_leads = bool(re.search(
-            r'\b(which|what|who|how many)\b[^.?]{0,40}\b(leads?|contacts?|'
-            r'people|persons?)\b', q_lower))
+        asks_about_leads = reading['about'] == 'leads'
 
         # "to which campaign do they belong?" right after a lead answer is
         # still about those leads. Treated as a fresh campaign question it came
         # back with campaign metrics instead of naming the leads' campaigns.
-        prev_q = (self._previous_question(context) or '').lower()
-        prev_was_leads = bool(re.search(r'\b(leads?|contacts?|people)\b', prev_q))
-        if (prev_was_leads
-                and re.search(r'\b(they|them|their|these|those|it)\b', q_lower)
-                and re.search(r'\b(belong|campaign|from|part of|which)\b', q_lower)):
-            asks_about_leads = True
+        if asks_about_leads and reading['continues']:
             full_context += (
                 "\nThe previous answer was about specific LEADS. This follow-up "
                 "is about THOSE SAME PEOPLE — only the ones named in your "
@@ -745,11 +774,7 @@ class MarketingQAAgent(MarketingBaseAgent):
         # "types of replies from all leads of X" is about the reply TYPES, not
         # the lead roster — answering it with a plain lead list left the actual
         # question unanswered.
-        asks_reply_types = (
-            self._mentions(q_lower, 'type', 'types', 'kind', 'kinds',
-                           'interest level')
-            and self._mentions(q_lower, 'reply', 'replies', 'replied',
-                               'respond', 'response', 'responded'))
+        asks_reply_types = reading['about'] == 'reply_types'
         if asks_reply_types:
             # Build the finished table here. Asked to copy it from the context
             # the model kept dropping rows — 2 of 5, then 4 of 5. Handing it
@@ -757,7 +782,7 @@ class MarketingQAAgent(MarketingBaseAgent):
             ready = self._reply_types_table(question, marketing_data)
             if ready:
                 hint = (hint or '') + ready
-        elif hint and re.search(r'\b(lead|leads|contact|contacts|who|whom)\b', q_lower):
+        elif hint and asks_about_leads:
             hint += (
                 "The row above identifies WHICH campaign. The question is about "
                 "its LEADS — answer from the DETAIL section, listing the people "
@@ -765,11 +790,7 @@ class MarketingQAAgent(MarketingBaseAgent):
                 "answer.\n")
         # Same for email content: the plan's metrics row was being returned in
         # place of the subject lines the user asked for.
-        if hint and (
-                re.search(r'\b(subject|subjects|email content)\b', q_lower)
-                or re.search(r'\b(what|which|show|list|tell)\b[^.?]{0,30}'
-                             r'\b(emails?|messages?)\b', q_lower)
-                or re.search(r'\bemails?\b[^.?]{0,20}\b(sent|went out)\b', q_lower)):
+        if hint and reading['about'] == 'emails':
             hint += (
                 "The row above identifies WHICH campaign. The question is about "
                 "the EMAILS IT SENT — answer from the 'Emails sent, grouped by "
@@ -793,9 +814,7 @@ class MarketingQAAgent(MarketingBaseAgent):
         # "and which campaign is left?" after "17 of 18 target adults" asks for
         # the ONE that did not match — the complement of the previous filter.
         # Without this it was treated as a fresh question and listed 16 rows.
-        is_complement = bool(re.search(
-            r'\b(left|remaining|rest|other one|others|excluded|not included|'
-            r'didn.?t match|does ?n.?t match|missing one|the last one)\b', low_q))
+        is_complement = reading['asks_left_out']
         if not hint and is_complement:
             prev = self._previous_question(context)
             if prev:
@@ -803,9 +822,9 @@ class MarketingQAAgent(MarketingBaseAgent):
                 if comp:
                     hint = comp
 
-        is_why = bool(re.match(r'^\s*(and\s+)?why\b', low_q))
+        is_why = reading['asks_why']
         if (not hint and not names_a_campaign
-                and (is_why or self._is_reformat_followup(question))):
+                and (is_why or reading['continues'])):
             prev = self._previous_question(context)
             if prev:
                 hint = self._run_query_plan(prev, marketing_data)
@@ -1181,7 +1200,11 @@ class MarketingQAAgent(MarketingBaseAgent):
         email_stats = {}
         if campaign_ids:
             sent_statuses = ['sent', 'delivered', 'opened', 'clicked']
-            for row in EmailSendHistory.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(
+            # The campaign's own emails (from a template) and replies counted as people, as on the campaign page
+            # (services/campaign_numbers.py): Reply Draft's one-off sends and every reply message were counted (CO-136,
+            # CO-195).
+            for row in EmailSendHistory.objects.filter(campaign_id__in=campaign_ids,
+                                                       email_template__isnull=False).values('campaign_id').annotate(
                 total_sent    = Count('id', filter=Q(status__in=sent_statuses)),
                 total_opened  = Count('id', filter=Q(status__in=['opened', 'clicked'])),
                 total_clicked = Count('id', filter=Q(status='clicked')),
@@ -1193,9 +1216,9 @@ class MarketingQAAgent(MarketingBaseAgent):
         reply_stats = {}
         if campaign_ids:
             for row in Reply.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(
-                total_replied    = Count('id'),
-                positive_replies = Count('id', filter=Q(interest_level__in=['positive', 'neutral', 'requested_info', 'objection'])),
-                negative_replies = Count('id', filter=Q(interest_level__in=['negative', 'unsubscribe'])),
+                total_replied    = Count('lead_id', distinct=True),
+                positive_replies = Count('lead_id', distinct=True, filter=Q(interest_level__in=['positive', 'requested_info'])),
+                negative_replies = Count('lead_id', distinct=True, filter=Q(interest_level__in=['negative', 'unsubscribe'])),
             ).order_by('campaign_id'):
                 reply_stats[row['campaign_id']] = row
 
@@ -1941,7 +1964,7 @@ class MarketingQAAgent(MarketingBaseAgent):
             "N must equal how many you then list. Write the list first, count "
             "its rows, and use that number. Saying '6 campaigns' above a list "
             "of 16 is a wrong answer.\n"
-            "- A counting or filtering question covers ALL 18 campaigns unless "
+            "- A counting or filtering question covers ALL the campaigns listed unless "
             "the user restricts it. 'How many were created before August?' means "
             "every campaign, not just the ones discussed a moment ago. Check the "
             "created= value of each row before answering.\n"
@@ -2040,105 +2063,6 @@ class MarketingQAAgent(MarketingBaseAgent):
             if "429" in err_str or "rate_limit" in err_str.lower():
                 return "The service is busy. Please try again in a few seconds."
             return "Analysis could not be completed at this time. Please try again."
-
-    OUT_OF_SCOPE_SYSTEM = (
-        "You gate questions for an assistant that ONLY answers questions about "
-        "one company's own marketing campaigns (their metrics, targeting, "
-        "leads, emails, dates) and marketing advice about them.\n"
-        "Reply with exactly one word.\n\n"
-        "allow  - about this account's campaigns/marketing, or advice on them. "
-        "Each campaign stores TARGETING fields: age range, location, industry, "
-        "company size, interests, language. Questions about those are ALWAYS "
-        "allowed — 'what is their company size?' asks which company size a "
-        "campaign targets, and 'show their industries' asks which industries "
-        "they target. Neither is a question about outside companies.\n"
-        "reject - general knowledge (geography, history, science, celebrities, "
-        "news), OTHER companies' pricing or products, coding help, recipes, "
-        "creative writing (poems, songs, stories, jokes), or anything else "
-        "unrelated to this account's marketing data.\n\n"
-        "A question does NOT have to mention the word 'campaign'. Short "
-        "follow-ups, comparisons, and campaign names on their own are part of "
-        "an ongoing conversation about the data — allow them. When unsure, "
-        "ALLOW: wrongly blocking a real question is far worse than answering a "
-        "borderline one.\n\n"
-        "Examples:\n"
-        "'which campaigns have sent emails?' -> allow\n"
-        "'how do I improve my open rate?' -> allow\n"
-        "'should I delete the drafts?' -> allow\n"
-        "'compare er5t6y7u89 and new1234' -> allow\n"
-        "'what should I do about the others?' -> allow\n"
-        "'and why?' -> allow\n"
-        "'from total?' -> allow\n"
-        "'which one is good?' -> allow\n"
-        "'what is the capital of France?' -> reject\n"
-        "'how much does OpenAI charge per token?' -> reject\n"
-        "'write me a poem about my campaigns' -> reject\n"
-        "'tell me a joke' -> reject\n"
-    )
-
-    def _is_out_of_scope(self, question: str,
-                         campaign_names: Optional[List[str]] = None,
-                         has_history: bool = False) -> bool:
-        """True when the question isn't about this account's marketing.
-
-        The prompt rules alone did not hold — the model answered 'what is the
-        capital of France?' and wrote a poem on request. On any failure this
-        returns False, so a real question is never blocked by a broken check.
-        """
-        if not question or not question.strip():
-            return False
-
-        # A question naming one of the user's own campaigns is always in scope,
-        # whatever the classifier thinks. It wrongly rejected "compare
-        # er5t6y7u89 and new1234" — blocking a real question is the worse error.
-        low = question.lower()
-        for name in (campaign_names or []):
-            n = (name or '').strip().lower()
-            if n and re.search(r'(?<![a-z0-9])%s(?![a-z0-9])' % re.escape(n), low):
-                return False
-
-        # Creative writing is out of scope even when it is about the campaigns,
-        # so this is checked before the domain-term allowance below (a poem
-        # request mentions "campaigns" too).
-        if re.search(r'\b(write|compose|make up|create)\b[^.]{0,30}'
-                     r'\b(poem|poetry|song|story|joke|rap|haiku|limerick)\b', low):
-            return True
-
-        # Any question mentioning a field we actually store is in scope. The
-        # classifier read "what is their company size?" as being about outside
-        # companies and blocked it, though company_size is a targeting field on
-        # every campaign.
-        domain_terms = (
-            'campaign', 'campaigns', 'lead', 'leads', 'email', 'emails',
-            'sent', 'open rate', 'click', 'reply', 'replies', 'bounce',
-            'conversion', 'conversions', 'target', 'targeting', 'audience',
-            'age range', 'company size', 'industry', 'industries', 'interests',
-            'location', 'language', 'draft', 'drafts', 'paused', 'active',
-            'performance', 'metrics', 'created', 'status',
-        )
-        if any(t in low for t in domain_terms):
-            return False
-
-        # Mid-conversation, a short question with a back-reference is a
-        # follow-up about the data just discussed — "mention its deal" was
-        # blocked because it names no field of its own. The subject comes from
-        # the previous turn, so it cannot be judged in isolation.
-        if has_history:
-            words = set(re.findall(r"[a-z']+", low))
-            refs = {'it', 'its', "it's", 'that', 'this', 'those', 'these',
-                    'them', 'they', 'their', 'same', 'above', 'previous',
-                    'others', 'other', 'rest'}
-            if len(low.split()) <= 12 and (words & refs):
-                return False
-        try:
-            out = self._call_llm_for_reasoning(
-                'Question: "%s"' % question.strip()[:300],
-                self.OUT_OF_SCOPE_SYSTEM, temperature=0.0, max_tokens=5,
-            )
-        except Exception as e:
-            self.log_action("Scope check failed", {"error": str(e)})
-            return False
-        return bool(out) and 'reject' in out.strip().lower()
 
     # Question wording -> the campaign field it refers to.
     # ══════════════════════════════════════════════════════════
@@ -2535,8 +2459,14 @@ class MarketingQAAgent(MarketingBaseAgent):
         sort = plan.get('sort') or None
         if isinstance(sort, dict) and sort.get('field') in self.PLANNABLE_FIELDS:
             skey = self.PLANNABLE_FIELDS[sort['field']][1]
-            matched.sort(key=lambda c: (c.get(skey) is None, c.get(skey) or 0),
-                         reverse=bool(sort.get('desc')))
+            # Missing values last; numbers and text never compared with each other (an empty text field is '', and
+            # '' against 0 raised a TypeError, CO-239).
+            def _sort_key(c):
+                v = c.get(skey)
+                if v is None or v == '':
+                    return (1, 0, '')
+                return (0, 0, v) if isinstance(v, (int, float)) else (0, 1, str(v).lower())
+            matched.sort(key=_sort_key, reverse=bool(sort.get('desc')))
         limit = plan.get('limit')
         if isinstance(limit, int) and 0 < limit < len(matched):
             matched = matched[:limit]
@@ -2969,7 +2899,9 @@ class MarketingQAAgent(MarketingBaseAgent):
 
         # The opening line's leading number, if it has one.
         for i, ln in enumerate(lines[:3]):
-            m = re.match(r'^\s*(\d+)\b', ln)
+            # Only a number that counts campaigns ("6 campaigns", "2 of 18 campaigns"): any leading number was
+            # rewritten, a correct total of leads or emails too (CO-239).
+            m = re.match(r'^\s*(\d+)\s+(of\s+\d+\s+)?campaigns?\b', ln, re.IGNORECASE)
             if not m:
                 continue
             stated = int(m.group(1))
