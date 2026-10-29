@@ -175,6 +175,7 @@ rather than inventing one or leaving a [placeholder]. Answer in markdown with no
                 return {'success': False, 'error': 'Campaign not found'}
         
         title = document_data.get('title', self.COPY_TITLES.get(document_type, f'{document_type.title()} Document'))
+        title = (title or '')[:200]         # the column's limit: a longer title failed after writing (CO-138)
 
         # Generate document content
         content = self._generate_document_content(document_type, document_data, campaign, context)

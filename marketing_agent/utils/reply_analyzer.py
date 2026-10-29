@@ -89,160 +89,10 @@ Return your analysis in a structured format."""
         # keyword/rule matching, so one reply's phrases don't leak into another.
         new_reply_only = strip_quoted_thread(reply_content or '')
         combined_lower = f"{reply_subject or ''} {new_reply_only}".lower()
-        # First line / content before quoted "On ... wrote" (so "no" + quote still counts as "no")
-        content_only = new_reply_only.strip().lower()
-        first_line = content_only.split('\n')[0].strip() if content_only else ''
-        before_quote = content_only.split('on ')[0].strip() if ' on ' in content_only or content_only.startswith('on ') else content_only
-        short_content = (first_line or before_quote or content_only).strip()
-
-        # Early rule: short dismissive "no" / "not interested" = negative (not objection)
-        if short_content in ('no', 'no.', 'nope', 'nah') or short_content in ('not interested', 'no thanks', 'no thank you'):
-            return {
-                'interest_level': 'negative',
-                'analysis': 'Short dismissive reply (e.g. "no", "not interested"). Classified as Not Interested.',
-                'confidence': 92
-            }
-
-        # Early rule: "eager to meet" / "egar to meet" (typo) = positive (warm interest), NOT negative
-        if any(phrase in combined_lower for phrase in [
-            'eager to meet', 'egar to meet', 'eager to meet you', 'egar to meet you',
-            'looking forward to meet', 'looking forward to meeting'
-        ]) and not any(phrase in combined_lower for phrase in ["dont send", "don't send", "unsubscribe"]):
-            return {
-                'interest_level': 'positive',
-                'analysis': 'Reply expresses eagerness to meet (e.g. "eager to meet you"). Classified as Interested.',
-                'confidence': 95
-            }
-        # Early rule: "send more/new information" / "more info" / "so i can analyze" / "further requirements" = requested_info (wants details)
-        if any(phrase in combined_lower for phrase in [
-            'send more information', 'send more info', 'send new information', 'send new info',
-            'more information', 'more info', 'need more information', 'need more info',
-            'awesome send more information', 'send more information now',
-            'good send new information', 'send new information so that',
-            'so that i can analyze', 'so that i can analyse', 'so i can analyze', 'so i can analyse',
-            'information so that i can analyze', 'information so i can analyze',
-            'send me further requirements', 'send further requirements', 'further requirements',
-            'send me the requirements', 'send the requirements', 'send me requirements',
-            'share the requirements', 'share further requirements', 'share me the requirements',
-            'send me further details', 'send further details', 'further details',
-            'send me the details', 'send the details', 'send me details',
-            'share the details', 'share further details', 'share me the details'
-        ]) and not any(phrase in combined_lower for phrase in ["dont send", "don't send", "unsubscribe"]):
-            return {
-                'interest_level': 'requested_info',
-                'analysis': 'Reply asks for more/new information or requirements (e.g. "send new information", "send me further requirements"). Classified as Requested More Information.',
-                'confidence': 95
-            }
-        # Early rule: short positive agreement = positive (e.g. "yes thanks", "yes", "thanks")
-        if short_content in (
-            'yes', 'yes.', 'yes thanks', 'yes thank you', 'thanks', 'thank you', 'sure', 'ok', 'okay',
-            'sounds good', 'great thanks', 'perfect thanks', 'ok thanks', 'okay thanks'
-        ) and not any(phrase in combined_lower for phrase in ["dont send", "don't send", "unsubscribe", "not interested", "no thanks"]):
-            return {
-                'interest_level': 'positive',
-                'analysis': 'Short positive agreement (e.g. "yes thanks"). Classified as Interested.',
-                'confidence': 92
-            }
-        # Early rule: "lets meet" / "meet again" / "thanks lets meet" = positive (interested), NOT requested_info
-        if any(phrase in combined_lower for phrase in [
-            "lets meet", "let's meet", "let us meet", "meet again", "lets meet again", "let's meet again",
-            "thanks lets meet", "thank you lets meet", "awesome thanks lets meet", "sounds good lets meet"
-        ]) and not any(phrase in combined_lower for phrase in ["dont send", "don't send", "unsubscribe", "not interested"]):
-            return {
-                'interest_level': 'positive',
-                'analysis': 'Reply agrees to meet or meet again (e.g. "awesome thanks lets meet again"). Classified as Interested.',
-                'confidence': 95
-            }
-
-        # Early rule: unsubscribe / stop sending = unsubscribe (never "not interested")
-        if any(phrase in combined_lower for phrase in [
-            "don't send again", "dont send again", "do not send again", "stop sending", "stop sending me",
-            "unsubscribe", "remove me", "stop emailing", "opt out", "don't email me", "remove from list"
-        ]):
-            return {
-                'interest_level': 'unsubscribe',
-                'analysis': 'Reply asks to stop receiving emails (e.g. "dont send again", "unsubscribe"). Classified as Unsubscribe Request.',
-                'confidence': 95
-            }
-
-        # Early rule: objection / "don't think it can be done" or "not the correct way" / "do in some other way" = objection (not "not interested")
-        if any(phrase in combined_lower for phrase in [
-            "don't think it can be done", "dont think it can be done", "can't be done like this",
-            "cant be done like this", "can not be done", "don't think this can work", "dont think this can work"
-        ]):
-            return {
-                'interest_level': 'objection',
-                'analysis': 'Reply expresses doubt or objection about the approach (e.g. "I dont think it can be done like this"). Classified as Has Objection/Concern.',
-                'confidence': 90
-            }
-        # Early rule: polite brush-off / "we'll keep you in mind" / busy = negative (not interested)
-        if any(phrase in combined_lower for phrase in [
-            "we'll keep you in mind", "we will keep you in mind", "keep you in mind",
-            "we're quite busy", "we are quite busy", "haven't allocated time", "havent allocated time",
-            "priorities change", "checking back in a few months", "check back in a few months",
-            "passed this along", "passed along to our team", "we're all set for now", "we are all set for now",
-            "not looking at the moment", "not evaluating new tools", "stick with what we have",
-            "budget and bandwidth are tight", "not planning to switch", "decided to stick with"
-        ]):
-            return {
-                'interest_level': 'negative',
-                'analysis': 'Polite brush-off or "not right now" (e.g. we\'ll keep you in mind, we\'re quite busy, stick with what we have). Classified as Not Interested.',
-                'confidence': 90
-            }
-
-        # Early rule: asking for pricing / integration / timeline before committing = requested_info
-        if any(phrase in combined_lower for phrase in [
-            'ballpark pricing', 'pricing and whether', 'different tiers', 'integrate with',
-            'implementation timeline', 'before we take this further', 'before we take it further',
-            'need to understand a few things', 'typical implementation'
-        ]) and not any(phrase in combined_lower for phrase in ["dont send", "don't send", "unsubscribe", "not interested", "no thanks"]):
-            return {
-                'interest_level': 'requested_info',
-                'analysis': 'Reply asks for pricing, integration, or timeline before committing. Classified as Requested More Information.',
-                'confidence': 92
-            }
-
-        # Early rule: "not the correct way" / "do in some other way" = objection (feedback about approach, willing to engage differently)
-        if any(phrase in combined_lower for phrase in [
-            "not the correct way", "not the right way", "isn't the correct way", "isnt the correct way",
-            "do in some other way", "do it in some other way", "in some other way", "some other way",
-            "do it another way", "try another way", "different way"
-        ]) and not any(phrase in combined_lower for phrase in ["unsubscribe", "stop sending", "don't send", "dont send"]):
-            return {
-                'interest_level': 'objection',
-                'analysis': 'Reply suggests the approach is wrong or should be done differently (e.g. "not the correct way", "do in some other way"). Classified as Has Objection/Concern.',
-                'confidence': 90
-            }
-        # Early rule: "not right" / "should be different" = objection (feedback about approach, not flat rejection)
-        if any(phrase in combined_lower for phrase in [
-            "not right", "is not right", "it's not right", "its not right",
-            "should be different", "should be a little different", "ought to be different",
-            "doing this way", "this way it should", "wrong way"
-        ]) and not any(phrase in combined_lower for phrase in ["unsubscribe", "stop sending", "don't send", "dont send"]):
-            return {
-                'interest_level': 'objection',
-                'analysis': 'Reply expresses that the approach is not right or should be different (feedback/concern about method). Classified as Has Objection/Concern.',
-                'confidence': 88
-            }
-
-        # Early rule: obvious "clarification / make it clear" = requested_info (never call AI for these)
-        if any(phrase in combined_lower for phrase in [
-            'make it more clear', 'make it clearer', 'make it mroe clear', 'make it clear',
-            'please clarify', 'could you clarify', 'can you clarify', 'can you explain',
-            'clarify please', 'more clear please'
-        ]):
-            return {
-                'interest_level': 'requested_info',
-                'analysis': 'Reply asks for clarification or clearer information (e.g. "make it more clear", "please clarify"). Classified as Requested More Information.',
-                'confidence': 95
-            }
-        # Flexible: "make it" + "clear" or "clarif" (catches typos like "mroe clear")
-        if 'make it' in combined_lower and ('clear' in combined_lower or 'clarif' in combined_lower):
-            return {
-                'interest_level': 'requested_info',
-                'analysis': 'Reply asks for clarification ("make it clear" / "make it clearer" or similar). Classified as Requested More Information.',
-                'confidence': 90
-            }
+        # The AI reads the reply. Keyword rules answered first and overrode it, and they read the company's own
+        # subject line too ("Re: ... unsubscribe anytime"), so replies were filed wrongly and people were put on the
+        # do-not-email list by mistake (CO-128). Only an explicit request to stop, in the reply's own words, is
+        # taken as one whatever the AI says (_asks_to_stop); keywords alone are used only when the AI cannot be.
 
         # Build analysis prompt
         prompt = f"""Analyze this email reply from a lead in a marketing campaign.
@@ -250,6 +100,7 @@ Return your analysis in a structured format."""
 CAMPAIGN: {campaign_name or 'Marketing Campaign'}
 
 REPLY SUBJECT: {reply_subject or '(No subject)'}
+(The subject usually repeats the company's own email's subject. Judge the reply by what the lead wrote below.)
 
 REPLY CONTENT:
 {new_reply_only or reply_content or '(No content)'}
@@ -356,12 +207,9 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
             # Post-process: override AI when reply clearly matches our rules (AI sometimes returns neutral for these)
             # Strip the quoted original email first — rule overrides must fire on
             # what the lead just wrote, not on quoted history from the thread.
-            new_reply_text = strip_quoted_thread(reply_content or '')
-            combined = f"{reply_subject or ''} {new_reply_text}".lower()
-            overridden = self._apply_rule_overrides(combined, interest_level)
-            if overridden is not None:
-                interest_level = overridden
-                logger.info(f"Reply analyzer: overridden to '{interest_level}' based on rule match")
+            if interest_level != 'unsubscribe' and self._asks_to_stop(new_reply_only):
+                interest_level = 'unsubscribe'
+                logger.info("Reply analyzer: an explicit request to stop, taken as unsubscribe")
             
             return {
                 'interest_level': interest_level,
@@ -394,7 +242,18 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
             result['ai_fallback_reason'] = note
             return result
     
+    _STOP = re.compile(r"\b(unsubscribe|remove me|opt[- ]?out|stop (emailing|sending|contacting)( me| us)?|"
+                       r"do(n['’]?t| not) (email|contact|send|message)( me| us)?)\b", re.IGNORECASE)
+
+    def _asks_to_stop(self, new_reply_text: str) -> bool:
+        """An explicit request to stop emailing, in the reply's own words (never its subject)."""
+        return bool(self._STOP.search(new_reply_text or ''))
+
     def _apply_rule_overrides(self, combined_text_lower: str, ai_level: str):
+        """Keyword rules, used only when the AI could not read the reply (_fallback_analysis)."""
+        return self._keyword_level(combined_text_lower)
+
+    def _keyword_level(self, combined_text_lower: str):
         """
         Override AI result when reply clearly matches rules (avoids AI returning neutral for clear positives).
         Returns new interest_level or None if no override.
@@ -410,8 +269,8 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
                 "dont send", "don't send", "do not send", "stop sending", "stop sending me",
                 "stop emailing", "unsubscribe", "remove me", "opt out", "opt-out",
                 "remove from list", "dont email me", "don't email me", "dont contact me",
-                "don't contact me", "i deny", "i decline", "not interested", "leave me alone",
-            ])
+                "don't contact me", "i deny", "i decline", "leave me alone",
+            ])                   # "not interested" is a no, not a request to stop emailing (CO-128)
         ):
             return 'unsubscribe'
 
@@ -430,7 +289,8 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
         if any(p in combined_text_lower for p in ['will update you', 'update you soon', 'get back to you', 'we will update']):
             return 'positive'
         # Short agreement
-        if any(p in combined_text_lower for p in ['yes okay', 'yes ok', 'sure', 'sounds good', 'lets have a meeting', "let's have a meeting"]):
+        if (re.search(r'\bsure\b', combined_text_lower)        # a whole word: "ensure" and "measure" matched
+                or any(p in combined_text_lower for p in ['yes okay', 'yes ok', 'sounds good', 'lets have a meeting', "let's have a meeting"])):
             return 'positive'
         # Clear requested_info: asking for pricing, details, clarification, requirements (override AI if it returned neutral/positive)
         if any(p in combined_text_lower for p in [
@@ -464,7 +324,7 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
         # over the old email history and misclassifies (e.g. a "dont send it again"
         # reply was scored positive because quoted text contained positive words).
         new_reply_only = strip_quoted_thread(reply_content or '')
-        combined_text = f"{reply_subject or ''} {new_reply_only}".lower()
+        combined_text = new_reply_only.lower()          # the lead's words, not the company's subject (CO-128)
 
         # Run the shared rule overrides first — they already handle opt-out/deny
         # intent flexibly ("dont send it again", "i deny", etc.). This keeps the

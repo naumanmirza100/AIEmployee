@@ -281,8 +281,10 @@ def _build_campaign_detail(campaign, user):
     total_sent = all_email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
     total_opened = all_email_sends.filter(status__in=['opened', 'clicked']).count()
     total_clicked = all_email_sends.filter(status='clicked').count()
-    # Use Reply model so total matches Email Sending page (count of reply events, not unique contacts)
-    total_replied = Reply.objects.filter(campaign=campaign).count()
+    # Replies, reply rate and conversions count people, the same everywhere (services/campaign_numbers.py, CO-195).
+    from marketing_agent.services.campaign_numbers import numbers as campaign_numbers
+    shared = campaign_numbers(campaign)
+    total_replied = shared['replied_leads']
     total_failed = all_email_sends.filter(status='failed').count()
     total_bounced = all_email_sends.filter(status='bounced').count()
     # Positive = interested, requested_info, neutral, objection (show as Positive/Neutral on dashboard)
@@ -316,7 +318,7 @@ def _build_campaign_detail(campaign, user):
     }
     open_rate = (total_opened / total_sent * 100) if total_sent > 0 else 0
     click_rate = (total_clicked / total_sent * 100) if total_sent > 0 else 0
-    reply_rate = (total_replied / total_sent * 100) if total_sent > 0 else 0
+    reply_rate = shared['reply_rate']
     click_through_rate = (total_clicked / total_opened * 100) if total_opened > 0 else 0
     # Leads engagement: % of leads (who were sent at least one email) who opened, clicked, or replied
     leads_sent_to = all_email_sends.values_list('lead_id', flat=True).distinct().count()
@@ -331,9 +333,9 @@ def _build_campaign_detail(campaign, user):
     target_conversions = campaign.target_conversions
     leads_count = campaign.leads.count()
     leads_progress = (leads_count / target_leads * 100) if target_leads and target_leads > 0 else None
-    # Conversion = positive replies (interested, requested_info, etc.), not clicks
-    total_conversions = positive_replies
-    conversion_progress = (total_conversions / target_conversions * 100) if target_conversions and target_conversions > 0 else None
+    # Conversion = a lead who replied with interest or asked for more: people, not messages (CO-195)
+    total_conversions = shared['conversions']
+    conversion_progress = shared['conversion_progress']
 
     analytics = {
         'open_rate_percent': round(open_rate, 2),
@@ -360,6 +362,8 @@ def _build_campaign_detail(campaign, user):
         'total_bounced': total_bounced,
         'engaged_leads_count': len(engaged_lead_ids),
         'leads_sent_to': leads_sent_to,
+        'total_conversions': total_conversions,
+        'reply_messages': shared['reply_messages'],
     }
 
     # Chart data (last 30 days)
@@ -1799,6 +1803,12 @@ def delete_notification(request, notification_id):
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
         notification = MarketingNotification.objects.get(id=notification_id, user=user)
+        # Remembered, so the monitor does not raise it again within the week (CO-133).
+        from marketing_agent.agents.proactive_notification_agent import alert_key
+        from marketing_agent.models import DismissedMarketingAlert
+        DismissedMarketingAlert.objects.create(
+            user=user, campaign_id=notification.campaign_id,
+            key=alert_key(notification.notification_type, notification.metadata, notification.title))
         notification.delete()
         return Response({'status': 'success', 'message': 'Notification deleted successfully'}, status=status.HTTP_200_OK)
     except MarketingNotification.DoesNotExist:
@@ -3731,6 +3741,9 @@ def api_marketing_get_saved_prompts(request):
         user = _get_or_create_user_for_company_user(company_user)
 
         prompts = SavedGraphPrompt.objects.filter(created_by=user)
+        # One saved graph by its id (a link to run it): it was looked for in the first page of ten only (CO-236).
+        if (request.GET.get('id') or '').isdigit():
+            prompts = prompts.filter(id=int(request.GET['id']))
 
         # Pagination
         page = int(request.GET.get('page', 1))

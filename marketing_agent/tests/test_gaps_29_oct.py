@@ -264,3 +264,25 @@ class ReplyDraftDisconnectTests(MarketingTestCase):
             code, body = self.call(views.delete_reply_account, self.ann_login, method='delete')
         box.refresh_from_db()
         self.assertEqual((box.is_reply_agent_account, box.enable_imap_sync), (False, True), body)
+
+
+class ReplyReadingTests(MarketingTestCase):
+    """CO-128: keyword rules overrode the AI and read the company's own subject line."""
+
+    def read(self, ai_says, content, subject='Re: Spring offer - unsubscribe anytime'):
+        from unittest import mock
+        from marketing_agent.utils.reply_analyzer import ReplyAnalyzer
+        analyzer = ReplyAnalyzer.__new__(ReplyAnalyzer)
+        analyzer.system_prompt = ''
+        answer = '{"interest_level": "%s", "analysis": "test", "confidence": 90}' % ai_says
+        with mock.patch.object(ReplyAnalyzer, '_call_groq_qa', create=True, return_value=answer):
+            return analyzer.analyze_reply(subject, content, 'Spring offer', company_id=self.acme.id)['interest_level']
+
+    def test_the_ai_reads_the_reply_and_the_subject_does_not_unsubscribe_anyone(self):
+        self.assertEqual(self.read('positive', 'Sure, send me the details for next week.'), 'positive')
+        self.assertEqual(self.read('negative', 'Not interested, thanks.'), 'negative')       # a no, not a stop
+        self.assertEqual(self.read('requested_info', 'We will ensure the budget first - what does it cost?'),
+                         'requested_info')
+
+    def test_an_explicit_request_to_stop_is_always_one(self):
+        self.assertEqual(self.read('negative', "Please don't email me again, unsubscribe me."), 'unsubscribe')

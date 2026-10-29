@@ -19,6 +19,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Events that happen once in a campaign's life: their alert is raised once, ever (CO-133).
+ONCE_PER_CAMPAIGN = {'first_open', 'first_click', 'auto_activated', 'campaign_ready_to_launch'}
+
+
+def alert_key(notification_type, metadata, title):
+    """What makes two alerts the same: their kind and their action, else their title."""
+    action = (metadata or {}).get('action') if isinstance(metadata, dict) else None
+    return f'{notification_type}:{action or (title or "")[:120]}'[:160]
+
 
 class ProactiveNotificationAgent(MarketingBaseAgent):
     """
@@ -147,93 +156,27 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             issues = []
             opportunities = []
             
-            # Check performance metrics
-            perf_result = self._check_performance_metrics(campaign, user)
-            if perf_result:
-                notifications_created.extend(perf_result.get('notifications', []))
-                issues.extend(perf_result.get('issues', []))
-                opportunities.extend(perf_result.get('opportunities', []))
-            
-            # Check email delivery
-            delivery_result = self._check_email_delivery(campaign, user)
-            if delivery_result:
-                notifications_created.extend(delivery_result.get('notifications', []))
-                issues.extend(delivery_result.get('issues', []))
-            
-            # Check milestones
-            milestone_result = self._check_milestones(campaign, user)
-            if milestone_result:
-                notifications_created.extend(milestone_result.get('notifications', []))
-                opportunities.extend(milestone_result.get('opportunities', []))
-            
-            # Check anomalies
-            anomaly_result = self._check_anomalies(campaign, user)
-            if anomaly_result:
-                notifications_created.extend(anomaly_result.get('notifications', []))
-                issues.extend(anomaly_result.get('issues', []))
-            
-            # Check campaign setup and actionable recommendations
-            setup_result = self._check_campaign_setup(campaign, user)
-            if setup_result:
-                notifications_created.extend(setup_result.get('notifications', []))
-                issues.extend(setup_result.get('issues', []))
-            
-            # Check for actionable recommendations
-            recommendations_result = self._check_actionable_recommendations(campaign, user)
-            if recommendations_result:
-                notifications_created.extend(recommendations_result.get('notifications', []))
-                opportunities.extend(recommendations_result.get('opportunities', []))
-            
-            # Comprehensive checks for ALL campaigns (active, scheduled, paused, draft)
-            # Check all reply types (positive, negative, neutral, objections, unsubscribe)
-            # Works for any campaign that has sent emails
-            all_replies_result = self._check_all_reply_types(campaign, user)
-            if all_replies_result:
-                notifications_created.extend(all_replies_result.get('notifications', []))
-                opportunities.extend(all_replies_result.get('opportunities', []))
-                issues.extend(all_replies_result.get('issues', []))
-            
-            # Check open/click rates and engagement metrics
-            # Works for any campaign that has sent emails
-            engagement_result = self._check_active_campaign_engagement(campaign, user)
-            if engagement_result:
-                notifications_created.extend(engagement_result.get('notifications', []))
-                opportunities.extend(engagement_result.get('opportunities', []))
-                issues.extend(engagement_result.get('issues', []))
-            
-            # Check sequence status and email sending
-            # Works for all campaign statuses
-            sequence_status_result = self._check_active_campaign_sequences(campaign, user)
-            if sequence_status_result:
-                notifications_created.extend(sequence_status_result.get('notifications', []))
-                issues.extend(sequence_status_result.get('issues', []))
-            
-            # Check campaign progress (weekly updates, milestones)
-            # Only for active campaigns (they're the ones running)
+            # Each check on its own: one that failed (a missing variable in the setup check) stopped every check
+            # after it (CO-238).
+            checks = [self._check_performance_metrics, self._check_email_delivery, self._check_milestones,
+                      self._check_anomalies, self._check_campaign_setup, self._check_actionable_recommendations,
+                      self._check_all_reply_types, self._check_active_campaign_engagement,
+                      self._check_active_campaign_sequences]
             if campaign.status == 'active':
-                progress_result = self._check_campaign_progress(campaign, user)
-                if progress_result:
-                    notifications_created.extend(progress_result.get('notifications', []))
-                    opportunities.extend(progress_result.get('opportunities', []))
-            
-            # Recent activity summary (opens, clicks, replies) - any campaign with sends or replies
-            activity_result = self._check_recent_activity_summary(campaign, user)
-            if activity_result:
-                notifications_created.extend(activity_result.get('notifications', []))
-                opportunities.extend(activity_result.get('opportunities', []))
-            
-            # First open / first click milestones (low threshold so new campaigns get feedback)
-            milestones_result = self._check_first_milestones(campaign, user)
-            if milestones_result:
-                notifications_created.extend(milestones_result.get('notifications', []))
-                opportunities.extend(milestones_result.get('opportunities', []))
-            
-            # Sub-sequence triggered by reply (reply triggered a follow-up sequence)
-            subseq_result = self._check_sub_sequence_triggered(campaign, user)
-            if subseq_result:
-                notifications_created.extend(subseq_result.get('notifications', []))
-                opportunities.extend(subseq_result.get('opportunities', []))
-            
+                checks.append(self._check_campaign_progress)          # weekly updates, for running campaigns
+            checks += [self._check_recent_activity_summary, self._check_first_milestones,
+                       self._check_sub_sequence_triggered]
+            for check in checks:
+                try:
+                    result = check(campaign, user)
+                except Exception:
+                    logger.exception('Marketing monitor: %s failed for campaign %s', check.__name__, campaign.id)
+                    continue
+                if result:
+                    notifications_created.extend(result.get('notifications', []))
+                    issues.extend(result.get('issues', []))
+                    opportunities.extend(result.get('opportunities', []))
+
             # Filter out None values (duplicates that weren't created) and count actual notifications
             actual_notifications = [n for n in notifications_created if n is not None and hasattr(n, 'id')]
             
@@ -293,22 +236,20 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         issues = []
         opportunities = []
         
-        # Get email statistics
-        email_sends = EmailSendHistory.objects.filter(campaign=campaign)
-        total_sent = email_sends.count()
-        
-        if total_sent == 0:
+        # The campaign page's figures (services/campaign_numbers.py): rates of emails that went out, not of every
+        # row with failed and pending ones too (CO-136). Bounces and failures are a share of every attempt.
+        from marketing_agent.services.campaign_numbers import numbers
+        shared = numbers(campaign)
+        total_sent = shared['sent']
+        attempts = total_sent + shared['failed'] + shared['bounced']
+        if attempts == 0:
             return None
-        
-        emails_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
-        emails_clicked = email_sends.filter(status='clicked').count()
-        emails_bounced = email_sends.filter(status='bounced').count()
-        emails_failed = email_sends.filter(status='failed').count()
-        
-        open_rate = (emails_opened / total_sent * 100) if total_sent > 0 else 0
-        click_rate = (emails_clicked / total_sent * 100) if total_sent > 0 else 0
-        bounce_rate = (emails_bounced / total_sent * 100) if total_sent > 0 else 0
-        failure_rate = (emails_failed / total_sent * 100) if total_sent > 0 else 0
+
+        emails_opened, emails_clicked = shared['opened'], shared['clicked']
+        emails_bounced, emails_failed = shared['bounced'], shared['failed']
+        open_rate, click_rate = shared['open_rate'], shared['click_rate']
+        bounce_rate = (emails_bounced / attempts * 100)
+        failure_rate = (emails_failed / attempts * 100)
         
         # Check for low open rate (alert if < 15%) - lowered threshold so smaller campaigns get feedback
         if open_rate < 15 and total_sent >= 5:
@@ -495,7 +436,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                             title=f'📧 Emails Opened But No Clicks/Replies: {campaign.name}',
                             message=f'Campaign "{campaign.name}" has {emails_opened} email opens but ZERO clicks and ZERO replies from {total_sent} emails sent. People are opening but not engaging. Improve: 1) Call-to-action buttons, 2) Email content relevance, 3) Offer value, 4) Follow-up sequences.',
                             action_required=True,
-                            action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
+                            action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                             metadata={
                                 'action': 'opens_but_no_clicks_replies',
                                 'total_sent': total_sent,
@@ -680,6 +621,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         """Check campaign setup and provide actionable recommendations"""
         notifications = []
         issues = []
+        opportunities = []          # was never set, so this check failed and every check after it was skipped (CO-238)
         
         # Check PAUSED campaigns - provide actionable steps
         if campaign.status == 'paused':
@@ -697,7 +639,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'👥 Generate Leads: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is paused and has no leads! Generate or upload leads first, then create email sequences, and finally launch the campaign.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'generate_leads',
                         'status': 'paused',
@@ -739,7 +681,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🚀 Launch Campaign: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is paused but ready to launch! It has {leads_count} leads and {sequences.count()} email sequence(s). Activate the campaign to start sending emails.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'launch_paused_campaign',
                         'status': 'paused',
@@ -791,7 +733,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'👥 Generate Leads for Scheduled Campaign: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is scheduled but has no leads! Generate or upload leads first, then create email sequences before the start date.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'generate_leads_for_scheduled',
                         'status': 'scheduled',
@@ -837,7 +779,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         title=f'⏰ Scheduled Campaign Not Launched: {campaign.name}',
                         message=f'Campaign "{campaign.name}" is scheduled with start date {campaign.start_date} but has NOT been launched yet! It has {leads_count} leads and {sequences.count()} sequence(s) ready. Launch the campaign now to start sending emails.',
                         action_required=True,
-                        action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
+                        action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                         metadata={
                             'action': 'launch_scheduled_campaign',
                             'status': 'scheduled',
@@ -862,7 +804,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                             title=f'🚀 Campaign Ready to Launch: {campaign.name}',
                             message=f'Campaign "{campaign.name}" is scheduled to start {campaign.start_date.strftime("%B %d, %Y")} ({days_until_start} day{"s" if days_until_start != 0 else ""} away). It has {leads_count} leads and {sequences.count()} sequence(s) ready. You can launch it now or wait for the scheduled date.',
                             action_required=False,
-                            action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
+                            action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                             metadata={
                                 'action': 'campaign_ready_to_launch',
                                 'status': 'scheduled',
@@ -891,7 +833,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🚀 Activate Campaign: {campaign.name}',
                     message=f'Your campaign "{campaign.name}" is ready to activate! It has {campaign.leads.count()} leads and dates configured. Click to activate and start sending emails.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'activate_campaign',
                         'leads_count': campaign.leads.count(),
@@ -916,7 +858,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'⏰ Campaign Start Date Passed: {campaign.name}',
                     message=f'Campaign "{campaign.name}" start date ({campaign.start_date}) has passed but campaign is still scheduled. Activate it now to start sending emails.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'activate_overdue_campaign',
                         'start_date': campaign.start_date.isoformat()
@@ -970,7 +912,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'👥 Increase Leads: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is active but has no leads! Generate or upload more leads to start engaging with your target audience and improve campaign performance.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'increase_leads_for_active',
                         'status': 'active',
@@ -1030,9 +972,8 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             # Active campaign with low lead count (needs more leads)
             elif leads_count > 0 and leads_count < 10 and emails_sent > 0:
                 # Check if campaign is performing well but needs more leads
-                email_sends = EmailSendHistory.objects.filter(campaign=campaign)
-                emails_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
-                open_rate = (emails_opened / emails_sent * 100) if emails_sent > 0 else 0
+                from marketing_agent.services.campaign_numbers import numbers
+                open_rate = numbers(campaign)['open_rate']          # the campaign page's figure (CO-136)
                 
                 if open_rate >= 20:  # Good engagement, can scale
                     notification = self._create_notification(
@@ -1043,7 +984,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         title=f'👥 Increase Lead Count: {campaign.name}',
                         message=f'Campaign "{campaign.name}" is performing well ({open_rate:.1f}% open rate) but only has {leads_count} leads. Consider adding more leads to scale the campaign and increase conversions.',
                         action_required=False,
-                        action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
+                        action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                         metadata={
                             'action': 'increase_leads_scale',
                             'status': 'active',
@@ -1062,7 +1003,8 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         if notifications:
             return {
                 'notifications': notifications,
-                'issues': issues
+                'issues': issues,
+                'opportunities': opportunities,
             }
         return None
     
@@ -1093,7 +1035,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'👥 Add Leads to Active Campaign: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is active but has no leads and no emails sent. Add leads first, then create email sequences to start the campaign.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'add_leads_to_active',
                         'leads_count': 0,
@@ -1151,7 +1093,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'✏️ Improve Email Content: {campaign.name}',
                 message=f'Open rate is {open_rate:.1f}% (below 20%). Improve your emails by: 1) Writing better subject lines, 2) Personalizing content, 3) Testing send times, 4) A/B testing different approaches.',
                 action_required=True,
-                action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                 metadata={
                     'action': 'improve_email_content',
                     'open_rate': open_rate,
@@ -1180,7 +1122,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'🎯 Optimize Call-to-Action: {campaign.name}',
                 message=f'Good open rate ({open_rate:.1f}%) but low click rate ({click_rate:.1f}%). Improve CTAs by: 1) Making buttons more prominent, 2) Using action-oriented language, 3) Reducing friction, 4) Testing different CTA placements.',
                 action_required=True,
-                action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                 metadata={
                     'action': 'optimize_cta',
                     'open_rate': open_rate,
@@ -1449,20 +1391,16 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         opportunities = []
         issues = []
         
-        # Get email statistics
-        email_sends = EmailSendHistory.objects.filter(campaign=campaign)
-        total_sent = email_sends.count()
-        
+        # The campaign page's figures (services/campaign_numbers.py, CO-136)
+        from marketing_agent.services.campaign_numbers import numbers
+        shared = numbers(campaign)
+        total_sent = shared['sent']
         if total_sent == 0:
             return None
-        
-        emails_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
-        emails_clicked = email_sends.filter(status='clicked').count()
-        emails_delivered = email_sends.filter(status__in=['delivered', 'opened', 'clicked']).count()
-        
-        open_rate = (emails_opened / total_sent * 100) if total_sent > 0 else 0
-        click_rate = (emails_clicked / total_sent * 100) if total_sent > 0 else 0
-        delivery_rate = (emails_delivered / total_sent * 100) if total_sent > 0 else 0
+        emails_opened, emails_clicked = shared['opened'], shared['clicked']
+        open_rate, click_rate = shared['open_rate'], shared['click_rate']
+        attempts = total_sent + shared['failed'] + shared['bounced']
+        delivery_rate = (total_sent / attempts * 100) if attempts else 0
         
         # Check for excellent open rate (opportunity)
         if open_rate >= 30 and total_sent >= 20:
@@ -1535,7 +1473,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'⚠️ Low Open Rate: {campaign.name}',
                     message=f'Campaign "{campaign.name}" has a low open rate of {open_rate:.1f}% ({emails_opened} opens from {total_sent} emails). Improve: 1) Subject lines, 2) Send times, 3) Personalization, 4) Audience targeting.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={'action': 'low_open_rate', 'open_rate': open_rate, 'total_sent': total_sent}
                 )
                 if notification:
@@ -1561,7 +1499,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📉 Low Click Rate: {campaign.name}',
                     message=f'Campaign "{campaign.name}" has good open rate ({open_rate:.1f}%) but low click rate ({click_rate:.1f}%). Improve: 1) CTA buttons, 2) Email content relevance, 3) Offer value, 4) CTA placement.',
                     action_required=True,
-                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={'action': 'low_click_rate', 'open_rate': open_rate, 'click_rate': click_rate}
                 )
                 if notification:
@@ -1597,7 +1535,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         f'Draft campaign "{campaign.name}" has no leads and no email sequences. '
                         'Next steps: 1) Upload your leads (CSV/Excel). 2) Create email sequences. 3) Schedule the campaign to start.'
                     )
-                    action_url = f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/'
+                    action_url = f'/marketing/dashboard/campaign/{campaign.id}/'
                 else:
                     title = f'📧 Create sequences: {campaign.name}'
                     message = (
@@ -1612,7 +1550,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         f'{status_label} campaign "{campaign.name}" has no leads and no sequences. '
                         'Upload your leads first, then create email sequences.'
                     )
-                    action_url = f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/'
+                    action_url = f'/marketing/dashboard/campaign/{campaign.id}/'
                 else:
                     message = (
                         f'{status_label} campaign "{campaign.name}" has no email sequences. '
@@ -1792,26 +1730,12 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         notifications = []
         opportunities = []
         
-        # Get campaign statistics
-        total_emails_sent = EmailSendHistory.objects.filter(campaign=campaign).count()
-        emails_opened = EmailSendHistory.objects.filter(
-            campaign=campaign,
-            status__in=['opened', 'clicked']
-        ).count()
-        emails_clicked = EmailSendHistory.objects.filter(
-            campaign=campaign,
-            status='clicked'
-        ).count()
-        total_replies = Reply.objects.filter(campaign=campaign).count()
-        positive_replies = Reply.objects.filter(
-            campaign=campaign,
-            interest_level='positive'
-        ).count()
-        
-        # Calculate rates
-        open_rate = (emails_opened / total_emails_sent * 100) if total_emails_sent > 0 else 0
-        click_rate = (emails_clicked / total_emails_sent * 100) if total_emails_sent > 0 else 0
-        reply_rate = (total_replies / total_emails_sent * 100) if total_emails_sent > 0 else 0
+        # The campaign page's figures, replies as people (services/campaign_numbers.py, CO-136/195)
+        from marketing_agent.services.campaign_numbers import numbers
+        shared = numbers(campaign)
+        total_emails_sent, emails_opened, emails_clicked = shared['sent'], shared['opened'], shared['clicked']
+        total_replies, positive_replies = shared['replied_leads'], shared['conversions']
+        open_rate, click_rate, reply_rate = shared['open_rate'], shared['click_rate'], shared['reply_rate']
         
         # Only send progress updates if campaign has sent emails
         if total_emails_sent == 0:
@@ -2116,32 +2040,32 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                            action_url: Optional[str] = None,
                            metadata: Optional[Dict] = None) -> Optional[MarketingNotification]:
         """
-        Create a notification in the database
-        Prevents duplicates by checking if a similar notification was created recently (last 24 hours)
+        Create a notification in the database, unless the same alert was raised lately.
+
+        An alert is the same when its kind and its action are (the title carries changing figures). A one-off event
+        (a first open, a start) is raised once per campaign, ever; any other alert once a week at most, whether the
+        last one was read, left unread or deleted. Only an unread copy of the same title from the last day stopped
+        it, so an alert came back within half an hour of being read or deleted, and every day for ever (CO-133).
         """
         from datetime import timedelta
-        
-        # Check for duplicate notification in last 24 hours
-        recent_cutoff = timezone.now() - timedelta(hours=24)
-        duplicate = MarketingNotification.objects.filter(
-            user=user,
-            campaign=campaign,
-            notification_type=notification_type,
-            title=title,
-            created_at__gte=recent_cutoff
-        ).first()
-        
-        # If duplicate exists and is unread, don't create a new one
-        if duplicate and not duplicate.is_read:
-            return None  # Return None to indicate no new notification was created
-        
+        from marketing_agent.models import DismissedMarketingAlert
+
+        key = alert_key(notification_type, metadata, title)
+        since = None if key.split(':', 1)[1] in ONCE_PER_CAMPAIGN else timezone.now() - timedelta(days=7)
+        earlier = MarketingNotification.objects.filter(user=user, campaign=campaign, notification_type=notification_type)
+        dismissed = DismissedMarketingAlert.objects.filter(user=user, campaign=campaign, key=key)
+        if since is not None:
+            earlier, dismissed = earlier.filter(created_at__gte=since), dismissed.filter(dismissed_at__gte=since)
+        if dismissed.exists() or any(alert_key(n.notification_type, n.metadata, n.title) == key for n in earlier):
+            return None
+
         # Create new notification (stays unread until user marks as read)
         notification = MarketingNotification.objects.create(
             user=user,
             campaign=campaign,
             notification_type=notification_type,
             priority=priority,
-            title=title,
+            title=title[:200],              # the column's limit; longer stopped the monitor half-way (CO-238)
             message=message,
             action_required=action_required,
             action_url=action_url or '',

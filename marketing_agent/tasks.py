@@ -109,23 +109,14 @@ def auto_pause_expired_campaigns_task():
 
 
 def _create_scheduled_launch_notification(campaign, user, title, message, action_required, action_url=None, metadata=None):
-    """Create notification for scheduled campaign launch - avoid duplicates in last 24h."""
-    recent_cutoff = timezone.now() - timedelta(hours=24)
-    dup = MarketingNotification.objects.filter(
-        user=user, campaign=campaign, notification_type='campaign_status',
-        title=title, created_at__gte=recent_cutoff
-    ).first()
-    if dup and not dup.is_read:
-        return None
-    notification = MarketingNotification.objects.create(
-        user=user, campaign=campaign, notification_type='campaign_status',
-        priority='high', title=title, message=message,
-        action_required=action_required, action_url=action_url or '',
-        metadata=metadata or {}
-    )
-    from marketing_agent.bell import forward
-    forward(notification)
-    return notification
+    """Tell the owner about a scheduled start, through the monitor's own creator: the same alert is raised once a
+    week at most, read, unread or deleted (CO-133); this one looked at unread copies of the last day only."""
+    from marketing_agent.agents.proactive_notification_agent import ProactiveNotificationAgent
+    agent = ProactiveNotificationAgent.__new__(ProactiveNotificationAgent)
+    return agent._create_notification(user=user, campaign=campaign, notification_type='campaign_status',
+                                      priority='high', title=title, message=message,
+                                      action_required=action_required, action_url=action_url,
+                                      metadata=metadata or {})
 
 
 @shared_task
@@ -281,3 +272,14 @@ def sync_campaign_performance_task():
     except Exception as e:
         print(f'Error in performance sync task: {str(e)}')
         return {'status': 'error', 'error': str(e)}
+
+
+@shared_task
+def cleanup_marketing_alerts_task():
+    """Once a day: alerts read more than 60 days ago, and remembered deletions older than the dedupe window. Nothing
+    cleaned them up (CO-133)."""
+    from marketing_agent.models import DismissedMarketingAlert
+    now = timezone.now()
+    old_read = MarketingNotification.objects.filter(is_read=True, created_at__lt=now - timedelta(days=60)).delete()[0]
+    old_keys = DismissedMarketingAlert.objects.filter(dismissed_at__lt=now - timedelta(days=30)).delete()[0]
+    return {'status': 'success', 'alerts_removed': old_read, 'dismissals_removed': old_keys}

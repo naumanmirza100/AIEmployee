@@ -1131,6 +1131,13 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 6 * 3600},
     },
 
+    # Old Marketing alerts and remembered deletions - daily, at 02:50 UTC (CO-133)
+    'cleanup-marketing-alerts': {
+        'task': 'marketing_agent.tasks.cleanup_marketing_alerts_task',
+        'schedule': _crontab(hour=2, minute=50),
+        'options': {'expires': 6 * 3600},
+    },
+
     # Auto-pause expired campaigns - daily, at 00:05 UTC
     'auto-pause-expired-campaigns': {
         'task': 'marketing_agent.tasks.auto_pause_expired_campaigns_task',

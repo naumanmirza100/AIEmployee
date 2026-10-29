@@ -309,7 +309,8 @@ const MarketingDashboard = () => {
   useEffect(() => {
     if (activeTab === 'dashboard') {
       fetchCampaigns(campaignsPage);
-      getSavedGraphPrompts()
+      // Every saved graph, not the first page of ten: a pinned one further down was never shown (CO-236).
+      getSavedGraphPrompts({ page_size: 100 })
         .then((res) => {
           if (res?.status === 'success' && Array.isArray(res.data)) {
             setDashboardGraphPrompts(res.data.filter(isGraphPromptOnDashboard));
@@ -423,7 +424,7 @@ const MarketingDashboard = () => {
       toast({ title: 'Error', description: `${failCount} campaign${failCount > 1 ? 's' : ''} failed to delete`, variant: 'destructive' });
     }
     fetchCampaigns(campaignsPage);
-    fetchDashboardData();
+    fetchStats();   // fetchDashboardData did not exist: the totals stayed as they were (CO-237)
   };
 
   const fetchEmailAccounts = async () => {

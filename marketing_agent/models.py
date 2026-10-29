@@ -1135,6 +1135,20 @@ def create_campaign_contact(sender, instance, action, pk_set, **kwargs):
                 )
 
 
+class DismissedMarketingAlert(models.Model):
+    """An alert someone deleted, remembered so the monitor does not raise it again at once (CO-133: it came back
+    within half an hour of being deleted, and the same alerts were made again every day)."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dismissed_marketing_alerts')
+    campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, null=True, blank=True,
+                                 related_name='dismissed_alerts')
+    key = models.CharField(max_length=160)
+    dismissed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ppp_marketingagent_dismissedalert'
+        indexes = [models.Index(fields=['user', 'campaign', 'key'], name='ppp_marketi_dismiss_key_idx')]
+
+
 class CheckedInboxMessage(models.Model):
     """A message a Marketing-only mailbox's inbox sync has read, so it is not downloaded again.
 

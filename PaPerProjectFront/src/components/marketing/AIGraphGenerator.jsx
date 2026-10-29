@@ -327,7 +327,7 @@ const AIGraphGenerator = () => {
     const run = async () => {
       hasRunFromUrl.current = true;
       try {
-        const response = await getSavedGraphPrompts();
+        const response = await getSavedGraphPrompts({ id });   // that one, wherever it is in the list (CO-236)
         const list = response?.data || [];
         const savedPrompt = list.find((p) => p.id === id);
         if (savedPrompt) {
@@ -466,7 +466,7 @@ const AIGraphGenerator = () => {
 
   const handleToggleFavorite = async (promptId, currentFavorite) => {
     try {
-      const response = await toggleGraphPromptFavorite(promptId, { is_favorite: !currentFavorite });
+      const response = await toggleGraphPromptFavorite(promptId, !currentFavorite);  // a boolean: an object was always "true" (CO-236)
       if (response.status === 'success') {
         setSavedPrompts(prev => prev.map(p => (p.id === promptId ? { ...p, is_favorite: !currentFavorite } : p)));
       }
