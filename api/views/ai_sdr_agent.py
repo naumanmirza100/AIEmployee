@@ -2230,7 +2230,29 @@ def _host_booking(company_user, scheduled_at, duration_minutes, *, exclude_id=No
                         tz_name=zone_name(company_user.company.timezone_name),
                         exclude=[('sdr', exclude_id)] if exclude_id else (),
                         viewer_source='sdr', hide_titles=public, suggest=not public)
+        elif scheduled_at is not None:
+            # No employee login, so no shared calendar: their own sales calls are checked still. Nothing was, and
+            # two calls could overlap (CO-151).
+            _ensure_own_calls_free(company_user, scheduled_at, duration_minutes or 30, exclude_id, public)
         yield
+
+
+def _ensure_own_calls_free(company_user, start, minutes, exclude_id, public):
+    """Raise ScheduleConflict if another of this salesperson's booked or proposed calls overlaps."""
+    from core.scheduling import Clash, zone_name
+    from core.scheduling.sources import SOURCES
+    end = start + timedelta(minutes=minutes)
+    clashes = []
+    others = SDRMeeting.objects.filter(company_user=company_user, status__in=SOURCES['sdr'].BOOKED,
+                                       scheduled_at__lt=end, scheduled_at__gt=start - timedelta(hours=8))
+    for other in others.exclude(id=exclude_id):
+        other_end = other.scheduled_at + timedelta(minutes=other.duration_minutes or 30)
+        if other_end > start:
+            clashes.append(Clash(user_id=0, user_name=company_user.full_name or company_user.email,
+                                 source='sdr', source_id=other.id, title=None if public else other.title,
+                                 starts_at=other.scheduled_at, ends_at=other_end, response=''))
+    if clashes:
+        raise ScheduleConflict(clashes, tz_name=zone_name(company_user.company.timezone_name))
 
 
 def _takes_time(status, scheduled_at) -> bool:
@@ -2538,6 +2560,13 @@ def sdr_confirm_meeting(request, meeting_id):
         if meeting.lead_timezone != browser_tz and browser_tz != 'UTC':
             meeting.lead_timezone = browser_tz
 
+        campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
+        if send_approval and campaign is None:
+            # No mailbox to ask from: the screen used to say the email was sent anyway (CO-152).
+            return Response({'status': 'error', 'code': 'no_mailbox',
+                             'message': "This call has no campaign mailbox to email the lead from. "
+                                        "Confirm the time directly instead."}, status=400)
+
         if send_approval:
             # Lead approval flow — email lead, wait for their confirmation
             import uuid as _uuid
@@ -2547,25 +2576,27 @@ def sdr_confirm_meeting(request, meeting_id):
             with _host_booking(company_user, meeting.scheduled_at, meeting.duration_minutes, exclude_id=meeting.id):
                 meeting.save()
 
-            if meeting.enrollment and meeting.enrollment.campaign:
-                campaign = meeting.enrollment.campaign
-                from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
-                tz_name = browser_tz
-                proposed_time_str = format_datetime_with_timezone(meeting.scheduled_at, tz_name)
-                try:
-                    MeetingSchedulingAgent(company=company_user.company).send_approval_request_email(
-                        campaign, meeting.lead, meeting, proposed_time_str
-                    )
-                except KeyServiceError:
-                    raise
-                except Exception as exc:
-                    logger.warning("Approval request email failed for meeting %s: %s", meeting.id, exc)
+            from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+            from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
+            proposed_time_str = format_datetime_with_timezone(meeting.scheduled_at, browser_tz)
+            email_sent, email_error = True, ''
+            try:
+                MeetingSchedulingAgent(company=company_user.company).send_approval_request_email(
+                    campaign, meeting.lead, meeting, proposed_time_str
+                )
+            except KeyServiceError:
+                raise
+            except Exception as exc:
+                logger.warning("Approval request email failed for meeting %s: %s", meeting.id, exc)
+                email_sent, email_error = False, str(exc)
 
             return Response({
                 'status': 'success',
                 'mode': 'awaiting_approval',
-                'message': 'Approval email sent to lead.',
+                'email_sent': email_sent,
+                'email_error': email_error,
+                'message': 'Approval email sent to lead.' if email_sent else
+                           f'The time is saved, but the email to the lead failed: {email_error}',
                 'data': _serialize_meeting(meeting),
             })
 
@@ -2579,18 +2610,22 @@ def sdr_confirm_meeting(request, meeting_id):
             lead = meeting.lead
             lead.status = 'meeting_scheduled'
             lead.save(update_fields=['status'])
+            _give_call_a_link(meeting)
 
-            if meeting.enrollment and meeting.enrollment.campaign:
-                campaign = meeting.enrollment.campaign
+            email_sent, email_error = False, 'This call has no campaign mailbox, so the lead was not emailed.'
+            if campaign:
                 try:
                     from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
                     MeetingSchedulingAgent(company=company_user.company).send_confirmation_email(campaign, lead, meeting)
+                    email_sent, email_error = True, ''
                 except KeyServiceError:
                     raise
                 except Exception as exc:
                     logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
+                    email_error = f'The email to the lead failed: {exc}'
 
-            return Response({'status': 'success', 'mode': 'confirmed', 'data': _serialize_meeting(meeting)})
+            return Response({'status': 'success', 'mode': 'confirmed', 'email_sent': email_sent,
+                             'email_error': email_error, 'data': _serialize_meeting(meeting)})
 
     except KeyServiceError:
         raise
@@ -2725,14 +2760,17 @@ def sdr_meeting_lead_approve(request, approval_token):
     # POST — claim the confirmation atomically. Only a proposed slot (awaiting
     # approval, with a time set) can be confirmed; a lead who asked for another
     # time, or a meeting with no time, must not flip to "scheduled".
+    # A proposed time that has passed cannot be accepted: the link never expired (CO-152).
     claimed = SDRMeeting.objects.filter(
-        id=meeting.id, status='awaiting_approval', scheduled_at__isnull=False,
+        id=meeting.id, status='awaiting_approval', scheduled_at__gt=timezone.now(),
     ).update(status='scheduled', confirmed_at=timezone.now())
 
     if claimed:
         lead = meeting.lead
         lead.status = 'meeting_scheduled'
         lead.save(update_fields=['status'])
+        meeting.refresh_from_db()
+        _give_call_a_link(meeting)
 
         # The time is settled now; that is when the CRM hears about it.
         try:
@@ -2769,6 +2807,14 @@ def sdr_meeting_lead_approve(request, approval_token):
             title='Meeting confirmed',
             heading="You're all set! 🎉",
             message='This meeting is already confirmed. A confirmation email with the details is in your inbox.',
+            booking_url=_booking_page_url(meeting),
+        )
+    if meeting.status == 'awaiting_approval' and meeting.scheduled_at and meeting.scheduled_at <= timezone.now():
+        return _approval_result_page(
+            ok=True, accent='#7c3aed',
+            title='This time has passed',
+            heading='The proposed time has already passed',
+            message='Please pick another time that suits you.',
             booking_url=_booking_page_url(meeting),
         )
     return _approval_result_page(
@@ -3261,6 +3307,44 @@ def sdr_booking_info(request, token):
 BOOKING_MAX_DAYS_AHEAD = 180   # how far in the future a lead may book
 
 
+VIDEO_LINK_STARTS = ('https://meet.jit.si/', 'https://meet.google.com/')
+
+
+def is_video_link(url):
+    """A call's own room, not the campaign's scheduling page (Calendly and the like)."""
+    return (url or '').startswith(VIDEO_LINK_STARTS)
+
+
+def _give_call_a_link(meeting):
+    """The video link, and the Google event when Google is connected, for a call that has just become scheduled.
+
+    Only the public booking page made them. 'Set Time & Confirm' and the lead's 'Yes, this works' link sent a
+    confirmation showing the campaign's scheduling page as 'Join Meeting', or nothing (CO-150)."""
+    from core.google_events import follow_meeting
+    room_slug = str(meeting.booking_token).replace('-', '')[:16]
+    meet_link = meeting.calendar_link if is_video_link(meeting.calendar_link) else f"https://meet.jit.si/SDR-{room_slug}"
+    if meeting.google_event_id:
+        # Booked before, then reopened: move that event; a second one would stay in the calendar for good.
+        follow_meeting(meeting)
+        if is_video_link(meeting.calendar_link):
+            meet_link = meeting.calendar_link
+    else:
+        try:
+            google_link = _create_google_meet_link(meeting, meeting.scheduled_at, meeting.duration_minutes or 30)
+        except KeyServiceError:
+            raise
+        except Exception as exc:
+            logger.warning("Google Meet creation failed for meeting %s: %s", meeting.id, exc)
+            google_link = None
+        if google_link:
+            meet_link = google_link
+    SDRMeeting.objects.filter(id=meeting.id).update(
+        calendar_link=meet_link, google_event_id=meeting.google_event_id,
+        google_event_state=meeting.google_event_state)
+    meeting.calendar_link = meet_link
+    return meet_link
+
+
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([])
@@ -3310,8 +3394,10 @@ def sdr_booking_confirm(request, token):
     # The host can't be in two places at once: refuse a slot that overlaps another
     # scheduled meeting of the same account.
     slot_end = scheduled_at + timedelta(minutes=duration_minutes)
+    # A time offered to another lead and awaiting their answer is taken too, as on the shared calendar (CO-151).
+    from core.scheduling.sources import SOURCES
     for other in SDRMeeting.objects.filter(
-        company_user_id=meeting.company_user_id, status='scheduled',
+        company_user_id=meeting.company_user_id, status__in=SOURCES['sdr'].BOOKED,
         scheduled_at__gt=scheduled_at - timedelta(hours=8), scheduled_at__lt=slot_end,
     ).exclude(id=meeting.id):
         other_end = other.scheduled_at + timedelta(minutes=other.duration_minutes or 30)
@@ -3357,28 +3443,8 @@ def sdr_booking_confirm(request, token):
     meeting.status = 'scheduled'
     meeting.scheduled_at = scheduled_at
     meeting.confirmed_at = timezone.now()
-    if meeting.google_event_id:
-        # Booked before, then reopened: it has an event already. Move that one;
-        # a second event would leave the first in the calendar for good. The
-        # row was changed with .update(), which no signal sees.
-        from core.google_events import follow_meeting
-        follow_meeting(meeting)
-        meet_link = meeting.calendar_link or meet_link
-        SDRMeeting.objects.filter(id=meeting.id).update(calendar_link=meet_link)
-    else:
-        try:
-            google_link = _create_google_meet_link(meeting, scheduled_at, duration_minutes)
-        except KeyServiceError:
-            raise
-        except Exception as exc:
-            logger.warning("Google Meet creation failed for meeting %s: %s", meeting.id, exc)
-            google_link = None
-        if google_link:
-            meet_link = google_link
-        SDRMeeting.objects.filter(id=meeting.id).update(
-            calendar_link=meet_link, google_event_id=meeting.google_event_id,
-            google_event_state=meeting.google_event_state)
-    meeting.calendar_link = meet_link
+    # The row says the Jitsi room now; in memory it still has what it had, which keeps a reopened call's Meet link.
+    meet_link = _give_call_a_link(meeting)
 
     lead = meeting.lead
     lead.status = 'meeting_scheduled'

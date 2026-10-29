@@ -188,7 +188,7 @@ def apply_reply_action(company_user, campaign, enrollment, lead, classification,
                 'lead': lead,
                 'title': f'Discovery Call with {lead.display_name}',
                 'reply_snippet': reply_text[:500],
-                'calendar_link': campaign.calendar_link or '',
+                # The call gets its own room once booked; the campaign's scheduling page is not one (CO-150).
                 'status': 'pending',
                 'lead_timezone': guess_timezone_from_location(lead.company_location or ''),
             },

@@ -242,3 +242,77 @@ class EnrolTests(SDRBase):
         data = views.leads_list(request).data
         self.assertEqual((data['pagination']['total_count'], len(data['data'])), (30, 5))
         self.assertNotIn('in@clinic.example', [l['email'] for l in data['data']])
+
+
+class BookedCallTests(SDRBase):
+    """CO-150: only the booking page gave a call its video link and calendar event.
+    CO-151: a salesperson with no employee login had no clash check at all.
+    CO-152: the screen said the email went when it had failed or was never tried; a passed time could be accepted."""
+
+    def setUp(self):
+        super().setUp()
+        self.lead = self.make_lead('kiran@clinic.example')
+        self.enrollment = self.enroll(self.lead)
+
+    def meeting(self, enrollment='own', **kw):
+        return SDRMeeting.objects.create(company_user=self.cu, lead=self.lead,
+                                         enrollment=self.enrollment if enrollment == 'own' else enrollment, **kw)
+
+    def confirm(self, meeting, when, **extra):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from api.views import ai_sdr_agent as views
+        request = APIRequestFactory().post('/x', {'scheduled_at': when.isoformat(), **extra}, format='json')
+        force_authenticate(request, user=self.cu)
+        with mock.patch.object(views, '_create_google_meet_link', return_value=None), \
+                mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent') as agent:
+            response = views.sdr_confirm_meeting(request, meeting_id=meeting.id)
+        return response, agent
+
+    def test_a_call_the_salesperson_confirms_gets_its_own_room(self):
+        meeting = self.meeting(status='pending', calendar_link='https://calendly.com/acme/demo')
+        response, _ = self.confirm(meeting, timezone.now() + timedelta(days=2))
+        meeting.refresh_from_db()
+        self.assertTrue(meeting.calendar_link.startswith('https://meet.jit.si/SDR-'))
+        self.assertTrue(response.data['email_sent'])
+
+    def test_the_lead_accepting_a_time_gets_the_room_too(self):
+        from django.test import Client
+        meeting = self.meeting(status='awaiting_approval', scheduled_at=timezone.now() + timedelta(days=2))
+        with mock.patch('api.views.ai_sdr_agent._create_google_meet_link', return_value=None), \
+                mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
+            Client().post(f'/api/sdr/meeting-approval/{meeting.approval_token}/yes/')
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, 'scheduled')
+        self.assertTrue(meeting.calendar_link.startswith('https://meet.jit.si/'))
+
+    def test_a_time_that_has_passed_cannot_be_accepted(self):
+        from django.test import Client
+        meeting = self.meeting(status='awaiting_approval', scheduled_at=timezone.now() - timedelta(hours=1))
+        page = Client().post(f'/api/sdr/meeting-approval/{meeting.approval_token}/yes/')
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, 'awaiting_approval')
+        self.assertIn('already passed', page.content.decode())
+
+    def test_asking_the_lead_needs_a_mailbox_and_a_failed_email_is_said(self):
+        manual = SDRMeeting.objects.create(company_user=self.cu, lead=self.lead, is_manual=True, status='pending')
+        response, _ = self.confirm(manual, timezone.now() + timedelta(days=2), send_approval='true')
+        self.assertEqual((response.status_code, response.data['code']), (400, 'no_mailbox'))
+        meeting = self.meeting(status='pending')
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from api.views import ai_sdr_agent as views
+        request = APIRequestFactory().post('/x', {'scheduled_at': (timezone.now() + timedelta(days=3)).isoformat()},
+                                           format='json')
+        force_authenticate(request, user=self.cu)
+        with mock.patch.object(views, '_create_google_meet_link', return_value=None), \
+                mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent') as agent:
+            agent.return_value.send_confirmation_email.side_effect = ValueError('SMTP error: 535')
+            response = views.sdr_confirm_meeting(request, meeting_id=meeting.id)
+        self.assertFalse(response.data['email_sent'])
+        self.assertIn('535', response.data['email_error'])
+
+    def test_two_calls_of_a_salesperson_without_a_calendar_cannot_overlap(self):
+        when = timezone.now() + timedelta(days=2)
+        self.meeting(status='awaiting_approval', scheduled_at=when)          # offered to someone, awaiting them
+        other = self.meeting(enrollment=self.enroll(self.make_lead('sara@clinic.example')), status='pending')
+        response, _ = self.confirm(other, when + timedelta(minutes=10))
+        self.assertEqual(response.status_code, 409)

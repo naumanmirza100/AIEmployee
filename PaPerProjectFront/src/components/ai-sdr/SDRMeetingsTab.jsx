@@ -446,7 +446,14 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
         send_approval: sendApproval,
         browser_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
-      if (sendApproval) {
+      // What the server says happened to the email: it used to say "sent" even when it failed (CO-152).
+      if (resp.email_sent === false) {
+        toast({
+          title: sendApproval ? 'Time saved, but the lead was not emailed' : 'Meeting confirmed, but the lead was not emailed',
+          description: resp.email_error || 'The email could not be sent.',
+          variant: 'destructive',
+        });
+      } else if (sendApproval) {
         toast({ title: 'Approval email sent!', description: 'Lead will receive an email asking if the time works.' });
       } else {
         toast({ title: 'Meeting confirmed!', description: 'Confirmation email sent to the lead.' });

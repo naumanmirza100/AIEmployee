@@ -47,6 +47,12 @@ def _backend_base() -> str:
     ).rstrip('/')
 
 
+def _video_link(meeting) -> str:
+    """The call's own room for 'Your video call link', never the campaign's scheduling page (CO-150)."""
+    link = meeting.calendar_link or ''
+    return link if link.startswith(('https://meet.jit.si/', 'https://meet.google.com/')) else ''
+
+
 def _booking_base() -> str:
     """Base URL for the browser-facing /book/<token> page.
 
@@ -874,7 +880,7 @@ Return exactly this JSON:
         sender = campaign.sender_name or campaign.sender_company or 'the team'
         sender_title = campaign.sender_title or ''
         sender_company = campaign.sender_company or ''
-        meet_link = meeting.calendar_link or campaign.calendar_link or ''
+        meet_link = _video_link(meeting)
         scheduled_str = self._format_meeting_time(meeting)
         duration = meeting.duration_minutes or 30
         title = meeting.title or 'Discovery Call'
@@ -923,7 +929,7 @@ Return exactly this JSON:
         sender = campaign.sender_name or campaign.sender_company or 'the team'
         sender_title = campaign.sender_title or ''
         sender_company = campaign.sender_company or ''
-        meet_link = meeting.calendar_link or campaign.calendar_link or ''
+        meet_link = _video_link(meeting)
         scheduled_str = self._format_meeting_time(meeting)
         duration = meeting.duration_minutes or 30
         title = meeting.title or 'Discovery Call'
