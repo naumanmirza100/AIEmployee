@@ -4227,6 +4227,14 @@ def delete_research_chat(request, chat_id):
         chat = MarketResearchChat.objects.filter(company_user=company_user, id=chat_id).first()
         if not chat:
             return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        # The research the chat's answers saved goes with it: it stayed behind and the Q&A and documents went on
+        # reading it (CO-274).
+        research_ids = [m.response_data.get('research_id')
+                        for m in chat.messages.filter(role='assistant') if isinstance(m.response_data, dict)]
+        research_ids = [i for i in research_ids if isinstance(i, int)]
+        if research_ids:
+            MarketResearch.objects.filter(id__in=research_ids,
+                                          created_by=_get_or_create_user_for_company_user(company_user)).delete()
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted.'})
     except KeyServiceError:

@@ -455,3 +455,97 @@ class SharingTests(MarketingTestCase):
             self.call(views.outreach_campaign, self.bob_login,
                       {'action': 'launch', 'campaign_id': self.anns.id, 'campaign_data': {}})
             self.assertEqual(agent.process.call_args.kwargs['user_id'], self.bob.pk)
+
+
+class WebResearchTests(MarketingTestCase):
+    """Decision of 29 Oct: research searches the web (OpenAI's web_search) and shows the pages it read; without a
+    search it says so. Deleting a research chat deletes the research it saved (CO-274)."""
+
+    @staticmethod
+    def _response(text, cited=(), consulted=()):
+        from types import SimpleNamespace as NS
+        notes = [NS(type='url_citation', url=url, title=title) for url, title in cited]
+        return NS(output=[NS(type='web_search_call', action=NS(sources=[NS(type='url', url=u) for u in consulted])),
+                          NS(type='message', content=[NS(type='output_text', annotations=notes)])],
+                  output_text=text, usage=NS(input_tokens=900, output_tokens=300))
+
+    def test_the_answer_loses_its_inline_marks_and_lists_the_pages(self):
+        from marketing_agent.services.web_search import answer_and_sources
+        text, sources = answer_and_sources(self._response(
+            'Plans cost PKR 3,000 to 60,000 a month. ([edish.net](https://edish.net/plans?utm_source=openai)) '
+            'See [the guide](https://www.example.com/guide).',
+            cited=[('https://edish.net/plans?utm_source=openai', 'Maintenance plans | Edish')],
+            consulted=['https://www.example.com/guide', 'https://edish.net/plans', 'javascript:alert(1)']))
+        self.assertEqual(text, 'Plans cost PKR 3,000 to 60,000 a month. See the guide.')
+        self.assertEqual(sources, [
+            {'title': 'Maintenance plans | Edish', 'url': 'https://edish.net/plans', 'site': 'edish.net'},
+            {'title': 'example.com', 'url': 'https://www.example.com/guide', 'site': 'example.com'}])
+
+    def _agent(self):
+        from marketing_agent.agents.market_research_agent import MarketResearchAgent
+        agent = MarketResearchAgent()
+        agent.company_id, agent.agent_key_name = self.acme.id, 'marketing_agent'
+        return agent
+
+    def test_research_keeps_the_pages_it_read(self):
+        from unittest import mock
+        agent = self._agent()
+        page = {'title': 'Solar in Pakistan', 'url': 'https://pv.example/solar', 'site': 'pv.example'}
+        with mock.patch.object(agent, '_wants_brief_answer', return_value=True), \
+                mock.patch.object(agent, '_call_with_web_search', return_value=('Demand is rising.', [page])), \
+                mock.patch.object(agent, '_call_llm_for_reasoning') as plain:
+            found = agent._conduct_research('market_trend', 'Is demand for solar rising in Pakistan?', {})
+        plain.assert_not_called()
+        self.assertEqual((found['source_urls'], found['checked_on_web']), ([page], True))
+
+    def test_without_a_search_the_answer_says_so(self):
+        from unittest import mock
+        agent = self._agent()
+        with mock.patch.object(agent, '_wants_brief_answer', return_value=True), \
+                mock.patch.object(agent, '_call_with_web_search', return_value=None), \
+                mock.patch.object(agent, '_call_llm_for_reasoning', return_value='Demand is rising.'):
+            found = agent._conduct_research('market_trend', 'Is demand for solar rising in Pakistan?', {})
+        self.assertEqual((found['source_urls'], found['checked_on_web']), ([], False))
+
+    def test_a_company_on_free_groq_tokens_searches_with_the_platforms_openai_key(self):
+        from unittest import mock
+        from core.api_key_service import CallContext
+        from core.models import PlatformAPIKey
+        from marketing_agent.agents import marketing_base_agent as base
+        key = PlatformAPIKey(provider='openai', status='active')
+        key.set_plaintext_key('sk-test-not-real')
+        key.save()
+        groq = CallContext(company_id=self.acme.id, agent_name='marketing_agent', mode='platform', provider='groq',
+                           api_key='gsk-test', key_id=1, quota_id=None)
+        agent = self._agent()
+        client = mock.Mock()
+        client.responses.create.return_value = self._response('Rising. ([a.example](https://a.example/x))',
+                                                             cited=[('https://a.example/x', 'A')])
+        recorded = []
+        with mock.patch.object(agent, '_resolve_company_client', return_value=(mock.Mock(), groq)), \
+                mock.patch.object(base, 'OpenAI', return_value=client) as made, \
+                mock.patch('core.api_key_service.record_usage', side_effect=lambda ctx, n: recorded.append((ctx, n))):
+            text, sources = agent._call_with_web_search('Is demand rising?', 'system')
+        self.assertEqual(made.call_args.kwargs['api_key'], 'sk-test-not-real')
+        self.assertEqual(client.responses.create.call_args.kwargs['tools'], [{'type': 'web_search'}])
+        self.assertEqual((text, [s['url'] for s in sources]), ('Rising.', ['https://a.example/x']))
+        self.assertEqual((recorded[0][0].provider, recorded[0][0].mode, recorded[0][1]), ('openai', 'platform', 1200))
+
+    def test_an_own_groq_key_does_not_borrow_the_platforms(self):
+        from core.api_key_service import CallContext, platform_context_for
+        own = CallContext(company_id=self.acme.id, agent_name='marketing_agent', mode='byok', provider='groq',
+                          api_key='gsk-own', key_id=1)
+        self.assertIsNone(platform_context_for(own, 'openai'))
+
+    def test_deleting_a_research_chat_deletes_its_research(self):
+        from api.views import marketing_agent as views
+        from marketing_agent.models import MarketResearch, MarketResearchChat, MarketResearchChatMessage
+        kept = MarketResearch.objects.create(research_type='market_trend', topic='Kept', created_by=self.ann)
+        gone = MarketResearch.objects.create(research_type='market_trend', topic='Gone', created_by=self.ann)
+        chat = MarketResearchChat.objects.create(company_user=self.ann_login, title='Solar')
+        MarketResearchChatMessage.objects.create(chat=chat, role='user', content='Solar?')
+        MarketResearchChatMessage.objects.create(chat=chat, role='assistant', content='Rising.',
+                                                 response_data={'research_id': gone.id})
+        code, _ = self.call(views.delete_research_chat, self.ann_login, method='delete', chat_id=chat.id)
+        self.assertEqual(code, 200)
+        self.assertEqual(list(MarketResearch.objects.values_list('topic', flat=True)), ['Kept'])

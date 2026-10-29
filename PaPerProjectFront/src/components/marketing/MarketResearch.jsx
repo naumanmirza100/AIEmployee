@@ -933,6 +933,36 @@ const MarketResearch = () => {
                                     </ul>
                                   </motion.div>
                                 )}
+
+                                {/* Where the answer came from: the pages the web search read, or a note that it
+                                    could not search this time. Answers saved before 29 Oct 2026 carry neither. */}
+                                {msg.response?.checked_on_web === true && (
+                                  <div data-testid="MKT-research-sources" className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                    <h5 className="flex items-center gap-2 font-semibold text-sm mb-1">
+                                      <Globe className="h-4 w-4 text-sky-400" />
+                                      Sources
+                                    </h5>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      Searched on the web when you asked. Check a figure on its page before you rely on it.
+                                    </p>
+                                    <ul className="space-y-1">
+                                      {(msg.response.source_urls || []).filter((s) => /^https?:\/\//.test(s?.url || '')).map((s, j) => (
+                                        <li key={j} className="text-sm">
+                                          <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">
+                                            {s.title || s.site}
+                                          </a>
+                                          {s.site && <span className="text-xs text-muted-foreground"> · {s.site}</span>}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {msg.response?.checked_on_web === false && (
+                                  <p data-testid="MKT-research-not-searched" className="text-xs text-muted-foreground">
+                                    This answer is from the AI's own knowledge: it could not search the web this time, so
+                                    figures may be out of date. Ask again for an answer with sources.
+                                  </p>
+                                )}
                               </div>
                             </div>
                           )}

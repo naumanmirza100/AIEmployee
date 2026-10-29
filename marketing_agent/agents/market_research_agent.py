@@ -363,7 +363,8 @@ Reply only with the definition, no preamble."""
             'opportunities': research_findings.get('opportunities', []),
             'risks': research_findings.get('risks', []),
             'recommendations': research_findings.get('recommendations', []),
-            'source_urls': research_findings.get('source_urls', [])
+            'source_urls': research_findings.get('source_urls', []),
+            'checked_on_web': research_findings.get('checked_on_web', False),
         }
     
     def _conduct_research(self, research_type: str, topic: str, 
@@ -390,14 +391,28 @@ Reply only with the definition, no preamble."""
         else:
             prompt = self._build_research_prompt(research_type, topic, additional_context)
         
-        # Get AI-generated research
+        # Searched on the web with the company's key, the pages it read kept as sources (the user's decision of
+        # 29 Oct 2026). A key that cannot search, or a search that failed, gets the AI's own answer, marked as such.
+        searched = None
         try:
-            research_response = self._call_llm_for_reasoning(
-                prompt,
-                self.system_prompt,
-                temperature=0.5,
-                max_tokens=350 if brief else 1500
-            )
+            searched = self._call_with_web_search(prompt + self.SEARCH_NOTE, self.system_prompt,
+                                                  max_tokens=350 if brief else 1500)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            self.log_action("Web search failed", {"error": str(e)[:200]})
+
+        try:
+            if searched:
+                research_response = searched[0]
+            else:
+                research_response = self._call_llm_for_reasoning(
+                    prompt,
+                    self.system_prompt,
+                    temperature=0.5,
+                    max_tokens=350 if brief else 1500
+                )
         except Exception as e:
             self.log_action("Error generating research", {"error": str(e)})
             from core.api_key_service import KeyServiceError
@@ -426,9 +441,15 @@ Reply only with the definition, no preamble."""
             )
 
         findings = self._parse_research_response(research_type, research_response, additional_context)
-
+        findings['source_urls'] = searched[1] if searched else []
+        findings['checked_on_web'] = bool(findings['source_urls'])     # searched, and it says where from
         return findings
-    
+
+    SEARCH_NOTE = (
+        "\n\nSearch the web for current facts and figures and base the answer on what the pages say, citing the page "
+        "for each figure. Where the pages give no figure, say so instead of estimating one."
+    )
+
     DEPTH_SYSTEM = (
         "You judge how much depth a market-research question needs. "
         "Reply with exactly one word.\n\n"
