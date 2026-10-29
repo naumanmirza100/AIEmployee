@@ -14,7 +14,7 @@ import {
   listCampaigns, createCampaign, deleteCampaign, updateCampaign,
   getCampaignDetail, getCampaignSteps, generateSequenceSteps,
   getCampaignContacts, enrollLeads, updateCampaignStep, listLeads,
-  clearCampaignLeads,
+  clearCampaignLeads, retryFailedLeads,
 } from '@/services/aiSdrService';
 import SDRReplyDrafts from './SDRReplyDrafts';
 
@@ -651,6 +651,19 @@ const SDROutreachTab = () => {
     } finally { setPausingCampaign(false); }
   };
 
+  // ── Put leads parked after failed sends back in the sequence ─────────
+  const handleRetryFailed = async () => {
+    try {
+      const resp = await retryFailedLeads(selectedCampaign.id);
+      toast({ title: `${resp.retried} lead${resp.retried !== 1 ? 's' : ''} back in the sequence`,
+        description: 'They are tried again within five minutes.' });
+      if (resp.data) setSelectedCampaign(resp.data);
+      await loadDetail(resp.data || selectedCampaign);
+    } catch (e) {
+      toast({ title: 'Retry failed', description: apiErrorMessage(e, e.message), variant: 'destructive' });
+    }
+  };
+
   // ── Start a draft or finished campaign ───────────────────────────────
   const handleStart = async () => {
     if (!selectedCampaign) return;
@@ -1135,6 +1148,14 @@ const SDROutreachTab = () => {
               Clear Leads
             </Button>
           )}
+          {enrollments.some(e => e.reply_sentiment === 'send_failed' && e.status === 'paused') && (
+            <Button data-testid="sdr-retry-failed" onClick={handleRetryFailed} variant="outline" style={{
+              border: '1px solid rgba(248,113,113,0.4)', color: '#f87171',
+              borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+            }}>
+              <Play size={14} /> Retry failed
+            </Button>
+          )}
           {['draft', 'completed'].includes(selectedCampaign.status) && (mine || selectedCampaign.owner.is_active) && (
             <Button data-testid="sdr-start-campaign" onClick={handleStart}
               disabled={pausingCampaign || !selectedCampaign.total_leads} variant="outline"
@@ -1222,8 +1243,17 @@ const SDROutreachTab = () => {
       }}>
         <Zap size={13} style={{ flexShrink: 0, color: '#a855f7' }} />
         <span>
+          {selectedCampaign.inbox_error ? (
+            // The inbox could not be read: the line below said it was checked every five minutes (CO-197).
+            <span data-testid="sdr-inbox-error" style={{ color: '#f87171' }}>
+              <b>Replies are not being read.</b> {selectedCampaign.inbox_error} Fix the inbox in the campaign's
+              mailbox settings; follow-ups may reach people who have replied until then.{' '}
+            </span>
+          ) : null}
           {selectedCampaign.status === 'active'
-            ? <><b style={{ color: '#10b981' }}>Automation running</b> — emails send automatically every 5 min · inbox checked every 5 min · no manual action needed.</>
+            ? (selectedCampaign.inbox_error
+              ? <><b style={{ color: '#10b981' }}>Sending</b> — emails send automatically every 5 min.</>
+              : <><b style={{ color: '#10b981' }}>Automation running</b> — emails send automatically every 5 min · inbox checked every 5 min · no manual action needed.</>)
             : selectedCampaign.status === 'scheduled'
             ? <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Scheduled</b> — campaign will auto-start on {selectedCampaign.start_date}.</>
             : selectedCampaign.status === 'paused'
@@ -1361,6 +1391,12 @@ const SDROutreachTab = () => {
                         <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 13 }}>{enr.lead_name}</div>
                         <div style={{ color: '#6b7280', fontSize: 11, marginTop: 2 }}>{enr.lead_company}</div>
                         {enr.lead_email && <div style={{ color: '#4b5563', fontSize: 11 }}>{enr.lead_email}</div>}
+                        {enr.send_error && (
+                          // Why sending stopped for this lead: it was parked with no word (CO-198).
+                          <div data-testid="sdr-send-error" style={{ color: '#f87171', fontSize: 11, marginTop: 3, maxWidth: 260 }}>
+                            Sending failed: {enr.send_error}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: '11px 14px' }}>
                         {enr.lead_score != null ? (

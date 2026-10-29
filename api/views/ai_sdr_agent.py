@@ -33,7 +33,7 @@ from ai_sdr_agent.agents.lead_research_agent import (
     ApifyApprovalRequired, LeadResearchAgent, NoLeadSource, apify_actor_page_url,
 )
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
-from ai_sdr_agent.reply_actions import apply_reply_action as _apply_reply_action, handle_inbox_reply
+from ai_sdr_agent.reply_actions import apply_reply_action as _apply_reply_action, handle_inbox_reply, read_inbox
 from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
 from contextlib import contextmanager
@@ -172,7 +172,19 @@ def _validate_mail_settings(d, campaign=None):
         imap_err = validate_mail_server(_val('imap_host'), _val('imap_port') or 993, 'imap')
     except (TypeError, ValueError):
         return 'SMTP/IMAP port must be a number.'
-    return smtp_err or imap_err
+    if smtp_err or imap_err:
+        return smtp_err or imap_err
+    # Changed mailbox settings are tried before they are saved (CO-197, CO-198). A saved password is used when
+    # none was typed.
+    mailbox_fields = ('smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_use_tls', 'imap_host',
+                      'imap_port')
+    if any(f in d for f in mailbox_fields):
+        from ai_sdr_agent.agents.outreach_agent import try_mailbox_logins
+        return try_mailbox_logins(
+            _val('smtp_host'), _val('smtp_port') or 587, _val('smtp_use_tls', True), _val('smtp_username'),
+            d.get('smtp_password') or getattr(campaign, 'smtp_password', ''),
+            _val('imap_host'), _val('imap_port') or 993) or None
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -1264,6 +1276,8 @@ def _serialize_campaign(c: SDRCampaign, viewer=None) -> dict:
         'review_ai_replies': c.review_ai_replies,
         'answers_waiting': SDRReplyDraft.objects.filter(enrollment__campaign=c, status='pending').count(),
         'last_replies_checked_at': c.last_replies_checked_at.isoformat() if c.last_replies_checked_at else None,
+        'inbox_error': c.inbox_error or '',
+        'inbox_error_at': c.inbox_error_at.isoformat() if c.inbox_error_at else None,
         'activated_at': c.activated_at.isoformat() if c.activated_at else None,
         'total_leads': c.total_leads,
         'emails_sent': c.emails_sent,
@@ -1320,7 +1334,12 @@ def _serialize_enrollment(e: SDRCampaignEnrollment) -> dict:
             'positive': '✅ Interested',
             'positive_interest': '✅ Interested',
             'neutral': '💭 Neutral',
+            'unsubscribe': '✋ Unsubscribed',
+            'send_failed': '⚠️ Sending failed',
         }.get(e.reply_sentiment or '', ''),
+        # Why a lead was parked after failed sends: the screen did not say (CO-198).
+        'send_error': next((l['error_message'] for l in logs if l['status'] == 'failed'), '')
+        if e.status == 'paused' and e.reply_sentiment == 'send_failed' else '',
         'resume_at': e.next_action_at.isoformat() if e.status == 'paused' and e.next_action_at else None,
         'meeting_id': meeting.id if meeting else None,
         'meeting_status': meeting.status if meeting else None,
@@ -1619,6 +1638,23 @@ def sdr_clear_campaign_leads(request, campaign_id):
     except Exception as exc:
         logger.error("SDR clear leads error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_retry_failed(request, campaign_id):
+    """Put the leads parked after failed sends back in the sequence, once the mailbox is fixed (CO-198)."""
+    company_user = request.user
+    campaign = SDRCampaign.objects.filter(id=campaign_id, company_user=company_user).first()
+    if campaign is None:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+    retried = campaign.enrollments.filter(status='paused', reply_sentiment='send_failed').update(
+        status='active', reply_sentiment='', next_action_at=timezone.now())
+    if retried and campaign.status == 'completed':
+        campaign.status = 'active'
+        campaign.save(update_fields=['status'])
+    return Response({'status': 'success', 'retried': retried, 'data': _serialize_campaign(campaign, company_user)})
 
 
 # ==========================================================================
@@ -2160,7 +2196,10 @@ def sdr_check_replies(request, campaign_id):
         from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
         email_agent = EmailAssistantAgent(company=company_user.company)
         outreach_agent = _get_outreach_agent(company_user.company)
-        replies_found = outreach_agent.check_inbox_for_replies(campaign, enrollments)
+        replies_found = read_inbox(campaign, enrollments, outreach_agent)
+        if replies_found is None:
+            return Response({'status': 'error', 'code': 'inbox_unreadable', 'message': campaign.inbox_error},
+                            status=400)
 
         new_replies = 0
         meetings_created = 0
@@ -3057,7 +3096,11 @@ def sdr_check_all_replies(request):
             if not enrollments:
                 continue
 
-            replies = outreach_agent.check_inbox_for_replies(campaign, enrollments)
+            replies = read_inbox(campaign, enrollments, outreach_agent)
+            if replies is None:
+                # The button said "Check Replies complete" over an inbox it could not read (CO-197).
+                errors.append(f'{campaign.name}: {campaign.inbox_error}')
+                continue
 
             for r in replies:
                 result = handle_inbox_reply(campaign, r, email_agent=email_agent, outreach_agent=outreach_agent)

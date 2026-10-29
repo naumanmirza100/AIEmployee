@@ -16,12 +16,34 @@ from datetime import timedelta
 from django.utils import timezone
 
 from ai_sdr_agent.agents.email_assistant_agent import CAT_UNSUBSCRIBE
-from ai_sdr_agent.agents.outreach_agent import apply_unsubscribe, claim_reply, mark_bounced
+from ai_sdr_agent.agents.outreach_agent import apply_unsubscribe, claim_reply, imap_credentials, mark_bounced
 from ai_sdr_agent.models import SDRMeeting
 
 logger = logging.getLogger(__name__)
 
 OPEN_MEETING = ('pending', 'awaiting_approval', 'scheduled')
+
+
+def read_inbox(campaign, enrollments, outreach_agent):
+    """The campaign's replies, or None when its inbox could not be read. Either way the campaign keeps what
+    happened: a failed read was only logged, and the screen kept saying the inbox was checked (CO-197)."""
+    from ai_sdr_agent.models import SDRCampaign
+    host, _port, username, password = imap_credentials(campaign)
+    try:
+        if not (host and username and password):
+            raise ValueError('The campaign has no inbox set up (IMAP host, user name and password), '
+                             'so replies cannot be read.')
+        replies = outreach_agent.check_inbox_for_replies(campaign, enrollments)
+    except ValueError as exc:
+        error = ' '.join(str(exc).split())[:500]
+        SDRCampaign.objects.filter(pk=campaign.pk).update(inbox_error=error, inbox_error_at=timezone.now())
+        campaign.inbox_error, campaign.inbox_error_at = error, timezone.now()
+        logger.warning('SDR [inbox] campaign=%d could not be read: %s', campaign.id, error)
+        return None
+    if campaign.inbox_error:
+        SDRCampaign.objects.filter(pk=campaign.pk).update(inbox_error='', inbox_error_at=None)
+        campaign.inbox_error, campaign.inbox_error_at = '', None
+    return replies
 
 
 def handle_inbox_reply(campaign, reply, *, email_agent, outreach_agent=None):

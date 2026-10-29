@@ -267,6 +267,15 @@ export const deleteCampaign = async (id) => {
   }
 };
 
+export const retryFailedLeads = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/campaigns/${id}/retry-failed/`, {});
+  } catch (error) {
+    console.error('Retry failed leads error:', error);
+    throw error;
+  }
+};
+
 export const clearCampaignLeads = async (id, payload = {}) => {
   try {
     return await companyApi.post(`/sdr/campaigns/${id}/clear-leads/`, payload);

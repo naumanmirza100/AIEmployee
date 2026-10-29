@@ -250,7 +250,7 @@ def check_inbox_replies_impl():
     """Poll IMAP inbox for replies on every campaign campaigns_to_read_replies() gives."""
     from ai_sdr_agent.agents.outreach_agent import OutreachAgent
     from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-    from ai_sdr_agent.reply_actions import handle_inbox_reply
+    from ai_sdr_agent.reply_actions import handle_inbox_reply, read_inbox
 
     campaigns = campaigns_to_read_replies(
         company_user__is_active=True,       # a switched-off login's mailbox is not read, nor its leads answered
@@ -305,7 +305,9 @@ def check_inbox_replies_impl():
             if not enrollments:
                 continue
 
-            replies = agent.check_inbox_for_replies(campaign, enrollments)
+            replies = read_inbox(campaign, enrollments, agent)
+            if replies is None:
+                continue                    # kept on the campaign and shown on its screen (CO-197)
             logger.info(
                 "SDR [check-inbox] campaign=%d IMAP returned %d candidate replies",
                 campaign.id, len(replies),
@@ -387,8 +389,10 @@ def auto_pause_expired_campaigns_impl():
 
     active = SDRCampaign.objects.filter(status='active')
     for campaign in active:
+        # A lead parked after failed sends is still open: the campaign was shown as Completed, "all leads have been
+        # processed", with nothing to restart them (CO-198).
         open_qs = campaign.enrollments.filter(
-            Q(status='active') | Q(status='paused', reply_sentiment='out_of_office')
+            Q(status='active') | Q(status='paused', reply_sentiment__in=['out_of_office', 'send_failed'])
         )
         if not open_qs.exists() and campaign.enrollments.exists():
             campaign.status = 'completed'

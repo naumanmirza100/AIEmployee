@@ -613,14 +613,7 @@ Rules:
         and the platform's inbox read into a customer's campaign. With no name
         or no password this now returns blanks, and the caller skips the check.
         """
-        username = campaign.smtp_username or ''
-        password = campaign.smtp_password or ''
-        if not username or not password:
-            return '', campaign.imap_port or 993, '', ''
-
-        imap_host = campaign.imap_host or (_derive_imap_host(campaign.smtp_host) if campaign.smtp_host else '')
-        imap_port = campaign.imap_port or 993
-        return imap_host, imap_port, username, password
+        return imap_credentials(campaign)
 
     def check_inbox_for_replies(self, campaign, enrollments: list) -> list:
         """
@@ -958,6 +951,10 @@ Rules:
             raise ValueError(f"SMTP error: {exc}") from exc
         except smtplib.SMTPException as exc:
             raise ValueError(f"SMTP error: {exc}") from exc
+        except OSError as exc:
+            # The sending server cannot be reached: the same for every lead, so the campaign stops and says why;
+            # each lead used to fail three times and be parked (CO-198).
+            raise MailboxRefusedError(f"could not connect to {host}:{port} ({exc})") from exc
 
     # ------------------------------------------------------------------
     # Process a single enrollment step
@@ -1347,3 +1344,46 @@ def _extract_email_body(msg) -> str:
         except Exception:
             pass
     return ''
+
+
+def try_mailbox_logins(smtp_host, smtp_port, use_tls, username, password, imap_host='', imap_port=993):
+    """What is wrong with these mailbox settings, in words for the person, or '' when both logins work.
+
+    Settings used to be saved untried: a wrong password showed only as leads paused one by one, and an inbox that
+    could not be read as nothing at all (CO-197, CO-198)."""
+    if not (smtp_host and username and password):
+        return ''
+    port = int(smtp_port or 587)
+    try:
+        server = smtplib.SMTP_SSL(smtp_host, port, timeout=15) if port == 465 else smtplib.SMTP(smtp_host, port, timeout=15)
+        with server:
+            server.ehlo()
+            if use_tls and port != 465:
+                server.starttls(context=ssl.create_default_context())
+                server.ehlo()
+            server.login(username, password)
+    except smtplib.SMTPAuthenticationError as exc:
+        return (f'The sending server refused the login ({exc.smtp_code} {_text(exc.smtp_error)}). '
+                'Check the user name and password; for Gmail use an app password.')
+    except (smtplib.SMTPException, OSError) as exc:
+        return f'Could not reach the sending server {smtp_host}:{port} ({exc}).'
+    imap_host = imap_host or _derive_imap_host(smtp_host)
+    try:
+        with imaplib.IMAP4_SSL(imap_host, int(imap_port or 993), timeout=15) as imap:
+            imap.login(username, password)
+    except imaplib.IMAP4.error as exc:
+        return (f'Sending works, but the inbox {imap_host} refused the login ({_text(exc)}), so replies could not '
+                'be read. Check the IMAP settings.')
+    except OSError as exc:
+        return f'Sending works, but the inbox {imap_host}:{imap_port} could not be reached ({exc}).'
+    return ''
+
+
+def imap_credentials(campaign):
+    """(imap_host, imap_port, username, password) from the campaign's own mailbox settings; blanks without them."""
+    username = campaign.smtp_username or ''
+    password = campaign.smtp_password or ''
+    if not username or not password:
+        return '', campaign.imap_port or 993, '', ''
+    imap_host = campaign.imap_host or (_derive_imap_host(campaign.smtp_host) if campaign.smtp_host else '')
+    return imap_host, campaign.imap_port or 993, username, password

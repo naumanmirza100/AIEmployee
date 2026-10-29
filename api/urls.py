@@ -842,6 +842,7 @@ urlpatterns = [
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reset/?$', sdr_api.sdr_reset_enrollment, name='sdr_reset_enrollment'),  # POST
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/check-replies/?$', sdr_api.sdr_check_replies, name='sdr_check_replies'),  # POST
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/clear-leads/?$', sdr_api.sdr_clear_campaign_leads, name='sdr_clear_campaign_leads'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/retry-failed/?$', sdr_api.sdr_retry_failed, name='sdr_retry_failed'),  # POST
     # Answers the AI wrote to leads' replies, held for a person to check
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/reply-drafts/?$', sdr_api.sdr_reply_drafts, name='sdr_reply_drafts'),  # GET
     re_path(r'^sdr/reply-drafts/(?P<draft_id>\d+)/(?P<decision>send|discard)/?$', sdr_api.sdr_reply_draft_decide, name='sdr_reply_draft_decide'),  # POST

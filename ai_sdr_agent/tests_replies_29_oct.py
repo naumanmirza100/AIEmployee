@@ -316,3 +316,67 @@ class BookedCallTests(SDRBase):
         other = self.meeting(enrollment=self.enroll(self.make_lead('sara@clinic.example')), status='pending')
         response, _ = self.confirm(other, when + timedelta(minutes=10))
         self.assertEqual(response.status_code, 409)
+
+
+class MailboxProblemTests(SDRBase):
+    """CO-197: an inbox that could not be read was only logged; the screen said it was checked every five minutes.
+    CO-198: a wrong password or an unreachable server parked every lead one by one, then the campaign showed
+    'Completed'; nothing said why and nothing restarted them."""
+
+    def call(self, view, method='post', data=None, **kwargs):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        request = getattr(APIRequestFactory(), method)('/x', data or {}, format='json')
+        force_authenticate(request, user=self.cu)
+        return view(request, **kwargs)
+
+    def test_an_unreadable_inbox_is_kept_on_the_campaign_and_cleared_when_it_reads(self):
+        from ai_sdr_agent.reply_actions import read_inbox
+        agent = mock.MagicMock()
+        agent.check_inbox_for_replies.side_effect = ValueError('IMAP login failed: [AUTHENTICATIONFAILED]')
+        self.assertIsNone(read_inbox(self.campaign, [], agent))
+        self.campaign.refresh_from_db()
+        self.assertIn('AUTHENTICATIONFAILED', self.campaign.inbox_error)
+        agent.check_inbox_for_replies.side_effect, agent.check_inbox_for_replies.return_value = None, []
+        self.assertEqual(read_inbox(self.campaign, [], agent), [])
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.inbox_error, '')
+
+    def test_mailbox_settings_are_tried_before_they_are_saved(self):
+        import smtplib
+        from api.views import ai_sdr_agent as views
+        refused = smtplib.SMTPAuthenticationError(535, b'5.7.8 Username and Password not accepted')
+        with mock.patch('ai_sdr_agent.agents.outreach_agent.validate_mail_server', return_value=None), \
+                mock.patch('smtplib.SMTP') as smtp, mock.patch('imaplib.IMAP4_SSL') as imap:
+            smtp.return_value.login.side_effect = refused
+            message = views._validate_mail_settings({'smtp_host': 'smtp.gmail.com', 'smtp_username': 'a@gmail.com',
+                                                     'smtp_password': 'wrong'})
+        self.assertIn('refused the login (535', message)
+        self.assertIn("app password", message)
+        imap.assert_not_called()
+
+    def test_an_unreachable_server_pauses_the_campaign_not_each_lead(self):
+        enrollment = self.enroll(self.make_lead())
+        agent = self.agent()
+        with mock.patch('ai_sdr_agent.agents.outreach_agent.validate_mail_server', return_value=None), \
+                mock.patch('smtplib.SMTP', side_effect=OSError('Connection timed out')):
+            agent.process_enrollment(enrollment)
+        self.campaign.refresh_from_db(); enrollment.refresh_from_db()
+        self.assertEqual(self.campaign.status, 'paused')
+        self.assertIn('could not connect', self.campaign.paused_reason)
+        self.assertEqual(enrollment.status, 'active')                  # keeps its place
+
+    def test_leads_parked_after_failed_sends_are_open_shown_and_retried(self):
+        from ai_sdr_agent.tasks import auto_pause_expired_campaigns_impl
+        from api.views import ai_sdr_agent as views
+        enrollment = self.enroll(self.make_lead())
+        SDROutreachLog.objects.create(enrollment=enrollment, action_type='email', status='failed', step_order=1,
+                                      error_message='SMTP error: 550 quota')
+        SDRCampaignEnrollment.objects.filter(pk=enrollment.pk).update(status='paused', reply_sentiment='send_failed')
+        auto_pause_expired_campaigns_impl()
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.status, 'active')               # not 'Completed'
+        enrollment.refresh_from_db()
+        self.assertIn('550 quota', views._serialize_enrollment(enrollment)['send_error'])
+        self.assertEqual(self.call(views.sdr_retry_failed, campaign_id=self.campaign.id).data['retried'], 1)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.status, 'active')
