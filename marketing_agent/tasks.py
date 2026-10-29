@@ -60,11 +60,9 @@ def sync_inbox_task(self, account_id=None, since_days=None):
     # Fan-out branch — runs on the periodic beat tick.
     if account_id is None:
         from marketing_agent.models import EmailAccount
-        active_ids = list(
-            EmailAccount.objects
-            .filter(enable_imap_sync=True, is_active=True)
-            .values_list('id', flat=True)
-        )
+        from marketing_agent.services.subscription import mailboxes_to_read
+        active_ids = [a.id for a in mailboxes_to_read(
+            EmailAccount.objects.filter(enable_imap_sync=True, is_active=True).select_related('owner'))]
         for aid in active_ids:
             # `apply_async` queues each account as its own task. The worker
             # pool drains them in parallel; a slow account doesn't block
@@ -141,10 +139,13 @@ def auto_start_campaigns_task():
     Scheduled: Every 15 minutes via Celery Beat
     """
     try:
+        # A day's margin: "today" is each company's own (launch_checks.today_for), ahead of the server's in Asia.
+        from datetime import timedelta
+        from marketing_agent.services import launch_checks
         today = timezone.now().date()
         campaigns_due = Campaign.objects.filter(
             status='scheduled',
-            start_date__lte=today
+            start_date__lte=today + timedelta(days=1)
         ).select_related('owner')
         
         started_count = 0
@@ -157,10 +158,12 @@ def auto_start_campaigns_task():
             if not paying.allows(campaign):
                 continue
             user = campaign.owner
-            sequences = EmailSequence.objects.filter(campaign=campaign)
-            has_sequence_with_steps = any(seq.steps.exists() for seq in sequences)
-            
-            if has_sequence_with_steps:
+            if campaign.start_date > launch_checks.today_for(user):
+                continue
+            # The same checks as Launch (CO-130): steps, templates, a sending mailbox that is switched on.
+            problem = launch_checks.launch_problem(campaign)
+
+            if not problem:
                 # Auto-activate: campaign has sequences ready
                 campaign.status = 'active'
                 campaign.save()
@@ -180,7 +183,7 @@ def auto_start_campaigns_task():
                 _create_scheduled_launch_notification(
                     campaign, user,
                     title=f'⏰ Scheduled Date Arrived – Action Required: {campaign.name}',
-                    message=f'Scheduled date ({campaign.start_date}) has arrived but campaign "{campaign.name}" cannot be activated automatically. It has no email sequences (or no templates). Create email templates and sequences first, then launch the campaign manually.',
+                    message=f'Scheduled date ({campaign.start_date}) has arrived but campaign "{campaign.name}" cannot be activated automatically. {problem[0]}',
                     action_required=True,
                     action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences',
                     metadata={'action': 'date_arrived_no_sequences', 'start_date': str(campaign.start_date)}

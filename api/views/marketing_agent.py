@@ -806,6 +806,10 @@ def add_campaign_lead(request, campaign_id):
                 {'status': 'error', 'message': 'Email is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        if not _is_email(email):
+            return Response({'status': 'error', 'error': 'invalid_email',
+                             'message': f'"{email}" is not an email address, so it was not added.'},
+                            status=status.HTTP_400_BAD_REQUEST)
         from core.do_not_email import reason_for
         blocked_as = reason_for(company_user.company_id, email)
         if blocked_as:
@@ -827,14 +831,7 @@ def add_campaign_lead(request, campaign_id):
             }
         )
         if campaign not in lead.campaigns.all():
-            campaign.leads.add(lead)
-            CampaignContact.objects.get_or_create(
-                campaign=campaign, lead=lead,
-                defaults={
-                    'sequence': EmailSequence.objects.filter(campaign=campaign, is_active=True).first(),
-                    'current_step': 0,
-                }
-            )
+            campaign.leads.add(lead)        # the m2m hook makes its sequence rows (models.create_campaign_contact)
         return Response({
             'status': 'success',
             'message': 'Lead added successfully',
@@ -868,6 +865,10 @@ def update_campaign_lead(request, campaign_id, lead_id):
         data = request.data
         if data.get('email'):
             email = str(data.get('email', '')).strip().lower()
+            if not _is_email(email):
+                return Response({'status': 'error', 'error': 'invalid_email',
+                                 'message': f'"{email}" is not an email address.'},
+                                status=status.HTTP_400_BAD_REQUEST)
             if Lead.objects.filter(email=email, owner=user).exclude(id=lead_id).exists():
                 return Response(
                     {'status': 'error', 'message': 'Email already exists'},
@@ -992,6 +993,18 @@ def delete_campaign_lead(request, campaign_id, lead_id):
         )
 
 
+def _is_email(value):
+    """One valid address. 'n/a', 'john@' or two addresses in one cell became leads that failed on every run
+    (CO-122)."""
+    from django.core.exceptions import ValidationError
+    from django.core.validators import validate_email
+    try:
+        validate_email(value)
+        return True
+    except ValidationError:
+        return False
+
+
 def _upload_leads_from_file(campaign, user, uploaded_file):
     """
     Process CSV/Excel and add leads to campaign.
@@ -1049,6 +1062,11 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                     rejected_reasons['missing_email'] += 1
                     rejected_rows.append({'row': row_no, 'field': 'email', 'reason': 'Missing email', 'value': ''})
                     continue
+                if not _is_email(email):
+                    rejected_reasons['invalid_email'] = rejected_reasons.get('invalid_email', 0) + 1
+                    rejected_rows.append({'row': row_no, 'field': 'email', 'reason': 'Not an email address',
+                                          'value': email[:80]})
+                    continue
                 first = _get(row, 'first_name', 'first name')
                 last = _get(row, 'last_name', 'last name')
                 if not first and not last:
@@ -1100,14 +1118,7 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                         lead.source = v
                     lead.save()
                     created_count += 1
-                campaign.leads.add(lead)
-                CampaignContact.objects.get_or_create(
-                    campaign=campaign, lead=lead,
-                    defaults={
-                        'sequence': EmailSequence.objects.filter(campaign=campaign, is_active=True).first(),
-                        'current_step': 0,
-                    }
-                )
+                campaign.leads.add(lead)    # the m2m hook makes its sequence rows (models.create_campaign_contact)
             except Exception as row_exc:
                 rejected_reasons['other'] += 1
                 rejected_rows.append({'row': row_no, 'field': '', 'reason': f'Error: {str(row_exc)[:120]}', 'value': ''})
@@ -2486,6 +2497,17 @@ def delete_template(request, campaign_id, template_id):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # A step of a sequence uses it: deleting the template deleted the step, and every lead stopped at the gap
+        # (CO-233). Take it out of the sequence first.
+        in_steps = list(template.sequence_steps.select_related('sequence').values_list('sequence__name', flat=True))
+        if in_steps:
+            names = ', '.join(f'"{n}"' for n in sorted(set(in_steps)))
+            return Response(
+                {'status': 'error', 'error': 'template_in_sequence',
+                 'message': f'This template is a step of {names}. Remove it from that sequence first, then delete it.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         sends_count = template.sends.count()
         if sends_count > 0:
             return Response(
@@ -3456,10 +3478,21 @@ def update_email_account(request, account_id):
             except Exception:
                 logger.exception('update_email_account: failed to enqueue immediate inbox sync')
 
+        # Switched off: say which running campaigns now send nothing from it (CO-190).
+        message = 'Email account updated successfully.'
+        if not account.is_active:
+            from marketing_agent.models import Campaign
+            stopped = list(Campaign.objects.filter(status__in=('active', 'scheduled'))
+                           .filter(Q(email_account=account) | Q(email_sequences__email_account=account))
+                           .distinct().values_list('name', flat=True)[:5])
+            if stopped:
+                message += (' It is switched off, so nothing is sent from it: '
+                            + ', '.join(f'"{n}"' for n in stopped)
+                            + ' will send nothing until it is switched on or given another account.')
         return Response({
             'status': 'success',
             'data': {
-                'message': 'Email account updated successfully.',
+                'message': message,
                 'immediate_sync_queued': sync_queued,
             },
         }, status=status.HTTP_200_OK)

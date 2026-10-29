@@ -56,3 +56,21 @@ class PayingCampaigns:
                                  getattr(campaign, 'pk', None))
                 self._owner_gone[owner_id] = False
         return not self._owner_gone[owner_id]
+
+
+def mailboxes_to_read(accounts):
+    """The mailboxes whose company still pays for an agent that reads them: Marketing for a Marketing mailbox, Reply
+    Draft for a Reply Draft one. After a company cancelled, its mailbox was still logged into and read every five
+    minutes (CO-129). A mailbox whose company cannot be told is read as before."""
+    marketing = active_company_ids('marketing_agent')
+    reply_draft = active_company_ids('reply_draft_agent')
+    kept, companies = [], {}
+    for account in accounts:
+        if account.owner_id not in companies:
+            companies[account.owner_id] = company_id_for_owner(account.owner)
+        company = companies[account.owner_id]
+        if (company is None
+                or (account.is_marketing_account and company in marketing)
+                or (getattr(account, 'is_reply_agent_account', False) and company in reply_draft)):
+            kept.append(account)
+    return kept

@@ -13,6 +13,8 @@ from datetime import timedelta
 from typing import Dict, Optional, List
 import logging
 
+# Seconds a mail server may take to answer before the attempt fails (CO-218).
+MAIL_TIMEOUT = 30
 logger = logging.getLogger(__name__)
 
 
@@ -297,9 +299,12 @@ class EmailService:
             # Use provided email account, or get default
             from marketing_agent.models import EmailAccount
             if not email_account:
+                # A Marketing mailbox only: the one connected for Reply Draft alone was picked when it came first
+                # (CO-130).
                 email_account = EmailAccount.objects.filter(
                     owner=campaign.owner,
-                    is_active=True
+                    is_active=True,
+                    is_marketing_account=True,
             ).order_by('-is_default', '-created_at').first()
             
             if not email_account:
@@ -318,6 +323,7 @@ class EmailService:
                 use_tls=email_account.use_tls,
                 use_ssl=email_account.use_ssl,
                 fail_silently=False,
+                timeout=MAIL_TIMEOUT,      # one company's dead mail server held up everyone's sends (CO-218)
             )
             
             # Generate Message-ID for reply detection
@@ -486,6 +492,7 @@ class EmailService:
                 use_tls=email_account.use_tls,
                 use_ssl=email_account.use_ssl,
                 fail_silently=False,
+                timeout=MAIL_TIMEOUT,      # one company's dead mail server held up everyone's sends (CO-218)
             )
 
             email = EmailMultiAlternatives(
@@ -601,9 +608,9 @@ class EmailService:
 
         port = email_account.imap_port or (993 if email_account.imap_use_ssl else 143)
         if email_account.imap_use_ssl:
-            mail = imaplib.IMAP4_SSL(host, port)
+            mail = imaplib.IMAP4_SSL(host, port, timeout=MAIL_TIMEOUT)
         else:
-            mail = imaplib.IMAP4(host, port)
+            mail = imaplib.IMAP4(host, port, timeout=MAIL_TIMEOUT)
             if port == 143:
                 mail.starttls()
         try:
@@ -705,24 +712,13 @@ class EmailService:
             # Add tracking pixel using simple token URL format: /token?t=TOKEN
             # This is simpler and works better with email clients
             tracking_pixel_url = f"{base_url}/token?t={tracking_token}"
-            # "View in browser" link: when user clicks it we count as open (works when pixel is blocked by Gmail etc.)
-            view_in_browser_link = (
-                f'<p style="font-size:11px;color:#888;margin:0 0 12px 0;">'
-                f'<a href="{tracking_pixel_url}" style="color:#888;text-decoration:underline;">View in browser</a>'
-                f'</p>'
-            )
+            # No "View in browser" line: it pointed at the open counter, which showed only "Email displayed. You can
+            # close this window." (CO-234).
             # Use multiple pixel methods for better email client compatibility
             tracking_pixel = (
                 f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none; width:1px; height:1px; border:0;" alt="" />'
                 f'<img src="{tracking_pixel_url}" width="1" height="1" border="0" alt="" style="position:absolute; visibility:hidden; width:1px; height:1px;" />'
             )
-            # Inject "View in browser" at the start so open is counted when user clicks if pixel is blocked
-            if '<body' in html_content.lower():
-                html_content = re.sub(r'(<body[^>]*>)', r'\1' + view_in_browser_link, html_content, count=1, flags=re.IGNORECASE)
-            elif '<html' in html_content.lower():
-                html_content = re.sub(r'(<html[^>]*>)\s*', r'\1' + view_in_browser_link, html_content, count=1, flags=re.IGNORECASE)
-            else:
-                html_content = view_in_browser_link + html_content
             # Try to inject before </body>
             if '</body>' in html_content.lower():
                 html_content = re.sub(r'</body>', tracking_pixel + '</body>', html_content, flags=re.IGNORECASE)
@@ -769,12 +765,10 @@ class EmailService:
                         # Relative path, make it absolute
                         href = f'/{href}'
                 
-                # URL encode the href for the tracking URL
-                from urllib.parse import quote as url_quote
-                encoded_href = url_quote(href, safe=':/?#[]@!$&\'()*+,;=')
-                
-                # Create tracked URL using simple token format: /token?t=TOKEN&url=ORIGINAL_URL
-                tracked_url = f"{base_url}/token?t={tracking_token}&url={encoded_href}"
+                # The whole address encoded (an '&' in it was cut off, CO-124) and signed with this email's
+                # token, so the click goes only where the email said (CO-125).
+                from marketing_agent.services import click_links
+                tracked_url = click_links.wrap(base_url, tracking_token, href)
                 logger.info(f"[EMAIL TRACKING] Wrapping link: {original_href} -> {tracked_url}")
                 
                 # Replace the href in the full tag - use regex for reliable replacement

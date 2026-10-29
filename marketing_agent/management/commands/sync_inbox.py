@@ -176,6 +176,10 @@ class Command(BaseCommand):
                 is_active=True
             )
         
+        # Not for a company that no longer pays for an agent that reads it (CO-129).
+        from marketing_agent.services.subscription import mailboxes_to_read
+        accounts = EmailAccount.objects.filter(id__in=[a.id for a in mailboxes_to_read(accounts.select_related('owner'))])
+
         if not accounts.exists():
             self.stdout.write(self.style.WARNING('[WARNING] No email accounts with IMAP sync enabled found.'))
             self.stdout.write(self.style.WARNING('[WARNING] Please enable IMAP sync in Email Accounts settings.'))
@@ -374,9 +378,9 @@ class Command(BaseCommand):
         try:
             # Connect to IMAP server
             if account.imap_use_ssl:
-                mail = imaplib.IMAP4_SSL(account.imap_host, account.imap_port or 993)
+                mail = imaplib.IMAP4_SSL(account.imap_host, account.imap_port or 993, timeout=60)
             else:
-                mail = imaplib.IMAP4(account.imap_host, account.imap_port or 143)
+                mail = imaplib.IMAP4(account.imap_host, account.imap_port or 143, timeout=60)
                 if account.imap_port == 143:
                     mail.starttls()  # Use STARTTLS for port 143
 
@@ -394,6 +398,13 @@ class Command(BaseCommand):
                 .filter(email_account=account)
                 .values_list('message_id', flat=True)
             )
+            if not is_reply_agent:
+                # What this Marketing-only mailbox has already read (CO-273); older than any sync window: let go.
+                from marketing_agent.models import CheckedInboxMessage
+                CheckedInboxMessage.objects.filter(email_account=account,
+                                                   checked_at__lt=timezone.now() - timedelta(days=130)).delete()
+                known_message_ids |= set(CheckedInboxMessage.objects.filter(email_account=account)
+                                         .values_list('message_id', flat=True))
             self.stdout.write(f'  [INFO] {len(known_message_ids)} message(s) already cached for this account')
             if not is_reply_agent:
                 self.stdout.write(
@@ -610,7 +621,9 @@ class Command(BaseCommand):
         """
         # IMAP folder names with spaces or brackets must be quoted.
         select_arg = f'"{folder_label}"' if folder_label != 'INBOX' else 'INBOX'
-        status, _ = mail.select(select_arg)
+        # Read-only, and the bodies fetched with BODY.PEEK[]: reading with (RFC822) in a read-write folder marked
+        # every new message read in the customer's own mailbox within five minutes (29 Oct 2026).
+        status, _ = mail.select(select_arg, readonly=True)
         if status != 'OK':
             self.stdout.write(self.style.WARNING(f'   Failed to select folder {folder_label!r}; skipping'))
             return 0, 0, 0
@@ -677,6 +690,7 @@ class Command(BaseCommand):
 
         own_address = (account.email or '').lower()
         total_to_process = len(email_ids)
+        checked_ids = []        # read by a Marketing-only mailbox, remembered at the end (CO-273)
 
         for chunk_start in range(0, total_to_process, HEADER_BATCH_SIZE):
             chunk = email_ids[chunk_start:chunk_start + HEADER_BATCH_SIZE]
@@ -715,7 +729,7 @@ class Command(BaseCommand):
                 msgs_by_eid = {}
                 try:
                     seq2 = b','.join(sub_chunk)
-                    status, msg_data = mail.fetch(seq2, '(RFC822)')
+                    status, msg_data = mail.fetch(seq2, '(BODY.PEEK[])')
                     if status == 'OK':
                         msgs_by_eid = self._parse_imap_fetch(msg_data)
                 except Exception as e:
@@ -728,6 +742,11 @@ class Command(BaseCommand):
                         if not msg_bytes:
                             continue
                         msg = email.message_from_bytes(msg_bytes)
+                        if not store_inbox_rows and not dry_run:
+                            checked_mid = (msg.get('Message-ID') or '').strip().strip('<>')[:500]
+                            if checked_mid and checked_mid not in known_message_ids:
+                                checked_ids.append(checked_mid)
+                                known_message_ids.add(checked_mid)
 
                         # Direction-aware addressing. For incoming mail the
                         # From: header carries the sender; for outgoing mail
@@ -763,7 +782,12 @@ class Command(BaseCommand):
                         #     (email_account, message_id), so even though
                         #     two write paths touch the row, only one
                         #     row ends up in InboxEmail per message.
-                        if direction == 'in':
+                        automatic = self._automatic(msg, from_addr) if direction == 'in' else ''
+                        if automatic == 'bounce':
+                            bounced = self._record_bounce(msg, account)
+                            if bounced:
+                                self.stdout.write(f'\n  [BOUNCE] {bounced}: marked bounced and not emailed again')
+                        if direction == 'in' and not automatic:
                             is_reply, sent_email = self.detect_reply(msg, account)
                             if is_reply and sent_email:
                                 replies_found += 1
@@ -834,6 +858,11 @@ class Command(BaseCommand):
         if pending_inbox_rows:
             inbox_stored += self._flush_inbox_rows(pending_inbox_rows)
 
+        if checked_ids:
+            from marketing_agent.models import CheckedInboxMessage
+            CheckedInboxMessage.objects.bulk_create(
+                [CheckedInboxMessage(email_account=account, message_id=mid) for mid in checked_ids],
+                ignore_conflicts=True, batch_size=500)
         return replies_found, replies_processed, inbox_stored
 
     @staticmethod
@@ -1081,14 +1110,16 @@ class Command(BaseCommand):
         in_reply_to = msg.get('In-Reply-To', '').strip()
         references = msg.get('References', '').strip()
         subject = self.decode_header(msg.get('Subject', ''))
+        # Only this mailbox's company's emails (CO-120: any company's campaign could be matched, and its lead
+        # marked replied or unsubscribed). A company, not one login: colleagues may share a mailbox.
+        from marketing_agent.services.company_scope import company_owner_ids
+        ours = EmailSendHistory.objects.filter(campaign__owner_id__in=company_owner_ids(account.owner))
         
         # PRIMARY: Check In-Reply-To header
         if in_reply_to:
             # Remove < > brackets
             message_id = in_reply_to.strip('<>')
-            sent_email = EmailSendHistory.objects.filter(
-                message_id=message_id
-            ).first()
+            sent_email = ours.filter(message_id=message_id).first()
             
             if sent_email:
                 logger.info(f'Reply detected via In-Reply-To header: {message_id}')
@@ -1099,9 +1130,7 @@ class Command(BaseCommand):
             # References can contain multiple Message-IDs (space-separated)
             ref_message_ids = re.findall(r'<([^>]+)>', references)
             for message_id in ref_message_ids:
-                sent_email = EmailSendHistory.objects.filter(
-                    message_id=message_id
-                ).first()
+                sent_email = ours.filter(message_id=message_id).first()
                 
                 if sent_email:
                     logger.info(f'Reply detected via References header: {message_id}')
@@ -1116,8 +1145,8 @@ class Command(BaseCommand):
                 fourteen_days_ago = timezone.now() - timedelta(days=14)
                 subject_without_re = re.sub(r'^(re:|fw:|fwd:)\s*', '', subject, flags=re.IGNORECASE).strip()
                 
-                sent_emails = EmailSendHistory.objects.filter(
-                    recipient_email=sender_email,
+                sent_emails = ours.filter(
+                    recipient_email__iexact=sender_email,
                     sent_at__gte=fourteen_days_ago,
                     status__in=['sent', 'delivered', 'opened', 'clicked']
                 ).order_by('-sent_at')[:10]
@@ -1375,6 +1404,64 @@ class Command(BaseCommand):
             })
 
         return results
+
+    # Mail a server or a mailbox sends by itself. Bounce notices counted as replies (and their lead as replied, the
+    # sequence stopped as if interested), nothing was ever marked bounced, and out-of-office answers were replies
+    # too (CO-192). The hints are AI SDR's (ai_sdr_agent/agents/outreach_agent.py).
+    _BOUNCE_SENDERS = ('mailer-daemon', 'postmaster', 'mail-daemon', 'bounce')
+    _BOUNCE_SUBJECTS = ('undeliverable', 'delivery failure', 'delivery status notification', 'mail delivery failed',
+                        'returned mail', 'failure notice', 'could not deliver', 'message not delivered',
+                        'address not found', 'user unknown')
+
+    def _automatic(self, msg, from_addr):
+        """'bounce' for a delivery failure notice, 'auto' for any other automatic answer, '' for a person's mail."""
+        subject = (self.decode_header(msg.get('Subject', '')) or '').lower()
+        sender = (from_addr or '').lower()
+        report = any((p.get_content_type() or '').lower() == 'message/delivery-status' for p in msg.walk())
+        if report or (any(h in sender for h in self._BOUNCE_SENDERS)
+                      and any(h in subject for h in self._BOUNCE_SUBJECTS)):
+            return 'bounce'
+        if (msg.get('Auto-Submitted', '') or 'no').strip().lower() != 'no' or msg.get('X-Autoreply') \
+                or msg.get('X-Autorespond') or (msg.get('Precedence', '') or '').lower() in ('auto_reply', 'bulk', 'junk'):
+            return 'auto'
+        return ''
+
+    def _record_bounce(self, msg, account):
+        """Mark the bounced send, stop that lead's emails in the campaign, and put the address on the company's
+        do-not-email list. Returns the bounced address, or ''."""
+        failed = []
+        for part in msg.walk():
+            if (part.get_content_type() or '').lower() != 'message/delivery-status':
+                continue
+            payload = part.get_payload()
+            for block in (payload if isinstance(payload, list) else []):
+                for key in ('Final-Recipient', 'Original-Recipient'):
+                    value = str(block.get(key) or '')
+                    if value:
+                        failed.append(value.split(';', 1)[-1].strip().strip('<>').lower())
+        if not failed:
+            # A notice without the standard part: the address it names in its text.
+            text = msg.get_payload(decode=False)
+            failed = [m.lower() for m in re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', str(text))[:3]]
+        from marketing_agent.services.company_scope import company_owner_ids
+        for address in failed:
+            # The latest send to that address; the same notice is read again on later syncs.
+            sent = (EmailSendHistory.objects.filter(campaign__owner_id__in=company_owner_ids(account.owner),
+                                                    recipient_email__iexact=address, sent_at__isnull=False)
+                    .order_by('-sent_at').first())
+            if not sent or sent.status == 'bounced':
+                continue
+            sent.status = 'bounced'
+            sent.save(update_fields=['status'])
+            from marketing_agent.models import CampaignContact
+            CampaignContact.objects.filter(campaign_id=sent.campaign_id, lead_id=sent.lead_id, completed=False).update(
+                completed=True, gave_up=True, completed_at=timezone.now())
+            from core.do_not_email import BOUNCED, block
+            from marketing_agent.services.do_not_email import company_id_for_campaign
+            block(company_id_for_campaign(sent.campaign), address, BOUNCED, source='marketing',
+                  note=(self._extract_delivery_status(msg) or '')[:500])
+            return address
+        return ''
 
     def _extract_delivery_status(self, msg):
         """Return a readable summary of a bounce's delivery-status part.

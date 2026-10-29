@@ -40,9 +40,14 @@ class FailedSendTests(MarketingTestCase):
             if module.startswith('marketing_agent'):
                 self.assertTrue(hasattr(import_module(module), function), f'{name}: {entry["task"]}')
 
-    def test_a_failed_step_is_sent_again_on_the_next_run_and_then_no_more(self):
+    def test_a_failed_step_is_sent_again_after_a_wait_and_then_no_more(self):
         self.assertEqual(self.run_sender(False), [('bilal@customer.test', 'Main 1')])
-        self.assertEqual(self.contact().current_step, 0)                 # it did not move on
+        contact = self.contact()
+        self.assertEqual((contact.current_step, contact.send_failures), (0, 1))  # it did not move on
+        # Not on the very next run (every five minutes, for ever, CO-122): after its retry time.
+        self.assertEqual(self.run_sender(), [])
+        from django.utils import timezone
+        type(contact).objects.filter(pk=contact.pk).update(retry_after=timezone.now())
 
         self.assertEqual(self.run_sender(True), [('bilal@customer.test', 'Main 1')])
         self.assertEqual(self.contact().current_step, 1)

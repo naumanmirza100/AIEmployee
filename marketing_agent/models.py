@@ -1,4 +1,5 @@
 from django.db import models
+from ai_sdr_agent.fields import EncryptedCharField
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.db.models.signals import m2m_changed, pre_save, post_save
@@ -133,9 +134,11 @@ class Campaign(models.Model):
         # Do this BEFORE saving so we can set status to 'active' in one save
         should_auto_start = False
         if self.status == 'scheduled' and self.start_date:
-            from django.utils import timezone
-            today = timezone.now().date()
-            if self.start_date <= today:
+            # Only with what Launch checks, and on the company's day (CO-130); otherwise it stays scheduled and the
+            # 15-minute starter says what is missing.
+            from marketing_agent.services import launch_checks
+            today = launch_checks.today_for(self.owner) if self.owner_id else None
+            if today and self.start_date <= today and self.pk and not launch_checks.launch_problem(self):
                 # Campaign should start now - activate it immediately!
                 should_auto_start = True
                 self.status = 'active'  # Change status before saving
@@ -666,7 +669,8 @@ class EmailAccount(models.Model):
     smtp_host = models.CharField(max_length=255, help_text='SMTP server host (e.g., smtp.gmail.com)')
     smtp_port = models.IntegerField(default=587, help_text='SMTP server port (587 for TLS, 465 for SSL)')
     smtp_username = models.CharField(max_length=255, help_text='SMTP username (usually same as email)')
-    smtp_password = models.CharField(max_length=500, help_text='SMTP password or app password')
+    # Stored encrypted, read as plain text (CO-126: kept in clear text, unlike AI SDR's and CRM Sync's).
+    smtp_password = EncryptedCharField(max_length=1000, help_text='SMTP password or app password')
     use_tls = models.BooleanField(default=True, help_text='Use TLS encryption')
     use_ssl = models.BooleanField(default=False, help_text='Use SSL encryption')
     
@@ -678,7 +682,7 @@ class EmailAccount(models.Model):
     imap_port = models.IntegerField(null=True, blank=True, help_text='IMAP server port (993 for SSL, 143 for TLS)')
     imap_use_ssl = models.BooleanField(default=True, help_text='Use SSL for IMAP connection')
     imap_username = models.CharField(max_length=255, blank=True, help_text='IMAP username (usually same as email)')
-    imap_password = models.CharField(max_length=500, blank=True, help_text='IMAP password')
+    imap_password = EncryptedCharField(max_length=1000, blank=True, help_text='IMAP password')
     enable_imap_sync = models.BooleanField(default=False, help_text='Enable automatic IMAP sync for reply detection')
     imap_sync_days = models.PositiveIntegerField(
         default=90,
@@ -835,6 +839,10 @@ class CampaignContact(models.Model):
     replied = models.BooleanField(default=False, help_text='Has this contact replied? (stops main sequence, starts sub-sequence)')
     completed = models.BooleanField(default=False, help_text='Has this contact completed the sequence?')
     sub_sequence_completed = models.BooleanField(default=False, help_text='Has this contact completed the sub-sequence?')
+    # Failed sends: tried again later, then given up (CO-122)
+    send_failures = models.PositiveSmallIntegerField(default=0, help_text='Failed sends in a row')
+    retry_after = models.DateTimeField(null=True, blank=True, help_text='No new try before this time')
+    gave_up = models.BooleanField(default=False, help_text='Stopped after too many failed sends in a row')
     
     # Reply Tracking
     replied_at = models.DateTimeField(null=True, blank=True, help_text='When the contact replied')
@@ -907,13 +915,31 @@ class CampaignContact(models.Model):
         self.completed_at = timezone.now()
         self.save()
     
-    def advance_step(self, sent_at=None):
-        """Advance to next step in sequence"""
-        self.current_step += 1
+    def advance_step(self, sent_at=None, to_step=None):
+        """Advance to next step in sequence (to `to_step`, the step just sent, when steps have a gap). Saves only its
+        own fields: a whole-row save could write back a reply recorded meanwhile as not replied (CO-191)."""
+        self.current_step = to_step if to_step else self.current_step + 1
         self.last_sent_at = sent_at or timezone.now()
         if not self.started_at:
             self.started_at = self.last_sent_at
-        self.save()
+        self.send_failures, self.retry_after = 0, None
+        self.save(update_fields=['current_step', 'last_sent_at', 'started_at', 'send_failures', 'retry_after',
+                                 'updated_at'])
+
+    MAX_SEND_FAILURES = 5
+
+    def note_send_failure(self):
+        """A send that failed is tried again later, each time later still (15 min, 1 h, 4 h, 16 h), and given up
+        after the fifth failure. It was tried every five minutes for ever, with a new 'failed' row each time
+        (CO-122)."""
+        from datetime import timedelta
+        now = timezone.now()
+        self.send_failures += 1
+        if self.send_failures >= self.MAX_SEND_FAILURES:
+            self.gave_up, self.completed, self.completed_at, self.retry_after = True, True, now, None
+        else:
+            self.retry_after = now + timedelta(minutes=15 * 4 ** (self.send_failures - 1))
+        self.save(update_fields=['send_failures', 'retry_after', 'gave_up', 'completed', 'completed_at', 'updated_at'])
 
 
 class Reply(models.Model):
@@ -1092,7 +1118,9 @@ def stop_follow_ups_for_removed_leads(sender, instance, action, pk_set, reverse=
 def create_campaign_contact(sender, instance, action, pk_set, **kwargs):
     """Automatically create CampaignContact when leads are added to a campaign"""
     if action == 'post_add':
-        active_sequences = list(instance.email_sequences.filter(is_active=True))
+        # Main sequences only: a follow-up series is started by a reply, not by being added (CO-127: a row per
+        # follow-up series made the add screens' own get_or_create fail, and say the add failed).
+        active_sequences = list(instance.email_sequences.filter(is_active=True, is_sub_sequence=False))
         if not active_sequences:
             return
 
@@ -1105,6 +1133,21 @@ def create_campaign_contact(sender, instance, action, pk_set, **kwargs):
                     sequence=seq,
                     defaults={'current_step': 0},
                 )
+
+
+class CheckedInboxMessage(models.Model):
+    """A message a Marketing-only mailbox's inbox sync has read, so it is not downloaded again.
+
+    Only Reply Draft mailboxes keep their mail (InboxEmail), and the sync knew a message by that alone: a
+    Marketing-only mailbox downloaded every recent message in full on every run (CO-273)."""
+    email_account = models.ForeignKey(EmailAccount, on_delete=models.CASCADE, related_name='checked_messages')
+    message_id = models.CharField(max_length=500)
+    checked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ppp_marketingagent_checkedinboxmessage'
+        unique_together = [('email_account', 'message_id')]
+        indexes = [models.Index(fields=['email_account', 'checked_at'], name='ppp_marketi_email_a_chk_idx')]
 
 
 class SavedGraphPrompt(models.Model):
