@@ -512,11 +512,14 @@ Return ONLY JSON: {{"category": "...", "reason": "one sentence explanation"}}"""
     @staticmethod
     def _extract_return_date(text: str):
         """Parse OOO return date. Falls back to now + 5 days."""
+        # "November 5" and "5 November" both: "until 5 November" fell back to five days (live run of 30 Oct).
+        day_first = r'(\d{1,2}(?:st|nd|rd|th)? [A-Za-z]{3,9}(?:,?\s*\d{4})?)'
         patterns = [
             r'back (?:on|from)\s+([\w]+ \d{1,2}(?:,?\s*\d{4})?)',
             r'return(?:ing)? (?:on|from)\s+([\w]+ \d{1,2}(?:,?\s*\d{4})?)',
             r'(?:until|till)\s+([\w]+ \d{1,2}(?:,?\s*\d{4})?)',
             r'available (?:again )?(?:on|from)\s+([\w]+ \d{1,2}(?:,?\s*\d{4})?)',
+            r'(?:back (?:on|from)|return(?:ing)? (?:on|from)|until|till|available (?:again )?(?:on|from))\s+' + day_first,
         ]
         for pat in patterns:
             m = re.search(pat, text, re.IGNORECASE)

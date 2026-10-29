@@ -443,6 +443,7 @@ Rules:
   customer, integration or feature that it does not give; no "clinics like yours saw 30% fewer no-shows"
 - You know nothing about the prospect beyond the placeholders: never say you noticed, saw or read anything about
   them or their company, and never call them "leading" or praise their work
+- They have only had your earlier emails: never write "as we discussed" or "the app we talked about"
 - One clear request per email, and sign off with {(campaign.sender_name or 'the sender').split()[0]}"""
         # Found in the live run of 29 Oct: the steps promised "a 30% drop in missed appointments", "15% more
         # appointments" and a "fully integrated" app, none of which the campaign said, in emails sent in the
