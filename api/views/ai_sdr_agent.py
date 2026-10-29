@@ -1667,6 +1667,74 @@ def sdr_retry_failed(request, campaign_id):
 
 
 # ==========================================================================
+# Email Assistant: write an outreach email, or read a lead's reply
+# (it was a "Coming soon" page; the client's list, part 6)
+# ==========================================================================
+
+def _assistant_context(company_user, data):
+    """The sender and the offer: typed on the page, or taken from one of the person's campaigns."""
+    campaign = None
+    if str(data.get('campaign_id') or '').isdigit():
+        campaign = SDRCampaign.objects.filter(id=int(data['campaign_id']), company_user=company_user).first()
+    sender = {
+        'name': (data.get('sender_name') or (campaign.sender_name if campaign else '') or company_user.full_name or '').strip(),
+        'title': (data.get('sender_title') or (campaign.sender_title if campaign else '') or '').strip(),
+        'company': (data.get('sender_company') or (campaign.sender_company if campaign else '')
+                    or company_user.company.name or '').strip(),
+    }
+    offer = (data.get('offer') or (campaign.description if campaign else '') or '').strip()
+    return sender, offer
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_assistant_write(request):
+    from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
+    company_user, d = request.user, request.data
+    prospect = {k: str(d.get(k) or '')[:300] for k in ('name', 'title', 'company', 'industry')}
+    prospect['notes'] = str(d.get('notes') or '')[:800]
+    if not (prospect['name'] or prospect['company']):
+        return Response({'status': 'error', 'message': "Type at least the prospect's name or company."}, status=400)
+    sender, offer = _assistant_context(company_user, d)
+    try:
+        email_text = EmailAssistantAgent(company=company_user.company).write_email(
+            d.get('kind'), d.get('tone'), prospect, sender, offer)
+    except KeyServiceError:
+        raise
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=400)
+    except Exception as exc:
+        logger.warning("Email assistant write failed: %s", exc)
+        return Response({'status': 'error', 'message': 'The AI could not write the email. Please try again.'},
+                        status=502)
+    return Response({'status': 'success', 'data': email_text})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_assistant_read(request):
+    from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
+    company_user, d = request.user, request.data
+    reply_text = str(d.get('reply') or '').strip()
+    if not reply_text:
+        return Response({'status': 'error', 'message': "Paste the lead's reply first."}, status=400)
+    sender, offer = _assistant_context(company_user, d)
+    try:
+        reading = EmailAssistantAgent(company=company_user.company).read_reply(reply_text[:5000], sender, offer)
+    except KeyServiceError:
+        raise
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=400)
+    except Exception as exc:
+        logger.warning("Email assistant read failed: %s", exc)
+        return Response({'status': 'error', 'message': 'The AI could not read the reply. Please try again.'},
+                        status=502)
+    return Response({'status': 'success', 'data': reading})
+
+
+# ==========================================================================
 # Answers the AI wrote to leads' replies, waiting for a person to check them
 # (ai_sdr_agent/reply_answers.py)
 # ==========================================================================

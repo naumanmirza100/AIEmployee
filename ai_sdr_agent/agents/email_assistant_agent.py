@@ -358,6 +358,95 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 ),
             }
 
+    # ── The Email Assistant screen ────────────────────────────────────────────
+    # It was a "Coming soon" page (the client's list, part 6). Both use only what the person typed: the AI used to
+    # make up things it had "seen" about a prospect, and benefits of an offer nobody had described.
+
+    EMAIL_KINDS = {
+        'first_email': 'a first email introducing what we offer',
+        'follow_up': 'a short follow-up to a first email that had no answer',
+        'meeting_request': 'an email asking for a short call',
+        'last_touch': 'a polite last email saying this is the final note',
+    }
+    TONES = {
+        'professional': 'professional and courteous',
+        'friendly': 'warm and friendly, still businesslike',
+        'direct': 'brief and direct, no small talk',
+    }
+
+    def _ask_json(self, prompt, temperature=0.5):
+        if not self.groq_client:
+            raise ValueError('The AI is not available for your company right now (no AI key or no tokens left).')
+        resp = self.groq_client.chat.completions.create(
+            model=self.model, messages=[{'role': 'user', 'content': prompt}],
+            temperature=temperature, max_tokens=2000)
+        from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
+        record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
+        content = resp.choices[0].message.content.strip()
+        if '```' in content:
+            content = content.split('```')[1].lstrip('json').strip()
+        return json.loads(content)
+
+    def write_email(self, kind, tone, prospect: dict, sender: dict, offer: str) -> dict:
+        """A personal outreach email from a kind, a tone and what the person typed about the prospect."""
+        what = self.EMAIL_KINDS.get(kind, self.EMAIL_KINDS['first_email'])
+        how = self.TONES.get(tone, self.TONES['professional'])
+        known = '\n'.join(f'- {label}: {value}' for label, value in (
+            ('Name', prospect.get('name')), ('Job title', prospect.get('title')),
+            ('Company', prospect.get('company')), ('Industry', prospect.get('industry')),
+            ('Notes from the salesperson', prospect.get('notes'))) if (value or '').strip())
+        offer = ' '.join((offer or '').split())[:1500] or '(nothing has been written down)'
+        signer = (sender.get('name') or sender.get('company') or 'the sender').split()[0]
+        prompt = f"""Write {what}, in a {how} tone.
+
+The prospect (the ONLY facts you know about them):
+{known or '- nothing beyond their email address'}
+
+What we offer (the ONLY facts you may use about it): {offer}
+Sender: {sender.get('name', '')}, {sender.get('title', '')} at {sender.get('company', '')}
+
+Rules:
+- Under 130 words; one clear request at the end, never two
+- Never say you have seen, read or noticed anything about them or their company, and never guess their plans
+- Never state a fact, number, price, customer name or feature that is not given above
+- No placeholders in brackets; if a fact is missing, write around it
+- Sign off with "Best," and then {signer} on the next line
+
+Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
+        data = self._ask_json(prompt)
+        return {'subject': str(data.get('subject', ''))[:300], 'body': str(data.get('body', ''))}
+
+    def read_reply(self, reply_text: str, sender: dict, offer: str) -> dict:
+        """What a lead's reply means, what the agent would do, and an answer to send if one is due."""
+        reading = self.classify_reply(reply_text)
+        result = {'category': reading['category'], 'label': reading['label'], 'reason': reading['reason'],
+                  'action': reading['action'], 'answer': None}
+        if reading['category'] in (CAT_OUT_OF_OFFICE, CAT_UNSUBSCRIBE):
+            return result                          # nothing to answer: the agent waits, or stops for good
+        purpose = {
+            CAT_POSITIVE: 'thank them and propose a short call; ask which day suits them',
+            CAT_WANTS_MORE: 'answer their question from the facts below only, then offer a short call',
+            CAT_NOT_INTERESTED: 'thank them politely, say you will not follow up, and leave the door open',
+            CAT_NEUTRAL: 'answer briefly and ask one clear question to understand what they need',
+        }[reading['category']]
+        offer = ' '.join((offer or '').split())[:1500] or '(nothing has been written down)'
+        signer = (sender.get('name') or sender.get('company') or 'the sender').split()[0]
+        prompt = f"""A prospect replied to our sales email. Write our answer: {purpose}.
+
+Their reply: \"\"\"{strip_quoted_reply(reply_text)[:1200]}\"\"\"
+What we offer (the ONLY facts you may use about it): {offer}
+Sender: {sender.get('name', '')}, {sender.get('title', '')} at {sender.get('company', '')}
+
+Rules:
+- Write in the language of their reply
+- Under 110 words; never state a fact, number or price that is not given above
+- Sign off with "Best," and then {signer} on the next line
+
+Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
+        data = self._ask_json(prompt)
+        result['answer'] = {'subject': str(data.get('subject', ''))[:300], 'body': str(data.get('body', ''))}
+        return result
+
     # ── Private ───────────────────────────────────────────────────────────────
 
     def _ai_classify(self, reply_text: str) -> dict:

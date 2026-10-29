@@ -231,6 +231,25 @@ export const importLeadsFromCSV = async (file) => {
 };
 
 // Campaigns
+// Email Assistant: write an email, or read a lead's reply.
+export const assistantWriteEmail = async (data) => {
+  try {
+    return await companyApi.post('/sdr/email-assistant/write/', data);
+  } catch (error) {
+    console.error('Email assistant write error:', error);
+    throw error;
+  }
+};
+
+export const assistantReadReply = async (data) => {
+  try {
+    return await companyApi.post('/sdr/email-assistant/read/', data);
+  } catch (error) {
+    console.error('Email assistant read error:', error);
+    throw error;
+  }
+};
+
 export const listCampaigns = async () => {
   try {
     return await companyApi.get('/sdr/campaigns/');

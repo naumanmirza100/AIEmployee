@@ -852,6 +852,8 @@ urlpatterns = [
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/send-reminder/?$', sdr_api.sdr_send_meeting_reminder, name='sdr_send_meeting_reminder'),  # POST
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/generate-prep/?$', sdr_api.sdr_generate_meeting_prep, name='sdr_generate_meeting_prep'),  # POST
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/resend-scheduling/?$', sdr_api.sdr_resend_scheduling_email, name='sdr_resend_scheduling_email'),  # POST
+    re_path(r'^sdr/email-assistant/write/?$', sdr_api.sdr_assistant_write, name='sdr_assistant_write'),  # POST
+    re_path(r'^sdr/email-assistant/read/?$', sdr_api.sdr_assistant_read, name='sdr_assistant_read'),  # POST
     re_path(r'^sdr/check-all-replies/?$', sdr_api.sdr_check_all_replies, name='sdr_check_all_replies'),  # POST
     re_path(r'^sdr/settings/?$', sdr_api.sdr_agent_settings, name='sdr_agent_settings'),  # GET, POST
     # Google Calendar OAuth (one-time setup)

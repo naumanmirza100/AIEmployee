@@ -561,3 +561,46 @@ class ScoringQueueTests(SDRBase):
             qualify_queue_impl()
         self.assertEqual(SDRLead.objects.get(email='b@x.example').qualification_status, 'done')
         self.assertEqual(SDRLead.objects.filter(company_user=self.cu, qualification_status='done').count(), 5)
+
+
+class EmailAssistantTests(SDRBase):
+    """The client's list, part 6: the Email Assistant page was "Coming soon"."""
+
+    def call(self, view, data):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        request = APIRequestFactory().post('/x', data, format='json')
+        force_authenticate(request, user=self.cu)
+        return view(request)
+
+    def ai(self, *answers):
+        client = mock.MagicMock()
+        client.chat.completions.create.side_effect = [
+            mock.MagicMock(choices=[mock.MagicMock(message=mock.MagicMock(content=a))], usage=None) for a in answers]
+        return mock.patch('ai_sdr_agent.agents.sdr_key_resolver.resolve_sdr_groq_client', return_value=(client, None)), client
+
+    def test_an_email_is_written_from_only_what_was_typed(self):
+        from api.views import ai_sdr_agent as views
+        self.assertEqual(self.call(views.sdr_assistant_write, {'kind': 'first_email'}).status_code, 400)
+        patch, client = self.ai('{"subject": "A booking app for Smile Line", "body": "Hi Sana, ..."}')
+        with patch:
+            response = self.call(views.sdr_assistant_write, {
+                'kind': 'follow_up', 'tone': 'direct', 'name': 'Sana Malik', 'company': 'Smile Line Dental',
+                'offer': 'A patient booking app for dental clinics', 'campaign_id': self.campaign.id})
+        self.assertEqual(response.data['data']['subject'], 'A booking app for Smile Line')
+        prompt = client.chat.completions.create.call_args.kwargs['messages'][0]['content']
+        self.assertIn('a short follow-up', prompt)
+        self.assertIn('A patient booking app for dental clinics', prompt)
+        self.assertIn('Sam', prompt)                                   # the campaign's sender
+
+    def test_a_reply_is_read_and_answered_only_when_an_answer_is_due(self):
+        from api.views import ai_sdr_agent as views
+        patch, _ = self.ai('{"category": "wants_more_info", "reason": "asks the price"}',
+                           '{"subject": "Re: price", "body": "Hi, ..."}')
+        with patch:
+            data = self.call(views.sdr_assistant_read, {'reply': 'Is ki qeemat kya hai?'}).data['data']
+        self.assertEqual((data['category'], data['answer']['subject']), ('wants_more_info', 'Re: price'))
+        patch, client = self.ai('{"category": "out_of_office", "reason": "away"}')
+        with patch:
+            data = self.call(views.sdr_assistant_read, {'reply': 'I am away until Monday'}).data['data']
+        self.assertIsNone(data['answer'])
+        self.assertEqual(client.chat.completions.create.call_count, 1)
