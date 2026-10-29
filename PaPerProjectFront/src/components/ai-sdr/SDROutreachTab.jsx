@@ -539,6 +539,9 @@ const SDROutreachTab = () => {
   // ── Regenerate steps ──────────────────────────────────────────────────
   const handleGenerateSteps = async () => {
     if (!selectedCampaign) return;
+    // One click replaced every step, hand edits included, with no question (CO-245).
+    if (steps.length && !window.confirm(
+      `Replace all ${steps.length} steps with new emails written by the AI? Your changes to them will be lost.`)) return;
     setGeneratingSteps(true);
     try {
       const resp = await generateSequenceSteps(selectedCampaign.id);

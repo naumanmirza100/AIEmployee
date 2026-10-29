@@ -164,7 +164,9 @@ class SalesCallsOnTheCalendarTests(BothLoginsTestCase):
         Holiday.objects.create(company=self.company, name='Founders day', date=self.day)
         call = self.sales_call(status='pending', scheduled_at=None)
         self.assertEqual(self.book(call, self.at(6))[0], 409)                  # 11:00 in Karachi, that day
-        self.assertEqual(self.book(call, self.at(20))[0], 200)                 # 01:00 the next day there
+        # 01:00 the next day there: the booking page offers working hours only since 29 Oct 2026 (CO-201), so the
+        # salesperson sets that time instead; it is not the holiday.
+        self.assertEqual(self.confirm(call, self.at(20))[0], 200)
 
     def test_a_free_time_is_booked_and_is_on_the_calendar_at_once(self):
         call = self.sales_call(status='pending', scheduled_at=None)

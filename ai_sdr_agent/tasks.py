@@ -484,21 +484,25 @@ def send_daily_analytics_impl():
         if not _has_sdr_access(company_user.company, access_cache):
             continue
 
+        # Each login can turn these emails off ("Sales reports"); the low-meetings one goes on Mondays, about the
+        # week just ended, not every day of a slow week (CO-240).
+        from core.notification_settings import wants_email
+        if not wants_email(company_user, 'sales_reports'):
+            continue
         try:
             sent = agent.send_daily_summary(company_user)
             if sent:
                 processed += 1
 
-            # Check low-meetings alert
             metrics = agent.compute_metrics(company_user)
-            if metrics['low_meetings_alert']:
-                alert_sent = agent.send_low_meetings_alert(company_user, metrics['meetings_week'])
+            if metrics['low_meetings_alert'] and timezone.now().weekday() == 0:
+                alert_sent = agent.send_low_meetings_alert(company_user, metrics['meetings_lweek'])
                 if alert_sent:
                     alerts_sent += 1
                     logger.warning(
                         'SDR [daily-analytics] LOW-MEETINGS ALERT sent to company_user=%d '
-                        '(meetings_week=%d < threshold=%d)',
-                        cu_id, metrics['meetings_week'], MEETINGS_ALERT_THRESHOLD,
+                        '(meetings_lweek=%d < threshold=%d)',
+                        cu_id, metrics['meetings_lweek'], MEETINGS_ALERT_THRESHOLD,
                     )
         except Exception as exc:
             logger.error('SDR [daily-analytics] failed for company_user=%d: %s', cu_id, exc, exc_info=True)
@@ -669,7 +673,8 @@ def auto_research_leads_task(self):
 # ---------------------------------------------------------------------------
 # Lead qualification queue — background, batched, self-retrying
 # ---------------------------------------------------------------------------
-QUALIFY_BATCH_SIZE = 5        # leads scored per scheduler tick
+QUALIFY_BATCH_SIZE = 5        # leads scored per company per scheduler tick
+QUALIFY_CEILING = 25          # leads scored per tick in all, so the AI provider's rate limit holds
 QUALIFY_MAX_ATTEMPTS = 3      # give up after this many failed attempts
 QUALIFY_STUCK_MINUTES = 15    # a 'processing' lead older than this is retried
 
@@ -677,9 +682,9 @@ QUALIFY_STUCK_MINUTES = 15    # a 'processing' lead older than this is retried
 def qualify_queue_impl():
     """Score a small batch of queued leads. Runs every ~2 min via the scheduler.
 
-    - Picks the oldest 'pending' (or retryable 'failed') leads across all
-      companies, capped at QUALIFY_BATCH_SIZE, so AI tokens are spent gradually
-      instead of all at once.
+    - Picks up to QUALIFY_BATCH_SIZE 'pending' (or retryable 'failed') leads from
+      each company with an active plan, up to QUALIFY_CEILING in all, so AI
+      tokens are spent gradually and no company waits behind another's import.
     - On a key/quota error for a company, that company's leads are left 'pending'
       and retried on the next tick (never burns the whole batch on a dead key).
     - Other errors bump the attempt count; after QUALIFY_MAX_ATTEMPTS the lead is
@@ -690,25 +695,38 @@ def qualify_queue_impl():
     from core.api_key_service import KeyServiceError
     from api.views.ai_sdr_agent import _get_qualification_agent
 
+    from django.db.models import Min
+    from core.models import Company
+
     now = timezone.now()
     # pending, or failed-but-still-retryable, oldest first.
     # 'processing' rows untouched for a while were abandoned by a crashed run.
     stuck_before = now - timedelta(minutes=QUALIFY_STUCK_MINUTES)
-    batch = list(
-        SDRLead.objects.filter(
-            _Q(qualification_status='pending')
-            | _Q(qualification_status='failed', qualification_attempts__lt=QUALIFY_MAX_ATTEMPTS)
-            | _Q(qualification_status='processing', updated_at__lt=stuck_before)
-        )
-        .select_related('company_user__company')
-        .order_by('qualification_queued_at', 'created_at')[:QUALIFY_BATCH_SIZE]
+    queued = SDRLead.objects.filter(
+        _Q(qualification_status='pending')
+        | _Q(qualification_status='failed', qualification_attempts__lt=QUALIFY_MAX_ATTEMPTS)
+        | _Q(qualification_status='processing', updated_at__lt=stuck_before)
     )
+    # A few leads from every company with some waiting, the longest-waiting company first. One queue for all, five
+    # leads a run, let a company's big import or lapsed plan hold up everyone else (CO-202).
+    access_cache: dict = {}
+    waiting = (queued.order_by().values('company_user__company_id')
+               .annotate(since=Min('qualification_queued_at')).order_by('since'))
+    batch = []
+    for row in waiting:
+        if len(batch) >= QUALIFY_CEILING:
+            break
+        company = Company.objects.filter(pk=row['company_user__company_id']).first()
+        if company is None or not _has_sdr_access(company, access_cache):
+            continue                    # a lapsed plan: its leads wait, and take nobody's place
+        batch += list(queued.filter(company_user__company=company).select_related('company_user__company')
+                      .order_by('qualification_queued_at', 'created_at')
+                      [:min(QUALIFY_BATCH_SIZE, QUALIFY_CEILING - len(batch))])
     if not batch:
-        return {'processed': 0, 'qualified': 0, 'failed': 0, 'pending': 0}
+        return {'processed': 0, 'qualified': 0, 'failed': 0, 'pending': queued.count()}
 
     qualified = 0
     failed = 0
-    access_cache: dict = {}
     # Cache one agent + active ICP per company; skip companies whose key is out.
     agents: dict = {}
     icps: dict = {}
@@ -719,12 +737,6 @@ def qualify_queue_impl():
         cu_id = lead.company_user_id
         if cu_id in blocked_companies:
             continue  # key already out for this company this tick
-        if not _has_sdr_access(company, access_cache):
-            # Lapsed subscription: leave the lead pending, but send it to the back
-            # of the queue so it doesn't hog the batch every tick.
-            SDRLead.objects.filter(pk=lead.pk).update(qualification_queued_at=now)
-            continue
-
         try:
             if cu_id not in agents:
                 agents[cu_id] = _get_qualification_agent(company)

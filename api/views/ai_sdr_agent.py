@@ -945,6 +945,9 @@ def fetch_apify_leads(request):
 # CSV Import
 # ==========================================================================
 
+CSV_IMPORT_MAX_ROWS = 2000
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -991,7 +994,13 @@ def import_leads_csv(request):
             'company_website':  ['companywebsite', 'website', 'url', 'domain', 'web'],
         }
 
-        for i, raw_row in enumerate(reader, start=2):
+        rows = list(reader)
+        if len(rows) > CSV_IMPORT_MAX_ROWS:
+            # Every row is queued for AI scoring; a 5,000-row file held the queue for a day and a half (CO-202).
+            return Response({'status': 'error', 'code': 'too_many_rows',
+                             'message': f'The file has {len(rows)} rows. Please import at most '
+                                        f'{CSV_IMPORT_MAX_ROWS} leads at a time.'}, status=400)
+        for i, raw_row in enumerate(rows, start=2):
             try:
                 # Normalise this row's keys once, then pick fields by alias.
                 norm = {_norm_key(k): (v or '').strip() for k, v in raw_row.items() if k}
@@ -1813,6 +1822,14 @@ def sdr_generate_steps(request, campaign_id):
         campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
     except SDRCampaign.DoesNotExist:
         return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    # Not while it is sending: leads part-way through would carry on from the same place with new text, hand edits
+    # gone (CO-245). The screen asks before it replaces the steps.
+    mid_sequence = campaign.enrollments.filter(status='active').count()
+    if campaign.status == 'active' and mid_sequence:
+        return Response({'status': 'error', 'code': 'campaign_sending',
+                         'message': f'Pause the campaign first: {mid_sequence} lead(s) are part-way through these '
+                                    f'emails.'}, status=409)
 
     try:
         icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()

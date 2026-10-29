@@ -368,12 +368,15 @@ def _detect_bounce(msg, raw_bytes, sender_email, subject, email_map):
     if not hard:
         return None
 
-    failed = (msg.get('X-Failed-Recipients') or '').lower()
+    # Whole addresses only: 'ann@acme.com' is inside 'joann@acme.com', and a notice about Joann was filed against
+    # Ann (CO-244). The header and the report's Final-Recipient lines first, then the address standing alone.
+    failed = set(re.findall(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+', (msg.get('X-Failed-Recipients') or '').lower()))
+    failed |= set(re.findall(r'final-recipient:\s*rfc822;\s*<?([^\s>]+)', blob))
     for addr in email_map:
         if addr in failed:
             return addr
     for addr in email_map:
-        if addr in blob:
+        if re.search(r'(?<![\w.+-])' + re.escape(addr) + r'(?![\w-])', blob):
             return addr
     return None
 

@@ -1,9 +1,8 @@
-"""The SDR's reply rules, fixed before its demo (29 Oct 2026), from the inside-gaps report.
+"""The AI SDR, fixed before its demo (29 Oct 2026), from the inside-gaps report. Each class names its items.
 
-CO-144: a lead with a meeting could not opt out by reply, and meeting emails ignored the do-not-email list.
-CO-145: word lists decided most replies and misread common ones; 'not interested' opted people out for good.
-CO-241: an out-of-office message put a lead who had already answered back into the sequence.
-CO-243: a lead in two campaigns who replied once was answered twice.
+Replies: CO-144, CO-145, CO-241, CO-243. Lead search keys: CO-142. Campaigns: CO-146 to CO-149. Calls: CO-150 to
+CO-152, CO-199 to CO-201. Mailboxes: CO-197, CO-198. Scoring: CO-202. Figures and steps: CO-240, CO-242, CO-244,
+CO-245.
 """
 from datetime import timedelta
 from unittest import mock
@@ -12,7 +11,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-from ai_sdr_agent.models import SDRCampaign, SDRCampaignEnrollment, SDRMeeting, SDROutreachLog
+from ai_sdr_agent.models import SDRCampaign, SDRCampaignEnrollment, SDRLead, SDRMeeting, SDROutreachLog
 from ai_sdr_agent.reply_actions import handle_inbox_reply
 from ai_sdr_agent.tests import SDRBase
 from core.do_not_email import UNSUBSCRIBED, block, is_blocked
@@ -465,3 +464,100 @@ class BookingPageTests(SDRBase):
         response = Client().post(f'/api/sdr/book/{meeting.booking_token}/confirm/',
                                  {'scheduled_at': night.isoformat()}, content_type='application/json')
         self.assertEqual((response.status_code, response.json()['error']), (400, 'outside_hours'))
+
+
+class BounceAndPrepTests(SDRBase):
+    """CO-244: a bounce notice about joann@acme.com could be filed against ann@acme.com.
+    CO-242: meetings the five-minute job created got boilerplate prep notes (no company, so no AI)."""
+
+    def test_a_bounce_is_filed_against_the_whole_address(self):
+        import email
+        from ai_sdr_agent.agents.outreach_agent import _detect_bounce
+        raw = ('From: mailer-daemon@googlemail.com\nSubject: Delivery Status Notification (Failure)\n'
+               'X-Failed-Recipients: joann@acme.com\nContent-Type: text/plain\n\n'
+               'Address not found: joann@acme.com 550 5.1.1 does not exist\n').encode()
+        msg = email.message_from_bytes(raw)
+        found = _detect_bounce(msg, raw, 'mailer-daemon@googlemail.com', msg['Subject'],
+                               {'ann@acme.com': 1, 'joann@acme.com': 2})
+        self.assertEqual(found, 'joann@acme.com')
+        self.assertIsNone(_detect_bounce(msg, raw, 'mailer-daemon@googlemail.com', msg['Subject'],
+                                         {'ann@acme.com': 1}))
+
+    def test_a_meeting_from_a_reply_gets_the_companys_ai_for_its_notes(self):
+        enrollment = self.enroll(self.make_lead('kiran@clinic.example'))
+        reader = mock.MagicMock()
+        reader.classify_reply.return_value = POSITIVE
+        reply = {'enrollment': enrollment, 'reply_text': 'Yes please', 'sender_email': 'kiran@clinic.example',
+                 'subject': 'Re: Hello', 'message_id': '<p1>', 'received_at': timezone.now() + timedelta(minutes=1)}
+        with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent') as scheduler:
+            scheduler.return_value.generate_prep_notes.return_value = 'Notes'
+            handle_inbox_reply(self.campaign, reply, email_agent=reader, outreach_agent=mock.MagicMock())
+        self.assertEqual(scheduler.call_args.kwargs.get('company'), self.company)
+
+
+class FiguresAndRegenerateTests(SDRBase):
+    """CO-240: the sales numbers counted unbooked meetings, away messages and unsubscribe clicks, and a daily
+    'low meetings' email could not be turned off. CO-245: Regenerate replaced every step with no question."""
+
+    def test_booked_calls_and_real_replies_are_what_is_counted(self):
+        from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent
+        lead = self.make_lead('kiran@clinic.example')
+        answered = self.enroll(lead)
+        SDRCampaignEnrollment.objects.filter(pk=answered.pk).update(replied_at=timezone.now(), reply_content='Yes',
+                                                                    status='replied')
+        away = self.enroll(self.make_lead('sara@clinic.example'))
+        SDRCampaignEnrollment.objects.filter(pk=away.pk).update(replied_at=timezone.now(), reply_content='Away',
+                                                                reply_sentiment='out_of_office')
+        clicked = self.enroll(self.make_lead('ali@clinic.example'))
+        SDRCampaignEnrollment.objects.filter(pk=clicked.pk).update(replied_at=timezone.now(), status='unsubscribed')
+        SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=answered, status='pending')
+        SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=answered, status='scheduled',
+                                  confirmed_at=timezone.now(), scheduled_at=timezone.now() + timedelta(days=1))
+        m = AnalyticsAgent().compute_metrics(self.cu)
+        self.assertEqual((m['meetings_total'], m['replied_total']), (1, 1))
+
+    def test_the_reports_can_be_turned_off(self):
+        from core.models import NotificationSetting
+        from ai_sdr_agent.tasks import send_daily_analytics_impl
+        NotificationSetting.objects.create(company_user=self.cu, topic='sales_reports', in_app=False, email=False)
+        with mock.patch('ai_sdr_agent.agents.analytics_agent.AnalyticsAgent.send_daily_summary') as daily:
+            send_daily_analytics_impl()
+        daily.assert_not_called()
+
+    def test_regenerate_is_refused_while_leads_are_part_way_through(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from api.views import ai_sdr_agent as views
+        self.enroll(self.make_lead())
+        request = APIRequestFactory().post('/x', {}, format='json')
+        force_authenticate(request, user=self.cu)
+        response = views.sdr_generate_steps(request, campaign_id=self.campaign.id)
+        self.assertEqual((response.status_code, response.data['code']), (409, 'campaign_sending'))
+        self.assertEqual(self.campaign.steps.count(), 2)
+
+
+class ScoringQueueTests(SDRBase):
+    """CO-202: one scoring queue for every company, five leads a run, held up by any company's big import."""
+
+    def test_every_waiting_company_gets_its_leads_scored_in_the_same_run(self):
+        from ai_sdr_agent.models import SDRIcpProfile
+        from ai_sdr_agent.tasks import qualify_queue_impl
+        from core.models import Company, CompanyModulePurchase, CompanyUser
+        other = Company.objects.create(name='Beta', email='beta@test.local')
+        CompanyModulePurchase.objects.create(company=other, module_name='ai_sdr_agent', status='active',
+                                             is_complimentary=True)
+        beta = CompanyUser.objects.create(company=other, email='b@test.local', full_name='B', role='admin',
+                                          password_hash='x', is_active=True)
+        for cu in (self.cu, beta):
+            SDRIcpProfile.objects.create(company_user=cu, is_active=True, job_titles=['CEO'])
+        early = timezone.now() - timedelta(hours=1)
+        for i in range(12):                                     # Acme's big import, queued first
+            SDRLead.objects.create(company_user=self.cu, email=f'a{i}@x.example', qualification_status='pending',
+                                   qualification_queued_at=early)
+        SDRLead.objects.create(company_user=beta, email='b@x.example', qualification_status='pending',
+                               qualification_queued_at=timezone.now())
+        scorer = mock.MagicMock()
+        scorer.qualify_lead.return_value = {'score': 70, 'temperature': 'warm'}
+        with mock.patch('api.views.ai_sdr_agent._get_qualification_agent', return_value=scorer):
+            qualify_queue_impl()
+        self.assertEqual(SDRLead.objects.get(email='b@x.example').qualification_status, 'done')
+        self.assertEqual(SDRLead.objects.filter(company_user=self.cu, qualification_status='done').count(), 5)
