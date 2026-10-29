@@ -1352,7 +1352,8 @@ def _serialize_enrollment(e: SDRCampaignEnrollment) -> dict:
         'total_steps': total_steps,
         'next_action_at': e.next_action_at.isoformat() if e.next_action_at else None,
         'replied_at': e.replied_at.isoformat() if e.replied_at else None,
-        'reply_content': e.reply_content or '',
+        # The lead's words only: View Reply showed the quoted email under them (manual run, 30 Oct).
+        'reply_content': strip_quoted_reply(e.reply_content or '') or (e.reply_content or ''),
         'reply_sentiment': e.reply_sentiment or '',
         'reply_category_label': {
             'out_of_office': '🏖️ Out of Office',
@@ -1394,7 +1395,7 @@ def _serialize_meeting(m: SDRMeeting) -> dict:
         'campaign_removed': not m.is_manual and campaign is None,
         'title': m.title,
         'notes': m.notes,
-        'reply_snippet': m.reply_snippet,
+        'reply_snippet': strip_quoted_reply(m.reply_snippet or '') or m.reply_snippet,
         'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
         'duration_minutes': m.duration_minutes,
         'status': m.status,

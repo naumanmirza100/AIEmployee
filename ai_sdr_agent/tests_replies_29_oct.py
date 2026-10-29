@@ -605,6 +605,24 @@ class EmailAssistantTests(SDRBase):
         self.assertIsNone(data['answer'])
         self.assertEqual(client.chat.completions.create.call_count, 1)
 
+    def test_a_question_the_campaign_does_not_answer_is_neither_confirmed_nor_denied(self):
+        # Found taking the manual's pictures (30 Oct): asked about WhatsApp reminders, the answer said "only SMS".
+        from api.views import ai_sdr_agent as views
+        patch, client = self.ai('{"category": "wants_more_info", "reason": "asks about WhatsApp"}',
+                                '{"subject": "Re: reminders", "body": "Hi, ..."}')
+        with patch:
+            self.call(views.sdr_assistant_read, {'reply': 'Kya reminders WhatsApp par bhi jate hain?'})
+        prompt = client.chat.completions.create.call_args.kwargs['messages'][0]['content']
+        self.assertIn('do not say yes or no to it', prompt)
+        agent = EmailAssistantAgent()
+        agent.groq_client = mock.MagicMock()
+        agent.groq_client.chat.completions.create.return_value = mock.MagicMock(
+            choices=[mock.MagicMock(message=mock.MagicMock(content='{"subject": "Re: x", "body": "Hi"}'))], usage=None)
+        agent.generate_more_info_email(self.make_lead(), self.campaign, 'WhatsApp bhi?\n\n> Hi Bob,\n> our app')
+        prompt = agent.groq_client.chat.completions.create.call_args.kwargs['messages'][0]['content']
+        self.assertIn('do not say yes or no to it', prompt)
+        self.assertNotIn('our app', prompt)                            # the quoted email is not their question
+
 
 class LiveRunTests(SDRBase):
     """Found in the live run of 29 Oct."""
@@ -692,6 +710,18 @@ class QuotedThreadTests(SDRBase):
         [alert] = PMNotification.objects.filter(company_user=self.cu)
         self.assertIn('"yes, Tuesday at 11 works"', alert.message)
         self.assertNotIn('s@x.com', alert.message)
+
+    def test_view_reply_and_the_call_show_only_what_the_lead_wrote(self):
+        # Found taking the manual's pictures (30 Oct): both showed the quoted email under the lead's words.
+        from api.views.ai_sdr_agent import _serialize_enrollment, _serialize_meeting
+        reply = 'Could you send me a few times?\n\n> Hi Zain,\n>\n> I am Nadia, Sales Lead at Acme.'
+        lead = self.make_lead('zain@clinic.example')
+        enrollment = self.enroll(lead, reply_content=reply)
+        meeting = SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=enrollment, reply_snippet=reply)
+        self.assertEqual(_serialize_enrollment(enrollment)['reply_content'], 'Could you send me a few times?')
+        self.assertEqual(_serialize_meeting(meeting)['reply_snippet'], 'Could you send me a few times?')
+        enrollment.reply_content = '> only a quote'                    # nothing of theirs: the message as it came
+        self.assertEqual(_serialize_enrollment(enrollment)['reply_content'], '> only a quote')
 
 
 class EmailBrandTests(TestCase):

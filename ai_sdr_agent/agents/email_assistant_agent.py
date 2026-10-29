@@ -114,6 +114,12 @@ _OUR_FOOTER = re.compile(
 )
 
 
+# A question the campaign's words do not answer is neither confirmed nor denied: asked whether reminders go by
+# WhatsApp, the AI answered "only SMS, not WhatsApp" from a description that mentions SMS (manual run, 30 Oct).
+_NOT_IN_THE_FACTS = ('If they ask about something the facts above do not mention, do not say yes or no to it: '
+                     'say you will check and come back to them, or that it can be covered on the call')
+
+
 def strip_quoted_reply(text: str) -> str:
     """Return only what the prospect wrote, without the quoted earlier thread or our footer."""
     if not text:
@@ -310,7 +316,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
         prompt = f"""Write a SHORT reply to a prospect who asked for more information about our product/service.
 
 Prospect: {lead.full_name}, {lead.job_title or ''} at {lead.company_name or ''}
-Their reply: "{original_reply[:300]}"
+Their reply: "{strip_quoted_reply(original_reply)[:300]}"
 Sender: {campaign.sender_name}, {campaign.sender_title} at {campaign.sender_company}
 Calendar link: {calendar or '(none)'}
 {facts}
@@ -320,6 +326,7 @@ Write a reply that:
 {benefits}
 - Never states a fact, number, price, customer name or feature that is not given above
 - Answers their question if the facts above answer it
+- {_NOT_IN_THE_FACTS}
 - Ends with ONE sentence asking them to {"book a call at: " + calendar if calendar else "reply with a time that suits them for a short call"}; never two
 - Signs off with "Best," and then {(campaign.sender_name or campaign.sender_company or 'the sender').split()[0]} on the next line
 - Under 120 words total
@@ -442,6 +449,7 @@ Rules:
 - Write in the same language and the same script as their reply: Roman Urdu stays in Latin letters (a Roman Urdu
   reply was answered in Urdu script in the live run of 29 Oct)
 - Under 110 words; never state a fact, number or price that is not given above
+- {_NOT_IN_THE_FACTS}
 - Sign off with "Best," and then {signer} on the next line
 - If the reply means nothing (random letters, an empty message), answer nothing: {{"subject": "", "body": ""}}
 
