@@ -1453,14 +1453,16 @@ const CampaignDetail = () => {
               Add an email account first
             </DialogTitle>
             <DialogDescription>
-              You don't have any sender email accounts yet. An email account is required to
-              launch or schedule this campaign — add one before continuing.
+              {campaign?.is_own === false
+                ? `${campaign.made_by || 'Its maker'} has no sender email account yet. A colleague's campaign sends from its maker's mailbox, so they need to add one before it can be launched or scheduled.`
+                : "You don't have any sender email accounts yet. An email account is required to launch or schedule this campaign — add one before continuing."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setNoEmailAccountDialogOpen(false)}>
-              Not now
+              {campaign?.is_own === false ? 'OK' : 'Not now'}
             </Button>
+            {campaign?.is_own !== false && (
             <Button
               onClick={() => {
                 setNoEmailAccountDialogOpen(false);
@@ -1470,6 +1472,7 @@ const CampaignDetail = () => {
               <Mail className="mr-2 h-4 w-4" />
               Add email account
             </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
