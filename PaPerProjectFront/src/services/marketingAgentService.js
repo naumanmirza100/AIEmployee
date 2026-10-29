@@ -626,6 +626,18 @@ export const downloadDocument = async (documentId, formatType) => {
 };
 
 /**
+ * Pictures kept with social posts or ad copy (29 Oct 2026). Making one takes about ten seconds.
+ */
+export const makeDocumentImage = (documentId, idea, shape) =>
+  companyApi.post(`/marketing/documents/${documentId}/images/`, { idea, shape });
+
+export const getDocumentImageBlob = (documentId, imageId) =>
+  companyApi.get(`/marketing/documents/${documentId}/images/${imageId}/`, { responseType: 'blob' });
+
+export const deleteDocumentImage = (documentId, imageId) =>
+  companyApi.post(`/marketing/documents/${documentId}/images/${imageId}/delete/`);
+
+/**
  * Document Authoring Agent.
  * API: POST /api/marketing/document-authoring
  * Body: { action, document_type, document_data, campaign_id?, context }.
@@ -838,6 +850,9 @@ export default {
   getDocument,
   deleteDocument,
   downloadDocument,
+  makeDocumentImage,
+  getDocumentImageBlob,
+  deleteDocumentImage,
   documentAuthoring,
   getNotifications,
   monitorCampaigns,

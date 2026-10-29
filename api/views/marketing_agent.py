@@ -1571,6 +1571,8 @@ def document_detail(request, document_id):
                 'created_at': document.created_at.isoformat() if document.created_at else None,
                 'updated_at': document.updated_at.isoformat() if document.updated_at else None,
                 'available_formats': [{'code': c, 'name': n} for c, n in available_formats],
+                'can_have_images': document.document_type in IMAGE_DOCUMENT_TYPES,
+                'images': [_image_row(i) for i in document.images.all()],
             },
         }, status=status.HTTP_200_OK)
     except (KeyServiceError, Http404):
@@ -1646,6 +1648,90 @@ def document_delete(request, document_id):
             {'status': 'error', 'message': 'Delete failed', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# Pictures for social posts and ad copy, kept with the document (the user's decision of 29 Oct 2026).
+IMAGE_DOCUMENT_TYPES = ('social_posts', 'ad_copy')
+
+
+def _image_row(image):
+    return {'id': image.id, 'idea': image.idea, 'shape': image.shape,
+            'created_at': image.created_at.isoformat() if image.created_at else None}
+
+
+def _image_refused(message, code):
+    return Response({'status': 'error', 'message': message, 'error': code}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["GET", "POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def document_images(request, document_id):
+    """GET: the pictures kept with a document. POST {idea, shape}: one more, made by OpenAI's image model from the
+    idea (about 10 seconds)."""
+    from marketing_agent.agents.marketing_base_agent import ImageNotMade
+    from marketing_agent.models import MarketingDocumentImage
+
+    company_user = request.user
+    user = _get_or_create_user_for_company_user(company_user)
+    document = get_object_or_404(MarketingDocument, id=document_id, created_by=user)
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': [_image_row(i) for i in document.images.all()]})
+
+    if document.document_type not in IMAGE_DOCUMENT_TYPES:
+        return _image_refused('Pictures are made for social media posts and ad copy.', 'not_for_this_document')
+    data = request.data if isinstance(request.data, dict) else {}
+    idea = str(data.get('idea') or '').strip()[:1000]
+    shape = str(data.get('shape') or 'square')
+    if not idea:
+        return _image_refused('Say what the picture should show.', 'no_idea')
+    if shape not in dict(MarketingDocumentImage.SHAPE_CHOICES):
+        return _image_refused('Choose square, landscape or portrait.', 'bad_shape')
+    if document.images.count() >= MarketingDocumentImage.MAX_PER_DOCUMENT:
+        return _image_refused(f'A document keeps up to {MarketingDocumentImage.MAX_PER_DOCUMENT} pictures. '
+                              f'Delete one to make another.', 'too_many')
+
+    agent = AgentRegistry.get_agent("document_authoring")
+    agent.last_token_usage = None
+    agent.company_id = company_user.company_id
+    agent.agent_key_name = 'marketing_agent'
+    try:
+        image = agent.make_image(document, idea, shape)
+    except ImageNotMade as e:
+        return _image_refused(str(e), 'image_not_made')
+    return Response({'status': 'success', 'data': _image_row(image)}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def document_image_file(request, document_id, image_id):
+    """The picture itself, for the screen to show or save."""
+    from marketing_agent.models import MarketingDocumentImage
+
+    user = _get_or_create_user_for_company_user(request.user)
+    image = get_object_or_404(MarketingDocumentImage, id=image_id, document_id=document_id,
+                              document__created_by=user)
+    with image.image.open('rb') as f:
+        picture = f.read()
+    response = HttpResponse(picture, content_type='image/jpeg')
+    response['Content-Disposition'] = f'inline; filename="picture-{image.id}.jpg"'
+    response['Cache-Control'] = 'private, max-age=3600'
+    return response
+
+
+@api_view(["POST", "DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def document_image_delete(request, document_id, image_id):
+    """Delete one picture of a document, with its file."""
+    from marketing_agent.models import MarketingDocumentImage
+
+    user = _get_or_create_user_for_company_user(request.user)
+    image = get_object_or_404(MarketingDocumentImage, id=image_id, document_id=document_id,
+                              document__created_by=user)
+    image.delete()
+    return Response({'status': 'success', 'message': 'Picture deleted.'})
 
 
 @api_view(["POST"])

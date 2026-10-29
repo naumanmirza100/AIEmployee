@@ -549,3 +549,107 @@ class WebResearchTests(MarketingTestCase):
         code, _ = self.call(views.delete_research_chat, self.ann_login, method='delete', chat_id=chat.id)
         self.assertEqual(code, 200)
         self.assertEqual(list(MarketResearch.objects.values_list('topic', flat=True)), ['Kept'])
+
+
+class DocumentImageTests(MarketingTestCase):
+    """Decision of 29 Oct: pictures for social posts and ad copy, made by OpenAI's image model, kept with the
+    document and put into its PDF."""
+
+    def setUp(self):
+        super().setUp()
+        import io
+        import tempfile
+        from PIL import Image
+        from marketing_agent.models import MarketingDocument
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        media = override_settings(MEDIA_ROOT=self.media.name)
+        media.enable()
+        self.addCleanup(media.disable)
+        out = io.BytesIO()
+        Image.new('RGB', (16, 16), (200, 120, 40)).save(out, 'JPEG')
+        self.jpeg = out.getvalue()
+        self.posts = MarketingDocument.objects.create(
+            document_type='social_posts', title='Spring posts', created_by=self.ann, status='completed',
+            content='## LinkedIn\n1. We fixed it.\n#apps\n*Image idea: two developers reviewing an app on a phone*')
+
+    def _make(self, document=None, actor=None, **data):
+        from unittest import mock
+        from api.views import marketing_agent as views
+        from marketing_agent.agents.document_authoring_agent import DocumentAuthoringAgent
+        body = {'idea': 'Two developers reviewing an app on a phone', 'shape': 'landscape'}
+        body.update(data)
+        with mock.patch.object(DocumentAuthoringAgent, '_make_image', return_value=self.jpeg) as made:
+            code, answer = self.call(views.document_images, actor or self.ann_login, body,
+                                     document_id=(document or self.posts).id)
+        return code, answer, made
+
+    def test_a_picture_is_made_kept_shown_and_put_in_the_pdf(self):
+        from api.views import marketing_agent as views
+        from marketing_agent.document_generator import DocumentGenerator
+        code, body, made = self._make()
+        self.assertEqual(code, 201, body)
+        self.assertIn('No words, letters', made.call_args.args[0])
+        self.assertEqual(made.call_args.kwargs['size'], '1536x1024')
+        picture_id = body['data']['id']
+
+        code, detail = self.call(views.document_detail, self.ann_login, method='get', document_id=self.posts.id)
+        self.assertTrue(detail['data']['can_have_images'])
+        self.assertEqual([i['id'] for i in detail['data']['images']], [picture_id])
+
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        request = APIRequestFactory().get('/')
+        force_authenticate(request, user=self.ann_login)
+        response = views.document_image_file(request, document_id=self.posts.id, image_id=picture_id)
+        self.assertEqual((response.status_code, response['Content-Type'], response.content), (200, 'image/jpeg', self.jpeg))
+
+        self.posts.refresh_from_db()
+        pdf = DocumentGenerator.generate_pdf(self.posts).content
+        self.assertIn(b'/Subtype /Image', pdf)
+
+    def test_deleting_the_picture_or_the_document_deletes_the_file(self):
+        import os
+        from api.views import marketing_agent as views
+        from marketing_agent.models import MarketingDocumentImage
+        self._make()
+        self._make()
+        first, second = MarketingDocumentImage.objects.order_by('id')
+        paths = [first.image.path, second.image.path]
+        self.assertTrue(all(os.path.exists(p) for p in paths))
+        code, _ = self.call(views.document_image_delete, self.ann_login, document_id=self.posts.id, image_id=first.id)
+        self.assertEqual(code, 200)
+        self.assertFalse(os.path.exists(paths[0]))
+        self.posts.delete()
+        self.assertFalse(os.path.exists(paths[1]))
+
+    def test_pictures_are_for_posts_and_ads_only_and_at_most_eight(self):
+        from marketing_agent.models import MarketingDocument
+        strategy = MarketingDocument.objects.create(document_type='strategy', title='Plan', content='x',
+                                                    created_by=self.ann)
+        code, body, made = self._make(document=strategy)
+        self.assertEqual((code, body['error']), (400, 'not_for_this_document'))
+        made.assert_not_called()
+        for _ in range(8):
+            self._make()
+        code, body, made = self._make()
+        self.assertEqual((code, body['error']), (400, 'too_many'))
+        code, body, _ = self._make(idea='  ')
+        self.assertEqual(body['error'], 'no_idea')
+
+    def test_another_logins_document_is_not_found(self):
+        code, _, made = self._make(actor=self.rita_login)
+        self.assertEqual(code, 404)
+        made.assert_not_called()
+
+    def test_without_an_openai_key_it_says_what_to_do(self):
+        from unittest import mock
+        from api.views import marketing_agent as views
+        from core.api_key_service import CallContext
+        from marketing_agent.agents.document_authoring_agent import DocumentAuthoringAgent
+        own_groq = CallContext(company_id=self.acme.id, agent_name='marketing_agent', mode='byok', provider='groq',
+                               api_key='gsk-own', key_id=1)
+        with mock.patch.object(DocumentAuthoringAgent, '_resolve_company_client', return_value=(mock.Mock(), own_groq)):
+            code, body = self.call(views.document_images, self.ann_login, {'idea': 'A bright office'},
+                                   document_id=self.posts.id)
+        self.assertEqual((code, body['error']), (400, 'image_not_made'))
+        self.assertIn('OpenAI key', body['message'])

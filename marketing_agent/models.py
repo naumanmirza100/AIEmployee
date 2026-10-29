@@ -2,7 +2,7 @@ from django.db import models
 from ai_sdr_agent.fields import EncryptedCharField
 from django.contrib.auth.models import User
 from django.utils import timezone
-from django.db.models.signals import m2m_changed, pre_save, post_save
+from django.db.models.signals import m2m_changed, post_delete, pre_save, post_save
 from django.dispatch import receiver
 import json
 import logging
@@ -359,6 +359,38 @@ class MarketingDocument(models.Model):
     
     def __str__(self):
         return f"{self.get_document_type_display()}: {self.title}"
+
+
+class MarketingDocumentImage(models.Model):
+    """A picture made for social posts or ad copy, kept with its document (the user's decision of 29 Oct 2026).
+
+    The posts only suggested "an idea for the image"; the picture itself had to be made elsewhere."""
+    SHAPE_CHOICES = [
+        ('square', 'Square'),
+        ('landscape', 'Landscape'),
+        ('portrait', 'Portrait'),
+    ]
+    MAX_PER_DOCUMENT = 8
+
+    document = models.ForeignKey(MarketingDocument, on_delete=models.CASCADE, related_name='images')
+    idea = models.TextField(help_text='What the picture shows, as asked for')
+    shape = models.CharField(max_length=10, choices=SHAPE_CHOICES, default='square')
+    image = models.FileField(upload_to='marketing/images/%Y/%m/')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ppp_marketingagent_documentimage'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Image {self.id} of document {self.document_id}"
+
+
+@receiver(post_delete, sender=MarketingDocumentImage)
+def _delete_image_file(sender, instance, **kwargs):
+    """The file goes with its row, also when the whole document is deleted."""
+    if instance.image:
+        instance.image.delete(save=False)
 
 
 class NotificationRule(models.Model):

@@ -185,6 +185,30 @@ class DocumentGenerator:
     """Generate documents in various formats"""
 
     @staticmethod
+    def _add_images_to_pdf(elements, document, styles):
+        """The pictures made for the posts or ads (29 Oct 2026), each above what it shows. A file that has gone
+        missing is left out rather than stopping the PDF."""
+        from reportlab.platypus import Image as PdfImage, KeepTogether
+
+        pictures = list(document.images.all()) if document.pk else []
+        if not pictures:
+            return
+        elements.append(Paragraph('Pictures', styles['CustomH2']))
+        for picture in pictures:
+            try:
+                with picture.image.open('rb') as f:
+                    data = io.BytesIO(f.read())
+            except Exception:
+                continue
+            width, height = {'landscape': (4.5, 3.0), 'portrait': (3.0, 4.5)}.get(picture.shape, (4.0, 4.0))
+            elements.append(KeepTogether([
+                PdfImage(data, width=width * inch, height=height * inch, hAlign='LEFT'),
+                Spacer(1, 0.08 * inch),
+                Paragraph(escape(picture.idea), styles['CustomNormal']),
+                Spacer(1, 0.25 * inch),
+            ]))
+
+    @staticmethod
     def generate_pdf(document: MarketingDocument) -> HttpResponse:
         """Generate PDF file with proper header, footer, tables, and headings."""
         if not PDF_AVAILABLE:
@@ -232,6 +256,7 @@ class DocumentGenerator:
         # ---- Body content (headings, paragraphs, lists, tables)
         content = document.content or ''
         DocumentGenerator._add_content_to_pdf(elements, content, styles)
+        DocumentGenerator._add_images_to_pdf(elements, document, styles)
 
         # ---- Header/footer callbacks
         doc_title = document.title

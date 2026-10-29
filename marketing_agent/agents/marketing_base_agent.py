@@ -28,6 +28,11 @@ QA_TIMEOUT = 30.0
 WRITING_TIMEOUT = 50.0
 # A web search reads pages before it answers; it must still leave room under the proxy's 60 s.
 SEARCH_TIMEOUT = 40.0
+IMAGE_TIMEOUT = 50.0        # one picture takes about 10 s
+
+
+class ImageNotMade(Exception):
+    """A picture could not be made; the message says why, for the screen."""
 
 
 class MarketingBaseAgent:
@@ -435,15 +440,9 @@ class MarketingBaseAgent:
         quota problem is raised as for any other call."""
         from marketing_agent.services import web_search
 
-        resolved_client, key_ctx = self._resolve_company_client()
+        resolved_client, key_ctx = self._openai_for_tools()
         if resolved_client is None:
             return None
-        if key_ctx.provider != 'openai':
-            from core.api_key_service import platform_context_for
-            key_ctx = platform_context_for(key_ctx, 'openai')
-            if key_ctx is None:
-                return None
-            resolved_client = OpenAI(api_key=key_ctx.api_key, timeout=30.0, max_retries=0)
         started = time.monotonic()
         model = getattr(settings, 'OPENAI_MODEL', 'gpt-4o-mini')
         try:
@@ -477,6 +476,63 @@ class MarketingBaseAgent:
         if not (text or '').strip():
             return None
         return text, sources
+
+    def _openai_for_tools(self):
+        """(OpenAI client, key context) for the tools only OpenAI has here, web search and images: the company's
+        OpenAI key, or the platform's when the company runs on free tokens through Groq. (None, None) when it has
+        its own Groq key or there is no OpenAI key."""
+        resolved_client, key_ctx = self._resolve_company_client()
+        if resolved_client is None or key_ctx.provider == 'openai':
+            return resolved_client, key_ctx
+        from core.api_key_service import platform_context_for
+        key_ctx = platform_context_for(key_ctx, 'openai')
+        if key_ctx is None:
+            return None, None
+        return OpenAI(api_key=key_ctx.api_key, timeout=30.0, max_retries=0), key_ctx
+
+    def _make_image(self, prompt, size='1024x1024'):
+        """One picture from OpenAI's image model as JPEG bytes (the user's decision of 29 Oct 2026), its tokens
+        counted like any other call. Raises ImageNotMade with a message for the screen."""
+        import base64
+
+        client, key_ctx = self._openai_for_tools()
+        if client is None:
+            raise ImageNotMade('Pictures are made with OpenAI. Add an OpenAI key on the API Keys page to make them.')
+        model = getattr(settings, 'OPENAI_IMAGE_MODEL', 'gpt-image-1-mini')
+        started = time.monotonic()
+        try:
+            response = client.images.generate(model=model, prompt=prompt, size=size, n=1, quality='low',
+                                              output_format='jpeg', output_compression=85, timeout=IMAGE_TIMEOUT)
+            picture = base64.b64decode(response.data[0].b64_json)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError, raise_if_auth_error
+            if isinstance(e, KeyServiceError):
+                raise
+            self._log_call(model, started, False)
+            raise_if_auth_error(e, key_ctx)
+            logger.warning("%s image failed: %s", self.agent_name, str(e)[:300])
+            said = str(e).lower()
+            if 'safety' in said or 'moderation' in said or 'content_policy' in said:
+                raise ImageNotMade('OpenAI would not draw that. Describe the picture differently and try again.')
+            if 'timeout' in said or 'timed out' in said:
+                raise ImageNotMade('The picture took too long. Please try again.')
+            raise ImageNotMade('The picture could not be made. Please try again in a moment.')
+
+        usage = getattr(response, 'usage', None)
+        total = getattr(usage, 'total_tokens', 0) or 0
+        self.last_llm_used = True
+        self.last_token_usage = {'provider': 'openai', 'model': model,
+                                 'prompt_tokens': getattr(usage, 'input_tokens', 0) or 0,
+                                 'completion_tokens': getattr(usage, 'output_tokens', 0) or 0,
+                                 'total_tokens': total, 'estimated': False}
+        if total:
+            try:
+                from core.api_key_service import record_usage
+                record_usage(key_ctx, total)
+            except Exception as e:
+                logger.warning("marketing quota decrement failed: %s", e)
+        self._log_call(model, started, True, self.last_token_usage)
+        return picture
 
     def _call_llm_for_writing(self, prompt, system_prompt=None, temperature=0.7, max_tokens=4000, timeout=WRITING_TIMEOUT):
         """

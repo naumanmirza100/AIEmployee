@@ -151,6 +151,24 @@ rather than inventing one or leaving a [placeholder]. Answer in markdown with no
                                          max_tokens=3000)
         return self._clean_markdown_headings(raw)
 
+    IMAGE_SIZES = {'square': '1024x1024', 'landscape': '1536x1024', 'portrait': '1024x1536'}
+
+    def make_image(self, document: MarketingDocument, idea: str, shape: str = 'square'):
+        """One picture for social posts or ad copy, saved with the document (the user's decision of 29 Oct 2026).
+        Raises ImageNotMade with a message for the screen."""
+        from django.core.files.base import ContentFile
+        from marketing_agent.models import MarketingDocumentImage
+
+        use = 'a social media post' if document.document_type == 'social_posts' else 'an online ad'
+        about = f' for the campaign "{document.campaign.name}"' if document.campaign_id else ''
+        prompt = (f'{idea.strip()}\n\nA picture for {use}{about}. A natural photograph or a clean illustration that a '
+                  f'real business would post. No words, letters, numbers, logos or watermarks anywhere in the picture.')
+        picture = self._make_image(prompt, size=self.IMAGE_SIZES.get(shape, self.IMAGE_SIZES['square']))
+        image = MarketingDocumentImage(document=document, idea=idea.strip(), shape=shape)
+        image.image.save(f'document-{document.id}.jpg', ContentFile(picture), save=False)
+        image.save()
+        return image
+
     def _create_or_generate_document(self, action: str, user_id: int, document_type: str, document_data: Dict, campaign_id: Optional[int], context: Dict) -> Dict:
         """Create or generate a document"""
         try:

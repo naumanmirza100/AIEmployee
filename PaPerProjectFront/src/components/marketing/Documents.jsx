@@ -59,6 +59,7 @@ import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import HoverTip from '@/components/common/HoverTip';
 import ChatMarkdown from '@/components/shared/ChatMarkdown';
+import DocumentImages from './DocumentImages';
 
 /**
  * Document Authoring sub-agent (PayPerProject).
@@ -1079,6 +1080,10 @@ const Documents = () => {
                       <FileText className="h-12 w-12 text-muted-foreground/30 mb-4" />
                       <p className="text-muted-foreground">No content available for this document.</p>
                     </div>
+                  )}
+                  {detailDoc.can_have_images && (
+                    <DocumentImages key={detailDoc.id} documentId={detailDoc.id} content={detailDoc.content}
+                      initialImages={detailDoc.images} />
                   )}
                 </motion.div>
               ) : null}
