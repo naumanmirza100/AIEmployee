@@ -186,8 +186,11 @@ _PREP_SYSTEM_PROMPT = (
 # HTML Email Builder Helpers
 # ---------------------------------------------------------------------------
 
-def _base_html(content: str, preview_text: str = '') -> str:
-    """Wrap email content in a responsive base template."""
+def _base_html(content: str, preview_text: str = '', brand: str = '') -> str:
+    """Wrap email content in a responsive base template, headed with the sender's company (`brand`, escaped).
+
+    The header said "AI Employee · Smart Outreach Platform": the lead saw the tool's name, not the company writing
+    to them (live run of 29 Oct)."""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -206,8 +209,7 @@ def _base_html(content: str, preview_text: str = '') -> str:
           <!-- Header Bar -->
           <tr>
             <td style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:12px 12px 0 0;padding:28px 36px;text-align:center;">
-              <span style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">AI Employee</span>
-              <span style="display:block;color:rgba(255,255,255,0.65);font-size:12px;margin-top:4px;letter-spacing:0.04em;text-transform:uppercase;">Smart Outreach Platform</span>
+              <span style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">{brand}</span>
             </td>
           </tr>
 
@@ -338,7 +340,7 @@ def _build_scheduling_html(first_name, sender, sender_title, sender_company,
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Hi {first_name}, let's schedule our call — pick a time that works for you.")
+    return _base_html(body_html, preview_text=f"Hi {first_name}, let's schedule our call — pick a time that works for you.", brand=sender_company or sender)
 
 
 @_escape_args
@@ -441,7 +443,7 @@ def _build_confirmation_html(first_name, sender, sender_title, sender_company,
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Your meeting is confirmed, {first_name}! Here are the details.")
+    return _base_html(body_html, preview_text=f"Your meeting is confirmed, {first_name}! Here are the details.", brand=sender_company or sender)
 
 
 @_escape_args
@@ -538,7 +540,7 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Reminder: your call is on {scheduled_str}.")
+    return _base_html(body_html, preview_text=f"Reminder: your call is on {scheduled_str}.", brand=sender_company or sender)
 
 
 @_escape_args
@@ -595,7 +597,7 @@ def _build_completion_html(first_name, sender, sender_title, sender_company,
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Thank you for our {title} — great connecting with you!")
+    return _base_html(body_html, preview_text=f"Thank you for our {title} — great connecting with you!", brand=sender_company or sender)
 
 
 @_escape_args
@@ -666,7 +668,7 @@ def _build_approval_request_html(first_name, sender, sender_title, sender_compan
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Does {proposed_time_str} work for your {title}?")
+    return _base_html(body_html, preview_text=f"Does {proposed_time_str} work for your {title}?", brand=sender_company or sender)
 
 
 # ---------------------------------------------------------------------------

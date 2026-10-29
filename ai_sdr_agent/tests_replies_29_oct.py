@@ -692,3 +692,17 @@ class QuotedThreadTests(SDRBase):
         [alert] = PMNotification.objects.filter(company_user=self.cu)
         self.assertIn('"yes, Tuesday at 11 works"', alert.message)
         self.assertNotIn('s@x.com', alert.message)
+
+
+class EmailBrandTests(TestCase):
+    """Found in the live run of 29 Oct: the lead's 'pick a time' email was headed "AI Employee · Smart Outreach
+    Platform", the tool's name, not the company writing to them."""
+
+    def test_meeting_emails_are_headed_with_the_senders_company(self):
+        from ai_sdr_agent.agents.meeting_scheduling_agent import _build_scheduling_html
+        html = _build_scheduling_html(first_name='Kiran', sender='Abdullah', sender_title='Sales Lead',
+                                      sender_company='Margalla & Co', duration='30 minutes',
+                                      booking_url='https://x.example/book/1', company_name='Smile Line')
+        self.assertIn('>Margalla &amp; Co<', html)
+        self.assertNotIn('AI Employee', html)
+        self.assertNotIn('Smart Outreach', html)
