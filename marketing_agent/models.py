@@ -619,9 +619,13 @@ class EmailSendHistory(models.Model):
     # Relationships
     campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name='email_sends')
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='email_history')
-    email_template = models.ForeignKey(EmailTemplate, on_delete=models.SET_NULL, null=True, blank=True, 
+    email_template = models.ForeignKey(EmailTemplate, on_delete=models.SET_NULL, null=True, blank=True,
                                       related_name='sends')
-    
+    # The mailbox it went from. Counted backwards from templates, a template shared by two mailboxes counted twice,
+    # and changing or deleting a mailbox moved or lost past emails (CO-194).
+    email_account = models.ForeignKey('EmailAccount', on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name='sends_made')
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

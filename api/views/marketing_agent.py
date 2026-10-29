@@ -3092,9 +3092,12 @@ def list_email_accounts(request):
             # the campaign's mailbox: count those, unless their sequence names another one.
             elsewhere = (EmailSequenceStep.objects.filter(sequence__email_account__isnull=False)
                          .exclude(sequence__email_account_id=a.id).values_list('template_id', flat=True))
+            # A send records its mailbox now (CO-194); older ones are inferred as before.
             sent_qs = EmailSendHistory.objects.filter(
-                Q(email_template_id__in=template_ids)
-                | (Q(campaign__email_account_id=a.id) & ~Q(email_template_id__in=elsewhere)))
+                Q(email_account_id=a.id)
+                | (Q(email_account__isnull=True)
+                   & (Q(email_template_id__in=template_ids)
+                      | (Q(campaign__email_account_id=a.id) & ~Q(email_template_id__in=elsewhere)))))
             sent_count = sent_qs.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
             opened_count = sent_qs.filter(status__in=['opened', 'clicked']).count()
             clicked_count = sent_qs.filter(status='clicked').count()
@@ -3132,7 +3135,12 @@ def list_email_accounts(request):
                 'open_rate': open_rate,
                 'click_rate': click_rate,
             })
-        return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
+        # Every email the campaigns sent, once: the dashboard added up the mailboxes, so one sent through a mailbox
+        # since removed was missing and a shared template counted twice (CO-194).
+        from marketing_agent.services.campaign_numbers import SENT
+        total_sent = EmailSendHistory.objects.filter(campaign__owner=user, email_template__isnull=False,
+                                                     status__in=SENT).count()
+        return Response({'status': 'success', 'data': data, 'total_sent': total_sent}, status=status.HTTP_200_OK)
     except KeyServiceError:
         raise
     except Exception as e:

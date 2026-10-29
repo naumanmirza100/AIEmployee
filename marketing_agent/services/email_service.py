@@ -352,10 +352,11 @@ class EmailService:
             email.send()
 
             if send_history:
-                # Update send history with Message-ID
+                # Update send history with Message-ID, and the mailbox it went from (CO-194)
                 send_history.status = 'sent'
                 send_history.sent_at = timezone.now()
                 send_history.message_id = message_id.strip('<>')  # Store without < >
+                send_history.email_account = email_account
                 send_history.save()
 
             self.sent_count += 1

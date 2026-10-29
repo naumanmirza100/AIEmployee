@@ -221,7 +221,7 @@ rather than inventing one or leaving a [placeholder]. Answer in markdown with no
                 prompt=gen_prompt,
                 system_prompt=self.system_prompt,
                 temperature=temperature,
-                max_tokens=16384,
+                max_tokens=6000,          # room to finish within the time a request may take (CO-140)
                 timeout=timeout,
             )
             return self._post_process_document_content(raw, document_type, campaign)
@@ -767,10 +767,8 @@ Write a detailed, professional, data-driven document. End at {final_section}—n
         if getattr(campaign, 'target_audience', None) and campaign.target_audience:
             data['target_audience'] = campaign.target_audience
         
-        # Get performance metrics
-        performance = self._get_campaign_performance_data(campaign)
-        if performance:
-            data['performance'] = performance
+        # No daily performance snapshot: they were read oldest-first, so the first day's values won (CO-137). The
+        # figures below are today's, the same as the campaign page.
         
         # Get leads data (more leads for report so the document includes full lead list)
         leads_count = campaign.leads.count()
@@ -780,12 +778,13 @@ Write a detailed, professional, data-driven document. End at {final_section}—n
             data['leads'] = list(campaign.leads.values('email', 'first_name', 'last_name', 'company', 'status')[:max_leads])
         
         # Get email sending data from database (same logic as dashboard/email status)
-        email_sends = EmailSendHistory.objects.filter(campaign=campaign)
-        total_sent = email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
-        total_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
-        total_clicked = email_sends.filter(status='clicked').count()
-        total_bounced = email_sends.filter(status='bounced').count()
-        total_replied = Reply.objects.filter(campaign=campaign).count()
+        # The campaign page's figures (services/campaign_numbers.py): its own emails, replies and conversions as
+        # people (CO-136, CO-137, CO-195).
+        from marketing_agent.services.campaign_numbers import numbers
+        shared = numbers(campaign)
+        total_sent, total_opened, total_clicked = shared['sent'], shared['opened'], shared['clicked']
+        total_bounced, total_replied = shared['bounced'], shared['replied_leads']
+        data['conversions'] = shared['conversions']
 
         if total_sent > 0 or total_replied > 0 or total_bounced > 0:
             data['emails_sent'] = total_sent
@@ -796,34 +795,11 @@ Write a detailed, professional, data-driven document. End at {final_section}—n
             if total_sent > 0:
                 data['open_rate'] = round((total_opened / total_sent) * 100, 2)
                 data['click_rate'] = round((total_clicked / total_sent) * 100, 2)
-                data['reply_rate'] = round((total_replied / total_sent) * 100, 2)
+                data['reply_rate'] = shared['reply_rate']          # of the leads emailed, as on the campaign page
                 data['bounce_rate'] = round((total_bounced / total_sent) * 100, 2)
         
         # Filter out None values for cleaner output
         return {k: v for k, v in data.items() if v is not None}
-    
-    def _get_campaign_performance_data(self, campaign: Campaign) -> Optional[Dict]:
-        """Get campaign performance metrics from CampaignPerformance model (metric_name/metric_value structure)"""
-        try:
-            # CampaignPerformance uses metric_name/metric_value structure, not separate columns
-            from django.db.models import Q
-            
-            metrics = CampaignPerformance.objects.filter(campaign=campaign).values('metric_name', 'metric_value', 'actual_value')
-            if not metrics.exists():
-                return None
-            
-            # Build dict from metric_name -> metric_value or actual_value
-            result = {}
-            for m in metrics:
-                name = m.get('metric_name')
-                value = m.get('metric_value') or m.get('actual_value')
-                if name and value is not None:
-                    result[name] = float(value) if isinstance(value, (int, float, str)) else value
-            
-            return result if result else None
-        except Exception as e:
-            logger.warning(f"Error getting performance data: {e}")
-            return None
     
     def _format_campaign_data(self, campaign_data: Dict) -> str:
         """Format campaign data for prompt in a clear, detailed way"""
@@ -952,11 +928,9 @@ Write a detailed, professional, data-driven document. End at {final_section}—n
             pct = round((actual_leads / target_leads) * 100, 1) if target_leads > 0 else 0
             lines.append(f"Target Leads: {target_leads} | Actual Leads: {actual_leads} | Achievement: {pct}%")
         if target_conversions is not None:
-            # Conversions = leads with status 'converted' (approximate from lead data)
-            converted = 0
-            for lead in (campaign_data.get('leads') or []):
-                if (lead.get('status') or '').lower() in ('converted', 'won', 'closed', 'customer'):
-                    converted += 1
+            # Conversions as on the campaign page: leads who replied with interest. Counted from the first 10 or
+            # 50 leads' status, it said "Zero conversions achieved" of a campaign with interested replies (CO-137).
+            converted = campaign_data.get('conversions') or 0
             conv_pct = round((converted / target_conversions) * 100, 1) if target_conversions > 0 else 0
             lines.append(f"Target Conversions: {target_conversions} | Actual Conversions: {converted} | Achievement: {conv_pct}%")
         if not has_any_email_activity:
@@ -999,10 +973,7 @@ Write a detailed, professional, data-driven document. End at {final_section}—n
         if not has_any_leads:
             health_issues.append("No leads generated yet")
         if target_conversions and target_conversions > 0:
-            converted_count = 0
-            for lead in (campaign_data.get('leads') or []):
-                if (lead.get('status') or '').lower() in ('converted', 'won', 'closed', 'customer'):
-                    converted_count += 1
+            converted_count = campaign_data.get('conversions') or 0
             if converted_count == 0:
                 health_issues.append(f"Zero conversions achieved (target: {target_conversions})")
             elif converted_count > 0:

@@ -334,3 +334,58 @@ class QAReadingTests(MarketingTestCase):
                          '4 campaigns match:')
         answer = '120 emails went out:\n' + rows
         self.assertEqual(agent._fix_count_mismatch(answer, campaigns), answer)
+
+
+class FiguresTests(MarketingTestCase):
+    """CO-135 graphs, CO-137 reports, CO-194 mailbox counts, CO-195 people not messages."""
+
+    def setUp(self):
+        super().setUp()
+        from marketing_agent.models import CampaignContact, Reply
+        self.box = self.mailbox(self.ann, 'ann@acme.test', is_default=True)
+        self.spring = self.campaign(self.ann, email_account=self.box, target_conversions=4)
+        template = self.template(self.spring)
+        for n, interest in enumerate(('positive', 'positive', 'neutral')):
+            lead = self.lead(self.ann, f'lead{n}@customer.test', campaign=self.spring)
+            EmailSendHistory.objects.create(campaign=self.spring, lead=lead, email_template=template, subject='Hi',
+                                            recipient_email=lead.email, status='opened', email_account=self.box)
+            contact = CampaignContact.objects.create(campaign=self.spring, lead=lead)
+            Reply.objects.create(contact=contact, campaign=self.spring, lead=lead, interest_level=interest,
+                                 reply_content='hi')
+        # The first lead wrote twice: one person, two messages.
+        first = self.spring.leads.order_by('id').first()
+        Reply.objects.create(contact=CampaignContact.objects.get(lead=first), campaign=self.spring, lead=first,
+                             interest_level='positive', reply_content='again')
+
+    def test_one_set_of_figures_counting_people(self):
+        from marketing_agent.services.campaign_numbers import numbers
+        n = numbers(self.spring)
+        self.assertEqual((n['sent'], n['replied_leads'], n['reply_messages'], n['conversions']), (3, 3, 4, 2))
+        self.assertEqual(n['conversion_progress'], 50.0)
+
+    def test_a_graph_shows_the_metric_the_ai_named_under_its_own_title(self):
+        from unittest import mock
+        from marketing_agent.agents.graph_generator_agent import GraphGeneratorAgent as Graphs
+        agent = Graphs.__new__(Graphs)
+        agent.user = self.ann
+        answer = '{"chart_type": "bar", "metric": "conversions", "title": "Whatever", "data": {}}'
+        with mock.patch.object(Graphs, '_call_llm', create=True, return_value=answer):
+            chart = agent.generate_graph('which campaigns convert best?')['chart']
+        self.assertEqual(chart['title'], 'Conversions by Campaign')
+        self.assertEqual(chart['data'], {'Spring offer': 2})
+
+    def test_a_report_counts_conversions_like_the_campaign_page(self):
+        from marketing_agent.agents.document_authoring_agent import DocumentAuthoringAgent
+        agent = DocumentAuthoringAgent.__new__(DocumentAuthoringAgent)
+        data = agent._get_campaign_data_for_document(self.spring, 'report')
+        self.assertEqual(data['conversions'], 2)
+        text = agent._format_campaign_data(data)
+        self.assertIn('Actual Conversions: 2', text)
+        self.assertNotIn('Zero conversions', text)
+
+    def test_mailbox_counts_and_the_dashboard_total(self):
+        from api.views import marketing_agent as views
+        code, body = self.call(views.list_email_accounts, self.ann_login, method='get')
+        self.assertEqual(code, 200, body)
+        self.assertEqual(body['total_sent'], 3)
+        self.assertEqual(body['data'][0]['sent_count'], 3)
