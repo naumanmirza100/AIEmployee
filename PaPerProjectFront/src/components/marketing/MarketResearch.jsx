@@ -951,7 +951,7 @@ const MarketResearch = () => {
                                           <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">
                                             {s.title || s.site}
                                           </a>
-                                          {s.site && <span className="text-xs text-muted-foreground"> · {s.site}</span>}
+                                          {s.site && s.title && s.title !== s.site && <span className="text-xs text-muted-foreground"> · {s.site}</span>}
                                         </li>
                                       ))}
                                     </ul>

@@ -2027,6 +2027,10 @@ class MarketingQAAgent(MarketingBaseAgent):
             "(the age= value), never how old the campaign is. 'All campaigns "
             "with their age' means name + age range, not creation dates.\n"
             "- When you name a winner, quote the number that makes it the winner.\n"
+            "- Write plain sentences for the business owner: never the data's field names such as conv_progress, "
+            "positive_replies or sent:.\n"
+            "- Answer in the language and script of the question: Roman Urdu gets Roman Urdu, Urdu script gets Urdu "
+            "script.\n"
         )
         # 700 tokens could not hold a full per-campaign listing: the answer was
         # cut off mid-row ("below age11 (draft) - sent:0, opened:0, ...open"),

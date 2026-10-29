@@ -186,7 +186,16 @@ class GraphGeneratorAgent(MarketingBaseAgent):
 
         return None
 
-    METRICS = ('status', 'emails_sent', 'open_rate', 'clicks', 'bounces', 'replies', 'leads', 'conversions', 'goals')
+    METRICS = ('status', 'emails_sent', 'open_rate', 'clicks', 'bounces', 'replies', 'reply_types', 'leads',
+               'conversions', 'goals', 'none')
+    # What each person's last reply said, as the charts name it (found in the live run of 29 Oct: "reply types"
+    # drew replies per campaign).
+    REPLY_TYPES = {'positive': 'Interested', 'requested_info': 'Asked for info', 'neutral': 'Neutral',
+                   'objection': 'Objection', 'negative': 'Not interested', 'unsubscribe': 'Asked to stop',
+                   'not_analyzed': 'Not read yet'}
+    NOT_A_CHART = ("I draw charts of your marketing data: emails sent, opens, clicks, replies and what they said, "
+                   "leads, conversions and campaign status. Try \"pie chart of reply types\" or \"open rate by "
+                   "campaign\".")
 
     def _infer_metric_intent(self, prompt: str) -> str:
         """Infer which metric the user asked to visualize."""
@@ -306,6 +315,17 @@ class GraphGeneratorAgent(MarketingBaseAgent):
                 .order_by('campaign_id')
             ):
                 reply_stats[row['campaign_id']] = row
+
+        # People by what their last reply said, across the campaigns.
+        last_said = {}
+        if campaign_ids:
+            for row in (Reply.objects.filter(campaign_id__in=campaign_ids)
+                        .order_by('replied_at', 'id').values('campaign_id', 'lead_id', 'interest_level')):
+                last_said[(row['campaign_id'], row['lead_id'])] = row['interest_level'] or 'not_analyzed'
+        reply_types = {}
+        for level in last_said.values():
+            label = self.REPLY_TYPES.get(level, self.REPLY_TYPES['not_analyzed'])
+            reply_types[label] = reply_types.get(label, 0) + 1
 
         lead_counts = {}
         if campaign_ids:
@@ -457,6 +477,7 @@ class GraphGeneratorAgent(MarketingBaseAgent):
             'by_campaign_bounces': by_campaign_bounces,
             'by_campaign_conversions': by_campaign_conversions,
             'by_campaign_goal_progress': by_campaign_goal_progress,
+            'reply_types': reply_types,
         }
 
     def _build_single_campaign_chart(
@@ -472,6 +493,8 @@ class GraphGeneratorAgent(MarketingBaseAgent):
 
         # The metric the AI read from the request; the keyword guess only when it named none.
         metric_intent = metric if metric in self.METRICS else self._infer_metric_intent(prompt)
+        if metric_intent == 'reply_types':
+            metric_intent = 'replies'           # for one campaign, its replies are drawn by type below
         campaign_id = campaign.get('id')
         name = campaign.get('name', 'Campaign')
         start_date = campaign.get('start_date')
@@ -965,8 +988,8 @@ SPECIFIC CAMPAIGN DATA (user is asking about THIS campaign only):
 The user wants to see data for "{specific_campaign['name']}" ONLY. Do NOT include other campaigns.
 For line/area charts, if the campaign has timeline metrics, use them as data points with dates as labels. If no timeline metrics, show the campaign's key stats (emails sent, opened, replied, leads) as data points.
 Include start_date and end_date in each data point if available.
-Format: {{"chart_type":"bar"|"pie"|"line"|"area","metric":"emails_sent"|"open_rate"|"clicks"|"bounces"|"replies"|"leads"|"conversions"|"goals","title":"...","data":[{{"label":"x","value":y,"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}],"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
-metric: what the chart shows. If the user names a chart type (line, bar, pie, area), use it.
+Format: {{"chart_type":"bar"|"pie"|"line"|"area","metric":"emails_sent"|"open_rate"|"clicks"|"bounces"|"replies"|"reply_types"|"leads"|"conversions"|"goals"|"none","title":"...","data":[{{"label":"x","value":y,"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}],"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
+metric: what the chart shows (reply_types = replies grouped by what they said; none = the request is not a chart of this marketing data, e.g. "draw a cat"). If the user names a chart type (line, bar, pie, area), use it.
 Rules: Use actual data values. Only show data for this specific campaign."""
         else:
             data_summary = f"""
@@ -977,11 +1000,12 @@ Emails sent: {json.dumps(marketing_data['by_campaign_emails_sent'], separators=(
 Open rate%: {json.dumps(marketing_data['by_campaign_open_rate'], separators=(',', ':'))}
 Leads: {json.dumps(marketing_data['by_campaign_leads'], separators=(',', ':'))}
 Replies: {json.dumps(marketing_data['by_campaign_replies'], separators=(',', ':'))}
+Reply types (people, by what their last reply said): {json.dumps(marketing_data['reply_types'], separators=(',', ':'))}
 """
             system_prompt = f"""Generate chart JSON from marketing data. Respond with ONLY valid JSON, no markdown.
 {data_summary}
-Format: {{"chart_type":"bar"|"pie"|"line"|"area","metric":"status"|"emails_sent"|"open_rate"|"clicks"|"bounces"|"replies"|"leads"|"conversions"|"goals","title":"...","data":{{"label":value}} for bar/pie OR [{{"label":"x","value":y,"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}] for line/area,"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
-metric: what the chart shows (goals = progress towards each campaign's conversion target). If the user names a chart type (line, bar, pie, area), use it.
+Format: {{"chart_type":"bar"|"pie"|"line"|"area","metric":"status"|"emails_sent"|"open_rate"|"clicks"|"bounces"|"replies"|"reply_types"|"leads"|"conversions"|"goals"|"none","title":"...","data":{{"label":value}} for bar/pie OR [{{"label":"x","value":y,"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}] for line/area,"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
+metric: what the chart shows (goals = progress towards each campaign's conversion target; reply_types = replies grouped by what they said; none = the request is not a chart of this marketing data, e.g. "draw a cat"). If the user names a chart type (line, bar, pie, area), use it.
 Rules: Use actual data values. Only include non-zero values. Sort bar data by value descending. Choose best chart type for the request. For "top N", take N highest. For line/area charts where data points are campaigns, include start_date and end_date fields from the campaign data in each data point."""
 
         try:
@@ -1011,6 +1035,9 @@ Rules: Use actual data values. Only include non-zero values. Sort bar data by va
                 response_text = response_text.strip()[4:].strip()
 
             chart_config = json.loads(response_text)
+            if chart_config.get('metric') == 'none':
+                # Not a chart of this data: said so, rather than a chart of campaign status nobody asked for.
+                return {'chart': None, 'answer': self.NOT_A_CHART, 'insights': ''}
 
             # The AI chose the chart type, told to use one the user names; only its aliases are normalised (a
             # keyword list overrode it, 29 Oct 2026).
@@ -1241,6 +1268,20 @@ Rules: Use actual data values. Only include non-zero values. Sort bar data by va
         requested_chart_type = forced_chart_type or self._get_requested_chart_type(prompt)
         metric_intent = forced_intent or self._infer_metric_intent(prompt)
         campaigns = data.get('campaigns', [])
+
+        if metric_intent == 'reply_types':
+            said = {k: v for k, v in (data.get('reply_types') or {}).items() if v > 0} or {'No replies yet': 0}
+            chart_type = requested_chart_type if requested_chart_type in {'line', 'area', 'bar', 'pie'} else 'pie'
+            return {
+                'chart': {
+                    'type': chart_type,
+                    'title': 'Replies by Type',
+                    'data': ([{'label': k, 'value': v} for k, v in said.items()] if chart_type in {'line', 'area'}
+                             else said),
+                    'colors': ['#10b981', '#3b82f6', '#94a3b8', '#f59e0b', '#ef4444', '#6b7280', '#8b5cf6'],
+                },
+                'insights': 'People who replied, by what their last reply said.',
+            }
 
         # Campaigns by status
         if metric_intent == 'status':
