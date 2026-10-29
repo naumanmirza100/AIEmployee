@@ -438,7 +438,15 @@ Return exactly this JSON array (4 objects):
 Rules:
 - Use {{first_name}}, {{company_name}}, {{job_title}}, {{company_industry}} as placeholders
 - Keep emails 3-5 sentences, professional, value-focused
-- Do NOT use markdown in body_template"""
+- Do NOT use markdown in body_template
+- The campaign goal above is the ONLY thing you know about our offer. Never state a number, percentage, result,
+  customer, integration or feature that it does not give; no "clinics like yours saw 30% fewer no-shows"
+- You know nothing about the prospect beyond the placeholders: never say you noticed, saw or read anything about
+  them or their company, and never call them "leading" or praise their work
+- One clear request per email, and sign off with {(campaign.sender_name or 'the sender').split()[0]}"""
+        # Found in the live run of 29 Oct: the steps promised "a 30% drop in missed appointments", "15% more
+        # appointments" and a "fully integrated" app, none of which the campaign said, in emails sent in the
+        # salesperson's name.
 
         resp = self.groq_client.chat.completions.create(
             model=self.model,
@@ -463,15 +471,19 @@ Rules:
     def _default_steps(self, campaign) -> list:
         name = campaign.sender_name or 'the team'
         company = campaign.sender_company or 'us'
+        # The campaign's own words about the offer, never a "[key value proposition]" left to fill (the send refused
+        # it) nor praise of work nobody has seen.
+        offer = ' '.join((campaign.description or '').split())
+        offer = (offer[:400].rsplit('.', 1)[0] + '.') if len(offer) > 400 and '.' in offer[:400] else offer
+        about = f"{offer}\n\n" if offer else f"I'd like to tell you briefly what {company} does.\n\n"
         return [
             {
                 "step_order": 1, "step_type": "email", "delay_days": 1,
                 "name": "Introduction",
-                "subject_template": "Quick question about {company_name}",
+                "subject_template": "Quick question for {company_name}",
                 "body_template": (
                     f"Hi {{first_name}},\n\n"
-                    f"I came across {{company_name}} and noticed the great work your team is doing in {{company_industry}}.\n\n"
-                    f"We help companies like yours [key value proposition]. I'd love to share how we've helped similar teams.\n\n"
+                    f"I'm {name} from {company}. {about}"
                     f"Would you be open to a quick 15-minute call this week?\n\n"
                     f"Best,\n{name}\n{company}"
                 ),
@@ -489,7 +501,7 @@ Rules:
                 "body_template": (
                     f"Hi {{first_name}},\n\n"
                     f"I know things get busy — just wanted to follow up on my previous message.\n\n"
-                    f"I have a few ideas specific to {{company_name}} that I think could be valuable. Even a 10-minute call would be worth your time.\n\n"
+                    f"If it is of interest to {{company_name}}, a short call is the quickest way to see whether it fits.\n\n"
                     f"Available this week?\n\n"
                     f"Best,\n{name}"
                 ),
@@ -1278,6 +1290,14 @@ Rules:
             note = step.body_template or f"Send LinkedIn connection to {lead.display_name} ({lead.linkedin_url or 'no URL'})"
             SDROutreachLog.objects.create(**log_base, status='sent', body_sent=note)
             result_status = 'sent'
+            # Nothing is sent on LinkedIn by the agent: the salesperson is given it to do. It was only logged as
+            # "sent" (found in the live run of 29 Oct).
+            from ai_sdr_agent.alerts import tell_salesperson
+            note_filled = (note.replace('{first_name}', lead.first_name or lead.display_name)
+                           .replace('{company_name}', lead.company_name or 'their company'))
+            tell_salesperson(campaign.company_user, 'sdr_linkedin_step', f'LinkedIn step for {lead.display_name}',
+                             note_filled + (f' Profile: {lead.linkedin_url}' if lead.linkedin_url else ''),
+                             link='/ai-sdr/outreach')
 
         # current_step was already atomically advanced above (via UPDATE).
         # Now just set next_action_at (or mark completed) and save those fields only.
@@ -1357,19 +1377,30 @@ def try_mailbox_logins(smtp_host, smtp_port, use_tls, username, password, imap_h
     if not (smtp_host and username and password):
         return ''
     port = int(smtp_port or 587)
+    refused = ('The sending server refused the login{said}. Check the user name and password; for Gmail use an app '
+               'password.')
     try:
         server = smtplib.SMTP_SSL(smtp_host, port, timeout=15) if port == 465 else smtplib.SMTP(smtp_host, port, timeout=15)
-        with server:
+    except (smtplib.SMTPException, OSError) as exc:
+        return f'Could not reach the sending server {smtp_host}:{port} ({exc}).'
+    with server:
+        try:
             server.ehlo()
             if use_tls and port != 465:
                 server.starttls(context=ssl.create_default_context())
                 server.ehlo()
+        except (smtplib.SMTPException, OSError) as exc:
+            return f'Could not reach the sending server {smtp_host}:{port} ({exc}).'
+        try:
             server.login(username, password)
-    except smtplib.SMTPAuthenticationError as exc:
-        return (f'The sending server refused the login ({exc.smtp_code} {_text(exc.smtp_error)}). '
-                'Check the user name and password; for Gmail use an app password.')
-    except (smtplib.SMTPException, OSError) as exc:
-        return f'Could not reach the sending server {smtp_host}:{port} ({exc}).'
+        except smtplib.SMTPAuthenticationError as exc:
+            return refused.format(said=f' ({exc.smtp_code} {_text(exc.smtp_error)})')
+        except (smtplib.SMTPServerDisconnected, ConnectionError):
+            # Gmail answers a wrong password and hangs up, so the next way of logging in finds the line closed. It
+            # was shown as "could not reach the server" (live run of 29 Oct).
+            return refused.format(said=' and closed the connection')
+        except (smtplib.SMTPException, OSError) as exc:
+            return f'The sending server did not accept the login ({exc}).'
     imap_host = imap_host or _derive_imap_host(smtp_host)
     try:
         with imaplib.IMAP4_SSL(imap_host, int(imap_port or 993), timeout=15) as imap:
