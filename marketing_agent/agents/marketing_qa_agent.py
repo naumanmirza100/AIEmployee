@@ -2027,11 +2027,14 @@ class MarketingQAAgent(MarketingBaseAgent):
             "(the age= value), never how old the campaign is. 'All campaigns "
             "with their age' means name + age range, not creation dates.\n"
             "- When you name a winner, quote the number that makes it the winner.\n"
-            "- Write plain sentences for the business owner: never the data's field names such as conv_progress, "
-            "positive_replies or sent:.\n"
-            "- Answer in the language and script of the question: Roman Urdu gets Roman Urdu, Urdu script gets Urdu "
-            "script.\n"
+            "- Write for the business owner: a question about one campaign gets sentences ('It has sent 12 emails, "
+            "6 were opened...'), and a per-campaign listing uses plain labels ('positive replies', 'conversion "
+            "progress'), never the data's own names such as conv_progress, positive_replies or emails_sent.\n"
         )
+        # Restated last, next to the question: placed only among the rules, a Roman Urdu question was answered in
+        # English (live run of 29 Oct 2026).
+        prompt += (f'\nWrite the reply in the language and script of the question "{question[:300]}": Roman Urdu '
+                   'gets Roman Urdu, Urdu script gets Urdu script, English gets English.\n')
         # 700 tokens could not hold a full per-campaign listing: the answer was
         # cut off mid-row ("below age11 (draft) - sent:0, opened:0, ...open"),
         # which reads as the assistant ignoring half the question. Size the
