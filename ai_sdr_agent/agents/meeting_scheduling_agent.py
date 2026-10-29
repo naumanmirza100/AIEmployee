@@ -485,7 +485,7 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
       </table>
 
       <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
-        See you tomorrow, {first_name}!
+        See you soon, {first_name}!
       </p>
       <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
         Just a friendly heads-up — your call is coming up.
@@ -497,7 +497,7 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
         <tr>
           <td style="padding:20px 24px;">
             <p style="margin:0 0 14px;color:#7c3aed;font-size:12px;font-weight:700;
-                      text-transform:uppercase;letter-spacing:0.06em;">Tomorrow's Call</p>
+                      text-transform:uppercase;letter-spacing:0.06em;">Your Call</p>
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               {_detail_row('Topic', title)}
               {_divider()}
@@ -534,11 +534,11 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
       <hr style="border:none;border-top:1px solid #f3f4f6;margin:20px 0;"/>
 
       <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
-        Looking forward to our conversation tomorrow!<br/>
+        Looking forward to our conversation!<br/>
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Reminder: your call is tomorrow at {scheduled_str}.")
+    return _base_html(body_html, preview_text=f"Reminder: your call is on {scheduled_str}.")
 
 
 @_escape_args
@@ -920,7 +920,7 @@ Return exactly this JSON:
         logger.info("Confirmation email sent to %s for meeting %s", lead.email, meeting.id)
 
     # ------------------------------------------------------------------
-    # Reminder Email  (sent ~24 hours before meeting)
+    # Reminder Email  (sent up to 26 hours before the call, worded with its time: CO-200)
     # ------------------------------------------------------------------
 
     def send_reminder_email(self, campaign, lead, meeting) -> None:
@@ -938,18 +938,18 @@ Return exactly this JSON:
         if getattr(meeting, 'booking_token', None):
             booking_url = f"{_booking_base()}/book/{meeting.booking_token}"
 
-        subject = f"Reminder: {title} is tomorrow — {scheduled_str}"
+        subject = f"Reminder: {title} — {scheduled_str}"
 
         plain = (
             f"Hi {first_name},\n\n"
-            f"Just a friendly reminder that your call is tomorrow!\n\n"
+            f"Just a friendly reminder of our call on {scheduled_str}.\n\n"
             f"  Topic       : {title}\n"
             f"  Date & Time : {scheduled_str}\n"
             f"  Duration    : {duration} minutes\n"
             + (f"  Join Link   : {meet_link}\n" if meet_link else '')
             + f"\nNo preparation needed — come as you are!\n\n"
             + "Need to reschedule? Just reply to this email and we'll sort it out.\n\n"
-            + f"See you tomorrow!\n\n{sender}"
+            + f"See you then!\n\n{sender}"
             + (f"\n{sender_title}" if sender_title else '')
             + (f"\n{sender_company}" if sender_company else '')
         )

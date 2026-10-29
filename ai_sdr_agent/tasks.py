@@ -404,35 +404,38 @@ def auto_pause_expired_campaigns_impl():
 
 
 def send_meeting_reminders_impl():
-    """Send 24-hour reminder emails for meetings scheduled within the next 24–26 hours."""
+    """Remind the lead, and the salesperson, of a booked call starting within 26 hours.
+
+    Only calls 24 to 26 hours ahead were reminded, so one booked less than a day ahead never was, and the
+    salesperson never (CO-199, CO-200). A call booked less than half an hour ago is not reminded at once."""
+    from ai_sdr_agent.alerts import call_reminder
     from ai_sdr_agent.models import SDRMeeting
     from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
 
     agent = MeetingSchedulingAgent()
     now = timezone.now()
     access_cache: dict = {}
-    window_start = now + timedelta(hours=24)
-    window_end = now + timedelta(hours=26)
 
     due = SDRMeeting.objects.filter(
         status='scheduled',
-        scheduled_at__gte=window_start,
-        scheduled_at__lte=window_end,
+        scheduled_at__gt=now + timedelta(hours=1),
+        scheduled_at__lte=now + timedelta(hours=26),
         reminder_sent_at__isnull=True,
         company_user__is_active=True,       # not on behalf of someone whose login is switched off
-    ).select_related('lead', 'enrollment__campaign', 'company_user__company')
+    ).filter(Q(confirmed_at__isnull=True) | Q(confirmed_at__lte=now - timedelta(minutes=30))
+             ).select_related('lead', 'enrollment__campaign', 'company_user__company')
 
     sent = failed = 0
     for meeting in due:
-        if not meeting.enrollment or not meeting.enrollment.campaign:
-            continue
         if not _has_sdr_access(meeting.company_user.company, access_cache):
             continue
-        campaign = meeting.enrollment.campaign
+        campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
         try:
-            agent.send_reminder_email(campaign, meeting.lead, meeting)
+            if campaign:
+                agent.send_reminder_email(campaign, meeting.lead, meeting)
             meeting.reminder_sent_at = now
             meeting.save(update_fields=['reminder_sent_at'])
+            call_reminder(meeting)
             sent += 1
             logger.info("SDR reminder sent for meeting %s (%s)", meeting.id, meeting.lead.email)
         except Exception as exc:

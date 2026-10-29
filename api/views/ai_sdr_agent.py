@@ -2529,13 +2529,33 @@ def sdr_meeting_detail(request, meeting_id):
                             f"Hi {lead.first_name or lead.full_name},\n\n"
                             f"We had a meeting scheduled today but it looks like you weren't able to make it — no worries at all!\n\n"
                             f"I'd love to find another time that works better for you. "
-                            f"Feel free to pick a new slot here: {campaign.calendar_link or ''}\n\n"
-                            f"Looking forward to connecting,\n"
+                            + (f"Feel free to pick a new slot here: {campaign.calendar_link}\n\n" if campaign.calendar_link
+                               else "Just reply with a day and time that suit you.\n\n")   # it ended on an empty link
+                            + f"Looking forward to connecting,\n"
                             f"{campaign.sender_name}\n{campaign.sender_title}\n{campaign.sender_company}"
                         )
                         outreach.send_email(campaign, lead.email, subject, body)
                 except Exception as mail_exc:
                     logger.warning("No-show email failed for meeting %s: %s", meeting.id, mail_exc)
+
+            # A booked call can be cancelled from the Meetings screen; the lead is told (CO-200).
+            if old_status != 'cancelled' and new_status == 'cancelled' and meeting.scheduled_at:
+                try:
+                    if meeting.enrollment and meeting.enrollment.campaign:
+                        campaign = meeting.enrollment.campaign
+                        lead = meeting.lead
+                        from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
+                        when = format_datetime_with_timezone(meeting.scheduled_at, meeting.lead_timezone or 'UTC')
+                        body = (
+                            f"Hi {lead.first_name or lead.full_name},\n\n"
+                            f"I'm sorry, I have to cancel our call on {when}. "
+                            f"If you would still like to talk, just reply with a day and time that suit you.\n\n"
+                            f"Best regards,\n{campaign.sender_name}\n{campaign.sender_title}\n{campaign.sender_company}"
+                        )
+                        _get_outreach_agent(company_user.company).send_email(
+                            campaign, lead.email, f"Cancelled: {meeting.title or 'our call'}", body)
+                except Exception as mail_exc:
+                    logger.warning("Cancellation email failed for meeting %s: %s", meeting.id, mail_exc)
 
             return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
         except KeyServiceError:
@@ -2600,11 +2620,6 @@ def sdr_confirm_meeting(request, meeting_id):
             meeting.lead_timezone = browser_tz
 
         campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
-        if send_approval and campaign is None:
-            # No mailbox to ask from: the screen used to say the email was sent anyway (CO-152).
-            return Response({'status': 'error', 'code': 'no_mailbox',
-                             'message': "This call has no campaign mailbox to email the lead from. "
-                                        "Confirm the time directly instead."}, status=400)
 
         if send_approval:
             # Lead approval flow — email lead, wait for their confirmation
@@ -2613,6 +2628,12 @@ def sdr_confirm_meeting(request, meeting_id):
             meeting.status = 'awaiting_approval'
             meeting.approval_proposed_at = timezone.now()
             with _host_booking(company_user, meeting.scheduled_at, meeting.duration_minutes, exclude_id=meeting.id):
+                if campaign is None:
+                    # No mailbox to ask from (checked after the clash check): the screen used to say the email was
+                    # sent anyway (CO-152).
+                    return Response({'status': 'error', 'code': 'no_mailbox',
+                                     'message': "This call has no campaign mailbox to email the lead from. "
+                                                "Confirm the time directly instead."}, status=400)
                 meeting.save()
 
             from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
@@ -2810,6 +2831,8 @@ def sdr_meeting_lead_approve(request, approval_token):
         lead.save(update_fields=['status'])
         meeting.refresh_from_db()
         _give_call_a_link(meeting)
+        from ai_sdr_agent.alerts import call_booked
+        call_booked(meeting, accepted=True)
 
         # The time is settled now; that is when the CRM hears about it.
         try:
@@ -3466,6 +3489,7 @@ def sdr_booking_confirm(request, token):
                 scheduled_at=scheduled_at,
                 confirmed_at=timezone.now(),
                 calendar_link=meet_link,
+                reminder_sent_at=None,              # a new time is reminded again (CO-200)
             )
             if rows:
                 # .update() sends no signal, so the calendar is told here. Left to the nightly
@@ -3504,6 +3528,8 @@ def sdr_booking_confirm(request, token):
         except Exception as exc:
             logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
 
+    from ai_sdr_agent.alerts import call_booked
+    call_booked(meeting)
     logger.info(
         "SDR [booking] meeting=%d lead=%s scheduled_at=%s meet_link=%s — CONFIRMED via booking page",
         meeting.id, meeting.lead.display_name, scheduled_at.isoformat(), meet_link,

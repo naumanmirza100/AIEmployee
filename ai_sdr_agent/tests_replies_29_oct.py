@@ -380,3 +380,64 @@ class MailboxProblemTests(SDRBase):
         self.assertEqual(self.call(views.sdr_retry_failed, campaign_id=self.campaign.id).data['retried'], 1)
         enrollment.refresh_from_db()
         self.assertEqual(enrollment.status, 'active')
+
+
+class SalespersonTests(SDRBase):
+    """CO-199: nobody told the salesperson when a lead booked, accepted or replied with interest.
+    CO-200: a booked call could not be cancelled or moved, and reminders missed calls under a day ahead."""
+
+    def alerts(self):
+        from project_manager_agent.models import PMNotification
+        return list(PMNotification.objects.filter(company_user=self.cu).values_list('title', flat=True))
+
+    def test_an_interested_reply_tells_the_salesperson(self):
+        enrollment = self.enroll(self.make_lead('kiran@clinic.example'))
+        reader = mock.MagicMock()
+        reader.classify_reply.return_value = POSITIVE
+        reply = {'enrollment': enrollment, 'reply_text': 'Yes, a call next week works', 'sender_email': 'kiran@clinic.example',
+                 'subject': 'Re: Hello', 'message_id': '<x1>', 'received_at': timezone.now() + timedelta(minutes=1)}
+        with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent') as scheduler:
+            scheduler.return_value.generate_prep_notes.return_value = 'Notes'
+            handle_inbox_reply(self.campaign, reply, email_agent=reader, outreach_agent=mock.MagicMock())
+        self.assertIn('Bob B is interested', self.alerts())
+
+    def test_reminders_reach_calls_under_a_day_ahead_and_the_salesperson(self):
+        from ai_sdr_agent.tasks import send_meeting_reminders_impl
+        lead = self.make_lead('kiran@clinic.example')
+        enrollment = self.enroll(lead)
+        soon = SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=enrollment, status='scheduled',
+                                         scheduled_at=timezone.now() + timedelta(hours=3),
+                                         confirmed_at=timezone.now() - timedelta(days=1))
+        just_booked = SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=enrollment,
+                                                status='scheduled', scheduled_at=timezone.now() + timedelta(hours=4),
+                                                confirmed_at=timezone.now())
+        with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
+            send_meeting_reminders_impl()
+        soon.refresh_from_db(); just_booked.refresh_from_db()
+        self.assertIsNotNone(soon.reminder_sent_at)
+        self.assertIsNone(just_booked.reminder_sent_at)
+        self.assertIn('Call with Bob B soon', self.alerts())
+
+    def test_a_moved_call_is_reminded_again(self):
+        meeting = SDRMeeting.objects.create(company_user=self.cu, lead=self.make_lead(), status='scheduled',
+                                            scheduled_at=timezone.now() + timedelta(days=1),
+                                            reminder_sent_at=timezone.now())
+        meeting.scheduled_at = timezone.now() + timedelta(days=3)
+        meeting.save(update_fields=['scheduled_at'])
+        meeting.refresh_from_db()
+        self.assertIsNone(meeting.reminder_sent_at)
+
+    def test_cancelling_a_booked_call_tells_the_lead(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from api.views import ai_sdr_agent as views
+        lead = self.make_lead('kiran@clinic.example')
+        meeting = SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=self.enroll(lead),
+                                            status='scheduled', scheduled_at=timezone.now() + timedelta(days=2))
+        request = APIRequestFactory().put('/x', {'status': 'cancelled'}, format='json')
+        force_authenticate(request, user=self.cu)
+        sender = mock.MagicMock()
+        with mock.patch.object(views, '_get_outreach_agent', return_value=sender):
+            views.sdr_meeting_detail(request, meeting_id=meeting.id)
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, 'cancelled')
+        self.assertTrue(sender.send_email.call_args.args[3].startswith('Hi Bob,\n\nI\'m sorry, I have to cancel'))

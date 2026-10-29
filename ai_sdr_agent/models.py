@@ -554,6 +554,17 @@ class SDRMeeting(models.Model):
     def __str__(self):
         return f"Meeting with {self.lead.display_name} ({self.status})"
 
+    def save(self, *args, **kwargs):
+        # A call moved to a new time is reminded again: the mark was never cleared, so after a no-show and a new
+        # time no reminder went out (CO-200).
+        if self.pk and self.reminder_sent_at:
+            before = type(self).objects.filter(pk=self.pk).values_list('scheduled_at', flat=True).first()
+            if before != self.scheduled_at:
+                self.reminder_sent_at = None
+                if kwargs.get('update_fields') is not None:
+                    kwargs['update_fields'] = set(kwargs['update_fields']) | {'reminder_sent_at'}
+        super().save(*args, **kwargs)
+
 
 class SDRJobLock(models.Model):
     """Cross-process lock for scheduler jobs.

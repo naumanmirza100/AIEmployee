@@ -775,6 +775,20 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
                   onClick={() => handleStatus('no_show')}>
                   {actionLoading === 'status_no_show' ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />} Lead Didn't Show Up
                 </button>
+                {/* A booked call could only be undone through "Lead Didn't Show Up", which tells the lead they
+                    missed it (CO-200). */}
+                <button data-testid="sdr-move-call" disabled={!!actionLoading}
+                  style={{ ...btnBase, background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' }}
+                  onClick={() => setShowConfirm(true)}>
+                  <CalendarCheck size={12} /> Move Time
+                </button>
+                <button data-testid="sdr-cancel-call" disabled={!!actionLoading}
+                  style={{ ...btnBase, background: 'transparent', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
+                  onClick={() => {
+                    if (window.confirm('Cancel this call? The lead is emailed that it is cancelled.')) doStatus('cancelled');
+                  }}>
+                  {actionLoading === 'status_cancelled' ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />} Cancel Call
+                </button>
               </>
             )}
             {(local.status === 'no_show' || local.status === 'cancelled') && (

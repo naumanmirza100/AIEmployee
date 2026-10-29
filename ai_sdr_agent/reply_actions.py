@@ -185,6 +185,8 @@ def apply_reply_action(company_user, campaign, enrollment, lead, classification,
             info_sent, held = answered['sent'], answered['held']
             if info_sent:
                 logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
+                from ai_sdr_agent.alerts import ai_answered
+                ai_answered(campaign, lead)
         except KeyServiceError:
             raise
         except Exception as exc:
@@ -218,6 +220,8 @@ def apply_reply_action(company_user, campaign, enrollment, lead, classification,
         if created:
             campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
             campaign.save(update_fields=['meetings_booked'])
+            from ai_sdr_agent.alerts import lead_interested
+            lead_interested(meeting, reply_text)
             try:
                 sched = MeetingSchedulingAgent(company=company_user.company)
                 prep_notes = sched.generate_prep_notes(lead, enrollment, reply_text)

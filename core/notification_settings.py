@@ -51,6 +51,7 @@ AGENT_LABELS = {
     'exec_meeting_agent': 'Executive Meeting',
     'marketing_agent': 'Marketing',
     'operations_agent': 'Operations',
+    'ai_sdr_agent': 'AI SDR',
     None: 'Everyone',
 }
 #: The heading for topics that several agents share.
@@ -153,6 +154,11 @@ TOPICS = (
           "A campaign of yours cannot go on without you: it could not start, its mailbox stopped "
           "sending, or something else needs a decision. At most once a day for each.",
           'marketing_agent', kinds=('marketing_action_required',)),
+    Topic('sales_calls', 'Sales calls and interested leads',
+          'A lead books a call, accepts the time you proposed or replies with interest, the AI answers a lead for '
+          'you, and the reminder before a call.',
+          'ai_sdr_agent', kinds=('sdr_call_booked', 'sdr_lead_interested', 'sdr_ai_answered', 'sdr_call_reminder'),
+          email_default=True),
     Topic('operations_failed', 'Documents that could not be read',
           'A document you uploaded to Operations failed to process.',
           'operations_agent', kinds=('operations_document_failed',)),
