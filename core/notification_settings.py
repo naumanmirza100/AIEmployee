@@ -156,8 +156,9 @@ TOPICS = (
           'marketing_agent', kinds=('marketing_action_required',)),
     Topic('sales_calls', 'Sales calls and interested leads',
           'A lead books a call, accepts the time you proposed or replies with interest, the AI answers a lead for '
-          'you, and the reminder before a call.',
-          'ai_sdr_agent', kinds=('sdr_call_booked', 'sdr_lead_interested', 'sdr_ai_answered', 'sdr_call_reminder'),
+          'you, the reminder before a call, and a LinkedIn step for you to do.',
+          'ai_sdr_agent', kinds=('sdr_call_booked', 'sdr_lead_interested', 'sdr_ai_answered', 'sdr_call_reminder',
+                                 'sdr_linkedin_step'),
           email_default=True),
     Topic('sales_reports', 'Sales reports',
           'The daily AI SDR summary, and on Mondays a note when last week had few calls booked.',

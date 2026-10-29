@@ -31,7 +31,9 @@ def call_booked(meeting, accepted=False):
 
 
 def lead_interested(meeting, reply_text):
-    snippet = ' '.join((reply_text or '').split())[:200]
+    # Only what the lead wrote: the alert quoted the whole Gmail thread after it (live run of 29 Oct).
+    from ai_sdr_agent.agents.email_assistant_agent import strip_quoted_reply
+    snippet = ' '.join(strip_quoted_reply(reply_text or '').split())[:200]
     tell_salesperson(meeting.company_user, 'sdr_lead_interested',
                      f'{meeting.lead.display_name} is interested',
                      f'They wrote: "{snippet}". They were sent a link to pick a time.')

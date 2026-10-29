@@ -605,11 +605,11 @@ const SDROutreachTab = () => {
       const resp = await enrollLeads(selectedCampaign.id, selectedLeadIds);
       // Adding leads starts nothing (CO-149): a draft or finished campaign waits for Start campaign.
       const waiting = ['draft', 'completed'].includes(resp.campaign_status);
+      // Why a lead was left out is said too (a lead on the do-not-email list was skipped without a word).
+      const skippedText = resp.skipped ? ` Not added: ${(resp.skipped_reasons || []).join('; ')}.` : '';
       toast({
         title: `Enrolled ${resp.enrolled} lead${resp.enrolled !== 1 ? 's' : ''}`,
-        description: waiting
-          ? 'Nothing is sent yet: press Start campaign when you are ready.'
-          : `${resp.skipped} skipped.${resp.skipped_reasons?.length ? ' ' + resp.skipped_reasons[0] : ''}`,
+        description: (waiting ? 'Nothing is sent yet: press Start campaign when you are ready.' : '') + skippedText,
       });
       setShowEnrollModal(false);
       setSelectedLeadIds([]);
@@ -980,7 +980,7 @@ const SDROutreachTab = () => {
                   fontSize: 12, padding: 0, display: 'flex', alignItems: 'center', gap: 6,
                 }}>
                   <Mail size={13} />
-                  {showSmtpSection ? 'Hide' : 'Configure'} Email Sending (SMTP) — optional
+                  {showSmtpSection ? 'Hide' : 'Set up'} the email it sends from (SMTP): needed before leads can be added
                 </button>
                 {showSmtpSection && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>

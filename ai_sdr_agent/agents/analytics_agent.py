@@ -169,7 +169,10 @@ class AnalyticsAgent:
         ]
 
         # ── Alert ─────────────────────────────────────────────────────
-        low_meetings_alert = meetings_lweek < MEETINGS_ALERT_THRESHOLD      # about the week just ended
+        # About the week just ended, and only once a campaign ran through it: a new account was greeted with a
+        # 'Low meetings alert' (found in the live run of 29 Oct).
+        ran_last_week = SDRCampaign.objects.filter(company_user=company_user, activated_at__lt=week_start).exists()
+        low_meetings_alert = ran_last_week and meetings_lweek < MEETINGS_ALERT_THRESHOLD
 
         return {
             # Summary cards
@@ -273,7 +276,7 @@ class AnalyticsAgent:
   <!-- Header -->
   <tr>
     <td style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:12px 12px 0 0;padding:28px 32px;">
-      <div style="color:#fff;font-size:20px;font-weight:700;">AI Employee — SDR Daily Report</div>
+      <div style="color:#fff;font-size:20px;font-weight:700;">Pay Per Project — AI SDR Daily Report</div>
       <div style="color:rgba(255,255,255,0.7);font-size:13px;margin-top:4px;">{now_str}</div>
     </td>
   </tr>
@@ -369,7 +372,7 @@ class AnalyticsAgent:
         <tr>
           <td style="border-top:1px solid #e5e7eb;padding-top:18px;">
             <p style="font-size:12px;color:#9ca3af;margin:0;">
-              This is an automated daily report from your AI Employee SDR system.
+              This is an automated daily report from your Pay Per Project AI SDR.
               Total lifetime stats: {m['leads_total']} leads · {m['emails_total']} emails · {m['meetings_total']} meetings.
             </p>
           </td>
@@ -407,7 +410,7 @@ class AnalyticsAgent:
 <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
   <div style="background:linear-gradient(135deg,#dc2626,#b91c1c);padding:24px 28px;">
     <div style="color:#fff;font-size:18px;font-weight:700;">⚠️ Low Meeting Alert</div>
-    <div style="color:rgba(255,255,255,0.75);font-size:12px;margin-top:4px;">AI Employee SDR System</div>
+    <div style="color:rgba(255,255,255,0.75);font-size:12px;margin-top:4px;">Pay Per Project · AI SDR</div>
   </div>
   <div style="padding:28px;">
     <p style="font-size:15px;color:#1f2937;">
@@ -451,7 +454,7 @@ class AnalyticsAgent:
         try:
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
-            msg['From']    = f'AI Employee SDR <{from_email}>'
+            msg['From']    = f'Pay Per Project AI SDR <{from_email}>'
             msg['To']      = to_email
             msg.attach(MIMEText(html, 'html', 'utf-8'))
 

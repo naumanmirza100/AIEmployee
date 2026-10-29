@@ -604,3 +604,105 @@ class EmailAssistantTests(SDRBase):
             data = self.call(views.sdr_assistant_read, {'reply': 'I am away until Monday'}).data['data']
         self.assertIsNone(data['answer'])
         self.assertEqual(client.chat.completions.create.call_count, 1)
+
+
+class LiveRunTests(SDRBase):
+    """Found in the live run of 29 Oct."""
+
+    def test_rows_with_an_email_that_is_not_one_are_refused_with_the_reason(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from api.views import ai_sdr_agent as views
+        csv_text = ('first_name,last_name,email,company\n'
+                    'Sana,Malik,sana.malik@,Margalla Smiles\n'
+                    'Usman,Ghani,,Capital Dental\n'
+                    'Hira,Aslam,n/a,City Dental\n'
+                    'Kiran,Shah,kiran@clinic.example,Smile Line\n')
+        request = APIRequestFactory().post('/x', {'file': SimpleUploadedFile('leads.csv', csv_text.encode())},
+                                           format='multipart')
+        force_authenticate(request, user=self.cu)
+        data = views.import_leads_csv(request).data
+        self.assertEqual(data['created'], 2)                    # Kiran, and Usman with no email (as by hand)
+        self.assertEqual(len(data['refused']), 2)
+        self.assertIn('"n/a" is not an email address', data['message'])
+        self.assertIn('"sana.malik@" is not an email address', data['message'])
+
+    def test_a_new_account_is_not_told_its_meetings_are_low(self):
+        from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent
+        self.assertFalse(AnalyticsAgent().compute_metrics(self.cu)['low_meetings_alert'])
+        SDRCampaign.objects.filter(pk=self.campaign.pk).update(activated_at=timezone.now() - timedelta(days=14))
+        self.assertTrue(AnalyticsAgent().compute_metrics(self.cu)['low_meetings_alert'])
+
+
+class LiveRunCampaignTests(SDRBase):
+    """Found when the campaign was made in the live run of 29 Oct."""
+
+    def test_the_built_in_steps_use_the_campaigns_words_and_invent_nothing(self):
+        from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+        SDRCampaign.objects.filter(pk=self.campaign.pk).update(description='A booking app for dental clinics.')
+        self.campaign.refresh_from_db()
+        steps = OutreachAgent()._default_steps(self.campaign)
+        text = ' '.join(s['body_template'] for s in steps)
+        self.assertIn('A booking app for dental clinics.', text)
+        self.assertNotIn('[', text)
+        self.assertNotIn('noticed', text)
+
+    def test_the_ai_is_told_to_invent_no_results_or_praise(self):
+        from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+        agent = OutreachAgent()
+        agent.groq_client = mock.MagicMock()
+        agent.groq_client.chat.completions.create.return_value = mock.MagicMock(
+            choices=[mock.MagicMock(message=mock.MagicMock(content='[]'))], usage=None)
+        agent._ai_generate_steps(self.campaign, None)
+        prompt = agent.groq_client.chat.completions.create.call_args.kwargs['messages'][1]['content']
+        self.assertIn('Never state a number, percentage, result', prompt)
+        self.assertIn('never say you noticed', prompt)
+
+    def test_a_wrong_gmail_password_is_said_to_be_the_login(self):
+        import smtplib
+        from ai_sdr_agent.agents.outreach_agent import try_mailbox_logins
+        with mock.patch('smtplib.SMTP') as smtp, mock.patch('imaplib.IMAP4_SSL') as imap:
+            smtp.return_value.__enter__.return_value = smtp.return_value
+            smtp.return_value.login.side_effect = smtplib.SMTPServerDisconnected('Connection unexpectedly closed')
+            message = try_mailbox_logins('smtp.gmail.com', 587, True, 'a@gmail.com', 'wrong')
+        self.assertIn('refused the login and closed the connection', message)
+        imap.assert_not_called()
+
+    def test_a_linkedin_step_is_given_to_the_salesperson_to_do(self):
+        from project_manager_agent.models import PMNotification
+        from ai_sdr_agent.models import SDRCampaignStep
+        SDRCampaignStep.objects.filter(campaign=self.campaign, step_order=1).update(
+            step_type='linkedin', body_template='Send a LinkedIn connection request to {first_name}')
+        enrollment = self.enroll(self.make_lead())
+        self.agent().process_enrollment(enrollment)
+        [alert] = PMNotification.objects.filter(company_user=self.cu)
+        self.assertEqual(alert.title, 'LinkedIn step for Bob B')
+        self.assertIn('connection request to Bob', alert.message)
+
+
+class QuotedThreadTests(SDRBase):
+    """Found in the live run of 29 Oct: the interested alert and the waiting answer showed the whole Gmail thread."""
+
+    def test_the_alert_shows_only_what_the_lead_wrote(self):
+        from project_manager_agent.models import PMNotification
+        from ai_sdr_agent.alerts import lead_interested
+        lead = self.make_lead('kiran@clinic.example')
+        meeting = SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=self.enroll(lead))
+        lead_interested(meeting, 'yes, Tuesday at 11 works\n\nOn Thu, 29 Oct 2026 at 20:20, Sam <s@x.com> wrote:\n> Hi')
+        [alert] = PMNotification.objects.filter(company_user=self.cu)
+        self.assertIn('"yes, Tuesday at 11 works"', alert.message)
+        self.assertNotIn('s@x.com', alert.message)
+
+
+class EmailBrandTests(TestCase):
+    """Found in the live run of 29 Oct: the lead's 'pick a time' email was headed "AI Employee · Smart Outreach
+    Platform", the tool's name, not the company writing to them."""
+
+    def test_meeting_emails_are_headed_with_the_senders_company(self):
+        from ai_sdr_agent.agents.meeting_scheduling_agent import _build_scheduling_html
+        html = _build_scheduling_html(first_name='Kiran', sender='Abdullah', sender_title='Sales Lead',
+                                      sender_company='Margalla & Co', duration='30 minutes',
+                                      booking_url='https://x.example/book/1', company_name='Smile Line')
+        self.assertIn('>Margalla &amp; Co<', html)
+        self.assertNotIn('AI Employee', html)
+        self.assertNotIn('Smart Outreach', html)
