@@ -138,7 +138,8 @@ const tableRowVariants = {
   },
   hover: {
     scale: 1.01,
-    backgroundColor: "rgba(var(--primary), 0.02)",
+    // The hover colour is the row's hover:bg-primary class: the animation cannot blend a CSS variable,
+    // and "rgba(var(--primary), …)" threw on every hover.
     transition: { duration: 0.2 }
   }
 };
@@ -468,7 +469,7 @@ const EmailAccountsPage = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              <Button onClick={openAdd} size="lg" className="gap-2 bg-primary hover:bg-primary/90">
+              <Button onClick={openAdd} size="lg" aria-label="Add email account" title="Add email account" className="gap-2 bg-primary hover:bg-primary/90">
                 <Plus className="h-4 w-4" />
                 {/* Add Email Account */}
               </Button>
@@ -520,7 +521,7 @@ const EmailAccountsPage = () => {
                 <p className="text-muted-foreground mb-6">
                   Add your first email account to start sending campaigns and tracking performance.
                 </p>
-                <Button onClick={openAdd} size="lg" className="gap-2">
+                <Button onClick={openAdd} size="lg" aria-label="Add email account" title="Add email account" className="gap-2">
                   <Plus className="h-4 w-4" />
                   {/* Add Email Account */}
                 </Button>
@@ -582,7 +583,7 @@ const EmailAccountsPage = () => {
                             whileHover="hover"
                             exit={{ opacity: 0, x: -20 }}
                             transition={{ delay: index * 0.05 }}
-                            className="border-b last:border-0 group"
+                            className="border-b last:border-0 group transition-colors hover:bg-primary/[0.02]"
                           >
                             <td className="p-4">
                               <div className="flex items-center gap-3">

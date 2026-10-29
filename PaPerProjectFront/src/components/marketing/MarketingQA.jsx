@@ -47,47 +47,6 @@ import { cn } from '@/lib/utils';
 
 const STORAGE_KEY = 'marketing_qa_chats'; // kept for one-time migration
 
-/** Normalize question for comparison: trim, lower, collapse spaces, remove trailing punctuation */
-function normalizeQuestion(text) {
-  if (!text || typeof text !== 'string') return '';
-  return text
-    .replace(/\u200B|\u200C|\u200D|\uFEFF/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-    .replace(/[?!.,;:]+\s*$/, '');
-}
-
-/** True if question is greeting/small talk – do not call API */
-function isGreetingOrSmallTalk(question) {
-  const t = normalizeQuestion(question);
-  if (!t) return true;
-  if (t.length > 40) return false;
-  const smallTalk = new Set([
-    'hi', 'hii', 'hello', 'hey', 'helo', 'yo', 'sup', 'thanks', 'thank you', 'thx',
-    'ok', 'okay', 'oky', 'okey', 'okie', 'k', 'kk', 'bye', 'goodbye', 'cya',
-    'good', 'great', 'nice', 'cool', 'alright', 'fine', 'got it', 'understood',
-    'perfect', 'sure', 'yeah', 'yep', 'yup', 'nope', 'no', 'yes',
-    'ok good', 'okay good', 'oky good', 'ok god', 'oky god', 'okay god',
-    'okya', 'okya good', 'okya god', 'okie good', 'gud', 'gud good',
-  ]);
-  if (smallTalk.has(t)) return true;
-  if (t.length <= 14 && /^ok[a-z]*\s*(good|god|gud)?$/.test(t)) return true;
-  return false;
-}
-
-/** True if question is meta (what can I ask) – do not call API. Platform/agent questions ("what is this platform", "how does this work") go to API. */
-function isMetaQuestion(question) {
-  const t = normalizeQuestion(question);
-  if (!t || t.length > 80) return false;
-  const metaPhrases = [
-    'what can i ask', 'what i can ask', 'how can you help', 'what do you do',
-    'what can you answer', 'what should i ask',
-    'example questions', 'give me examples', 'what to ask',
-  ];
-  return metaPhrases.some((p) => t.includes(p));
-}
-
 /** Markdown to HTML for Q&A answers - readable paragraphs, headings, bullets, tables */
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -924,32 +883,8 @@ const MarketingQA = () => {
 
     const q = question.trim();
 
-    // Check for special cases (only for search mode)
-    if (inputMode === 'search') {
-      if (isGreetingOrSmallTalk(q)) {
-        const response = {
-          answer: "👋 Hi there! I'm your Marketing Q&A Assistant. I can help you with:\n\n• **Campaign performance** metrics and insights\n• **ROI analysis** and optimization suggestions\n• **Lead generation** and conversion rates\n• **Channel effectiveness** comparisons\n• **Strategic recommendations** for improvement\n\nWhat would you like to know about your marketing data?",
-          insights: [],
-        };
-        const responseText = response.answer;
-        const userMsg = { role: 'user', content: q };
-        const assistantMsg = { role: 'assistant', content: responseText, responseData: response };
-        handleResponse(q, userMsg, assistantMsg, response);
-        return;
-      }
-
-      if (isMetaQuestion(q)) {
-        const response = {
-          answer: "You can ask me about:\n\n**📈 Performance Metrics**\n• Campaign ROI, conversion rates, CAC\n• Channel effectiveness, lead generation\n\n**🔍 Analysis**\n• Why sales are dropping/rising\n• Which campaigns need optimization\n• Trends in your marketing data\n\n**💡 Recommendations**\n• Marketing strategies to implement\n• Opportunities you might be missing\n• Best practices for your industry\n\nPick a suggested question above or type your own!",
-          insights: [],
-        };
-        const responseText = response.answer;
-        const userMsg = { role: 'user', content: q };
-        const assistantMsg = { role: 'assistant', content: responseText, responseData: response };
-        handleResponse(q, userMsg, assistantMsg, response);
-        return;
-      }
-    }
+    // Greetings and "what can I ask" go to the server like any question: its AI reading answers them (the
+    // browser word lists here missed "salam", "thanks a lot" and every other language).
 
     // Actual API call
     try {
@@ -985,7 +920,12 @@ const MarketingQA = () => {
       if (result.status === 'success' && result.data) {
         const response = result.data;
 
-        if (inputMode === 'graph') {
+        if (inputMode === 'graph' && !response.chart) {
+          // Not a chart of this data ("draw me a cat"): the server says what it can draw instead.
+          const answer = response.answer || 'I could not make a chart from that. Try "pie chart of reply types".';
+          handleResponse(q, { role: 'user', content: q },
+            { role: 'assistant', content: answer, responseData: { answer, insights: [] } }, response);
+        } else if (inputMode === 'graph') {
           // Handle graph response
           const userMsg = { role: 'user', content: q };
           const assistantMsg = {

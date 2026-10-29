@@ -155,7 +155,8 @@ const tableRowVariants = {
   },
   hover: {
     scale: 1.01,
-    backgroundColor: "rgba(var(--primary), 0.05)",
+    // The hover colour is the row's hover:bg-primary class: the animation cannot blend a CSS variable,
+    // and "rgba(var(--primary), …)" threw on every hover.
     transition: { duration: 0.2 }
   }
 };
@@ -803,7 +804,7 @@ const Documents = () => {
                               exit={{ opacity: 0, x: -20 }}
                               transition={{ delay: index * 0.05 }}
                               className={cn(
-                                'border-b last:border-0 cursor-pointer transition-colors',
+                                'border-b last:border-0 cursor-pointer transition-colors hover:bg-primary/5',
                                 selectedDocumentId === doc.id && 'bg-primary/5'
                               )}
                               onClick={() => openDetail(doc.id)}
