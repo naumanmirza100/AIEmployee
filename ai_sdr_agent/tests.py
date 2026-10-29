@@ -587,6 +587,14 @@ class ApiTests(SDRBase):
         self.assertEqual(views.sdr_google_auth_start(self.rf.get('/x')).status_code, 404)
 
 
+def work_time(days):
+    """A weekday at 10:00 UTC at least `days` ahead: the booking page takes working hours only (CO-201)."""
+    when = (timezone.now() + timedelta(days=days)).replace(hour=10, minute=0, second=0, microsecond=0)
+    while when.weekday() >= 5:
+        when += timedelta(days=1)
+    return when
+
+
 class BookingTests(SDRBase):
     def setUp(self):
         super().setUp()
@@ -605,7 +613,7 @@ class BookingTests(SDRBase):
 
     def test_booking_sets_lead_status_and_creates_meet_only_once(self):
         m = self.meeting()
-        when = timezone.now() + timedelta(days=3)
+        when = work_time(3)
         with mock.patch.object(views, '_create_google_meet_link',
                                return_value='https://meet.google.com/abc') as meet, \
                 mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
@@ -620,7 +628,7 @@ class BookingTests(SDRBase):
         # The event's id was thrown away: a call that moved stayed in Google at its old time.
         from core.google_calendar import event_state
         m = self.meeting()
-        when = (timezone.now() + timedelta(days=3)).replace(microsecond=0)
+        when = work_time(3)
         made = {'event_id': 'ev-42', 'meet_url': 'https://meet.google.com/abc'}
         with mock.patch('core.google_calendar.create_google_event', return_value=made) as create:
             with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
@@ -634,14 +642,14 @@ class BookingTests(SDRBase):
         m = self.meeting()
         with mock.patch('core.google_calendar.create_google_event', return_value=None):
             with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
-                self.assertEqual(self.book(m, timezone.now() + timedelta(days=3)).status_code, 200)
+                self.assertEqual(self.book(m, work_time(3)).status_code, 200)
         m.refresh_from_db()
         self.assertEqual((m.google_event_id, m.google_event_state), ('', ''))
         self.assertTrue(m.calendar_link.startswith('https://meet.jit.si/'))
 
     def test_a_reopened_call_booked_again_moves_its_event_and_makes_no_second_one(self):
         from core.google_calendar import event_state
-        was = (timezone.now() + timedelta(days=2)).replace(microsecond=0)
+        was = work_time(2)
         m = self.meeting(scheduled_at=was, calendar_link='https://meet.google.com/abc',
                          google_event_id='ev-42', google_event_state=event_state(was, 30))
         when = was + timedelta(days=1)
@@ -663,7 +671,7 @@ class BookingTests(SDRBase):
         self.assertEqual(m.status, 'pending')
 
     def test_booking_overlapping_another_meeting_is_refused(self):
-        when = timezone.now() + timedelta(days=3)
+        when = work_time(3)
         other_lead = self.make_lead('o@o.com')
         SDRMeeting.objects.create(company_user=self.cu, lead=other_lead, status='scheduled',
                                   scheduled_at=when + timedelta(minutes=10), duration_minutes=30)

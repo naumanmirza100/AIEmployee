@@ -441,3 +441,27 @@ class SalespersonTests(SDRBase):
         meeting.refresh_from_db()
         self.assertEqual(meeting.status, 'cancelled')
         self.assertTrue(sender.send_email.call_args.args[3].startswith('Hi Bob,\n\nI\'m sorry, I have to cancel'))
+
+
+class BookingPageTests(SDRBase):
+    """CO-201: the booking page offered every half hour of the lead's own day, any day, then refused times."""
+
+    def test_only_free_working_hour_times_are_offered_and_others_refused(self):
+        from django.test import Client
+        from api.views.ai_sdr_agent import WORK_HOURS
+        lead = self.make_lead('kiran@clinic.example')
+        meeting = SDRMeeting.objects.create(company_user=self.cu, lead=lead, enrollment=self.enroll(lead),
+                                            status='pending')
+        taken = SDRMeeting.objects.create(company_user=self.cu, lead=self.make_lead('sara@clinic.example'),
+                                          status='awaiting_approval', scheduled_at=None)
+        info = Client().get(f'/api/sdr/book/{meeting.booking_token}/').json()
+        slots = [timezone.datetime.fromisoformat(s) for s in info['free_slots']]
+        self.assertTrue(slots)
+        self.assertTrue(all(s.weekday() < 5 and WORK_HOURS[0] <= s.hour < WORK_HOURS[1] for s in slots))
+        SDRMeeting.objects.filter(pk=taken.pk).update(scheduled_at=slots[0])        # proposed to someone else
+        again = Client().get(f'/api/sdr/book/{meeting.booking_token}/').json()['free_slots']
+        self.assertNotIn(slots[0].isoformat(), again)
+        night = slots[-1].replace(hour=2)                                         # a future night, whatever the hour now
+        response = Client().post(f'/api/sdr/book/{meeting.booking_token}/confirm/',
+                                 {'scheduled_at': night.isoformat()}, content_type='application/json')
+        self.assertEqual((response.status_code, response.json()['error']), (400, 'outside_hours'))

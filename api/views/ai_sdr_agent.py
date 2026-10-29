@@ -3354,6 +3354,7 @@ def sdr_booking_info(request, token):
     # email lands on). Returning a 400 here made a successfully-confirmed meeting
     # render as "Link unavailable".
     already_booked = meeting.status not in ('pending', 'awaiting_approval')
+    tz_name, slots = _free_booking_times(meeting) if not already_booked else ('UTC', [])
 
     return Response({
         'title': meeting.title,
@@ -3366,11 +3367,55 @@ def sdr_booking_info(request, token):
         'status': meeting.status,
         'already_booked': already_booked,
         'scheduled_at': meeting.scheduled_at.isoformat() if meeting.scheduled_at else None,
-        'meet_link': meeting.calendar_link or (campaign.calendar_link if campaign else '') or '',
+        'meet_link': meeting.calendar_link if is_video_link(meeting.calendar_link) else '',
+        # The times the salesperson is free, in the company's working hours. The page offered every half hour from
+        # 08:00 to 18:00 of the lead's own day, any day, and refused times afterwards (CO-201).
+        'free_slots': [slot.isoformat() for slot in slots],
+        'company_timezone': tz_name,
     })
 
 
 BOOKING_MAX_DAYS_AHEAD = 180   # how far in the future a lead may book
+BOOKING_DAYS_SHOWN = 14
+WORK_HOURS = (9, 18)           # the sales agent has no working-hours setting: weekdays, company time
+
+
+def _in_work_hours(when, tz_name):
+    from core.scheduling.conflicts import zone_info
+    local = when.astimezone(zone_info(tz_name))
+    return local.weekday() < 5 and WORK_HOURS[0] <= local.hour and (local.hour, local.minute) < (WORK_HOURS[1], 0)
+
+
+def _free_booking_times(meeting):
+    """(company time zone, start times) a lead may book: weekdays in working hours over the next two weeks,
+    at least an hour ahead, minus the salesperson's busy time and their other booked or proposed calls."""
+    from datetime import datetime, time as dtime
+    from core.scheduling import busy_intervals, login_user_id_for_company_user, overlaps, zone_name
+    from core.scheduling.conflicts import zone_info
+    from core.scheduling.sources import SOURCES
+    tz_name = zone_name(meeting.company_user.company.timezone_name)
+    zone = zone_info(tz_name)
+    duration = timedelta(minutes=meeting.duration_minutes or 30)
+    now = timezone.now()
+    until = now + timedelta(days=BOOKING_DAYS_SHOWN)
+    host = login_user_id_for_company_user(meeting.company_user)
+    busy = busy_intervals([host], now, until, exclude=[('sdr', meeting.id)], tz_name=tz_name) if host else []
+    for other in SDRMeeting.objects.filter(company_user=meeting.company_user, status__in=SOURCES['sdr'].BOOKED,
+                                           scheduled_at__gte=now - timedelta(hours=8),
+                                           scheduled_at__lt=until).exclude(id=meeting.id):
+        busy.append((other.scheduled_at, other.scheduled_at + timedelta(minutes=other.duration_minutes or 30)))
+    slots, first_day = [], now.astimezone(zone).date()
+    for offset in range(BOOKING_DAYS_SHOWN + 1):
+        day = first_day + timedelta(days=offset)
+        if day.weekday() >= 5:
+            continue
+        cursor = datetime.combine(day, dtime(WORK_HOURS[0]), tzinfo=zone)
+        day_end = datetime.combine(day, dtime(WORK_HOURS[1]), tzinfo=zone)
+        while cursor + duration <= day_end:
+            if cursor >= now + timedelta(hours=1) and not overlaps(busy, cursor, cursor + duration):
+                slots.append(cursor)
+            cursor += timedelta(minutes=30)
+    return tz_name, slots
 
 
 VIDEO_LINK_STARTS = ('https://meet.jit.si/', 'https://meet.google.com/')
@@ -3454,6 +3499,9 @@ def sdr_booking_confirm(request, token):
         return Response({
             'error': f'Please pick a time within the next {BOOKING_MAX_DAYS_AHEAD} days.',
         }, status=400)
+    from core.scheduling import zone_name
+    if not _in_work_hours(scheduled_at, zone_name(meeting.company_user.company.timezone_name)):
+        return Response({'error': 'outside_hours', 'message': 'Please pick one of the times shown.'}, status=400)
 
     duration_minutes = meeting.duration_minutes or 30
 
