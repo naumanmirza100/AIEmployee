@@ -15,7 +15,7 @@ from datetime import timedelta
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import InboxEmail
+from .models import InboxAttachment, InboxEmail
 from .text import ai_json, for_ai, parse_json
 
 logger = logging.getLogger(__name__)
@@ -186,6 +186,7 @@ Return ONLY this JSON:
 - priorities: ["urgent", "high"] when the question asks what is urgent, important, needs attention or must be done
   first ("urgent", "zaroori", "jaldi"); [] otherwise."""
 
+# "Every email that fits": on live, "which clinics replied?" left out the one that asked the price.
 ANSWER_PROMPT = """You answer questions about a company's email, from the emails below only. Return ONLY this JSON,
 with the email numbers as plain numbers: {"answer": "...", "sources": [12, 40]}
 
@@ -196,6 +197,7 @@ kind and priority as read when it arrived (for example support/urgent).
   script, English stays English.
 - After each fact, name the email it came from as [#id].
 - Use only what these emails say. When they do not answer the question, say so plainly.
+- When the question asks who or which, name every email that fits, not only some.
 - You only answer questions. You cannot reply, send, delete, book or change anything. When asked to, say in one
   sentence that you cannot do that here, and name the email to open as [#id] so the person can reply from it.
 - When the question is not about this mail at all (a poem, the weather, general knowledge), say in one sentence that
@@ -213,7 +215,9 @@ def answer_last(language):
     it."""
     name = _LANGUAGES.get((language or '').strip().lower(), (language or '').strip()[:30])
     lang = f'in {name}' if name else 'in the language and script of the QUESTION'
-    return f'\n\nWrite the answer {lang}, as the JSON {{"answer": "...", "sources": [...]}}.'
+    # Names, not "he" or "she", said here too: on live the rules alone still gave "he is not interested".
+    return (f'\n\nWrite the answer {lang}, naming people rather than writing "he" or "she", as the JSON '
+            f'{{"answer": "...", "sources": [...]}}.')
 
 
 def _plan(question, history, agent) -> dict:
@@ -279,27 +283,58 @@ def find_emails(account, plan, limit=SOURCES):
     return found[:limit]
 
 
-def _head(m):
+def _head(m, answered=frozenset()):
     who = f'{m.from_name} <{m.from_email}>' if m.from_name else m.from_email
     side = 'sent by us to ' + (m.to_email or '') if m.direction == 'out' else 'from ' + who
     when = m.received_at.strftime('%a %d %b %Y %H:%M') if m.received_at else ''
     head = f'[#{m.id}] {when}, {side}, subject "{m.subject or ""}"'
     if m.category:
         head += f', {m.category}/{m.priority}'
+    # "Which emails still need an answer?" listed an invoice that needs none: the answer now sees what the AI read.
+    if m.direction == 'in' and m.id in answered:
+        head += ', answered by us'
+    elif m.direction == 'in' and m.needs_reply:
+        head += ', waits for an answer'
+    elif m.direction == 'in' and m.triaged_at:
+        head += ', needs no answer'
     return head
 
 
-def _email_block(m):
-    return f'{_head(m)}\n{for_ai(m.body, 700)}'
+def _answered(ids):
+    from .models import ReplyDraft
+    return frozenset(ReplyDraft.objects.filter(inbox_email_id__in=ids, status='sent')
+                     .values_list('inbox_email_id', flat=True))
+
+
+def _email_block(m, files=(), answered=frozenset()):
+    text = f'{_head(m, answered)}\n{for_ai(m.body, 700)}'
+    for name, summary in files:
+        text += f'\nAttached file "{name}", as summarised: {summary}'
+    return text
+
+
+def _file_summaries(emails):
+    """The summaries made of the emails' attached files, by email: an invoice's amount is in its PDF, not in the
+    email ("Please find attached our invoice")."""
+    out = {}
+    rows = (InboxAttachment.objects.filter(inbox_email_id__in=[m.id for m in emails]).exclude(summary='')
+            .values_list('inbox_email_id', 'filename', 'summary'))
+    for email_id, name, raw in rows:
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        parts = [data.get('what') or ''] + list(data.get('points') or []) + list(data.get('figures') or [])
+        out.setdefault(email_id, []).append((name, '; '.join(p for p in parts if p)[:600]))
+    return out
 
 
 def _index(account, plan, skip):
     """The other recent emails, one line each: a question about "everything urgent" or "who replied" is not left
     to the search alone."""
-    rows = list(_window(account, plan).exclude(id__in=skip).order_by('-received_at')
+    return list(_window(account, plan).exclude(id__in=skip).order_by('-received_at')
                 .only('id', 'direction', 'from_name', 'from_email', 'to_email', 'subject', 'received_at', 'category',
-                      'priority', 'ai_summary')[:INDEX])
-    return rows, '\n'.join(_head(m) + (f': {m.ai_summary}' if m.ai_summary else '') for m in rows)
+                      'priority', 'ai_summary', 'needs_reply', 'triaged_at')[:INDEX])
 
 
 def _read_answer(raw):
@@ -332,11 +367,14 @@ def ask_inbox(question, account, agent, history=()) -> dict:
     emails = find_emails(account, plan)
     if not emails:
         return {'answer': 'There is no mail in this inbox yet.', 'sources': [], 'searched': 0}
-    others, index = _index(account, plan, [m.id for m in emails])
+    others = _index(account, plan, [m.id for m in emails])
+    answered = _answered([m.id for m in emails + others])
+    index = '\n'.join(_head(m, answered) + (f': {m.ai_summary}' if m.ai_summary else '') for m in others)
+    files = _file_summaries(emails)
     earlier = '\n'.join(f'Q: {q}\nA: {a}' for q, a in history)
     today = timezone.localtime().strftime('%A %d %B %Y')
     prompt = (f'Today is {today}.\n\n' + (f'Earlier in this conversation:\n{earlier}\n\n' if earlier else '')
-              + 'EMAILS IN FULL:\n\n' + '\n\n'.join(_email_block(m) for m in emails)
+              + 'EMAILS IN FULL:\n\n' + '\n\n'.join(_email_block(m, files.get(m.id, ()), answered) for m in emails)
               + (f'\n\nOTHER RECENT EMAILS, ONE LINE EACH:\n{index}' if index else '')
               + f'\n\nQUESTION: {question}' + answer_last(plan.get('language')))
     raw = agent._call_llm(prompt=prompt, system_prompt=ANSWER_PROMPT, temperature=0.2, max_tokens=800)

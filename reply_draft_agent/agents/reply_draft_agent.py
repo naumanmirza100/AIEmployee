@@ -122,7 +122,8 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "1. Match the formality of the sender. A casual inbound gets a warm reply; "
         "a formal inbound gets a professional one.\n"
         "2. Stay grounded in the original email and the user's instructions. Do not "
-        "invent product details, pricing, or commitments that are not provided.\n"
+        "invent product details, pricing, or commitments that are not provided. When the email asks for a fact "
+        "the instructions do not give, do not answer yes or no: say you will confirm it and come back to them.\n"
         "3. Respect the detected interest level:\n"
         "   - positive: momentum-building, propose a clear next step.\n"
         "   - requested_info: directly address what they asked for.\n"
@@ -132,7 +133,9 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "4. Honor the length guidance the user provided in the prompt.\n"
         "5. End with either a clear question or a specific next step.\n"
         "6. Sign with the signature given in the prompt, as written. Never write placeholders in brackets such as "
-        "[Your Name] or [Company]: leave out what you do not know.\n\n"
+        "[Your Name] or [Company]: leave out what you do not know.\n"
+        "7. Write in the language and script the sender wrote in, unless the user's instructions ask for another. "
+        "In Urdu or Roman Urdu write as the company ('hum'), so the verbs do not guess the writer's gender.\n\n"
         "Output strict JSON only, with exactly these keys: "
         '{"subject": "...", "body": "...", "reasoning": "..."}'
     )
@@ -147,7 +150,9 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "Step 2 — draft the reply with these rules:\n"
         "1. Match the formality of the sender.\n"
         "2. Stay grounded in what the sender actually wrote and the user's instructions. "
-        "Do not invent product details, pricing, or commitments.\n"
+        "Do not invent product details, pricing, or commitments. When the email asks for a fact the instructions "
+        "do not give (a price, whether something is possible, a date), do not answer yes or no and do not call it "
+        "'competitive': say you will confirm it and come back to them.\n"
         "3. Respect the interest level you just classified:\n"
         "   - positive: momentum-building, propose a clear next step.\n"
         "   - requested_info: directly address what they asked for.\n"
@@ -157,7 +162,11 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "4. Honor the length guidance the user provided in the prompt.\n"
         "5. End with a clear question or a specific next step.\n"
         "6. Sign with the signature given in the prompt, as written. Never write placeholders in brackets such as "
-        "[Your Name] or [Company]: leave out what you do not know.\n\n"
+        "[Your Name] or [Company]: leave out what you do not know.\n"
+        "7. Write in the language and script the sender wrote in (Roman Urdu stays Roman Urdu, Urdu script stays "
+        "Urdu script), unless the user's instructions ask for another. In Urdu or Roman Urdu write as the company "
+        "('hum'), so the verbs do not guess the writer's gender.\n"
+        "8. Greet the person by the name they sign the email with; only when there is none, by the sender name.\n\n"
         "Output strict JSON only, with exactly these keys: "
         '{"interest_level": "...", "analysis": "...", "subject": "...", "body": "...", "reasoning": "..."}'
     )
@@ -679,6 +688,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             f"INCOMING BODY:\n{for_ai(reply.reply_content)}\n\n"
             f"User instructions: {user_context or '(none)'}\n\n"
             f"Signature:\n{self._signature()}\n\n"
+            f"{self.WE_IN_URDU}"
             "Draft the reply now, returning the JSON object described in the system prompt."
         )
 
@@ -722,6 +732,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             f"{attachments_block}"
             f"User instructions: {user_context or '(none)'}\n\n"
             f"Signature:\n{self._signature()}\n\n"
+            f"{self.WE_IN_URDU}"
             "First classify the sender's interest_level, write a short analysis, "
             "then draft the reply. Return the JSON object described in the system prompt."
         )
@@ -765,6 +776,12 @@ class ReplyDraftAgent(MarketingBaseAgent):
             lines.append(body)
         lines.append('--- end of prior messages ---\n')
         return '\n'.join(lines) + '\n'
+
+    # Said in the request as well as the rules: with the rules alone, a Roman Urdu draft signed by Nadia wrote "jaanch
+    # kar rahi hoon … de dungi", guessing the writer's gender from the name.
+    WE_IN_URDU = ("Language: write the reply in the language of the INCOMING BODY above; an email in English gets a "
+                  "reply in English. Only when that email is in Urdu or Roman Urdu: write as the company, with 'hum' "
+                  "and plural verbs ('hum check kar rahe hain'), never 'main' with a he or she verb.\n\n")
 
     def _signature(self):
         """Who signs the reply: the person drafting and the company, or the company's team when the login is the
