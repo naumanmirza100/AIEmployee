@@ -177,8 +177,13 @@ export default function SDRAnalyticsTab() {
   const handleSendSummary = async () => {
     setSending(true);
     try {
-      await sendSdrDailySummary();
-      toast({ title: 'Daily summary email sent!' });
+      const res = await sendSdrDailySummary();
+      // It said "sent" when the server answered sent: false (the AI SDR film, 30 Oct).
+      if ((res?.sent ?? res?.data?.sent) === false) {
+        toast({ title: 'The summary email could not be sent', description: 'Try again later; if it keeps failing, tell the site\'s admin.', variant: 'destructive' });
+      } else {
+        toast({ title: 'Daily summary email sent!' });
+      }
     } catch {
       toast({ title: 'Failed to send summary email', variant: 'destructive' });
     } finally {

@@ -286,7 +286,9 @@ def _build_scheduling_html(first_name, sender, sender_title, sender_company,
         f'<li style="margin-bottom:6px;color:#374151;font-size:14px;">{b}</li>'
         for b in [
             'Your current priorities and challenges',
-            'How companies like yours are already using our solution',
+            # It said "How companies like yours are already using our solution": customers the salesperson never
+            # named, in an email sent in their name (the AI SDR film, 30 Oct).
+            f'What we offer, and whether it fits {company_name or "your team"}',
             'Any questions you have — we keep it open and no-pressure',
         ]
     )
@@ -700,14 +702,16 @@ class MeetingSchedulingAgent:
     # ------------------------------------------------------------------
 
     def generate_prep_notes(self, lead, enrollment=None, reply_text: str = '') -> dict:
-        if self.groq_client:
+        # Tried twice: the model now and then repeats one question until it runs out of room, and the notes are not
+        # JSON (two of three tries on 30 Oct). A second try is a fresh draw.
+        for attempt in (1, 2) if self.groq_client else ():
             try:
                 return self._ai_prep_notes(lead, enrollment, reply_text)
             except Exception as exc:
                 from core.api_key_service import KeyServiceError
                 if isinstance(exc, KeyServiceError):
                     raise
-                logger.warning("AI prep notes failed, using defaults: %s", exc)
+                logger.warning("AI prep notes failed (try %d of 2): %s", attempt, exc)
         return self._default_prep_notes(lead, reply_text)
 
     def _ai_prep_notes(self, lead, enrollment, reply_text: str) -> dict:
@@ -716,7 +720,10 @@ class MeetingSchedulingAgent:
         if lead.recent_news:
             recent_news = (lead.recent_news[0] or {}).get('title', '')
 
-        reply_excerpt = (reply_text or '')[:400] or 'No reply text available'
+        # The lead's words only: with our quoted email and its long unsubscribe link in it, the model echoed the link
+        # and ran out of room, and the notes fell back to the template (the AI SDR film, 30 Oct).
+        from ai_sdr_agent.agents.email_assistant_agent import strip_quoted_reply
+        reply_excerpt = (strip_quoted_reply(reply_text or '') or reply_text or '')[:400] or 'No reply text available'
         campaign_name = enrollment.campaign.name if enrollment else 'Outreach Campaign'
         campaign_desc = enrollment.campaign.description if enrollment else ''
         emails_sent = enrollment.current_step if enrollment else 1
@@ -735,7 +742,12 @@ Campaign: {campaign_name} — {campaign_desc}
 Emails sent before reply: {emails_sent}
 Lead's reply: "{reply_excerpt}"
 
-Return exactly this JSON:
+Rules:
+- The campaign line above is all you know about what we offer. A talking point never names a feature, integration,
+  result or customer it does not give: the salesperson may repeat it on the call
+- What you know about the lead is the lines above; say "may" or "ask" for anything you only guess
+
+Return exactly this JSON, and nothing after it:
 {{
   "summary": "2-3 sentence overview of who this person is and why they replied",
   "talking_points": ["point 1", "point 2", "point 3"],
@@ -745,6 +757,9 @@ Return exactly this JSON:
   "recommended_duration": "30 min",
   "key_insight": "One sentence — the single most important thing to know going into this call"
 }}"""
+        # Found filming the AI SDR (30 Oct): a talking point read "Explain easy integration with existing practice
+        # management software", which the campaign never offered. With the rules after the JSON the model ran on
+        # past 9,000 characters, so they come first.
 
         resp = self.groq_client.chat.completions.create(
             model=self.model,
@@ -774,7 +789,8 @@ Return exactly this JSON:
             "talking_points": [
                 f"Ask about their current challenges in {lead.company_industry or 'their industry'}",
                 "Understand their decision-making process and timeline",
-                "Present case studies from similar companies",
+                # Not "Present case studies from similar companies": there may be none.
+                f"Walk through what we offer, and whether it fits {lead.company_name or 'them'}",
             ],
             "questions_to_ask": [
                 "What prompted you to reply? What's driving this priority right now?",

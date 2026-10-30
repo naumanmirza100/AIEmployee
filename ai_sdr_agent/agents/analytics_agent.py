@@ -9,12 +9,7 @@ Calculates performance metrics for the AI SDR system and delivers:
 from __future__ import annotations
 
 import logging
-import os
-import smtplib
-import ssl
 from datetime import timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
 from django.conf import settings
 from django.db.models import Count, Q
@@ -160,9 +155,12 @@ class AnalyticsAgent:
             })
 
         # ── Funnel ────────────────────────────────────────────────────
+        # Contacted = the leads emailed at least once. It was counted by the lead's status, which sending never sets,
+        # so five clinics emailed showed as 2 contacted and 3 replied (the AI SDR film, 30 Oct).
+        contacted = max(logs_qs.filter(status='sent').values('enrollment__lead_id').distinct().count(), replied_total)
         funnel = [
             {'stage': 'Total Leads',  'count': leads_total,                                             'color': '#a78bfa'},
-            {'stage': 'Contacted',    'count': leads_qs.filter(status__in=['contacted','replied','meeting_scheduled','converted']).count(), 'color': '#60a5fa'},
+            {'stage': 'Contacted',    'count': contacted,                                               'color': '#60a5fa'},
             {'stage': 'Replied',      'count': replied_total,                                           'color': '#4ade80'},
             {'stage': 'Meetings',     'count': meetings_total,                                          'color': '#34d399'},
             {'stage': 'Converted',    'count': leads_qs.filter(status='converted').count(),             'color': '#fbbf24'},
@@ -441,30 +439,17 @@ class AnalyticsAgent:
     # ------------------------------------------------------------------
 
     def _send_email(self, to_email: str, subject: str, html: str) -> bool:
-        smtp_host     = getattr(settings, 'EMAIL_HOST',     os.environ.get('EMAIL_HOST', ''))
-        smtp_port     = int(getattr(settings, 'EMAIL_PORT', os.environ.get('EMAIL_PORT', 587)))
-        smtp_user     = getattr(settings, 'EMAIL_HOST_USER',     os.environ.get('EMAIL_HOST_USER', ''))
-        smtp_password = getattr(settings, 'EMAIL_HOST_PASSWORD', os.environ.get('EMAIL_HOST_PASSWORD', ''))
-        from_email    = getattr(settings, 'DEFAULT_FROM_EMAIL', smtp_user) or smtp_user
+        # Through the site's own mail settings, as every other email it sends. It had SMTP code of its own that
+        # needed a user name and password and forced STARTTLS, so where the site sends without them nothing went,
+        # while the screen said it had (the AI SDR film, 30 Oct).
+        from django.core.mail import EmailMultiAlternatives
+        from django.utils.html import strip_tags
 
-        if not (smtp_host and smtp_user and smtp_password):
-            logger.warning('AnalyticsAgent._send_email: SMTP not configured (EMAIL_HOST/USER/PASSWORD missing)')
-            return False
-
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', '') or getattr(settings, 'EMAIL_HOST_USER', '')
         try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From']    = f'Pay Per Project AI SDR <{from_email}>'
-            msg['To']      = to_email
-            msg.attach(MIMEText(html, 'html', 'utf-8'))
-
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP(smtp_host, smtp_port) as server:
-                server.ehlo()
-                server.starttls(context=ctx)
-                server.login(smtp_user, smtp_password)
-                server.sendmail(from_email, to_email, msg.as_string())
-
+            msg = EmailMultiAlternatives(subject, strip_tags(html), from_email, [to_email])
+            msg.attach_alternative(html, 'text/html')
+            msg.send()
             logger.info('AnalyticsAgent: email sent to %s subject="%s"', to_email, subject)
             return True
         except Exception as exc:

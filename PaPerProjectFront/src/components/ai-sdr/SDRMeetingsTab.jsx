@@ -496,7 +496,8 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 1 }}>
               {cells.map((d, i) => {
                 const dateStr = d ? `${y}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}` : '';
-                const selected = dateStr === selDate;
+                // The blank cells before the 1st have no date; with none chosen yet they matched '' and showed as chosen.
+                const selected = !!d && dateStr === selDate;
                 const past = d ? isPast(d) : false;
                 const todayD = d ? isToday(d) : false;
                 return (

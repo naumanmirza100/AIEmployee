@@ -929,7 +929,9 @@ const SDRLeadsTab = () => {
     setCsvImporting(true);
     try {
       const resp = await importLeadsFromCSV(csvImport.file);
-      toast({ title: `Imported ${resp.created} leads`, description: resp.message });
+      // Refused rows are listed with their reasons: 5 seconds was too short to read them (AI SDR film, 30 Oct).
+      toast({ title: `Imported ${resp.created} leads`, description: resp.message,
+        ...(resp.refused?.length ? { duration: 15000 } : {}) });
       setCsvImport(null);
       setPage(1);
       loadLeads({ page: 1 });
