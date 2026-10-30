@@ -178,7 +178,23 @@ def _validate_mail_settings(d, campaign=None):
 # Serialisers
 # --------------------------------------------------------------------------
 
+def _normalize_lead_list(val) -> list:
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str) and val.strip():
+        try:
+            import json
+            parsed = json.loads(val)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+        return [item.strip() for item in val.split(',') if item.strip()]
+    return []
+
+
 def _serialize_lead(lead: SDRLead) -> dict:
+    raw = lead.raw_data if isinstance(lead.raw_data, dict) else {}
     return {
         'id': lead.id,
         'full_name': lead.display_name,
@@ -195,25 +211,27 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'company_size': lead.company_size,
         'company_size_range': lead.company_size_range,
         'company_location': lead.company_location,
-        'company_technologies': lead.company_technologies,
+        'company_technologies': _normalize_lead_list(lead.company_technologies),
         'linkedin_url': lead.linkedin_url,
         'company_linkedin_url': lead.company_linkedin_url,
         'company_website': lead.company_website,
-        'recent_news': lead.recent_news,
-        'buying_signals': lead.buying_signals,
+        'recent_news': lead.recent_news if isinstance(lead.recent_news, list) else [],
+        'buying_signals': _normalize_lead_list(lead.buying_signals),
         'score': lead.score,
         'temperature': lead.temperature,
         'score_breakdown': lead.score_breakdown,
         'qualification_reasoning': lead.qualification_reasoning,
-        'key_strengths': lead.key_strengths if hasattr(lead, 'key_strengths') else [],
-        'concerns': lead.concerns if hasattr(lead, 'concerns') else [],
+        'key_strengths': _normalize_lead_list(getattr(lead, 'key_strengths', [])),
+        'concerns': _normalize_lead_list(getattr(lead, 'concerns', [])),
         'outreach_strategy': lead.outreach_strategy if hasattr(lead, 'outreach_strategy') else '',
         'confidence_score': lead.confidence_score if hasattr(lead, 'confidence_score') else None,
-        'data_quality_flags': lead.data_quality_flags if hasattr(lead, 'data_quality_flags') else [],
+        'data_quality_flags': _normalize_lead_list(getattr(lead, 'data_quality_flags', [])),
         'email_bounced': lead.email_bounced,
         'status': lead.status,
         'qualification_status': lead.qualification_status,
         'source': lead.source,
+        'research_status': raw.get('research_status', 'none'),
+        'research_profile': raw.get('research_profile'),
         'qualified_at': lead.qualified_at.isoformat() if lead.qualified_at else None,
         'created_at': lead.created_at.isoformat(),
         'updated_at': lead.updated_at.isoformat(),
@@ -782,6 +800,86 @@ def research_leads(request):
     except Exception as exc:
         logger.error("Research leads error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_lead_endpoint(request, lead_id):
+    """
+    POST: Run independent research workflow on an existing lead.
+    GET: Retrieve existing research profile and status for a lead.
+    """
+    company_user = request.user
+    lead = SDRLead.all_objects.filter(company_user=company_user, pk=lead_id).first()
+    if not lead:
+        return Response({'status': 'error', 'message': f'Lead {lead_id} not found.'}, status=404)
+
+    if request.method == 'GET':
+        raw_data = lead.raw_data if isinstance(lead.raw_data, dict) else {}
+        profile = raw_data.get('research_profile')
+        status = raw_data.get('research_status', 'none')
+        return Response({
+            'status': 'success',
+            'lead_id': lead.id,
+            'research_status': status,
+            'research_profile': profile,
+            'recent_news': lead.recent_news,
+            'buying_signals': lead.buying_signals,
+        })
+
+    # POST: Trigger research
+    force = bool(request.data.get('force', False))
+    campaign_id = request.data.get('campaign_id')
+    campaign = None
+    if campaign_id:
+        campaign = SDRCampaign.objects.filter(company_user=company_user, pk=campaign_id).first()
+
+    researcher = _get_research_agent(company_user.company, company_user=company_user)
+    try:
+        profile = researcher.research_lead(lead, campaign=campaign)
+        return Response({
+            'status': 'success',
+            'lead_id': lead.id,
+            'research_status': profile.get('research_status', 'completed'),
+            'research_profile': profile,
+        })
+    except Exception as exc:
+        logger.error("Error researching lead %s: %s", lead_id, exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_leads_batch_endpoint(request):
+    """
+    POST: Run independent research on multiple existing leads.
+    Expects JSON: {'lead_ids': [1, 2, ...], 'campaign_id': Optional[int], 'force': bool}
+    """
+    company_user = request.user
+    lead_ids = request.data.get('lead_ids', [])
+    if not lead_ids or not isinstance(lead_ids, list):
+        return Response({'status': 'error', 'message': 'lead_ids must be a non-empty list of IDs.'}, status=400)
+
+    # Restrict to leads belonging to this user (capped at 50 per batch)
+    leads = list(SDRLead.all_objects.filter(company_user=company_user, pk__in=lead_ids[:50]))
+    if not leads:
+        return Response({'status': 'error', 'message': 'No matching leads found.'}, status=404)
+
+    campaign_id = request.data.get('campaign_id')
+    campaign = None
+    if campaign_id:
+        campaign = SDRCampaign.objects.filter(company_user=company_user, pk=campaign_id).first()
+
+    researcher = _get_research_agent(company_user.company, company_user=company_user)
+    results = researcher.research_leads_batch(leads, campaign=campaign)
+
+    return Response({
+        'status': 'success',
+        'total': len(leads),
+        'results': results,
+    })
 
 
 @api_view(['POST'])

@@ -17,6 +17,7 @@ import time
 
 import requests
 from django.conf import settings
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,15 @@ class LeadResearchAgent:
 
         if company is not None:
             from ai_sdr_agent.agents.sdr_key_resolver import resolve_sdr_groq_client
-            self.groq_client, self._key_ctx = resolve_sdr_groq_client(company)
+            try:
+                self.groq_client, self._key_ctx = resolve_sdr_groq_client(company)
+            except Exception as exc:
+                logger.warning(
+                    "LeadResearchAgent: key resolution failed for company %s (%s) — using deterministic extraction.",
+                    company, exc
+                )
+                self.groq_client = None
+                self._key_ctx = None
         else:
             logger.warning(
                 "LeadResearchAgent initialised without a company — no LLM key resolved."
@@ -240,9 +249,123 @@ class LeadResearchAgent:
 
         self.model = getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
 
+        from ai_sdr_agent.agents.lead_research_workflow import LeadResearchWorkflow
+        self.workflow = LeadResearchWorkflow(
+            groq_client=self.groq_client,
+            model=self.model,
+            key_ctx=self._key_ctx,
+            apify_token=self.apify_token,
+            apify_actor=self.apify_actor,
+        )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def research_lead(self, lead_or_id, campaign=None) -> dict:
+        """
+        Research an existing lead (independent of its discovery origin).
+        Accepts an SDRLead instance, an integer ID, or a lead dict.
+        Updates lead record non-destructively and returns structured profile.
+        """
+        from ai_sdr_agent.models import SDRLead
+        lead_obj = None
+        if isinstance(lead_or_id, (int, str)) and str(lead_or_id).isdigit():
+            lead_obj = SDRLead.all_objects.filter(pk=int(lead_or_id)).first()
+            if not lead_obj:
+                raise ValueError(f"Lead with id {lead_or_id} not found.")
+            lead = lead_obj
+        elif hasattr(lead_or_id, 'pk'):
+            lead_obj = lead_or_id
+            lead = lead_obj
+        else:
+            lead = lead_or_id
+
+        # Mark running status in lead record if model instance
+        if lead_obj:
+            if not isinstance(lead_obj.raw_data, dict):
+                lead_obj.raw_data = {}
+            lead_obj.raw_data['research_status'] = 'running'
+            lead_obj.save(update_fields=['raw_data', 'updated_at'])
+
+        try:
+            profile = self.workflow.execute_research(lead, campaign=campaign)
+
+            if lead_obj:
+                update_fields = ['raw_data', 'updated_at']
+                lead_obj.raw_data['research_profile'] = profile
+                lead_obj.raw_data['research_status'] = profile.get('research_status', 'completed')
+
+                comp_res = profile.get('company_research', {})
+                if not lead_obj.company_industry and comp_res.get('industry') and comp_res.get('industry').lower() != 'unknown':
+                    lead_obj.company_industry = comp_res['industry'][:255]
+                    update_fields.append('company_industry')
+
+                if not lead_obj.company_website and lead_obj.company_domain:
+                    domain = lead_obj.company_domain.strip()
+                    lead_obj.company_website = f"https://{domain}" if not domain.startswith('http') else domain
+                    update_fields.append('company_website')
+
+                prospect_res = profile.get('prospect_research', {})
+                if not lead_obj.seniority_level and prospect_res.get('seniority') and prospect_res.get('seniority').lower() != 'unknown':
+                    lead_obj.seniority_level = prospect_res['seniority'][:100]
+                    update_fields.append('seniority_level')
+                if not lead_obj.department and prospect_res.get('department') and prospect_res.get('department').lower() != 'unknown':
+                    lead_obj.department = prospect_res['department'][:100]
+                    update_fields.append('department')
+
+                signals = profile.get('company_signals', [])
+                if signals:
+                    existing_signals = list(lead_obj.buying_signals or [])
+                    new_signals = [s.get('description', '') for s in signals if s.get('description')]
+                    combined_signals = list(dict.fromkeys(existing_signals + new_signals))
+                    lead_obj.buying_signals = combined_signals[:10]
+                    update_fields.append('buying_signals')
+
+                    existing_news = list(lead_obj.recent_news or [])
+                    new_news = [
+                        {
+                            'title': s.get('type', 'Company Update').replace('_', ' ').title(),
+                            'date': s.get('published_at', '') or timezone.now().strftime('%Y-%m-%d'),
+                            'summary': s.get('description', ''),
+                            'url': s.get('source_url', ''),
+                        }
+                        for s in signals if s.get('description')
+                    ]
+                    lead_obj.recent_news = (existing_news + new_news)[:10]
+                    update_fields.append('recent_news')
+
+                lead_obj.save(update_fields=list(set(update_fields)))
+
+            return profile
+
+        except Exception as exc:
+            logger.error("LeadResearchAgent.research_lead failed for lead %s: %s", lead_or_id, exc, exc_info=True)
+            if lead_obj:
+                lead_obj.raw_data['research_status'] = 'failed'
+                lead_obj.raw_data['research_error'] = str(exc)
+                lead_obj.save(update_fields=['raw_data', 'updated_at'])
+            raise
+
+    def research_leads_batch(self, leads, campaign=None) -> list[dict]:
+        """
+        Research multiple existing leads in a batch.
+        Isolates failures so one failing lead does not abort the batch.
+        """
+        results = []
+        for item in leads:
+            try:
+                profile = self.research_lead(item, campaign=campaign)
+                results.append(profile)
+            except Exception as exc:
+                lead_id = str(getattr(item, 'id', '') or (item.get('id') if isinstance(item, dict) else item))
+                logger.warning("Batch research failed for lead %s: %s", lead_id, exc)
+                results.append({
+                    'lead_id': lead_id,
+                    'research_status': 'failed',
+                    'error': str(exc),
+                })
+        return results
 
     def search_leads(self, icp_profile, count: int = 20, source: str = 'auto') -> list[dict]:
         """Return a list of raw lead dicts for the given ICP profile."""

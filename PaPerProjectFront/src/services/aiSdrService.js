@@ -172,6 +172,34 @@ export const qualifyAllLeads = async () => {
 };
 
 // --------------------------------------------------------------------------
+// Lead Research Workflow (Agent 1 Intelligence)
+export const researchLead = async (leadId, data = {}) => {
+  try {
+    return await companyApi.post(`/sdr/leads/${leadId}/research/`, data);
+  } catch (error) {
+    console.error('Research lead error:', error);
+    throw error;
+  }
+};
+
+export const getLeadResearch = async (leadId) => {
+  try {
+    return await companyApi.get(`/sdr/leads/${leadId}/research/`);
+  } catch (error) {
+    console.error('Get lead research error:', error);
+    throw error;
+  }
+};
+
+export const researchLeadsBatch = async (leadIds, data = {}) => {
+  try {
+    return await companyApi.post('/sdr/leads/research-batch/', { lead_ids: leadIds, ...data });
+  } catch (error) {
+    console.error('Batch research leads error:', error);
+    throw error;
+  }
+};
+
 // Research (Apollo.io or AI generation)
 // --------------------------------------------------------------------------
 export const researchLeads = async ({ count = 20, source = 'auto' } = {}) => {

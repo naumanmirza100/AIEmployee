@@ -5,6 +5,14 @@ import django.db.models.deletion
 from django.conf import settings
 
 
+def _drop_index_compat(apps, schema_editor):
+    vendor = schema_editor.connection.vendor
+    with schema_editor.connection.cursor() as cursor:
+        if vendor in ('mysql', 'microsoft'):
+            cursor.execute('DROP INDEX IF EXISTS recruitment_agent_recruiterinterviewsettings_recruiter_id_b57b8a19 ON recruitment_agent_recruiterinterviewsettings;')
+        else:
+            cursor.execute('DROP INDEX IF EXISTS recruitment_agent_recruiterinterviewsettings_recruiter_id_b57b8a19;')
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -15,10 +23,7 @@ class Migration(migrations.Migration):
 
     operations = [
         # Drop the existing index first
-        migrations.RunSQL(
-            sql="DROP INDEX IF EXISTS recruitment_agent_recruiterinterviewsettings_recruiter_id_b57b8a19 ON recruitment_agent_recruiterinterviewsettings;",
-            reverse_sql=migrations.RunSQL.noop,
-        ),
+        migrations.RunPython(_drop_index_compat, migrations.RunPython.noop),
         migrations.AlterField(
             model_name='recruiterinterviewsettings',
             name='company_user',

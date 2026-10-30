@@ -829,6 +829,8 @@ urlpatterns = [
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/restore/?$', sdr_api.restore_lead, name='sdr_restore_lead'),  # POST
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/?$', sdr_api.lead_detail, name='sdr_lead_detail'),  # GET, PUT, DELETE
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/qualify/?$', sdr_api.qualify_lead, name='sdr_qualify_lead'),  # POST
+    re_path(r'^sdr/leads/(?P<lead_id>\d+)/research/?$', sdr_api.research_lead_endpoint, name='sdr_research_lead_endpoint'),  # GET, POST
+    re_path(r'^sdr/leads/research-batch/?$', sdr_api.research_leads_batch_endpoint, name='sdr_research_leads_batch_endpoint'),  # POST
     # Campaigns
     re_path(r'^sdr/campaigns/?$', sdr_api.sdr_campaigns_list, name='sdr_campaigns_list'),  # GET, POST
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/?$', sdr_api.sdr_campaign_detail, name='sdr_campaign_detail'),  # GET, PUT, DELETE

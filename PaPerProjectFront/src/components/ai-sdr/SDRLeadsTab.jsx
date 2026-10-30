@@ -18,7 +18,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
-  researchLeads, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
+  researchLead, getLeadResearch, researchLeads, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads,
 } from '@/services/aiSdrService';
 
@@ -604,6 +604,7 @@ const SDRLeadsTab = () => {
   const [newLead, setNewLead] = useState(BLANK_LEAD);
   const [addingLead, setAddingLead] = useState(false);
   const [qualifyingId, setQualifyingId] = useState(null);
+  const [researchingId, setResearchingId] = useState(null);
 
   const [searchRaw, setSearchRaw] = useState('');
   const [filterTemp, setFilterTemp] = useState('');
@@ -810,6 +811,35 @@ const SDRLeadsTab = () => {
     } catch (e) {
       toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
     } finally { setDeletingSingle(false); }
+  };
+
+  const handleResearchOne = async (lead) => {
+    if (!lead) return;
+    setResearchingId(lead.id);
+    try {
+      const resp = await researchLead(lead.id, { force: true });
+      const data = resp?.data || resp;
+      toast({
+        title: 'Research Complete',
+        description: `Intelligence gathered for ${lead.company_name || lead.full_name || 'lead'}`,
+      });
+      if (selectedLead?.id === lead.id) {
+        setSelectedLead(prev => ({
+          ...prev,
+          research_status: data.research_status || 'completed',
+          research_profile: data.research_profile,
+        }));
+      }
+      loadLeads();
+    } catch (e) {
+      toast({
+        title: 'Research failed',
+        description: e?.response?.data?.message || e.message || 'Could not complete research',
+        variant: 'destructive',
+      });
+    } finally {
+      setResearchingId(null);
+    }
   };
 
   const handleQualifyOne = async (lead) => {
@@ -1474,34 +1504,125 @@ const SDRLeadsTab = () => {
               </div>
             </div>
 
-            {selectedLead.company_technologies?.length > 0 && (
-              <div style={{ marginBottom: 20 }}>
-                <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Technologies</h4>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {selectedLead.company_technologies.map(t => (
-                    <span key={t} style={{ padding: '3px 10px', borderRadius: 10, fontSize: 12, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: 'hsl(var(--pt-93c5fd))' }}>{t}</span>
-                  ))}
+            {/* Technologies */}
+            {(() => {
+              const rawTech = selectedLead.company_technologies;
+              const techList = Array.isArray(rawTech)
+                ? rawTech
+                : typeof rawTech === 'string' && rawTech.trim()
+                  ? rawTech.split(',').map(t => t.trim()).filter(Boolean)
+                  : [];
+              if (!techList.length) return null;
+              return (
+                <div style={{ marginBottom: 20 }}>
+                  <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Technologies</h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {techList.map((t, idx) => (
+                      <span key={`${t}-${idx}`} style={{ padding: '3px 10px', borderRadius: 10, fontSize: 12, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: 'hsl(var(--pt-93c5fd))' }}>{t}</span>
+                    ))}
+                  </div>
                 </div>
+              );
+            })()}
+
+            {/* Research Intelligence Profile */}
+            {selectedLead.research_profile && (
+              <div style={{ marginBottom: 20, padding: '14px', borderRadius: 10, background: 'rgba(14,165,233,0.06)', border: '1px solid rgba(14,165,233,0.25)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Search size={14} style={{ color: '#38bdf8' }} />
+                    <h4 style={{ color: '#38bdf8', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0, fontWeight: 700 }}>Company Intelligence</h4>
+                  </div>
+                  {(() => {
+                    const c = selectedLead.research_profile.research_confidence ?? 0;
+                    const tier = c >= 70
+                      ? { bg: 'rgba(16,185,129,0.15)', text: '#34d399', label: 'High' }
+                      : c >= 45
+                        ? { bg: 'rgba(56,189,248,0.15)', text: '#38bdf8', label: 'Moderate' }
+                        : { bg: 'rgba(245,158,11,0.15)', text: '#fbbf24', label: 'Limited' };
+                    return (
+                      <span title={`${tier.label} source verification (${c}%)`} style={{ fontSize: 11, padding: '3px 9px', borderRadius: 6, background: tier.bg, color: tier.text, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: tier.text }} />
+                        {tier.label} {c}%
+                      </span>
+                    );
+                  })()}
+                </div>
+
+                {selectedLead.research_profile.company_research?.overview && (
+                  <p style={{ color: 'hsl(var(--pt-e0f2fe))', fontSize: 12.5, lineHeight: 1.5, marginBottom: 10 }}>
+                    {selectedLead.research_profile.company_research.overview.toLowerCase() === 'unknown'
+                      ? `Baseline intelligence: ${selectedLead.company_name} in ${selectedLead.company_industry || 'commercial sector'}. (Official website was unreachable).`
+                      : selectedLead.research_profile.company_research.overview}
+                  </p>
+                )}
+
+                {selectedLead.research_profile.prospect_research?.decision_making_relevance && (
+                  <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, background: 'rgba(0,0,0,0.2)' }}>
+                    <span style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', display: 'block', marginBottom: 2 }}>Prospect Context</span>
+                    <span style={{ color: '#f1f5f9', fontSize: 12 }}>
+                      {selectedLead.research_profile.prospect_research.decision_making_relevance.toLowerCase() === 'unknown'
+                        ? `${selectedLead.job_title} at ${selectedLead.company_name} (${selectedLead.seniority_level || 'Decision Maker'}).`
+                        : selectedLead.research_profile.prospect_research.decision_making_relevance}
+                    </span>
+                  </div>
+                )}
+
+                {Array.isArray(selectedLead.research_profile.evidence) && selectedLead.research_profile.evidence.length > 0 && (
+                  <div>
+                    <span style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Verified Sources ({selectedLead.research_profile.evidence.length})</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {selectedLead.research_profile.evidence.slice(0, 3).map((ev, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11 }}>
+                          <span style={{ color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
+                            {ev.finding}
+                          </span>
+                          {ev.source_url && (
+                            <a href={safeUrl(ev.source_url)} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 2 }}>
+                              source <ExternalLink size={10} />
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {selectedLead.buying_signals?.length > 0 && (
-              <div style={{ marginBottom: 20 }}>
-                <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Buying Signals</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {selectedLead.buying_signals.map((s, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                      <Sparkles size={12} style={{ color: '#10b981', marginTop: 2, flexShrink: 0 }} />
-                      <span style={{ color: 'hsl(var(--pt-d1fae5))', fontSize: 13 }}>{s}</span>
-                    </div>
-                  ))}
+            {/* Buying Signals */}
+            {(() => {
+              const rawSignals = selectedLead.buying_signals;
+              const signalsList = Array.isArray(rawSignals)
+                ? rawSignals
+                : typeof rawSignals === 'string' && rawSignals.trim()
+                  ? [rawSignals]
+                  : [];
+              if (!signalsList.length) return null;
+              return (
+                <div style={{ marginBottom: 20 }}>
+                  <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Buying Signals</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {signalsList.map((s, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                        <Sparkles size={12} style={{ color: '#10b981', marginTop: 2, flexShrink: 0 }} />
+                        <span style={{ color: 'hsl(var(--pt-d1fae5))', fontSize: 13 }}>
+                          {typeof s === 'object' && s !== null ? (s.description || s.title || JSON.stringify(s)) : String(s)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Actions */}
-            <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid var(--sfc-1e0f38)' }}>
-              <Button onClick={() => handleQualifyOne(selectedLead)} disabled={qualifyingId === selectedLead.id} style={{ flex: 1, background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid var(--sfc-1e0f38)', flexWrap: 'wrap' }}>
+              <Button onClick={() => handleResearchOne(selectedLead)} disabled={researchingId === selectedLead.id} style={{ flex: 1, minWidth: 140, background: 'linear-gradient(90deg,#0284c7,#0369a1)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {researchingId === selectedLead.id ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                {selectedLead.research_status === 'completed' ? 'Re-research' : 'Research Lead'}
+              </Button>
+              <Button onClick={() => handleQualifyOne(selectedLead)} disabled={qualifyingId === selectedLead.id} style={{ flex: 1, minWidth: 140, background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                 {qualifyingId === selectedLead.id ? <Loader2 size={13} className="animate-spin" /> : <Brain size={13} />}
                 {selectedLead.score != null ? 'Re-score with AI' : 'Score with AI'}
               </Button>
