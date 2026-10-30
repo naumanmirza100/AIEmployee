@@ -385,11 +385,18 @@ def ask_inbox(question, account, agent, history=()) -> dict:
     answered = _answered([m.id for m in emails + others])
     index = '\n'.join(_head(m, answered) + (f': {m.ai_summary}' if m.ai_summary else '') for m in others)
     files = _file_summaries(emails)
+    # Asked what still needs an answer, the AI named two of three on live, a different two each time: the list is
+    # worked out here and given to it.
+    waiting = ''
+    if plan.get('waiting'):
+        ids = [m.id for m in emails + others if m.direction == 'in' and m.needs_reply and m.id not in answered]
+        waiting = ('\n\nEMAILS THAT WAIT FOR AN ANSWER, none answered yet (name every one): '
+                   + (', '.join(f'[#{i}]' for i in ids) if ids else 'none'))
     earlier = '\n'.join(f'Q: {q}\nA: {a}' for q, a in history)
     today = timezone.localtime().strftime('%A %d %B %Y')
     prompt = (f'Today is {today}.\n\n' + (f'Earlier in this conversation:\n{earlier}\n\n' if earlier else '')
               + 'EMAILS IN FULL:\n\n' + '\n\n'.join(_email_block(m, files.get(m.id, ()), answered) for m in emails)
-              + (f'\n\nOTHER RECENT EMAILS, ONE LINE EACH:\n{index}' if index else '')
+              + (f'\n\nOTHER RECENT EMAILS, ONE LINE EACH:\n{index}' if index else '') + waiting
               + f'\n\nQUESTION: {question}' + answer_last(plan.get('language')))
     raw = agent._call_llm(prompt=prompt, system_prompt=ANSWER_PROMPT, temperature=0.2, max_tokens=800)
     data = _read_answer(raw)

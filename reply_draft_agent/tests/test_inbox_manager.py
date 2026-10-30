@@ -258,6 +258,11 @@ class AskTests(InboxTestCase):
         found = insights.find_emails(self.mailbox, {'terms': ['answer'], 'waiting': True})
         self.assertEqual(found[0], move)
         self.assertNotIn(done, found[:1])
+        # And the list itself is worked out, not left to the AI (it named a different two of three each time).
+        with ai('{"terms": [], "waiting": true}', 'Tariq [#1].') as llm:
+            insights.ask_inbox('Kin emails ka jawab abhi dena baqi hai?', self.mailbox, ReplyDraftAgent())
+        self.assertIn(f'EMAILS THAT WAIT FOR AN ANSWER, none answered yet (name every one): [#{move.id}]',
+                      llm.call_args_list[1].kwargs['prompt'])
 
     def test_a_summarised_attachment_is_part_of_what_the_answer_reads(self):
         # "How much is the invoice?": the amount is in the PDF, not in "Please find attached our invoice".
@@ -390,6 +395,26 @@ class MailboxTests(InboxTestCase):
         same = raw.replace('Kiran Shah <Kiran.Shah@Gmail.test>', 'forms@site.test')
         self.assertEqual(Command()._build_inbox_email(email_lib.message_from_string(same), self.mailbox,
                                                       'forms@site.test').reply_to, '')
+
+    def test_an_answer_joins_the_conversation_of_the_email_it_answers(self):
+        # The first email of a conversation has no References, so its key came from its subject, and the customer's
+        # answer to our reply (References: <the first email>) started a conversation of its own.
+        import email as email_lib
+        from marketing_agent.management.commands.sync_inbox import Command
+        first = Command()._build_inbox_email(email_lib.message_from_string(
+            'From: Kiran Shah <kiran@clinic.test>\r\nSubject: Booking app ki qeemat\r\nMessage-ID: <q1@clinic.test>'
+            '\r\n\r\nQeemat kya hai?'), self.mailbox, 'kiran@clinic.test')
+        first.save()
+        answer = Command()._build_inbox_email(email_lib.message_from_string(
+            'From: Kiran Shah <kiran@clinic.test>\r\nSubject: Re: Booking app ki qeemat\r\nMessage-ID: <q3@clinic.test>'
+            '\r\nIn-Reply-To: <r2@margalla.test>\r\nReferences: <q1@clinic.test> <r2@margalla.test>'
+            '\r\n\r\nAur WhatsApp?'), self.mailbox, 'kiran@clinic.test')
+        self.assertTrue(first.thread_key.startswith('subj:'))
+        self.assertEqual(answer.thread_key, first.thread_key)
+        stranger = Command()._build_inbox_email(email_lib.message_from_string(
+            'From: x@y.test\r\nSubject: Re: Other\r\nMessage-ID: <z@y.test>\r\nReferences: <unknown@y.test>\r\n\r\nHi'),
+            self.mailbox, 'x@y.test')
+        self.assertEqual(stranger.thread_key, 'root:unknown@y.test')                 # unknown: as before
 
     def test_an_html_only_email_keeps_its_words_not_its_style_sheet(self):
         import email as email_lib
