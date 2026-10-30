@@ -138,6 +138,7 @@ def ping_crm_integrations():
         integration.save(update_fields=['last_ping_at', 'last_ping_ok'])
 
         if ok:
+            CRMSyncAgent.release_waiting(integration)      # the key works again (CO-159)
             results['ok'] += 1
         else:
             results['failed'] += 1
@@ -167,13 +168,48 @@ def queue_everything(agent, company) -> dict:
     # This filtered on a `company` field leads do not have, so the job failed
     # on its first step every time and "Sync queued" never synced anything.
     each('leads', SDRLead.objects.filter(company_user__company=company), agent.enqueue_sdr_lead)
+    # Emails only: a LinkedIn step's 'sent' row is a reminder to the salesperson (CO-253).
     each('emails', SDROutreachLog.objects.filter(
-        status='sent', enrollment__lead__company_user__company=company,
+        status='sent', action_type='email', enrollment__lead__company_user__company=company,
     ).select_related('enrollment__lead'), agent.enqueue_email_sent)
     each('meetings', SDRMeeting.objects.filter(
         lead__company_user__company=company, scheduled_at__isnull=False,
         status__in=('scheduled', 'completed'),
     ).select_related('lead'), agent.enqueue_meeting)
+    counts.update(queue_inbox(agent, company))
+    return counts
+
+
+#: How far back "Sync All" goes in Reply Draft's mail.
+INBOX_DAYS = 30
+
+
+def queue_inbox(agent, company) -> dict:
+    """Reply Draft's part (the AI Inbox Manager of the client's list): the last month's mail from customers and
+    leads, as the AI read it, and the replies sent. CRM Sync carried only the AI SDR's records (CO-207)."""
+    from datetime import timedelta
+    from core.logins import company_user_ids
+    from crm_sync_agent.agents.crm_sync_agent import INBOX_KINDS
+    from reply_draft_agent.models import InboxEmail, ReplyDraft
+
+    since = timezone.now() - timedelta(days=INBOX_DAYS)
+    owners = company_user_ids(company)
+    counts = {'inbox_emails': 0, 'inbox_replies': 0}
+    for email in InboxEmail.objects.filter(owner_id__in=owners, direction='in', category__in=INBOX_KINDS,
+                                           received_at__gte=since, email_account__is_reply_agent_account=True):
+        try:
+            agent.enqueue_inbox_email(email)
+            counts['inbox_emails'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue inbox email %s', email.pk)
+    for draft in (ReplyDraft.objects.filter(owner_id__in=owners, status='sent', sent_at__gte=since)
+                  .select_related('inbox_email')):
+        try:
+            agent.enqueue_inbox_reply(draft, draft.get_recipient_email(), draft.get_final_subject(),
+                                      draft.get_final_body())
+            counts['inbox_replies'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue reply %s', draft.pk)
     return counts
 
 

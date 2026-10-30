@@ -251,8 +251,9 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await syncCrmLeads(integration.id);
-      toast({ title: 'Sync queued!', description: 'All leads will sync to ' + cfg.label });
+      const res = await syncCrmLeads(integration.id);
+      toast({ title: 'Sync queued!', description: res?.message && res.status === 'done' ? res.message
+        : `AI SDR leads, emails and calls, and Reply Draft's last month of customer mail, go to ${cfg.label} in the next minutes.` });
     } catch {
       toast({ title: 'Sync failed', variant: 'destructive' });
     } finally {
@@ -346,6 +347,34 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
         </div>
       )}
 
+      {/* The key refused: entries wait for it instead of failing for good (CO-159). */}
+      {integration.key_refused_at && (
+        <div data-testid="crm-key-refused" style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderRadius: 10,
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+        }}>
+          <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 13, lineHeight: 1.5, color: 'hsl(var(--pt-d1d5db))' }}>
+            <b style={{ color: '#ef4444' }}>{cfg.label} refused the key.</b>{' '}
+            {integration.waiting || 0} item(s) are waiting, not lost. Put in a new key (or check it in {cfg.label}),
+            then press Test Connection: what waited goes out.
+          </div>
+        </div>
+      )}
+
+      {/* Something the CRM would not take for lack of a permission: skipped, not counted as sent (CO-162). */}
+      {integration.missing_permission && (
+        <div data-testid="crm-missing-permission" style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderRadius: 10,
+          background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)',
+        }}>
+          <AlertCircle size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 13, lineHeight: 1.5, color: 'hsl(var(--pt-d1d5db))' }}>
+            {integration.missing_permission} Add it to the key in {cfg.label}, then press Retry below the queue.
+          </div>
+        </div>
+      )}
+
       {/* Sync toggles */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {[
@@ -374,7 +403,7 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
         </button>
         <button style={btnSecondary} onClick={handleSync} disabled={syncing}>
           {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-          Sync All Leads
+          Sync Everything
         </button>
       </div>
     </div>
@@ -393,6 +422,8 @@ function QueueStats({ stats }) {
         { label: 'Pending', value: stats.pending, color: '#f59e0b' },
         { label: 'Done',    value: stats.done,    color: '#10b981' },
         { label: 'Failed',  value: stats.failed,  color: '#ef4444' },
+        ...(stats.waiting ? [{ label: 'Waiting for the key', value: stats.waiting, color: '#ef4444' }] : []),
+        ...(stats.skipped ? [{ label: 'Skipped', value: stats.skipped, color: '#9ca3af' }] : []),
         { label: 'Total',   value: stats.total,   color: '#a855f7' },
       ].map(s => (
         <div key={s.label} style={{
@@ -461,7 +492,8 @@ const SDRCRMSyncTab = () => {
             CRM & System Sync
           </h2>
           <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, margin: '6px 0 0' }}>
-            Automatically save leads, emails, and meetings to your CRM.
+            Automatically save to your CRM what the agents do: AI SDR leads, the emails sent to them, their calls
+            and replies; and Reply Draft&apos;s mail from customers and leads, with the replies sent.
           </p>
         </div>
         <button style={btnPrimary} onClick={fetchAll} disabled={loading}>
@@ -477,10 +509,10 @@ const SDRCRMSyncTab = () => {
             <Database size={13} /> Sync Queue Status
           </div>
           <QueueStats stats={queueStats} />
-          {queueStats.failed > 0 && (
-            <button style={{ ...btnSecondary, marginTop: 10 }} onClick={handleRetry} disabled={retrying}>
+          {(queueStats.failed + (queueStats.waiting || 0) + (queueStats.skipped || 0)) > 0 && (
+            <button data-testid="crm-retry" style={{ ...btnSecondary, marginTop: 10 }} onClick={handleRetry} disabled={retrying}>
               {retrying ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-              Retry {queueStats.failed} Failed Items
+              Retry {queueStats.failed + (queueStats.waiting || 0) + (queueStats.skipped || 0)} Items Not Sent
             </button>
           )}
         </div>

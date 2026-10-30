@@ -64,7 +64,10 @@ class CredentialTests(ConnectionBase):
         _, one = self.call(views.integration_detail, self.member, method='get', integration_id=integration.id)
         for body in (created, listed, one):
             self.assertNotIn(SECRET, json.dumps(body))
-        self.assertEqual(one['credentials_preview'], {'access_token': 'pat-********cdef'})
+        # A member sees none of it; the owner sees its last four (CO-160).
+        self.assertEqual(one['credentials_preview'], {'access_token': ''})
+        _, mine = self.call(views.integration_detail, self.cu, method='get', integration_id=integration.id)
+        self.assertEqual(mine['credentials_preview'], {'access_token': '********cdef'})
 
     def test_where_to_sign_in_is_shown_but_the_password_is_not(self):
         CRMIntegration.objects.all().delete()
@@ -72,8 +75,9 @@ class CredentialTests(ConnectionBase):
         salesforce.set_credentials({'username': 'ops@acme.example', 'password': 'synthetic-password-1',
                                     'domain': 'login'})
         salesforce.save()
+        # A person's password shows nothing of itself: 'Summer2026!' showed as 'Summ********026!' (CO-160).
         self.assertEqual(salesforce.credentials_preview(),
-                         {'username': 'ops@acme.example', 'password': 'synt********rd-1', 'domain': 'login'})
+                         {'username': 'ops@acme.example', 'password': '********', 'domain': 'login'})
 
     def test_a_connection_saved_before_encryption_still_works_and_is_then_encrypted(self):
         old = CRMIntegration.objects.create(company=self.company, provider='pipedrive',
@@ -185,4 +189,4 @@ class SyncEverythingTests(ConnectionBase):
                 mock.patch.object(agent_module.CRMSyncAgent, 'process_pending', return_value={'processed': 4}):
             code, body = self.call(views.integration_sync_leads, self.member, integration_id=integration.id)
         self.assertEqual((code, body['status']), (200, 'done'), body)
-        self.assertEqual(body['message'], 'Synced 2 leads, 1 emails, 1 meetings.')
+        self.assertEqual(body['message'], 'Synced 2 leads, 1 emails, 1 meetings, 0 inbox emails and 0 replies.')

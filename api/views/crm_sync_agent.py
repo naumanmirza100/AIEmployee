@@ -47,13 +47,24 @@ def _merged_credentials(integration: CRMIntegration, incoming) -> dict:
     return merged
 
 
-def _serialize_integration(integration: CRMIntegration) -> dict:
+def _is_admin(request) -> bool:
+    return getattr(request.user, 'role', None) in IsCompanyAdmin.ADMIN_ROLES
+
+
+def _serialize_integration(integration: CRMIntegration, request=None) -> dict:
+    preview = integration.credentials_preview()
+    if request is not None and not _is_admin(request):
+        # Only the people who may change the key see any of it; the form still gets the field names (CO-160).
+        preview = {key: '' for key in preview}
     return {
         'id': integration.pk,
         'provider': integration.provider,
         'provider_label': integration.get_provider_display(),
         # Masked. The real values never leave the server.
-        'credentials_preview': integration.credentials_preview(),
+        'credentials_preview': preview,
+        'key_refused_at': integration.key_refused_at,
+        'missing_permission': integration.missing_permission,
+        'waiting': CRMSyncQueue.objects.filter(integration=integration, status=CRMSyncQueue.STATUS_WAITING).count(),
         'field_mappings': integration.field_mappings,
         'sync_contacts': integration.sync_contacts,
         'sync_emails': integration.sync_emails,
@@ -97,7 +108,7 @@ def integrations_list(request):
 
     if request.method == 'GET':
         qs = CRMIntegration.objects.filter(company=company).order_by('provider')
-        return Response([_serialize_integration(i) for i in qs])
+        return Response([_serialize_integration(i, request) for i in qs])
 
     # POST — create
     refused = _admins_only(request)
@@ -136,7 +147,7 @@ def integrations_list(request):
     integration.set_credentials(data.get('credentials') or {})
     integration.save()
     logger.info('CRM integration created: company=%d provider=%s', company.pk, provider)
-    return Response(_serialize_integration(integration), status=status.HTTP_201_CREATED)
+    return Response(_serialize_integration(integration, request), status=status.HTTP_201_CREATED)
 
 
 # ------------------------------------------------------------------ #
@@ -156,7 +167,7 @@ def integration_detail(request, integration_id: int):
         return Response({'error': 'Integration not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'GET':
-        return Response(_serialize_integration(integration))
+        return Response(_serialize_integration(integration, request))
 
     refused = _admins_only(request)
     if refused:
@@ -169,14 +180,20 @@ def integration_detail(request, integration_id: int):
     # PUT / PATCH
     data = request.data
     if 'credentials' in data:
+        before = integration.get_credentials()
         integration.set_credentials(_merged_credentials(integration, data['credentials']))
+        if integration.get_credentials() != before:
+            # A new key: what waited for the old one goes out again, and the old refusals no longer hold.
+            integration.missing_permission = ''
+            from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+            CRMSyncAgent.release_waiting(integration)
     if 'field_mappings' in data:
         integration.field_mappings = data['field_mappings']
     for flag in ('sync_contacts', 'sync_emails', 'sync_meetings', 'sync_notes', 'is_active'):
         if flag in data:
             setattr(integration, flag, bool(data[flag]))
     integration.save()
-    return Response(_serialize_integration(integration))
+    return Response(_serialize_integration(integration, request))
 
 
 # ------------------------------------------------------------------ #
@@ -214,7 +231,11 @@ def integration_ping(request, integration_id: int):
     integration.save(update_fields=['last_ping_at', 'last_ping_ok'])
 
     if ok:
-        return Response({'status': 'ok', 'message': 'Connection successful.'})
+        released = CRMSyncAgent.release_waiting(integration)      # the key works again (CO-159)
+        message = 'Connection successful.'
+        if released:
+            message += f' {released} waiting item(s) go out now.'
+        return Response({'status': 'ok', 'message': message})
     return Response(
         {'status': 'failed', 'message': 'Could not connect. Check credentials.'},
         status=status.HTTP_502_BAD_GATEWAY,
@@ -250,7 +271,8 @@ def integration_sync_leads(request, integration_id: int):
         return Response({
             'status': 'done',
             'message': (f"Synced {counts['leads']} leads, {counts['emails']} emails, "
-                        f"{counts['meetings']} meetings."),
+                        f"{counts['meetings']} meetings, {counts.get('inbox_emails', 0)} inbox emails and "
+                        f"{counts.get('inbox_replies', 0)} replies."),
             'result': result,
         })
 
@@ -306,6 +328,8 @@ def queue_status(request):
         'pending': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_PENDING).count(),
         'failed': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_FAILED).count(),
         'done': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_DONE).count(),
+        'waiting': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_WAITING).count(),
+        'skipped': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_SKIPPED).count(),
         'breakdown': breakdown,
     })
 
@@ -321,13 +345,17 @@ def retry_failed(request):
     company_user = request.user
     company = company_user.company
 
+    # Every entry that did not go, with its attempts back to none. Only those with attempts left were taken, so
+    # the button said '0 items re-queued' for the ones it named (CO-159). Skipped ones (a permission the CRM did
+    # not give) go too: the permission may have been added since.
     count = CRMSyncQueue.objects.filter(
         company=company,
-        status=CRMSyncQueue.STATUS_FAILED,
-        attempts__lt=3,
+        status__in=[CRMSyncQueue.STATUS_FAILED, CRMSyncQueue.STATUS_WAITING, CRMSyncQueue.STATUS_SKIPPED],
     ).update(
         status=CRMSyncQueue.STATUS_PENDING,
         scheduled_at=timezone.now(),
         error_message='',
+        attempts=0,
     )
+    CRMIntegration.objects.filter(company=company).update(missing_permission='', key_refused_at=None)
     return Response({'requeued': count})

@@ -21,7 +21,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError, is_blank
+from .base import BaseCRMConnector, CRMError, PermissionMissing, is_blank, network_error
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ class HubSpotConnector(BaseCRMConnector):
         notes: str = '',
     ) -> Optional[str]:
         start_ms = _to_hs_timestamp(start_time)
-        end_ms = _to_hs_timestamp(end_time) if end_time else start_ms + 3_600_000
+        end_ms = _to_hs_timestamp(end_time) if end_time else start_ms + 1_800_000
         return self._log_engagement(
             eng_type='MEETING',
             contact_id=crm_contact_id,
@@ -177,8 +177,13 @@ class HubSpotConnector(BaseCRMConnector):
             metadata={'body': body[:10000] if body else ''},
         )
 
+    #: What each kind of record needs on a HubSpot key, for the card's message.
+    _PERMISSION = {'EMAIL': ('emails', 'sales-email-read'), 'MEETING': ('meetings', 'crm.objects.contacts.write'),
+                   'NOTE': ('notes', 'crm.objects.contacts.write')}
+
     def _log_engagement(self, eng_type: str, contact_id: str, timestamp: int, metadata: dict) -> Optional[str]:
-        """Use legacy Engagements v1 API — works on free HubSpot accounts."""
+        """The Engagements v1 API: works on free HubSpot accounts and with service keys (tried 30 Oct 2026). A refusal
+        for lack of a permission is raised as PermissionMissing; it was swallowed and the sync counted it as sent."""
         payload = {
             'engagement': {'active': True, 'type': eng_type, 'timestamp': timestamp},
             'associations': {'contactIds': [int(contact_id)]},
@@ -189,9 +194,26 @@ class HubSpotConnector(BaseCRMConnector):
             return str(((resp.json() or {}).get('engagement') or {}).get('id', '')) or None
         except CRMError as e:
             if e.status_code == 403:
-                logger.warning('HubSpot: engagement scope missing for type=%s (free plan limitation)', eng_type)
-                return None
+                what, scope = self._PERMISSION.get(eng_type, (eng_type.lower(), ''))
+                raise PermissionMissing(what, f'HubSpot refused the {what}: the key lacks a permission'
+                                              + (f' ({scope}).' if scope else '.')) from e
             raise
+
+    def update_meeting(self, crm_meeting_id: str, title: str, start_time, end_time=None, notes: str = '',
+                       cancelled: bool = False) -> None:
+        """The meeting moved, or cancelled, in HubSpot. A v1 engagement's id is its v3 meeting id (tried 30 Oct)."""
+        start_ms = _to_hs_timestamp(start_time)
+        end_ms = _to_hs_timestamp(end_time) if end_time else start_ms + 1_800_000
+        props = {
+            'hs_timestamp': start_ms,
+            'hs_meeting_start_time': start_ms,
+            'hs_meeting_end_time': end_ms,
+            'hs_meeting_title': (title or 'Meeting')[:500],
+            'hs_meeting_outcome': 'CANCELED' if cancelled else 'SCHEDULED',
+        }
+        if notes:
+            props['hs_meeting_body'] = notes[:5000]
+        self._patch(f'/crm/v3/objects/meetings/{crm_meeting_id}', json={'properties': props})
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -272,7 +294,7 @@ class HubSpotConnector(BaseCRMConnector):
                 timeout=self._timeout,
             )
         except requests.RequestException as exc:
-            raise CRMError(f'HubSpot network error: {exc}', retriable=True) from exc
+            raise network_error('HubSpot', exc) from exc
 
         if 200 <= resp.status_code < 300:
             return resp

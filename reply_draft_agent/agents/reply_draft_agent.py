@@ -622,6 +622,10 @@ class ReplyDraftAgent(MarketingBaseAgent):
                 sent_history = EmailSendHistory.objects.filter(id=sh_id).first()
             draft.mark_sent(sent_history)
             self.log_action('sent_draft', {'draft_id': draft.id, 'to': recipient_email})
+            # To the company's CRM, on the recipient's contact, when it has CRM Sync (the client's list puts CRM &
+            # System Sync in the Inbox Manager too).
+            from crm_sync_agent.signals import queue_inbox_reply
+            queue_inbox_reply(draft, recipient_email, outgoing_subject, plain_body)
 
             # Mirror the outgoing message into our InboxEmail/InboxAttachment
             # tables so:

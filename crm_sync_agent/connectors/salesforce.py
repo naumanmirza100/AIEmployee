@@ -18,7 +18,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError, is_blank
+from .base import BaseCRMConnector, CRMError, is_blank, network_error
 
 logger = logging.getLogger(__name__)
 
@@ -128,16 +128,33 @@ class SalesforceConnector(BaseCRMConnector):
                 end_time = start_time + timedelta(hours=1)
             else:
                 end_time = start_time
+        # Start and end only. 'DurationInMinutes': 60 went with them, so every half-hour meeting disagreed with itself
+        # and Salesforce refuses that (CO-161).
         event = {
             'WhoId': crm_contact_id,
             'Subject': (title or 'Meeting')[:255],
             'Description': (notes or '')[:32000],
             'StartDateTime': _sf_datetime(start_time),
             'EndDateTime': _sf_datetime(end_time),
-            'DurationInMinutes': 60,
         }
         resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Event/', json=event)
         return str((resp.json() or {}).get('id', '')) or None
+
+    def update_meeting(self, crm_meeting_id: str, title: str, start_time, end_time=None, notes: str = '',
+                       cancelled: bool = False) -> None:
+        """Moved: the Event's start and end. Cancelled: the Event is deleted (CO-275)."""
+        self._ensure_token()
+        path = f'/services/data/{SF_API_VERSION}/sobjects/Event/{crm_meeting_id}'
+        if cancelled:
+            self._request('DELETE', path)
+            return
+        if end_time is None and hasattr(start_time, 'timestamp'):
+            end_time = start_time + timedelta(minutes=30)
+        fields = {'Subject': (title or 'Meeting')[:255], 'StartDateTime': _sf_datetime(start_time),
+                  'EndDateTime': _sf_datetime(end_time)}
+        if notes:
+            fields['Description'] = notes[:32000]
+        self._patch(path, json=fields)
 
     def log_note(self, crm_contact_id: str, body: str) -> Optional[str]:
         self._ensure_token()
@@ -169,7 +186,7 @@ class SalesforceConnector(BaseCRMConnector):
         try:
             resp = requests.post(token_url, data=data, timeout=self._timeout)
         except requests.RequestException as exc:
-            raise CRMError(f'Salesforce auth network error: {exc}', retriable=True) from exc
+            raise network_error('Salesforce', exc) from exc
 
         if resp.status_code != 200:
             raise CRMError(
@@ -250,7 +267,7 @@ class SalesforceConnector(BaseCRMConnector):
                 timeout=self._timeout,
             )
         except requests.RequestException as exc:
-            raise CRMError(f'Salesforce network error: {exc}', retriable=True) from exc
+            raise network_error('Salesforce', exc) from exc
 
         # 204 No Content is success for PATCH
         if resp.status_code in (200, 201, 204):

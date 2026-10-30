@@ -59,11 +59,28 @@ class CRMIntegration(models.Model):
         from core.crypto_utils import encrypt_secret
         self.credentials = {'enc': encrypt_secret(json.dumps(credentials or {}))}
 
+    #: Secrets of which nothing at all is shown: a person's password is not a key.
+    SHOWN_AS_DOTS = ('password', 'client_secret', 'security_token')
+    MASK = '********'
+
     def credentials_preview(self) -> dict:
-        """What may be shown on screen: each secret as `pat-********abcd`."""
-        from core.crypto_utils import mask_secret
-        return {key: (value if key in self.NOT_SECRET else mask_secret(str(value or '')))
-                for key, value in self.get_credentials().items()}
+        """What may be shown on screen: a password as `********`, a key as `********abcd` (its last four).
+
+        It kept the first and last four characters of everything, so a Salesforce password 'Summer2026!' showed as
+        'Summ********026!' (CO-160). The edit form sends the preview back, and anything containing `********` is
+        taken as unchanged (api/views/crm_sync_agent.py, _merged_credentials)."""
+        out = {}
+        for key, value in self.get_credentials().items():
+            text = str(value or '')
+            if key in self.NOT_SECRET:
+                out[key] = value
+            elif not text:
+                out[key] = ''
+            elif key in self.SHOWN_AS_DOTS or len(text) < 20:
+                out[key] = self.MASK
+            else:
+                out[key] = self.MASK + text[-4:]
+        return out
 
     sync_contacts = models.BooleanField(default=True)
     sync_emails = models.BooleanField(default=True)
@@ -81,6 +98,13 @@ class CRMIntegration(models.Model):
     limit_reached = models.BooleanField(default=False)
     limit_message = models.TextField(blank=True)
     limit_reached_at = models.DateTimeField(null=True, blank=True)
+
+    # When the CRM refused the saved key. Entries wait (STATUS_WAITING) instead of using up their attempts, and
+    # go out again once a test of the connection succeeds or the key is changed (CO-159).
+    key_refused_at = models.DateTimeField(null=True, blank=True)
+    # What the CRM would not take for lack of a permission, said on the card: such entries are recorded as
+    # skipped. They used to be recorded as sent (CO-162).
+    missing_permission = models.TextField(blank=True)
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -229,23 +253,34 @@ class CRMSyncQueue(models.Model):
     SOURCE_SDR_MEETING = 'sdr_meeting'
     SOURCE_SDR_NOTE = 'sdr_note'
     SOURCE_FRONTLINE = 'frontline_contact'
+    # The Inbox Manager's part of the client's list: mail from customers and leads, and the replies sent.
+    SOURCE_INBOX_EMAIL = 'inbox_email'
+    SOURCE_INBOX_REPLY = 'inbox_reply'
     SOURCE_TYPES = [
         (SOURCE_SDR_LEAD, 'SDR Lead'),
         (SOURCE_SDR_EMAIL, 'SDR Email'),
         (SOURCE_SDR_MEETING, 'SDR Meeting'),
         (SOURCE_SDR_NOTE, 'SDR Note'),
         (SOURCE_FRONTLINE, 'Frontline Contact'),
+        (SOURCE_INBOX_EMAIL, 'Reply Draft: email received'),
+        (SOURCE_INBOX_REPLY, 'Reply Draft: reply sent'),
     ]
 
     STATUS_PENDING = 'pending'
     STATUS_PROCESSING = 'processing'
     STATUS_DONE = 'done'
     STATUS_FAILED = 'failed'
+    # Held until the CRM takes the key again (CO-159).
+    STATUS_WAITING = 'waiting'
+    # Not sent: the CRM refused it for lack of a permission (CO-162).
+    STATUS_SKIPPED = 'skipped'
     STATUSES = [
         (STATUS_PENDING, 'Pending'),
         (STATUS_PROCESSING, 'Processing'),
         (STATUS_DONE, 'Done'),
         (STATUS_FAILED, 'Failed'),
+        (STATUS_WAITING, 'Waiting for the CRM key'),
+        (STATUS_SKIPPED, 'Skipped'),
     ]
 
     company = models.ForeignKey(
@@ -289,3 +324,23 @@ class CRMSyncQueue(models.Model):
 
     def __str__(self):
         return f'[{self.status}] {self.object_type} {self.source_type}:{self.source_id}'
+
+
+class CRMActivityMapping(models.Model):
+    """The CRM's own id for something we sent it that can change later: a sales call that is moved or cancelled.
+
+    The id was not kept, so a call moved or cancelled after it reached the CRM stayed there as it was (CO-275)."""
+
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='crm_activity_mappings')
+    integration = models.ForeignKey(CRMIntegration, on_delete=models.CASCADE, related_name='activity_mappings')
+    source_type = models.CharField(max_length=30)
+    source_id = models.PositiveBigIntegerField()
+    crm_object_id = models.CharField(max_length=255)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'crm_activity_mapping'
+        unique_together = ('integration', 'source_type', 'source_id')
+
+    def __str__(self):
+        return f'{self.source_type}:{self.source_id} → {self.crm_object_id}'
