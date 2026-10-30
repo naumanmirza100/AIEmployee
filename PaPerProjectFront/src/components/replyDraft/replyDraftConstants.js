@@ -42,7 +42,8 @@ export const INTEREST_STYLES = {
   negative: { label: 'Not Interested', className: 'bg-rose-500/15 text-rose-300 border-rose-500/30' },
   unsubscribe: { label: 'Unsubscribe', className: 'bg-red-500/15 text-red-300 border-red-500/30' },
   neutral: { label: 'Neutral', className: 'bg-slate-500/15 text-slate-300 border-slate-500/30' },
-  not_analyzed: { label: 'Not Analyzed', className: 'bg-white/5 text-gray-400 border-white/10' },
+  // Shown on mail the AI has not read yet (the dashboard's word for it too).
+  not_analyzed: { label: 'Not read by the AI yet', className: 'bg-white/5 text-gray-400 border-white/10' },
 };
 
 export const STATUS_STYLES = {
@@ -62,7 +63,7 @@ export const CATEGORY_LABELS = {
   billing: 'Invoice or payment',
   meeting: 'Meeting',
   internal: 'From a colleague',
-  newsletter: 'Newsletter',
+  newsletter: 'Newsletter or notice',
   personal: 'Personal',
   other: 'Other',
 };

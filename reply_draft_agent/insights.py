@@ -16,7 +16,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .models import InboxEmail
-from .text import ai_json, for_ai
+from .text import ai_json, for_ai, parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 PER_MESSAGE = 1500
 CONVERSATION = 12000
 
+# People are named, not "he" or "she": on live a summary guessed "him".
 THREAD_PROMPT = """Summarise this email conversation for the person in the company who answers it.
 
 Return ONLY this JSON:
@@ -34,7 +35,8 @@ Return ONLY this JSON:
 - points: 2 to 6 short points, in the order things happened: who asked or said what, and what was agreed.
 - next_step: one sentence: who has to do what next ("We owe them a price for two branches"), or "" when nothing.
 - open_questions: what the other side asked that has not been answered yet; [] when none.
-Use only what the messages say. Write in English, whatever language the messages are in."""
+Use only what the messages say. Write in English, whatever language the messages are in. Name people; never
+write "he" or "she": a name does not tell you who someone is."""
 
 
 def conversation(email):
@@ -162,30 +164,56 @@ def summarize_attachment(att, agent) -> dict:
 
 # ---- questions about the inbox -------------------------------------------------------------------------------------
 
-#: Emails the answer may draw on.
+#: Emails the answer may draw on in full, and the other recent ones it sees one line each of.
 SOURCES = 12
+INDEX = 60
 
 PLAN_PROMPT = """A person asks a question about their company's email. Decide how to look for the emails that answer it.
 
 Return ONLY this JSON:
-{"terms": ["..."], "people": ["..."], "days": null, "categories": []}
+{"language": "...", "terms": ["..."], "people": ["..."], "days": null, "categories": [], "priorities": []}
 
-- terms: up to 6 words or short phrases, in English, likely to appear in those emails' subject or text (translate
-  Urdu or Roman Urdu words: "qeemat" -> "price"). Leave out words like email, inbox, message.
+- language: the language the question is written in: "English", "Roman Urdu" (Urdu in Latin letters), "Urdu"
+  (Urdu script), or another language's name.
+- terms: up to 6 words or short phrases, in English and in the singular, likely to appear in those emails' subject
+  or text (translate Urdu or Roman Urdu words: "qeemat" -> "price"; "invoices" -> "invoice"). Leave out words like
+  email, inbox, message.
 - people: names, companies or email addresses the question mentions; [] when none.
 - days: how far back to look, as a number of days, when the question says ("this week" = 7, "today" = 1); null when
   it does not.
 - categories: any of customer, sales, support, billing, meeting, internal, newsletter, personal, other that the
-  question is about ("complaints" -> support, "invoices" -> billing); [] when none."""
+  question is about ("complaints" -> support, "invoices" -> billing); [] when none.
+- priorities: ["urgent", "high"] when the question asks what is urgent, important, needs attention or must be done
+  first ("urgent", "zaroori", "jaldi"); [] otherwise."""
 
-ANSWER_PROMPT = """You answer questions about a company's email, from the emails below only.
+ANSWER_PROMPT = """You answer questions about a company's email, from the emails below only. Return ONLY this JSON,
+with the email numbers as plain numbers: {"answer": "...", "sources": [12, 40]}
 
-- Write in the same language and script as the question: Roman Urdu stays in Latin letters, English stays English.
+The first emails are given in full. The rest of the recent mail follows, one line each. Each email's head shows its
+kind and priority as read when it arrived (for example support/urgent).
+
+- Write in the same language and script as the question: Roman Urdu stays in Latin letters, Urdu stays in Urdu
+  script, English stays English.
 - After each fact, name the email it came from as [#id].
 - Use only what these emails say. When they do not answer the question, say so plainly.
+- You only answer questions. You cannot reply, send, delete, book or change anything. When asked to, say in one
+  sentence that you cannot do that here, and name the email to open as [#id] so the person can reply from it.
+- When the question is not about this mail at all (a poem, the weather, general knowledge), say in one sentence that
+  you answer questions about this inbox only.
 - Be brief: a few sentences, or a short list.
+- Name people; never write "he" or "she": a name does not tell you who someone is."""
 
-Return ONLY this JSON: {"answer": "...", "sources": [id, ...]}"""
+_SCRIPT_URDU = re.compile(r'[؀-ۿ]')
+_LANGUAGES = {'roman urdu': 'Roman Urdu (Urdu in Latin letters)', 'urdu': 'Urdu, in Urdu script'}
+
+
+def answer_last(language):
+    """Said after the question. With the rules alone, gpt-4o-mini answered English questions in Roman Urdu (the
+    inbox had a Roman Urdu email) and dropped the JSON; naming the question's language, as the plan read it, fixed
+    it."""
+    name = _LANGUAGES.get((language or '').strip().lower(), (language or '').strip()[:30])
+    lang = f'in {name}' if name else 'in the language and script of the QUESTION'
+    return f'\n\nWrite the answer {lang}, as the JSON {{"answer": "...", "sources": [...]}}.'
 
 
 def _plan(question, history, agent) -> dict:
@@ -193,46 +221,102 @@ def _plan(question, history, agent) -> dict:
     data = ai_json(agent, prompt=(asked + '\n' if asked else '') + f'Question: {question}',
                    system_prompt=PLAN_PROMPT, max_tokens=300)
     days = data.get('days')
+    language = str(data.get('language') or '').strip()
+    if _SCRIPT_URDU.search(question):
+        language = 'Urdu'
     return {
+        'language': language,
         'terms': [t.strip() for t in data.get('terms', []) if isinstance(t, str) and len(t.strip()) >= 3][:6],
         'people': [p.strip() for p in data.get('people', []) if isinstance(p, str) and len(p.strip()) >= 2][:4],
         'days': int(days) if isinstance(days, (int, float)) and 0 < days <= 365 else None,
         'categories': [c for c in data.get('categories', []) if isinstance(c, str)][:4],
+        'priorities': [p for p in data.get('priorities', []) if p in ('urgent', 'high')],
     }
 
 
-def find_emails(account, plan, limit=SOURCES):
-    """The mailbox's emails that best match the plan, newest first among equals; the newest when nothing matches."""
+def _stem(term):
+    """The word without its plural ending, so "alerts" finds "Security alert" (on live it found nothing)."""
+    t = term.strip()
+    if len(t) > 4 and t.lower().endswith('ies'):
+        return t[:-3] + 'y'
+    if len(t) > 4 and t.lower().endswith('s') and not t.lower().endswith('ss'):
+        return t[:-1]
+    return t
+
+
+def _window(account, plan):
     qs = InboxEmail.objects.filter(email_account=account)
     if plan.get('days'):
         qs = qs.filter(received_at__gte=timezone.now() - timedelta(days=plan['days']))
+    return qs
+
+
+def find_emails(account, plan, limit=SOURCES):
+    """The mailbox's emails that best match the plan, mail received before mail sent and newest first among equals;
+    the newest when nothing matches."""
+    qs = _window(account, plan)
+    terms = [_stem(t) for t in plan.get('terms', [])]
     match = Q()
-    for term in plan.get('terms', []):
+    for term in terms:
         match |= Q(subject__icontains=term) | Q(ai_summary__icontains=term) | Q(body__icontains=term)
     for person in plan.get('people', []):
         match |= Q(from_name__icontains=person) | Q(from_email__icontains=person) | Q(to_email__icontains=person)
     if plan.get('categories'):
         match |= Q(category__in=plan['categories'])
-    found = list(qs.filter(match).order_by('-received_at')[:60]) if match else []
+    if plan.get('priorities'):
+        match |= Q(priority__in=plan['priorities'])
+    found = list(qs.filter(match).order_by('-received_at')[:80]) if match else []
     if not found:
         return list(qs.order_by('-received_at')[:limit])
-    words = [w.lower() for w in plan.get('terms', []) + plan.get('people', [])]
+    words = [w.lower() for w in terms + plan.get('people', [])]
 
     def hits(m):
         text = f'{m.subject} {m.ai_summary} {m.from_name} {m.from_email} {(m.body or "")[:4000]}'.lower()
-        return sum(1 for w in words if w in text) + (1 if m.category in plan.get('categories', []) else 0)
-    found.sort(key=lambda m: (hits(m), m.received_at), reverse=True)
+        return (sum(1 for w in words if w in text) + (1 if m.category in plan.get('categories', []) else 0)
+                + (2 if m.priority in plan.get('priorities', []) else 0))
+    # A campaign's own sent emails used to outrank the replies to them, and a clinic's price question was left out.
+    found.sort(key=lambda m: (hits(m), m.direction == 'in', m.received_at), reverse=True)
     return found[:limit]
 
 
-def _email_block(m):
+def _head(m):
     who = f'{m.from_name} <{m.from_email}>' if m.from_name else m.from_email
     side = 'sent by us to ' + (m.to_email or '') if m.direction == 'out' else 'from ' + who
     when = m.received_at.strftime('%a %d %b %Y %H:%M') if m.received_at else ''
     head = f'[#{m.id}] {when}, {side}, subject "{m.subject or ""}"'
     if m.category:
         head += f', {m.category}/{m.priority}'
-    return f'{head}\n{for_ai(m.body, 700)}'
+    return head
+
+
+def _email_block(m):
+    return f'{_head(m)}\n{for_ai(m.body, 700)}'
+
+
+def _index(account, plan, skip):
+    """The other recent emails, one line each: a question about "everything urgent" or "who replied" is not left
+    to the search alone."""
+    rows = list(_window(account, plan).exclude(id__in=skip).order_by('-received_at')
+                .only('id', 'direction', 'from_name', 'from_email', 'to_email', 'subject', 'received_at', 'category',
+                      'priority', 'ai_summary')[:INDEX])
+    return rows, '\n'.join(_head(m) + (f': {m.ai_summary}' if m.ai_summary else '') for m in rows)
+
+
+def _read_answer(raw):
+    """The answer's JSON. The AI sometimes writes its sources as [#60] (on live, a question in Urdu failed so), and
+    sometimes answers in plain words: those are the answer, with the emails it names in it."""
+    try:
+        return parse_json(raw)
+    except ValueError:
+        pass
+    fixed = re.sub(r'("sources"\s*:\s*\[)([^\]]*)\]',
+                   lambda mt: mt.group(1) + ','.join(re.findall(r'\d+', mt.group(2))) + ']', raw or '')
+    try:
+        return parse_json(fixed)
+    except ValueError:
+        if '{' in (raw or ''):
+            raise
+        return {'answer': (raw or '').strip(), 'sources': []}
 
 
 def ask_inbox(question, account, agent, history=()) -> dict:
@@ -243,21 +327,26 @@ def ask_inbox(question, account, agent, history=()) -> dict:
         plan = _plan(question, history, agent)
     except (ValueError, KeyError, TypeError) as exc:
         logger.warning('ask_inbox: the search plan could not be read (%s); the newest mail is used', exc)
-        plan = {'terms': [], 'people': [], 'days': None, 'categories': []}
+        plan = {'language': 'Urdu' if _SCRIPT_URDU.search(question) else '', 'terms': [], 'people': [], 'days': None,
+                'categories': [], 'priorities': []}
     emails = find_emails(account, plan)
     if not emails:
         return {'answer': 'There is no mail in this inbox yet.', 'sources': [], 'searched': 0}
+    others, index = _index(account, plan, [m.id for m in emails])
     earlier = '\n'.join(f'Q: {q}\nA: {a}' for q, a in history)
     today = timezone.localtime().strftime('%A %d %B %Y')
     prompt = (f'Today is {today}.\n\n' + (f'Earlier in this conversation:\n{earlier}\n\n' if earlier else '')
-              + 'EMAILS:\n\n' + '\n\n'.join(_email_block(m) for m in emails) + f'\n\nQUESTION: {question}')
-    data = ai_json(agent, prompt=prompt, system_prompt=ANSWER_PROMPT, temperature=0.2, max_tokens=700)
+              + 'EMAILS IN FULL:\n\n' + '\n\n'.join(_email_block(m) for m in emails)
+              + (f'\n\nOTHER RECENT EMAILS, ONE LINE EACH:\n{index}' if index else '')
+              + f'\n\nQUESTION: {question}' + answer_last(plan.get('language')))
+    raw = agent._call_llm(prompt=prompt, system_prompt=ANSWER_PROMPT, temperature=0.2, max_tokens=800)
+    data = _read_answer(raw)
     answer = str(data.get('answer', '')).strip()
     if not answer:
         raise ValueError('the AI gave no answer')
-    by_id = {m.id: m for m in emails}
+    by_id = {m.id: m for m in emails + others}
     cited = [int(i) for i in re.findall(r'\[#(\d+)\]', answer)]
-    listed = [i for i in data.get('sources', []) if isinstance(i, int)]
+    listed = [int(i) for i in data.get('sources', []) if isinstance(i, int) or (isinstance(i, str) and i.isdigit())]
     ids = [i for i in dict.fromkeys(cited + listed) if i in by_id]
     return {
         'answer': answer,
@@ -266,5 +355,5 @@ def ask_inbox(question, account, agent, history=()) -> dict:
             'to_email': m.to_email, 'subject': m.subject or '(no subject)',
             'received_at': m.received_at.isoformat() if m.received_at else None,
         } for m in (by_id[i] for i in ids)],
-        'searched': len(emails),
+        'searched': len(emails) + len(others),
     }

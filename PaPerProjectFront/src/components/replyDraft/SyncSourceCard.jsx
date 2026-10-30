@@ -94,7 +94,7 @@ export const SyncSourceCard = ({ accounts, onConfigure }) => {
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-amber-100">No email account connected</div>
           <div className="text-xs text-amber-200/80 mt-0.5">
-            Add a mailbox in the Marketing Agent's <span className="font-medium">Email Accounts</span> settings to start syncing email and their replies here. Without an account, this inbox stays empty.
+            Connect the mailbox this agent reads and answers from (for Gmail, with an app password). Until then, this inbox stays empty.
           </div>
         </div>
         <HoverTip tip="Connect an inbox account to start syncing email and their replies into this agent">
@@ -112,8 +112,8 @@ export const SyncSourceCard = ({ accounts, onConfigure }) => {
   // Account exists but IMAP is off or credentials are incomplete → warning.
   if (syncing.length === 0) {
     const reason = misconfigured.length > 0
-      ? 'IMAP sync is enabled but credentials are incomplete — inbox won\'t sync until host / username / password are all filled in.'
-      : 'None of your accounts have IMAP sync enabled. Turn it on in the Marketing Agent\'s Email Accounts settings.';
+      ? 'The mailbox\'s reading settings are incomplete: the inbox won\'t sync until its host, username and password are all filled in.'
+      : 'Reading is turned off for this mailbox, so no new mail comes in. Connect it again to turn it on.';
     return (
       <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 flex items-start gap-4 flex-wrap">
         <div className="h-11 w-11 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
@@ -131,7 +131,7 @@ export const SyncSourceCard = ({ accounts, onConfigure }) => {
           variant="outline"
           className="bg-transparent border-amber-500/40 text-amber-200 hover:bg-amber-500/20"
         >
-          Fix in settings
+          Fix the mailbox
         </Button>
       </div>
     );

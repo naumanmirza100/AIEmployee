@@ -127,6 +127,8 @@ const ReplyDraftAgentPage = () => {
   const [inboxLoading, setInboxLoading] = useState(false);  // shown during dropdown-triggered refetch so the user sees feedback
   const [sentLoading, setSentLoading] = useState(false);    // mirrors inboxLoading but for the Sent tab's days-window refetch
   const [syncAccounts, setSyncAccounts] = useState([]);     // the attached Reply Draft Agent account, if any (0 or 1 items)
+  // Known only once the list has loaded, so the Emails page does not flash "no mailbox" while it loads.
+  const [syncAccountsLoaded, setSyncAccountsLoaded] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountModalMode, setAccountModalMode] = useState('add'); // 'add' | 'edit'
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -239,6 +241,7 @@ const ReplyDraftAgentPage = () => {
     try {
       const res = await listSyncAccounts();
       setSyncAccounts(res?.data || []);
+      setSyncAccountsLoaded(true);
     } catch (e) {
       // Non-fatal — the visibility card just won't render.
       console.error('Failed to load sync accounts', e);
@@ -1118,7 +1121,7 @@ const ReplyDraftAgentPage = () => {
                   this inbox, or prompts them to configure one if it's empty. */}
               <SyncSourceCard
                 accounts={syncAccounts}
-                onConfigure={() => setAccountModalOpen(true)}
+                onConfigure={syncAccounts.length ? openEditAccountModal : openAddAccountModal}
               />
 
             <div className="mt-4 space-y-4">
@@ -1230,6 +1233,10 @@ const ReplyDraftAgentPage = () => {
           )}
 
           {/* ---------------- EMAILS VIEW (workspace) ---------------- */}
+          {/* Without a mailbox the list only said "Inbox is clear", with no way to connect one from here. */}
+          {view === 'emails' && syncAccountsLoaded && syncAccounts.length === 0 && (
+            <SyncSourceCard accounts={syncAccounts} onConfigure={openAddAccountModal} />
+          )}
           {view === 'emails' && (
           <div className="grid grid-cols-12 gap-4 items-stretch">
             {/* LEFT: List */}

@@ -79,6 +79,17 @@ class TriageTests(InboxTestCase):
                              {'category': 'newsletter', 'priority': 'low', 'ai_summary': 'Weekly news',
                               'needs_reply': False})
 
+    def test_an_automatic_alert_can_be_urgent_but_never_needs_a_reply(self):
+        # On live: Render's server-failure alert from no-reply@render.com came back urgent and needing a reply.
+        alert = self.mail(subject='Server failure detected', sender='no-reply@render.test', body='Your server failed.')
+        answer = ('{"category": "support", "priority": "urgent", "summary": "Render says a server failed.", '
+                  '"needs_reply": true}')
+        with ai(answer):
+            fields = triage.triage_email(alert, ReplyDraftAgent())
+        self.assertEqual((fields['priority'], fields['needs_reply']), ('urgent', False))
+        with ai(answer):                                                   # a person's address keeps the AI's word
+            self.assertTrue(triage.triage_email(self.mail(subject='Down'), ReplyDraftAgent())['needs_reply'])
+
     def test_the_job_reads_new_mail_once_and_tells_about_urgent_mail_once(self):
         urgent = self.mail(subject='Booking page down', body='Our patients cannot book since this morning!')
         old = self.mail(subject='Old', received_at=timezone.now() - timedelta(days=30))
@@ -197,11 +208,67 @@ class AskTests(InboxTestCase):
         self.assertLess(emails.index(f'[#{price.id}]'), emails.index('Lunch'))   # the match first
         self.assertIn('same language and script as the question', llm.call_args_list[1].kwargs['system_prompt'])
 
+    def test_found_on_live_urgent_mail_plurals_sources_written_as_hash_and_replies_first(self):
+        # On live: "Kya koi urgent cheez hai?" got a course sale, "security alerts" found no "Security alert", an
+        # Urdu question failed on sources written as [#60], and a clinic's reply lost its place to our sent emails.
+        down = self.mail(subject='Server failure detected', sender='no-reply@render.test', category='support',
+                         priority='urgent', ai_summary='Render says a server failed.')
+        alert = self.mail(subject='Security alert', sender='no-reply@google.test', body='App password created.')
+        reply = self.mail(subject='Re: A demo for Blue Area Dental', body='How much for two branches?')
+        for n in range(14):
+            self.mail(subject=f'A demo for Clinic {n}', body='A free demo of our booking app for your dental clinic.',
+                      direction='out')
+        plan = '{"terms": [], "people": [], "days": null, "categories": [], "priorities": ["urgent"]}'
+        answer = f'{{"answer": "Haan, Render ka server band hai [#{down.id}].", "sources": [#{down.id}]}}'
+        with ai(plan, answer) as llm:
+            data = insights.ask_inbox('Kya koi urgent cheez hai?', self.mailbox, ReplyDraftAgent())
+        self.assertEqual([s['id'] for s in data['sources']], [down.id])
+        prompt = llm.call_args_list[1].kwargs['prompt']
+        self.assertLess(prompt.index(f'[#{down.id}]'), prompt.index('OTHER RECENT EMAILS'))   # given in full
+        self.assertIn(f'[#{alert.id}]', prompt)                                          # and the rest, one line
+        self.assertEqual(insights._stem('alerts'), 'alert')
+        self.assertEqual(insights._stem('replies'), 'reply')
+        self.assertEqual(insights._stem('address'), 'address')
+        self.assertEqual(insights.find_emails(self.mailbox, {'terms': ['security alerts']}), [alert])
+        found = insights.find_emails(self.mailbox, {'terms': ['demo', 'dental']})
+        self.assertEqual(found[0], reply)                                        # the reply before our own emails
+
+    def test_an_answer_in_plain_words_is_the_answer(self):
+        # On the film copy gpt-4o-mini answered "Main sirf is inbox ke bare mein sawalon ka jawab deta hoon." with no
+        # JSON around it, and the question failed.
+        price = self.mail(subject='Price', body='What does it cost?')
+        with ai('{"terms": ["price"]}', f'Kiran asked the price [#{price.id}].') as llm:
+            data = insights.ask_inbox('What did Kiran ask?', self.mailbox, ReplyDraftAgent())
+        self.assertEqual((data['answer'], [s['id'] for s in data['sources']]), (f'Kiran asked the price [#{price.id}].',
+                                                                              [price.id]))
+        self.assertIn('Write the answer in the language and script of the QUESTION', llm.call_args_list[1].kwargs['prompt'])
+
     def test_short_questions_and_an_empty_inbox(self):
         self.assertEqual(self.call(views.ask_inbox, self.nadia, {'question': 'hi'}).status_code, 400)
         with ai('{"terms": [], "people": [], "days": null, "categories": []}'):
             data = self.call(views.ask_inbox, self.nadia, {'question': 'What came today?'}).data['data']
         self.assertEqual(data['answer'], 'There is no mail in this inbox yet.')
+
+
+class DraftSignatureTests(InboxTestCase):
+    def test_a_draft_is_signed_by_the_person_and_never_with_placeholders(self):
+        # On live a draft ended "Best regards, [Your Name] [Your Position] [Your Company] [Your Contact Information]".
+        email = self.mail(subject='Price', body='How much does it cost per month for 2 branches?')
+        answer = json.dumps({'interest_level': 'requested_info', 'analysis': 'Asks the price.', 'subject': 'Re: Price',
+                             'body': 'Hello,\n\nThank you for asking.\n\nBest regards,\n[Your Name]\n[Your Position]\n'
+                                     '[Your Company]\n[Your Contact Information]', 'reasoning': ''})
+        with ai(answer) as llm:
+            made = self.call(views.generate_draft, self.nadia, {'inbox_email_id': email.id})
+        self.assertEqual(made.status_code, 200, made.data)
+        self.assertIn('Signature:\nNadia Rehman\nMargalla', llm.call_args.kwargs['prompt'])
+        body = ReplyDraft.objects.get(pk=made.data['data']['draft_id']).draft_body
+        self.assertNotIn('[', body)
+        self.assertTrue(body.endswith('Best regards,\nNadia Rehman\nMargalla'), body)
+
+    def test_the_company_login_signs_as_its_team(self):
+        owner = self.login('office@margalla.test', 'Margalla', 'owner')
+        self.assertEqual(ReplyDraftAgent(user=user_for(owner), company_id=self.company.id)._signature(),
+                         'The Margalla team')
 
 
 class ColleagueTests(InboxTestCase):
