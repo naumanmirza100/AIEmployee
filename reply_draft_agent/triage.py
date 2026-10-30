@@ -6,12 +6,11 @@ list's Email Assistant, 30 Oct 2026). `triage_inbox_task` runs every five minute
 mail that has not been read yet. Only recent mail is read, so connecting a mailbox with months of history costs no
 AI tokens on the backlog.
 """
-import json
 import logging
 import re
 
 from .models import CATEGORY_CHOICES, PRIORITY_CHOICES
-from .text import for_ai
+from .text import for_ai, parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +44,9 @@ priority, one of:
 - normal: a person should read it, but nothing is waiting on it
 - low: newsletters, notifications, receipts, automatic messages
 
-summary: one sentence in English, at most 25 words, saying what the sender wants or tells. Only what the email
-says: no guesses, no greeting, no advice.
+summary: one sentence in English, at most 25 words, saying who wants or tells what. Name the person, with their
+company when the email gives it, never "the sender": "Kiran Shah (Capital Dental) asks the monthly price for two
+branches." Only what the email says: no guesses, no greeting, no advice.
 
 needs_reply: true when the sender asks something or waits for an answer; false otherwise."""
 
@@ -70,7 +70,7 @@ def triage_prompt(email) -> str:
 
 def read_triage(raw: str) -> dict:
     """The AI's answer as the email's fields; KeyError/ValueError when it cannot be read."""
-    data = json.loads(raw, strict=False)
+    data = parse_json(raw)
     category = str(data.get('category', '')).strip().lower()
     priority = str(data.get('priority', '')).strip().lower()
     summary = ' '.join(str(data.get('summary', '')).split())
@@ -95,16 +95,25 @@ def fallback_triage(email) -> dict:
     }
 
 
+class AIUnreachable(Exception):
+    """The AI could not be asked just now (a connection error, a timeout): the email waits for the next run."""
+
+
 def triage_email(email, agent) -> dict:
-    """The AI's reading of one email. A key or quota problem is raised (the caller stops for that company); any
-    other failure gives the fallback, so one odd email cannot hold up the mailbox."""
+    """The AI's reading of one email. A key or quota problem is raised as it is, and an AI that cannot be reached
+    as AIUnreachable: either way the email stays unread and is tried again. Only an answer that came back and
+    cannot be read gives the fallback, so one odd email cannot hold up the mailbox. A connection error used to
+    give the fallback too, and the email kept the plain reading for good (the Reply Draft film, 30 Oct)."""
     from core.api_key_service import KeyServiceError
     try:
         raw = agent._call_llm(prompt=triage_prompt(email), system_prompt=SYSTEM_PROMPT,
-                              temperature=0, max_tokens=300, json_mode=True)
-        return read_triage(raw)
+                              temperature=0, max_tokens=300)
     except KeyServiceError:
         raise
     except Exception as exc:
+        raise AIUnreachable(str(exc)) from exc
+    try:
+        return read_triage(raw)
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
         logger.warning('triage: email %s read by the fallback: %s', email.id, exc)
         return fallback_triage(email)

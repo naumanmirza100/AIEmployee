@@ -290,3 +290,18 @@ export const deleteDraftAttachment = async (draftId, attachmentId) => {
   }
 };
 
+
+// ---- What the AI can say about the mail (30 Oct 2026) ----
+
+// The summary of an email's whole conversation: points, next step, open questions. Made once, and again when the
+// conversation has new messages.
+export const summarizeConversation = async (emailId) =>
+  companyApi.post(`/reply-draft/inbox/${emailId}/summarize`, {});
+
+// The summary of a PDF, Word or text file attached to an email.
+export const summarizeAttachment = async (emailId, attachmentId) =>
+  companyApi.post(`/reply-draft/inbox/${emailId}/attachments/${attachmentId}/summarize`, {});
+
+// A question about the inbox, in any language; history is the earlier turns, [{ question, answer }].
+export const askInbox = async (question, history = []) =>
+  companyApi.post('/reply-draft/ask', { question, history });

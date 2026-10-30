@@ -48,10 +48,39 @@ export const INTEREST_STYLES = {
 export const STATUS_STYLES = {
   pending: { label: 'Pending', className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
   approved: { label: 'Approved', className: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
+  sending: { label: 'Sending…', className: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
   sent: { label: 'Sent', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
   rejected: { label: 'Discarded', className: 'bg-rose-500/15 text-rose-300 border-rose-500/30' },
   failed: { label: 'Failed', className: 'bg-red-500/15 text-red-300 border-red-500/30' },
 };
+
+// Triage: what kind of email it is and how soon it needs someone, read by the AI as the mail arrived.
+export const CATEGORY_LABELS = {
+  customer: 'Customer question',
+  sales: 'Sales lead',
+  support: 'Support or complaint',
+  billing: 'Invoice or payment',
+  meeting: 'Meeting',
+  internal: 'From a colleague',
+  newsletter: 'Newsletter',
+  personal: 'Personal',
+  other: 'Other',
+};
+
+export const PRIORITY_STYLES = {
+  urgent: { label: 'Urgent', className: 'bg-red-500/15 text-red-300 border-red-500/40', dot: 'bg-red-400' },
+  high: { label: 'High', className: 'bg-amber-500/15 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' },
+  normal: { label: 'Normal', className: 'bg-white/5 text-gray-300 border-white/10', dot: 'bg-gray-500' },
+  low: { label: 'Low', className: 'bg-white/5 text-gray-500 border-white/10', dot: 'bg-gray-700' },
+};
+
+// The inbox's "Show" filter: by what needs someone, then by kind.
+export const INBOX_FILTERS = [
+  { value: 'all', label: 'All mail' },
+  { value: 'urgent', label: 'Urgent' },
+  { value: 'needs_reply', label: 'Waiting for an answer' },
+  ...Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value: `category:${value}`, label })),
+];
 
 export const AVATAR_PALETTE = [
   'from-cyan-500 to-blue-600',

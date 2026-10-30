@@ -899,7 +899,7 @@ def list_inbox_attachments(request, email_id):
     is_bounce = _is_bounce_email(email)
     payload = []
     for att in InboxAttachment.objects.filter(inbox_email_id=email.id).only(
-        'id', 'filename', 'content_type', 'size_bytes', 'is_inline', 'created_at'
+        'id', 'filename', 'content_type', 'size_bytes', 'is_inline', 'created_at', 'summary'
     ):
         # Inline images are shown in the list too (downloadable), matching
         # the detail serializer; non-image inline parts stay hidden.
@@ -916,6 +916,8 @@ def list_inbox_attachments(request, email_id):
             'size_bytes': att.size_bytes,
             'created_at': att.created_at.isoformat() if att.created_at else None,
             'download_url': f'/api/reply-draft/inbox/{email.id}/attachments/{att.id}/download',
+            'summary': _stored_json(att.summary),
+            'can_summarize': can_summarize(att.filename, att.content_type),
         })
     return Response({'status': 'success', 'data': payload})
 
@@ -1040,6 +1042,10 @@ def fetch_inbox_attachments(request, email_id):
                 'content_type': att.content_type,
                 'size_bytes': att.size_bytes,
                 'download_url': f'/api/reply-draft/inbox/{inbox.id}/attachments/{att.id}/download',
+                # As in the email's own serializer: without these an attachment fetched on first open had no
+                # "Summarise this file" (the Reply Draft film, 30 Oct).
+                'summary': _stored_json(getattr(att, 'summary', '')),
+                'can_summarize': can_summarize(att.filename, att.content_type),
             })
         return out
 

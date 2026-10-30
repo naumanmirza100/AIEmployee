@@ -222,6 +222,7 @@ const ALL_AGENTS = [
     children: [
       { label: 'Dashboard', icon: LayoutDashboard, path: '/reply-draft/dashboard' },
       { label: 'Emails',    icon: Mail,            path: '/reply-draft/emails' },
+      { label: 'Ask the inbox', icon: MessageSquare, path: '/reply-draft/ask' },
     ],
   },
   {

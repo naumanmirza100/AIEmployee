@@ -26,8 +26,9 @@ from reply_draft_agent.text import SHORTENED, for_ai
 
 
 def ai(*answers):
-    """The AI, answering these in turn."""
-    return mock.patch.object(ReplyDraftAgent, '_call_llm', side_effect=list(answers))
+    """The AI, answering these in turn. autospec: a call with an argument the real one does not take fails (the
+    first version passed json_mode, which the agent's AI call does not have, and every email fell back)."""
+    return mock.patch.object(ReplyDraftAgent, '_call_llm', autospec=True, side_effect=list(answers))
 
 
 class InboxTestCase(TestCase):
@@ -100,10 +101,20 @@ class TriageTests(InboxTestCase):
 
     def test_without_the_ai_the_mail_waits_for_the_next_run(self):
         email = self.mail()
-        with mock.patch.object(ReplyDraftAgent, '_call_llm', side_effect=KeyServiceError('no tokens left')):
+        with mock.patch.object(ReplyDraftAgent, '_call_llm', autospec=True, side_effect=KeyServiceError('no tokens left')):
             self.assertEqual(triage_inbox_task(), {'read': 0})
         email.refresh_from_db()
         self.assertIsNone(email.triaged_at)
+
+    def test_an_ai_that_cannot_be_reached_leaves_the_mail_for_the_next_run(self):
+        # A connection error gave the plain fallback, and the email kept it for good (the Reply Draft film, 30 Oct).
+        for n in range(4):
+            self.mail(subject=f'Question {n}')
+        with mock.patch.object(ReplyDraftAgent, '_call_llm', autospec=True,
+                               side_effect=ConnectionError('Connection error.')) as llm:
+            self.assertEqual(triage_inbox_task(), {'read': 0})
+        self.assertEqual(llm.call_count, 2)                                   # twice, then the run stops
+        self.assertFalse(InboxEmail.objects.exclude(triaged_at=None).exists())
 
     def test_a_company_without_the_agent_is_not_read(self):
         CompanyModulePurchase.objects.filter(company=self.company).delete()

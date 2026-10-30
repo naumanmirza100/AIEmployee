@@ -164,7 +164,7 @@ def triage_inbox_task():
     from .agents.reply_draft_agent import ReplyDraftAgent
     from .alerts import urgent_email
     from .permissions import company_has_module
-    from .triage import PER_RUN, WINDOW_DAYS, triage_email
+    from .triage import PER_RUN, WINDOW_DAYS, AIUnreachable, triage_email
 
     read = 0
     for account in EmailAccount.objects.filter(is_reply_agent_account=True, is_active=True).select_related('owner'):
@@ -179,6 +179,7 @@ def triage_inbox_task():
         if not ids:
             continue
         agent = ReplyDraftAgent(user=account.owner, company_id=company_id)
+        unreachable = 0
         for email_id in ids:
             if not InboxEmail.objects.filter(pk=email_id, triaged_at__isnull=True).update(triaged_at=timezone.now()):
                 continue
@@ -189,6 +190,15 @@ def triage_inbox_task():
                 InboxEmail.objects.filter(pk=email_id).update(triaged_at=None)
                 logger.warning('triage: mailbox %s stopped, no AI for company %s: %s', account.id, company_id, exc)
                 break
+            except AIUnreachable as exc:
+                # Read on the next run; twice in a row and the AI is down for now.
+                InboxEmail.objects.filter(pk=email_id).update(triaged_at=None)
+                unreachable += 1
+                logger.warning('triage: email %s waits, the AI could not be reached: %s', email_id, exc)
+                if unreachable >= 2:
+                    break
+                continue
+            unreachable = 0
             InboxEmail.objects.filter(pk=email_id).update(**fields)
             read += 1
             if fields['priority'] == 'urgent' and email.received_at >= timezone.now() - timedelta(days=1):

@@ -66,11 +66,16 @@ import {
   INTEREST_STYLES,
   STATUS_STYLES,
   PAGE_SIZE,
+  INBOX_FILTERS,
+  CATEGORY_LABELS,
+  PRIORITY_STYLES,
 } from '@/components/replyDraft/replyDraftConstants';
 import { humanizeSendError, humanizeAiError, formatRelative, formatDateTime, looksLikeHtml } from '@/components/replyDraft/replyDraftHelpers';
 import { Avatar, EmptyState, Paginator, StatCard, FolderTile } from '@/components/replyDraft/SharedUI';
 import { HtmlBody } from '@/components/replyDraft/HtmlBody';
 import { AttachmentLoading, AttachmentList, DraftAttachmentsSection } from '@/components/replyDraft/Attachments';
+import { NeedsYouCard, TriageCard } from '@/components/replyDraft/InsightCards';
+import AskInbox from '@/components/replyDraft/AskInbox';
 import { EmailBody } from '@/components/replyDraft/EmailBody';
 import { InboxItem, DraftItem } from '@/components/replyDraft/ListItems';
 import { EmailActivityChart } from '@/components/replyDraft/EmailActivityChart';
@@ -86,7 +91,9 @@ const ReplyDraftAgentPage = () => {
   // /reply-draft/dashboard, and the mail workspace (Inbox / Sent / Drafts)
   // at /reply-draft/emails. Data-fetch + polling stay common to both so the
   // dashboard counters are always live.
-  const view = location.pathname.startsWith('/reply-draft/emails') ? 'emails' : 'dashboard';
+  const view = location.pathname.startsWith('/reply-draft/emails')
+    ? 'emails'
+    : location.pathname.startsWith('/reply-draft/ask') ? 'ask' : 'dashboard';
 
   const { toast } = useToast();
   const [companyUser, setCompanyUser] = useState(null);
@@ -146,6 +153,7 @@ const ReplyDraftAgentPage = () => {
   ].join('|');
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
+  const [inboxFilter, setInboxFilter] = useState('all');
   // 1-based current page for the active list. Reset to 1 whenever the tab
   // or search changes (below) so the user never lands on an out-of-range
   // page after the result set shrinks.
@@ -367,6 +375,20 @@ const ReplyDraftAgentPage = () => {
     setComposerOpen(false);
   };
 
+  // ?email=<id>, the link in an urgent-email alert and on the dashboard: that email is opened once the inbox has
+  // loaded (it is fetched on its own when it is not in the list, such as one with a draft in progress).
+  const openedFromLink = useRef('');
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get('email');
+    if (!id || !location.pathname.startsWith('/reply-draft/emails') || openedFromLink.current === id) return;
+    const found = pendingReplies.find((r) => String(r.id) === id && r.source === 'inbox');
+    if (!found && pendingReplies.length === 0) return;
+    openedFromLink.current = id;
+    setActiveTab('inbox');
+    handleSelectReply(found || { id: Number(id), source: 'inbox', direction: 'in' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, location.pathname, pendingReplies]);
+
   const handleSelectReply = async (r) => {
     // Show the row immediately with just preview content, then fetch the
     // full body in the background. List endpoint omits body for speed
@@ -408,6 +430,8 @@ const ReplyDraftAgentPage = () => {
                 if (!current || current.id !== r.id || current.source !== r.source) return current;
                 const next = { ...current, attachments: attData, attachments_fetched: true };
                 if (attHtml) next.body_html = attHtml;
+                // Searched everywhere and not there: archived, moved or deleted (CO-250).
+                if (attRes?.missing) next.attachments_missing = attRes.message;
                 return next;
               });
             } else {
@@ -428,7 +452,8 @@ const ReplyDraftAgentPage = () => {
             console.error('Failed to fetch attachments lazily', attErr);
             setSelectedReply((current) => {
               if (!current || current.id !== r.id || current.source !== r.source) return current;
-              return { ...current, attachments_fetched: true };
+              // The mailbox could not be searched: tried again on the next open (CO-250).
+              return { ...current, attachments_fetched: true, attachments_missing: attErr?.message || '' };
             });
           }
         }
@@ -746,11 +771,18 @@ const ReplyDraftAgentPage = () => {
 
   const filteredInbox = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return pendingReplies;
-    return pendingReplies.filter((r) =>
-      [r.from_name, r.from_email, r.subject, r.from_company].some((v) => (v || '').toLowerCase().includes(q))
+    // The AI's triage: urgent mail, mail waiting for an answer, or one kind of email.
+    const shown = pendingReplies.filter((r) => {
+      if (inboxFilter === 'urgent') return r.priority === 'urgent';
+      if (inboxFilter === 'needs_reply') return r.needs_reply === true;
+      if (inboxFilter.startsWith('category:')) return r.category === inboxFilter.slice(9);
+      return true;
+    });
+    if (!q) return shown;
+    return shown.filter((r) =>
+      [r.from_name, r.from_email, r.subject, r.from_company, r.ai_summary].some((v) => (v || '').toLowerCase().includes(q))
     );
-  }, [pendingReplies, search]);
+  }, [pendingReplies, search, inboxFilter]);
 
   const unsentDrafts = useMemo(
     () => drafts.filter((d) => d.status !== 'sent' && d.status !== 'rejected'),
@@ -806,7 +838,7 @@ const ReplyDraftAgentPage = () => {
     });
   }, [accountSyncDays]);
 
-  useEffect(() => { setListPage(1); }, [activeTab, search]);
+  useEffect(() => { setListPage(1); }, [activeTab, search, inboxFilter]);
 
   // The current list's items and its page slice. Derived from the active
   // tab so the pager + render below share one source of truth.
@@ -926,14 +958,16 @@ const ReplyDraftAgentPage = () => {
             <div className="flex items-center gap-3 min-w-0 flex-1">
               <div className="min-w-0">
                 <h1 className="text-lg font-bold text-white truncate">
-                  {view === 'emails' ? 'Emails' : 'Reply Draft Dashboard'}
+                  {view === 'emails' ? 'Emails' : view === 'ask' ? 'Ask the inbox' : 'Reply Draft Dashboard'}
                 </h1>
                 <p className="text-xs text-gray-400 truncate">
                   {refreshing
                     ? 'Syncing from your mailbox…'
                     : view === 'emails'
                       ? 'Inbox, Sent and Drafts from your attached mailbox.'
-                      : 'Live counters and quick actions for your reply agent.'}
+                      : view === 'ask'
+                        ? 'Questions about your mail, answered from its emails.'
+                        : 'Live counters and quick actions for your reply agent.'}
                 </p>
               </div>
             </div>
@@ -943,7 +977,7 @@ const ReplyDraftAgentPage = () => {
             <div className="flex items-center gap-1.5 flex-nowrap justify-end ml-auto shrink-0">
               {/* Emails page: a way back to the Dashboard, since all the
                   setup / analytics controls now live there. */}
-              {view === 'emails' && (
+              {(view === 'emails' || view === 'ask') && (
                 <HoverTip tip="Back to the reply agent dashboard">
                   <Button
                     variant="outline"
@@ -1049,6 +1083,14 @@ const ReplyDraftAgentPage = () => {
             </div>
           </div>
 
+          {/* ---------------- ASK VIEW ---------------- */}
+          {view === 'ask' && (
+            <AskInbox
+              hasMailbox={syncAccounts.length > 0}
+              onOpenEmail={(id) => navigate(`/reply-draft/emails?email=${id}`)}
+            />
+          )}
+
           {/* ---------------- DASHBOARD VIEW ---------------- */}
           {/* Stats and the sync-source card live on the Dashboard only — the
               Emails page is kept clean so the full height goes to the mail
@@ -1067,6 +1109,10 @@ const ReplyDraftAgentPage = () => {
                 <StatCard icon={AlertCircle} label="Failed" value={stats.failed} tint="from-rose-500/20 to-red-500/10" iconTint="text-rose-300"
                   onClick={() => openEmails('drafts')} />
               </div>
+
+              {syncAccounts.length > 0 && (
+                <NeedsYouCard onOpen={(id) => navigate(`/reply-draft/emails?email=${id}`)} />
+              )}
 
               {/* Sync Source card — tells the user exactly which mailbox feeds
                   this inbox, or prompts them to configure one if it's empty. */}
@@ -1273,6 +1319,22 @@ const ReplyDraftAgentPage = () => {
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
                     >
                       {timeWindowOptions.map((o) => (
+                        <option key={o.value} value={o.value} className="bg-gray-900">
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {activeTab === 'inbox' && (
+                    <select
+                      data-testid="rd-inbox-filter"
+                      value={inboxFilter}
+                      onChange={(e) => setInboxFilter(e.target.value)}
+                      title="The AI reads each new email as it arrives: show only what is urgent, what waits for an answer, or one kind of email."
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                    >
+                      {INBOX_FILTERS.map((o) => (
                         <option key={o.value} value={o.value} className="bg-gray-900">
                           {o.label}
                         </option>
@@ -1499,6 +1561,7 @@ const ReplyDraftAgentPage = () => {
 
                   {!isComposeDraft && (
                     <div className="p-5 flex-1 overflow-y-auto custom-scrollbar">
+                      {selectedReply && <TriageCard email={selectedReply} />}
                       <EmailBody
                         body={originalEmail.body}
                         bodyHtml={originalEmail.body_html}
@@ -1524,7 +1587,10 @@ const ReplyDraftAgentPage = () => {
                       ) : (
                         Array.isArray(originalEmail.attachments)
                         && originalEmail.attachments.length > 0
-                        && <AttachmentList attachments={originalEmail.attachments} />
+                        && <AttachmentList attachments={originalEmail.attachments} emailId={selectedReply?.id} />
+                      )}
+                      {originalEmail.attachments_missing && (
+                        <div className="mt-3 text-xs text-gray-500">{originalEmail.attachments_missing}</div>
                       )}
                       {selectedReply?.analysis && (
                         <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
@@ -1764,10 +1830,20 @@ const ReplyDraftAgentPage = () => {
                           </div>
                         )}
 
+                        {/* The answer goes to the address the sender asked for (Reply-To), shown with the one the
+                            email came from so the reviewer sees where it will go (CO-205). */}
+                        {selectedDraft.reply_to_used && selectedDraft.status !== 'sent' && (
+                          <div data-testid="rd-reply-to-note" className="p-3 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-200 text-xs">
+                            This answer goes to <span className="font-semibold">{selectedDraft.to_email}</span>, the address
+                            the sender asked replies to go to. The email came from {selectedDraft.original_from_email}.
+                          </div>
+                        )}
+
                         {selectedDraft.status === 'sent' && (
                           <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-sm flex items-center gap-2">
                             <Check className="h-4 w-4" />
                             Sent on {formatDateTime(selectedDraft.sent_at)} to {selectedDraft.to_email}
+                            {selectedDraft.sent_by ? ` by ${selectedDraft.sent_by}` : ''}
                           </div>
                         )}
 

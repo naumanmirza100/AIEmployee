@@ -16,7 +16,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .models import InboxEmail
-from .text import for_ai
+from .text import ai_json, for_ai
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,7 @@ def _transcript(messages):
     return text if len(text) <= CONVERSATION else '[… earlier messages cut]\n' + text[-CONVERSATION:]
 
 
-def _points(raw: str, keys) -> dict:
-    data = json.loads(raw, strict=False)
+def _points(data: dict, keys) -> dict:
     out = {}
     for key in keys:
         value = data.get(key, [] if key != 'next_step' else '')
@@ -77,9 +76,8 @@ def summarize_conversation(email, agent) -> dict:
             return json.loads(email.thread_summary)
         except ValueError:
             pass
-    raw = agent._call_llm(prompt=_transcript(messages), system_prompt=THREAD_PROMPT,
-                          temperature=0, max_tokens=700, json_mode=True)
-    summary = _points(raw, ('points', 'next_step', 'open_questions'))
+    summary = _points(ai_json(agent, prompt=_transcript(messages), system_prompt=THREAD_PROMPT, max_tokens=700),
+                      ('points', 'next_step', 'open_questions'))
     if not summary['points']:
         raise ValueError('the AI gave no summary')
     summary['messages'] = len(messages)
@@ -152,9 +150,8 @@ def summarize_attachment(att, agent) -> dict:
     text = ' '.join(attachment_text(att).split())
     if len(text) > DOCUMENT:
         text = text[:DOCUMENT] + ' [… the rest of the document was cut]'
-    raw = agent._call_llm(prompt=f'File name: {att.filename}\n\n{text}', system_prompt=DOCUMENT_PROMPT,
-                          temperature=0, max_tokens=700, json_mode=True)
-    summary = _points(raw, ('what', 'points', 'figures'))
+    summary = _points(ai_json(agent, prompt=f'File name: {att.filename}\n\n{text}', system_prompt=DOCUMENT_PROMPT,
+                              max_tokens=700), ('what', 'points', 'figures'))
     if not summary['points']:
         raise ValueError('the AI gave no summary')
     att.summary = json.dumps(summary)
@@ -193,9 +190,8 @@ Return ONLY this JSON: {"answer": "...", "sources": [id, ...]}"""
 
 def _plan(question, history, agent) -> dict:
     asked = '\n'.join(f'Earlier question: {q}' for q, _ in history[-3:])
-    raw = agent._call_llm(prompt=(asked + '\n' if asked else '') + f'Question: {question}',
-                          system_prompt=PLAN_PROMPT, temperature=0, max_tokens=300, json_mode=True)
-    data = json.loads(raw, strict=False)
+    data = ai_json(agent, prompt=(asked + '\n' if asked else '') + f'Question: {question}',
+                   system_prompt=PLAN_PROMPT, max_tokens=300)
     days = data.get('days')
     return {
         'terms': [t.strip() for t in data.get('terms', []) if isinstance(t, str) and len(t.strip()) >= 3][:6],
@@ -255,9 +251,7 @@ def ask_inbox(question, account, agent, history=()) -> dict:
     today = timezone.localtime().strftime('%A %d %B %Y')
     prompt = (f'Today is {today}.\n\n' + (f'Earlier in this conversation:\n{earlier}\n\n' if earlier else '')
               + 'EMAILS:\n\n' + '\n\n'.join(_email_block(m) for m in emails) + f'\n\nQUESTION: {question}')
-    raw = agent._call_llm(prompt=prompt, system_prompt=ANSWER_PROMPT, temperature=0.2, max_tokens=700,
-                          json_mode=True)
-    data = json.loads(raw, strict=False)
+    data = ai_json(agent, prompt=prompt, system_prompt=ANSWER_PROMPT, temperature=0.2, max_tokens=700)
     answer = str(data.get('answer', '')).strip()
     if not answer:
         raise ValueError('the AI gave no answer')
