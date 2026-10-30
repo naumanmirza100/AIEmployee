@@ -63,7 +63,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-blue-500',
       gradientFrom: gradientColors['blue-500'],
       gradientTo: gradientColors['cyan-500'],
-      price: 129,
+      price: 32,
       pricePeriod: 'month',
       features: [
         'Automated CV parsing and screening',
@@ -83,7 +83,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-purple-500',
       gradientFrom: gradientColors['purple-500'],
       gradientTo: gradientColors['pink-500'],
-      price: 149,
+      price: 37,
       pricePeriod: 'month',
       features: [
         'Automated email campaigns',
@@ -103,7 +103,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-green-500',
       gradientFrom: gradientColors['green-500'],
       gradientTo: gradientColors['emerald-500'],
-      price: 149,
+      price: 37,
       pricePeriod: 'month',
       features: [
         'AI task prioritization',
@@ -123,7 +123,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-orange-500',
       gradientFrom: gradientColors['emerald-500'],
       gradientTo: gradientColors['green-500'],
-      price: 149,
+      price: 37,
       pricePeriod: 'month',
       features: [
         'Automated ticket classification & resolution',
@@ -143,7 +143,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-amber-500',
       gradientFrom: gradientColors['amber-500'],
       gradientTo: gradientColors['orange-500'],
-      price: 129,
+      price: 32,
       pricePeriod: 'month',
       features: [
         'Document processing & parsing (PDF, DOCX, Excel)',
@@ -163,7 +163,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-rose-500',
       gradientFrom: '#f43f5e',
       gradientTo: '#a855f7',
-      price: 199,
+      price: 50,
       pricePeriod: 'month',
       features: [
         'AI lead scoring (Hot / Warm / Cold)',
@@ -183,7 +183,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-cyan-500',
       gradientFrom: gradientColors['cyan-500'],
       gradientTo: gradientColors['blue-500'],
-      price: 99,
+      price: 25,
       pricePeriod: 'month',
       features: [
         'AI triage: priority, kind and what each email wants',
@@ -203,7 +203,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-purple-500',
       gradientFrom: gradientColors['purple-500'],
       gradientTo: gradientColors['blue-500'],
-      price: 99,
+      price: 25,
       pricePeriod: 'month',
       features: [
         'Knowledge Q&A from your handbook & policies',
@@ -223,7 +223,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-violet-500',
       gradientFrom: gradientColors['purple-500'],
       gradientTo: gradientColors['pink-500'],
-      price: 129,
+      price: 32,
       pricePeriod: 'month',
       features: [
         'Natural language meeting scheduling',
@@ -243,7 +243,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-teal-500',
       gradientFrom: gradientColors['emerald-500'],
       gradientTo: gradientColors['cyan-500'],
-      price: 49,
+      price: 12,
       pricePeriod: 'month',
       features: [
         'HubSpot, Pipedrive and Salesforce',
