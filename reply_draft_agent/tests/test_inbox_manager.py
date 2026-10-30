@@ -233,6 +233,31 @@ class AskTests(InboxTestCase):
         found = insights.find_emails(self.mailbox, {'terms': ['demo', 'dental']})
         self.assertEqual(found[0], reply)                                        # the reply before our own emails
 
+    def test_the_answer_sees_which_mail_waits_for_an_answer(self):
+        # "Kin emails ka jawab abhi dena baqi hai?" listed an invoice the AI had read as needing no answer.
+        price = self.mail(subject='Price', needs_reply=True, triaged_at=timezone.now(), category='customer')
+        invoice = self.mail(subject='Invoice', needs_reply=False, triaged_at=timezone.now(), category='billing')
+        done = self.mail(subject='Old question', needs_reply=True, triaged_at=timezone.now())
+        ReplyDraft.objects.create(owner=user_for(self.nadia), inbox_email=done, email_account=self.mailbox,
+                                  draft_subject='Re', draft_body='Hello', status='sent')
+        with ai('{"terms": []}', 'Only the price question [#1].') as llm:
+            insights.ask_inbox('Which emails still need an answer?', self.mailbox, ReplyDraftAgent())
+        prompt = llm.call_args_list[1].kwargs['prompt']
+        self.assertIn(f'[#{price.id}]', prompt.split('waits for an answer')[0])
+        self.assertRegex(prompt, rf'\[#{invoice.id}\][^\n]*needs no answer')
+        self.assertRegex(prompt, rf'\[#{done.id}\][^\n]*answered by us')
+
+    def test_a_summarised_attachment_is_part_of_what_the_answer_reads(self):
+        # "How much is the invoice?": the amount is in the PDF, not in "Please find attached our invoice".
+        invoice = self.mail(subject='Invoice INV-2026-118', body='Please find attached our invoice.')
+        InboxAttachment.objects.create(inbox_email=invoice, filename='INV-2026-118.pdf', content_type='application/pdf',
+                                       summary=json.dumps({'what': 'An invoice from CareWell Dental', 'points': [],
+                                                           'figures': ['Total due: Rs 57,000', '5 November 2026']}))
+        with ai('{"terms": ["invoice"]}', f'Rs 57,000, due by 5 November [#{invoice.id}].') as llm:
+            insights.ask_inbox('How much is the invoice?', self.mailbox, ReplyDraftAgent())
+        self.assertIn('Attached file "INV-2026-118.pdf", as summarised: An invoice from CareWell Dental; '
+                      'Total due: Rs 57,000; 5 November 2026', llm.call_args_list[1].kwargs['prompt'])
+
     def test_an_answer_in_plain_words_is_the_answer(self):
         # On the film copy gpt-4o-mini answered "Main sirf is inbox ke bare mein sawalon ka jawab deta hoon." with no
         # JSON around it, and the question failed.
@@ -261,6 +286,9 @@ class DraftSignatureTests(InboxTestCase):
             made = self.call(views.generate_draft, self.nadia, {'inbox_email_id': email.id})
         self.assertEqual(made.status_code, 200, made.data)
         self.assertIn('Signature:\nNadia Rehman\nMargalla', llm.call_args.kwargs['prompt'])
+        # The sender's language, "hum" in Urdu, and no guessed yes/no (on live: "yes, both branches can share").
+        self.assertIn(ReplyDraftAgent.WE_IN_URDU, llm.call_args.kwargs['prompt'])
+        self.assertIn('do not answer yes or no', llm.call_args.kwargs['system_prompt'])
         body = ReplyDraft.objects.get(pk=made.data['data']['draft_id']).draft_body
         self.assertNotIn('[', body)
         self.assertTrue(body.endswith('Best regards,\nNadia Rehman\nMargalla'), body)
