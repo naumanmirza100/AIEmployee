@@ -36,6 +36,10 @@ class ConnectionBase(base.CRMBase):
         CRMIntegration.objects.all().delete()
         self.member = CompanyUser.objects.create(company=self.company, email='mo@test.local', full_name='Mo Member',
                                                  role='company_user', password_hash='x', is_active=True)
+        # Connecting tries the key with the CRM first (tests_crm_live_run_31_oct); here the CRM takes every key.
+        patcher = mock.patch('crm_sync_agent.connectors.base.BaseCRMConnector.check', return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def connect(self, actor=None, **credentials):
         credentials = credentials or {'access_token': SECRET}

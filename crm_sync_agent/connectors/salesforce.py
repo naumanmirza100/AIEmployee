@@ -57,13 +57,12 @@ class SalesforceConnector(BaseCRMConnector):
     # BaseCRMConnector interface
     # ------------------------------------------------------------------ #
 
-    def ping(self) -> bool:
-        try:
-            self._ensure_token()
-            resp = self._get(f'/services/data/{SF_API_VERSION}/limits')
-            return resp.status_code == 200
-        except CRMError:
-            return False
+    label = 'Salesforce'
+
+    def _ping(self) -> bool:
+        self._ensure_token()
+        resp = self._get(f'/services/data/{SF_API_VERSION}/limits')
+        return resp.status_code == 200
 
     def find_contact_by_email(self, email: str) -> Optional[dict]:
         self._ensure_token()

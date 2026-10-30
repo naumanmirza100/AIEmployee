@@ -25,6 +25,23 @@ def network_error(provider: str, exc: Exception) -> 'CRMError':
     return CRMError(f'{provider} could not be reached ({type(exc).__name__}). It is tried again.', retriable=True)
 
 
+def refusal(label: str, exc: CRMError) -> str:
+    """Why a CRM would not take the credentials, in words for the person connecting it. Never the CRM's raw answer,
+    which can name the request."""
+    code = getattr(exc, 'status_code', None)
+    what = 'sign-in details' if label == 'Salesforce' else 'key'
+    if code is None:
+        return f'{label} could not be reached just now. Try again in a minute.'
+    if code == 401 or (code == 400 and 'auth' in str(exc).lower()):
+        return f'{label} refused the {what}. Check that it was copied whole, or make a new one.'
+    if code == 403:
+        return (f'{label} took the {what} but would not show contacts. Give it permission to read and write '
+                f'contacts, then try again.')
+    if code == 429:
+        return f'{label} is busy (too many requests). Try again in a minute.'
+    return f'{label} refused the connection ({code}). Check the {what} and try again.'
+
+
 class PermissionMissing(CRMError):
     """The CRM refused one kind of record for lack of a permission (the key, or the plan). Recorded as skipped and
     said on the card; it used to be recorded as sent (CO-162)."""
@@ -71,9 +88,29 @@ class BaseCRMConnector(ABC):
     def create_contact(self, email: str, properties: dict) -> str:
         """Create a new contact and return its id. Never called for one that exists."""
 
+    #: The CRM's name as people know it, for what the page says.
+    label = 'The CRM'
+
     @abstractmethod
+    def _ping(self) -> bool:
+        """One cheap read that needs the credentials: True when it answered as expected. Raises CRMError when the
+        CRM refuses or cannot be reached."""
+
     def ping(self) -> bool:
         """Return True if credentials are valid and the API is reachable."""
+        return self.check() is None
+
+    def check(self) -> Optional[str]:
+        """None when the CRM takes these credentials, otherwise what to tell the person.
+
+        Connect saved a wrong key and said "connected", and Test Connection said only "Ping failed" (found in the
+        live run, 31 Oct): each connector's ping swallowed the reason."""
+        try:
+            if self._ping():
+                return None
+            return f'{self.label} answered, but not as expected. Check the details and try again.'
+        except CRMError as exc:
+            return refusal(self.label, exc)
 
     @abstractmethod
     def find_contact_by_email(self, email: str) -> Optional[dict]:

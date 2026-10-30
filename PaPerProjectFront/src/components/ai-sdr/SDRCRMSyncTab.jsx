@@ -2,11 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw, Plus, Trash2, CheckCircle2, XCircle, Wifi, WifiOff,
   AlertCircle, Loader2, ChevronDown, ChevronUp, Users, Mail,
-  Calendar, FileText, Database, Zap,
+  Calendar, FileText, Database, Zap, KeyRound,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  listCrmIntegrations, createCrmIntegration, deleteCrmIntegration,
+  listCrmIntegrations, createCrmIntegration, updateCrmIntegration, deleteCrmIntegration,
   pingCrmIntegration, syncCrmLeads, getCrmQueueStatus, retryCrmFailed,
 } from '@/services/aiSdrService';
 
@@ -132,7 +132,10 @@ const PROVIDERS = {
     color: '#ff7a59',
     bg: 'rgba(255,122,89,0.12)',
     logo: '🟠',
-    fields: [{ key: 'access_token', label: 'Access Token (Service Key)', placeholder: 'pat-na1-...' }],
+    // The keys were plain text boxes, so a key showed on screen (and in any screen share) while it was typed.
+    fields: [{ key: 'access_token', label: 'Access Token (Service Key)', placeholder: 'pat-na1-...', type: 'password',
+               hint: 'In HubSpot: Settings → Integrations → Service keys. Give it CRM contacts read and write, and '
+                     + 'sales-email-read (for emails and calls).' }],
   },
   salesforce: {
     label: 'Salesforce',
@@ -153,33 +156,41 @@ const PROVIDERS = {
     color: '#27c16b',
     bg: 'rgba(39,193,107,0.12)',
     logo: '🟢',
-    fields: [{ key: 'api_token', label: 'API Token', placeholder: 'abc123...' }],
+    fields: [{ key: 'api_token', label: 'API Token', placeholder: 'abc123...', type: 'password',
+               hint: 'In Pipedrive: your name → Personal preferences → API.' }],
   },
 };
 
 // ---------------------------------------------------------------------------
 // Connect Modal
 // ---------------------------------------------------------------------------
-function ConnectModal({ provider, onClose, onSaved }) {
+// `integration` given: change the saved details. Fields left empty keep what is saved (the server keeps them), so a
+// new HubSpot key needs no Remove, which also dropped everything waiting in the queue.
+function ConnectModal({ provider, integration, onClose, onSaved }) {
   const cfg = PROVIDERS[provider];
+  const editing = !!integration;
   const [creds, setCreds] = useState({});
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   const handleSave = async () => {
-    const missing = cfg.fields.find(f => !creds[f.key]);
-    if (missing) {
-      toast({ title: `${missing.label} is required`, variant: 'destructive' });
+    const filled = Object.fromEntries(Object.entries(creds).filter(([, v]) => v && v.trim()));
+    const missing = editing ? null : cfg.fields.find(f => !filled[f.key]);
+    if (missing || (editing && !Object.keys(filled).length)) {
+      toast({ title: missing ? `${missing.label} is required` : 'Type the new details first', variant: 'destructive' });
       return;
     }
     setLoading(true);
     try {
-      await createCrmIntegration({ provider, credentials: creds });
-      toast({ title: `${cfg.label} connected!`, description: 'Integration saved successfully.' });
+      // The server tries the details with the CRM first and refuses them, saying why, when the CRM does.
+      if (editing) await updateCrmIntegration(integration.id, { credentials: filled });
+      else await createCrmIntegration({ provider, credentials: filled });
+      toast({ title: editing ? `${cfg.label} details changed` : `${cfg.label} connected!`,
+              description: `${cfg.label} accepted them.` });
       onSaved();
       onClose();
     } catch (e) {
-      toast({ title: 'Connection failed', description: e?.message || 'Check your credentials.', variant: 'destructive' });
+      toast({ title: `${cfg.label} did not accept them`, description: e?.message || 'Check the details.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -194,8 +205,10 @@ function ConnectModal({ provider, onClose, onSaved }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <span style={{ fontSize: 28 }}>{cfg.logo}</span>
           <div>
-            <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Connect {cfg.label}</div>
-            <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>Enter your {cfg.label} credentials</div>
+            <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>{editing ? `Change the ${cfg.label} details` : `Connect ${cfg.label}`}</div>
+            <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>
+              {editing ? 'Type only what changes; a field left empty keeps what is saved.' : `Enter your ${cfg.label} credentials`}
+            </div>
           </div>
         </div>
 
@@ -206,10 +219,13 @@ function ConnectModal({ provider, onClose, onSaved }) {
               <input
                 style={inputStyle}
                 type={f.type || 'text'}
-                placeholder={f.placeholder}
+                autoComplete={f.type === 'password' ? 'new-password' : 'off'}
+                data-testid={`crm-field-${f.key}`}
+                placeholder={editing ? (integration.credentials_preview?.[f.key] || 'Leave empty to keep it') : f.placeholder}
                 value={creds[f.key] || ''}
                 onChange={e => setCreds(p => ({ ...p, [f.key]: e.target.value }))}
               />
+              {f.hint && <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, marginTop: 6 }}>{f.hint}</div>}
             </div>
           ))}
         </div>
@@ -218,7 +234,7 @@ function ConnectModal({ provider, onClose, onSaved }) {
           <button style={btnSecondary} onClick={onClose}>Cancel</button>
           <button style={btnPrimary} onClick={handleSave} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-            {loading ? 'Connecting...' : 'Connect'}
+            {loading ? 'Checking with the CRM...' : editing ? 'Save' : 'Connect'}
           </button>
         </div>
       </div>
@@ -263,6 +279,18 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  // The four kinds were shown as switches but could not be switched.
+  const handleToggle = async (key, label) => {
+    try {
+      await updateCrmIntegration(integration.id, { [key]: !integration[key] });
+      toast({ title: `${label} ${integration[key] ? 'no longer go' : 'now go'} to ${cfg.label}` });
+      onRefresh();
+    } catch (e) {
+      toast({ title: 'Not changed', description: e?.message, variant: 'destructive' });
+    }
+  };
 
   const handleDeleteConfirmed = async () => {
     setDeleting(true);
@@ -284,6 +312,10 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
 
   return (
     <>
+      {editing && (
+        <ConnectModal provider={integration.provider} integration={integration}
+          onClose={() => setEditing(false)} onSaved={onRefresh} />
+      )}
       {showDeleteModal && (
         <ConfirmDeleteModal
           provider={integration.provider}
@@ -356,8 +388,8 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ fontSize: 13, lineHeight: 1.5, color: 'hsl(var(--pt-d1d5db))' }}>
             <b style={{ color: '#ef4444' }}>{cfg.label} refused the key.</b>{' '}
-            {integration.waiting || 0} item(s) are waiting, not lost. Put in a new key (or check it in {cfg.label}),
-            then press Test Connection: what waited goes out.
+            {integration.waiting || 0} item(s) are waiting, not lost. Put in a new key with Change Key (or fix it in{' '}
+            {cfg.label} and press Test Connection): what waited goes out.
           </div>
         </div>
       )}
@@ -383,15 +415,17 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           { key: 'sync_meetings', icon: Calendar, label: 'Meetings' },
           { key: 'sync_notes',    icon: FileText, label: 'Notes' },
         ].map(({ key, icon: Icon, label }) => (
-          <div key={key} style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+          <button key={key} type="button" data-testid={`crm-toggle-${key}`} onClick={() => handleToggle(key, label)}
+            title={integration[key] ? `${label} go to ${cfg.label}. Click to stop.` : `Click to send ${label.toLowerCase()} to ${cfg.label}.`}
+            style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', cursor: 'pointer',
             borderRadius: 20, fontSize: 12,
             background: integration[key] ? 'rgba(16,185,129,0.1)' : 'hsl(var(--surface-invert) / 0.04)',
             color: integration[key] ? '#10b981' : '#6b7280',
             border: `1px solid ${integration[key] ? 'rgba(16,185,129,0.2)' : 'hsl(var(--surface-invert) / 0.06)'}`,
           }}>
-            <Icon size={11} /> {label}
-          </div>
+            <Icon size={11} /> {label}{integration[key] ? '' : ' (off)'}
+          </button>
         ))}
       </div>
 
@@ -400,6 +434,9 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
         <button style={btnSecondary} onClick={handlePing} disabled={pinging}>
           {pinging ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
           Test Connection
+        </button>
+        <button data-testid="crm-change-key" style={btnSecondary} onClick={() => setEditing(true)}>
+          <KeyRound size={13} /> {integration.provider === 'salesforce' ? 'Change Details' : 'Change Key'}
         </button>
         <button style={btnSecondary} onClick={handleSync} disabled={syncing}>
           {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
