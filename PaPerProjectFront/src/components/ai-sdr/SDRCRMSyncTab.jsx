@@ -171,6 +171,8 @@ function ConnectModal({ provider, integration, onClose, onSaved }) {
   const editing = !!integration;
   const [creds, setCreds] = useState({});
   const [loading, setLoading] = useState(false);
+  // Why the CRM refused, kept in the window until the details change: the toast alone was gone in seconds.
+  const [refused, setRefused] = useState('');
   const { toast } = useToast();
 
   const handleSave = async () => {
@@ -190,6 +192,7 @@ function ConnectModal({ provider, integration, onClose, onSaved }) {
       onSaved();
       onClose();
     } catch (e) {
+      setRefused(e?.message || 'Check the details.');
       toast({ title: `${cfg.label} did not accept them`, description: e?.message || 'Check the details.', variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -223,12 +226,22 @@ function ConnectModal({ provider, integration, onClose, onSaved }) {
                 data-testid={`crm-field-${f.key}`}
                 placeholder={editing ? (integration.credentials_preview?.[f.key] || 'Leave empty to keep it') : f.placeholder}
                 value={creds[f.key] || ''}
-                onChange={e => setCreds(p => ({ ...p, [f.key]: e.target.value }))}
+                onChange={e => { setRefused(''); setCreds(p => ({ ...p, [f.key]: e.target.value })); }}
               />
               {f.hint && <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, marginTop: 6 }}>{f.hint}</div>}
             </div>
           ))}
         </div>
+
+        {refused && (
+          <div data-testid="crm-connect-refused" style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8, margin: '-8px 0 18px', padding: '10px 12px', borderRadius: 8,
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', color: 'hsl(var(--pt-d1d5db))', fontSize: 13,
+          }}>
+            <AlertCircle size={15} color="#ef4444" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{refused}</span>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button style={btnSecondary} onClick={onClose}>Cancel</button>
