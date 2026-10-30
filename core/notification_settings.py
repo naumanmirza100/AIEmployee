@@ -52,6 +52,7 @@ AGENT_LABELS = {
     'marketing_agent': 'Marketing',
     'operations_agent': 'Operations',
     'ai_sdr_agent': 'AI SDR',
+    'reply_draft_agent': 'Reply Draft',
     None: 'Everyone',
 }
 #: The heading for topics that several agents share.
@@ -163,6 +164,14 @@ TOPICS = (
     Topic('sales_reports', 'Sales reports',
           'The daily AI SDR summary, and on Mondays a note when last week had few calls booked.',
           'ai_sdr_agent', email_default=True, in_app=False),
+    Topic('inbox_urgent', 'Urgent email',
+          'An email the AI reads as urgent arrives in the Reply Draft inbox: something broken, an angry customer, '
+          'a payment or deadline due today or tomorrow.',
+          'reply_draft_agent', kinds=('inbox_urgent',), email_default=True),
+    Topic('inbox_digest', 'Daily inbox summary',
+          "Each morning, yesterday's mail in the Reply Draft inbox: how many, of which kinds, what is urgent and "
+          'who is waiting for an answer.',
+          'reply_draft_agent', kinds=('inbox_digest',), email_default=True, in_app=False),
     Topic('operations_failed', 'Documents that could not be read',
           'A document you uploaded to Operations failed to process.',
           'operations_agent', kinds=('operations_document_failed',)),

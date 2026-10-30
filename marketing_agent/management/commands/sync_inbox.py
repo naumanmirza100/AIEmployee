@@ -526,7 +526,12 @@ class Command(BaseCommand):
             return
 
         now = timezone.now()
-        base = InboxEmail.objects.filter(email_account_id=account.id)
+        # An email with a draft stays: deleting it deleted the draft, its attachments and the record of the sent
+        # reply with it, about ten days later on a busy mailbox (CO-154). The stored count may pass the cap a little.
+        from reply_draft_agent.models import ReplyDraft
+        drafted = (ReplyDraft.objects.filter(inbox_email__isnull=False, inbox_email__email_account_id=account.id)
+                   .values('inbox_email_id'))
+        base = InboxEmail.objects.filter(email_account_id=account.id).exclude(id__in=drafted)
         removed = 0
 
         # 1. Anything outside the retention window goes, whatever the count.
@@ -927,6 +932,11 @@ class Command(BaseCommand):
 
         subject = self.decode_header(msg.get('Subject', ''))[:500]
         body, body_html = self.get_email_body(msg)
+        # Where an answer goes when it is not the sender: web forms and ticket systems send from a system address
+        # with the customer in Reply-To (CO-205). Kept only when it is another, well-formed address.
+        reply_to = (self._first_address(msg.get('Reply-To', '') or '') or '').lower()
+        if reply_to == (from_email or '').lower() or not self._well_formed(reply_to):
+            reply_to = ''
         in_reply_to = (msg.get('In-Reply-To', '') or '').strip()[:500]
         references = (msg.get('References', '') or '').strip()
 
@@ -950,6 +960,7 @@ class Command(BaseCommand):
             references=references,
             from_email=from_email,
             from_name=from_name[:255],
+            reply_to=reply_to[:254],
             subject=subject,
             body=body,
             body_html=body_html,
@@ -1613,9 +1624,15 @@ class Command(BaseCommand):
                 logger.warning(f'Error decoding body: {str(e)}')
 
         # Make sure plain is always populated. Tag-strip HTML when it's
-        # the only thing the message had.
+        # the only thing the message had: style, script and head blocks go first, or their contents (whole style
+        # sheets) became the text the AI read (CO-249).
         if html and not plain:
-            plain = re.sub(r'<[^>]+>', '', html)
+            import html as _html_lib
+            text = re.sub(r'(?is)<(style|script|head)\b.*?</\1\s*>', ' ', html)
+            text = re.sub(r'(?i)<br\s*/?>|</(p|div|tr|li|h[1-6])\s*>', '\n', text)
+            text = _html_lib.unescape(re.sub(r'<[^>]+>', '', text))
+            text = '\n'.join(line.strip() for line in re.sub(r'[ \t\r\f\v]+', ' ', text).split('\n'))
+            plain = re.sub(r'\n{3,}', '\n\n', text).strip()
 
         return plain, html
 

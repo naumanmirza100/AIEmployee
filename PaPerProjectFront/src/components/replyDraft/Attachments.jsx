@@ -1,5 +1,6 @@
 import React from 'react';
-import { Loader2, Paperclip, X } from 'lucide-react';
+import { ListChecks, Loader2, Paperclip, X } from 'lucide-react';
+import { summarizeAttachment } from '@/services/replyDraftService';
 import { Button } from '@/components/ui/button';
 import { DRAFT_ATTACHMENT_MAX_COUNT } from './replyDraftConstants';
 import { ATTACHMENT_ORIGIN, fileIconChar, formatFileSize } from './replyDraftHelpers';
@@ -34,7 +35,55 @@ export const AttachmentLoading = () => (
   </div>
 );
 
-export const AttachmentList = ({ attachments }) => {
+// The AI's summary of one PDF, Word or text attachment, made on request and kept (30 Oct 2026).
+const AttachmentSummary = ({ emailId, att }) => {
+  const [summary, setSummary] = React.useState(att.summary || null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState('');
+  if (!att.can_summarize || !emailId) return null;
+  const run = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await summarizeAttachment(emailId, att.id);
+      setSummary(res?.data || null);
+    } catch (e) {
+      setError(e?.message || 'The summary could not be made just now. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!summary) {
+    return (
+      <div className="px-3 pb-2">
+        <button
+          type="button"
+          data-testid="rd-summarize-attachment"
+          onClick={run}
+          disabled={busy}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-200 hover:text-white disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ListChecks className="h-3 w-3" />}
+          {busy ? 'Reading the file…' : 'Summarise this file'}
+        </button>
+        {error && <div className="text-[11px] text-red-300 mt-1">{error}</div>}
+      </div>
+    );
+  }
+  return (
+    <div data-testid="rd-attachment-summary" className="px-3 pb-3 text-[11px] text-gray-300 space-y-1">
+      {summary.what && <div className="font-semibold text-emerald-200">{summary.what}</div>}
+      <ul className="list-disc pl-4 space-y-0.5">
+        {(summary.points || []).map((p, i) => <li key={i}>{p}</li>)}
+      </ul>
+      {(summary.figures || []).length > 0 && (
+        <div><span className="font-semibold text-gray-200">Figures: </span>{summary.figures.join(' · ')}</div>
+      )}
+    </div>
+  );
+};
+
+export const AttachmentList = ({ attachments, emailId }) => {
   const handleDownload = async (att) => {
     // Token-authenticated download: fetch with the auth header, turn the
     // response into a Blob, then synthesise an <a download> click. Direct
@@ -71,11 +120,11 @@ export const AttachmentList = ({ attachments }) => {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {attachments.map((att) => (
+          <div key={att.id} className="rounded-lg bg-white/5 border border-white/10">
           <button
-            key={att.id}
             type="button"
             onClick={() => handleDownload(att)}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-emerald-500/30 transition text-left group"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition text-left group"
           >
             <span className="text-xl shrink-0" aria-hidden="true">
               {fileIconChar(att.filename, att.content_type)}
@@ -95,6 +144,8 @@ export const AttachmentList = ({ attachments }) => {
               Download
             </span>
           </button>
+          <AttachmentSummary emailId={emailId} att={att} />
+          </div>
         ))}
       </div>
     </div>

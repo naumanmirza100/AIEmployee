@@ -1091,6 +1091,19 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 300.0,  # Every 5 minutes
         'options': {'expires': 600}
     },
+
+    # Reply Draft: the AI reads the new mail (category, priority, one sentence) and tells about urgent mail, every
+    # 5 minutes after the mailbox read; and each mailbox's day by email, at 08:05 Pakistan time.
+    'reply-draft-triage-inbox': {
+        'task': 'reply_draft_agent.tasks.triage_inbox_task',
+        'schedule': 300.0,
+        'options': {'expires': 600},
+    },
+    'reply-draft-daily-digest': {
+        'task': 'reply_draft_agent.tasks.daily_inbox_digest_task',
+        'schedule': _crontab(hour=3, minute=5),
+        'options': {'expires': 6 * 3600},
+    },
     
     # There is no separate "retry failed emails" job, on purpose. The sequence sender
     # above does not move a contact forward when a send fails, so it tries that step
