@@ -171,7 +171,8 @@ INDEX = 60
 PLAN_PROMPT = """A person asks a question about their company's email. Decide how to look for the emails that answer it.
 
 Return ONLY this JSON:
-{"language": "...", "terms": ["..."], "people": ["..."], "days": null, "categories": [], "priorities": []}
+{"language": "...", "terms": ["..."], "people": ["..."], "days": null, "categories": [], "priorities": [],
+ "waiting": false}
 
 - language: the language the question is written in: "English", "Roman Urdu" (Urdu in Latin letters), "Urdu"
   (Urdu script), or another language's name.
@@ -184,7 +185,9 @@ Return ONLY this JSON:
 - categories: any of customer, sales, support, billing, meeting, internal, newsletter, personal, other that the
   question is about ("complaints" -> support, "invoices" -> billing); [] when none.
 - priorities: ["urgent", "high"] when the question asks what is urgent, important, needs attention or must be done
-  first ("urgent", "zaroori", "jaldi"); [] otherwise."""
+  first ("urgent", "zaroori", "jaldi"); [] otherwise.
+- waiting: true when the question asks which mail still needs an answer or a reply ("jawab dena baqi hai");
+  false otherwise."""
 
 # "Every email that fits": on live, "which clinics replied?" left out the one that asked the price.
 ANSWER_PROMPT = """You answer questions about a company's email, from the emails below only. Return ONLY this JSON,
@@ -203,7 +206,7 @@ kind and priority as read when it arrived (for example support/urgent).
 - When the question is not about this mail at all (a poem, the weather, general knowledge), say in one sentence that
   you answer questions about this inbox only.
 - Be brief: a few sentences, or a short list.
-- Name people; never write "he" or "she": a name does not tell you who someone is."""
+- Name people; never write he, she, him, her or his: a name does not tell you who someone is."""
 
 _SCRIPT_URDU = re.compile(r'[؀-ۿ]')
 _LANGUAGES = {'roman urdu': 'Roman Urdu (Urdu in Latin letters)', 'urdu': 'Urdu, in Urdu script'}
@@ -215,9 +218,10 @@ def answer_last(language):
     it."""
     name = _LANGUAGES.get((language or '').strip().lower(), (language or '').strip()[:30])
     lang = f'in {name}' if name else 'in the language and script of the QUESTION'
-    # Names, not "he" or "she", said here too: on live the rules alone still gave "he is not interested".
-    return (f'\n\nWrite the answer {lang}, naming people rather than writing "he" or "she", as the JSON '
-            f'{{"answer": "...", "sources": [...]}}.')
+    # Names, not "he" or "she", said here too: on live the rules alone still gave "he is not interested", and with
+    # "he" and "she" named, "works for him".
+    return (f'\n\nWrite the answer {lang}, repeating people\'s names instead of he, she, him, her or his, as the '
+            f'JSON {{"answer": "...", "sources": [...]}}.')
 
 
 def _plan(question, history, agent) -> dict:
@@ -235,6 +239,7 @@ def _plan(question, history, agent) -> dict:
         'days': int(days) if isinstance(days, (int, float)) and 0 < days <= 365 else None,
         'categories': [c for c in data.get('categories', []) if isinstance(c, str)][:4],
         'priorities': [p for p in data.get('priorities', []) if p in ('urgent', 'high')],
+        'waiting': data.get('waiting') is True,
     }
 
 
@@ -269,6 +274,14 @@ def find_emails(account, plan, limit=SOURCES):
         match |= Q(category__in=plan['categories'])
     if plan.get('priorities'):
         match |= Q(priority__in=plan['priorities'])
+    # "Kin emails ka jawab abhi dena baqi hai?" left out a meeting move that waited for an answer: such a question
+    # gets the mail that waits, and nobody has answered, in full.
+    answered = []
+    if plan.get('waiting'):
+        from .models import ReplyDraft
+        answered = list(ReplyDraft.objects.filter(inbox_email__email_account=account, status='sent')
+                        .values_list('inbox_email_id', flat=True))
+        match |= Q(direction='in', needs_reply=True) & ~Q(id__in=answered)
     found = list(qs.filter(match).order_by('-received_at')[:80]) if match else []
     if not found:
         return list(qs.order_by('-received_at')[:limit])
@@ -276,8 +289,9 @@ def find_emails(account, plan, limit=SOURCES):
 
     def hits(m):
         text = f'{m.subject} {m.ai_summary} {m.from_name} {m.from_email} {(m.body or "")[:4000]}'.lower()
+        waits = plan.get('waiting') and m.direction == 'in' and m.needs_reply and m.id not in answered
         return (sum(1 for w in words if w in text) + (1 if m.category in plan.get('categories', []) else 0)
-                + (2 if m.priority in plan.get('priorities', []) else 0))
+                + (2 if m.priority in plan.get('priorities', []) else 0) + (3 if waits else 0))
     # A campaign's own sent emails used to outrank the replies to them, and a clinic's price question was left out.
     found.sort(key=lambda m: (hits(m), m.direction == 'in', m.received_at), reverse=True)
     return found[:limit]
@@ -363,7 +377,7 @@ def ask_inbox(question, account, agent, history=()) -> dict:
     except (ValueError, KeyError, TypeError) as exc:
         logger.warning('ask_inbox: the search plan could not be read (%s); the newest mail is used', exc)
         plan = {'language': 'Urdu' if _SCRIPT_URDU.search(question) else '', 'terms': [], 'people': [], 'days': None,
-                'categories': [], 'priorities': []}
+                'categories': [], 'priorities': [], 'waiting': False}
     emails = find_emails(account, plan)
     if not emails:
         return {'answer': 'There is no mail in this inbox yet.', 'sources': [], 'searched': 0}

@@ -733,6 +733,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             f"User instructions: {user_context or '(none)'}\n\n"
             f"Signature:\n{self._signature()}\n\n"
             f"{self.WE_IN_URDU}"
+            f"{self.GREETING}"
             "First classify the sender's interest_level, write a short analysis, "
             "then draft the reply. Return the JSON object described in the system prompt."
         )
@@ -782,6 +783,11 @@ class ReplyDraftAgent(MarketingBaseAgent):
     WE_IN_URDU = ("Language: write the reply in the language of the INCOMING BODY above; an email in English gets a "
                   "reply in English. Only when that email is in Urdu or Roman Urdu: write as the company, with 'hum' "
                   "and plural verbs ('hum check kar rahe hain'), never 'main' with a he or she verb.\n\n")
+
+    # On live, an email sent from one person's account and signed "Tariq Mehmood" got "Hi M. Abdullah Mughal" with the
+    # rule only in the system prompt.
+    GREETING = ("Greeting: greet the person by the name they sign the email with at its end; the sender name above "
+                "is the account's and may be someone else's. Use it only when the email is not signed.\n\n")
 
     def _signature(self):
         """Who signs the reply: the person drafting and the company, or the company's team when the login is the
