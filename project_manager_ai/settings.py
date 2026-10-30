@@ -415,7 +415,14 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 # use Hostinger; anything else (or unset) keeps the original SQL Server config.
 _db_engine = os.getenv('DB_ENGINE', 'mssql').strip().lower()
 
-if _db_engine in ('mysql', 'mariadb'):
+if _db_engine in ('sqlite', 'sqlite3'):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+elif _db_engine in ('mysql', 'mariadb'):
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',

@@ -436,8 +436,8 @@ class LeadResearchAgent:
 
             logger.info("Apify: run started id=%s — polling for completion", run_id)
 
-            # Step 2: Poll until finished (max 120s)
-            for _ in range(24):
+            # Step 2: Poll until finished (max 300s)
+            for _ in range(60):
                 time.sleep(5)
                 status_resp = requests.get(
                     f"{APIFY_BASE}/actor-runs/{run_id}",
@@ -453,7 +453,7 @@ class LeadResearchAgent:
                 if status in ('FAILED', 'ABORTED', 'TIMED-OUT'):
                     raise ValueError(f"Apify run failed with status: {status}")
             else:
-                raise ValueError("Apify run timed out after 120s")
+                raise ValueError("Apify run timed out after 300s")
 
             # Step 3: Fetch dataset items
             dataset_id = run_data.get('defaultDatasetId')
@@ -567,6 +567,10 @@ class LeadResearchAgent:
         we branch on the actor id."""
         actor = (self.apify_actor or '').lower()
 
+        # evascrape/b2b-leads-finder — Apollo-style scraper with filters or Apollo URL
+        if 'evascrape' in actor:
+            return self._build_evascrape_input(icp, count)
+
         # code_crafter/leads-finder — an Apollo-style people-search actor that
         # returns real contact data (name + email + company). Its input maps
         # 1:1 to the ICP fields. https://apify.com/code_crafter/leads-finder
@@ -598,6 +602,37 @@ class LeadResearchAgent:
             'saveHtml': False,
             'includeUnfilteredResults': False,
         }
+
+    def _build_evascrape_input(self, icp, count: int) -> dict:
+        """Map the ICP profile to evascrape/b2b-leads-finder's input schema.
+        Supports direct filter search and Apollo-style criteria.
+        """
+        titles = icp.job_titles[:20] if icp.job_titles else ['Chief Technology Officer', 'CEO', 'VP Sales']
+        locations = [_norm_location(v) for v in icp.locations[:20]] if icp.locations else ['united states']
+
+        data = {
+            'searchMode': 'filters',
+            'jobTitles': titles,
+            'locations': locations,
+            'maxResults': max(10, min(int(count or 10), 100)),
+            'includeUnverifiedEmails': False,
+            'verifyEmails': False,
+        }
+        if icp.industries:
+            data['industries'] = [_norm(v) for v in icp.industries[:20]]
+
+        size_bands = _employee_bands(
+            getattr(icp, 'company_size_min', None),
+            getattr(icp, 'company_size_max', None),
+        )
+        if size_bands:
+            data['companySizes'] = size_bands
+
+        keywords = getattr(icp, 'keywords', None) or []
+        if keywords:
+            data['companyKeywords'] = [_norm(v) for v in keywords[:20]]
+
+        return data
 
     def _build_leads_finder_input(self, icp, count: int) -> dict:
         """Map the ICP profile to code_crafter/leads-finder's input schema.
@@ -659,13 +694,25 @@ class LeadResearchAgent:
         )
         size_raw = item.get('companySize') or item.get('company_size')
 
+        phone = (
+            item.get('phone') or item.get('phoneNumber') or item.get('mobile_number')
+            or item.get('mobileNumber') or item.get('companyPhone') or ''
+        )
+        tech_raw = item.get('technologies') or item.get('company_technologies') or item.get('companyTechnologies') or []
+        if isinstance(tech_raw, str):
+            tech_list = [t.strip() for t in tech_raw.split(',') if t.strip()]
+        else:
+            tech_list = list(tech_raw) if isinstance(tech_raw, (list, tuple)) else []
+
+        comp_li = item.get('company_linkedin') or item.get('companyLinkedinUrl') or ''
+
         return {
             'apollo_id': '',
             'first_name': first,
             'last_name': last,
             'full_name': name or f"{first} {last}".strip(),
-            'email': item.get('email') or item.get('emailAddress') or '',
-            'phone': item.get('phone') or item.get('phoneNumber') or item.get('mobile_number') or '',
+            'email': item.get('email') or item.get('emailAddress') or item.get('corporate_email') or '',
+            'phone': phone,
             'job_title': item.get('jobTitle') or item.get('title') or item.get('job_title') or item.get('headline') or '',
             'seniority_level': item.get('seniority') or item.get('seniority_level') or '',
             'department': item.get('department') or item.get('functional_level') or '',
@@ -675,9 +722,9 @@ class LeadResearchAgent:
             'company_size': _size_to_int(size_raw),
             'company_size_range': size_raw if isinstance(size_raw, str) else '',
             'company_location': location or '',
-            'company_technologies': item.get('technologies') or item.get('company_technologies') or [],
+            'company_technologies': tech_list,
             'linkedin_url': item.get('linkedinUrl') or item.get('linkedin_url') or item.get('linkedin') or item.get('profileUrl') or '',
-            'company_linkedin_url': item.get('company_linkedin') or '',
+            'company_linkedin_url': comp_li,
             'company_website': item.get('companyWebsite') or item.get('company_website') or item.get('website') or '',
             'recent_news': [],
             'buying_signals': [],

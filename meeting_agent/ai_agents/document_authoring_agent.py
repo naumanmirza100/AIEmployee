@@ -395,6 +395,17 @@ Return ONLY this JSON (no markdown):
 """
 
         context_for_prompt = context if has_context else '[No context provided]'
+        if has_points:
+            key_points_section = points_text
+        elif has_context:
+            key_points_section = 'Extract 3-5 key points (findings, risks, or important facts) from the context above. Format each as a "- " bullet.'
+        else:
+            key_points_section = '- [Key finding or point 1]\n- [Key finding or point 2]\n- [Key finding or point 3]'
+
+        if has_context:
+            actions_section = 'List the concrete next actions implied by the context above. Format each as a numbered "1. Action — Owner — Due date" line; use the owners/dates from the context where available, otherwise omit them.'
+        else:
+            actions_section = '1. [Action 1 — Owner — Due date]\n2. [Action 2 — Owner — Due date]'
         points_for_prompt = points_text if has_points else ''
 
         prompt = f"""Write an executive briefing document in markdown using ONLY the data provided below. Follow the EXACT structure.
@@ -422,7 +433,7 @@ Return ONLY this JSON (no markdown):
 
 ## Key Points
 
-{points_for_prompt if has_points else ('Extract 3-5 key points (findings, risks, or important facts) from the context above. Format each as a "- " bullet.' if has_context else '- [Key finding or point 1]\n- [Key finding or point 2]\n- [Key finding or point 3]')}
+        {key_points_section}
 
 ---
 
@@ -434,7 +445,7 @@ Return ONLY this JSON (no markdown):
 
 ## Recommended Actions
 
-{'List the concrete next actions implied by the context above. Format each as a numbered "1. Action — Owner — Due date" line; use the owners/dates from the context where available, otherwise omit them.' if has_context else '1. [Action 1 — Owner — Due date]\n2. [Action 2 — Owner — Due date]'}
+        {actions_section}
 
 ---
 

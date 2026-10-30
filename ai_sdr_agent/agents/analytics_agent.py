@@ -253,6 +253,33 @@ class AnalyticsAgent:
               </div>
             </td>"""
 
+        active_campaigns_html = ""
+        if m.get('campaign_rows'):
+            rows_html = "".join(f"""
+              <tr style="border-top:1px solid #e5e7eb;">
+                <td style="padding:10px 14px;font-size:13px;color:#374151;font-weight:500;">{row['name'][:30]}</td>
+                <td style="padding:10px 14px;text-align:center;font-size:13px;">{row['emails_sent']}</td>
+                <td style="padding:10px 14px;text-align:center;font-size:13px;">{row['replies']}</td>
+                <td style="padding:10px 14px;text-align:center;font-size:13px;font-weight:600;color:#7c3aed;">{row['meetings']}</td>
+                <td style="padding:10px 14px;text-align:center;font-size:13px;color:#16a34a;">{row['reply_rate']}%</td>
+              </tr>""" for row in m["campaign_rows"])
+            active_campaigns_html = f"""
+        <tr>
+          <td style="padding-bottom:24px;">
+            <div style="font-size:15px;font-weight:700;color:#1f2937;margin-bottom:14px;">Active Campaigns</div>
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+              <tr style="background:#f9fafb;">
+                <th style="padding:10px 14px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">Campaign</th>
+                <th style="padding:10px 14px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">Emails</th>
+                <th style="padding:10px 14px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">Replies</th>
+                <th style="padding:10px 14px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">Meetings</th>
+                <th style="padding:10px 14px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">Reply %</th>
+              </tr>
+              {rows_html}
+            </table>
+          </td>
+        </tr>"""
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>SDR Daily Summary</title></head>
@@ -331,30 +358,7 @@ class AnalyticsAgent:
         </tr>
 
         <!-- Active campaigns -->
-        {"" if not m['campaign_rows'] else f'''
-        <tr>
-          <td style="padding-bottom:24px;">
-            <div style="font-size:15px;font-weight:700;color:#1f2937;margin-bottom:14px;">Active Campaigns</div>
-            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-              <tr style="background:#f9fafb;">
-                <th style="padding:10px 14px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">Campaign</th>
-                <th style="padding:10px 14px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">Emails</th>
-                <th style="padding:10px 14px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">Replies</th>
-                <th style="padding:10px 14px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">Meetings</th>
-                <th style="padding:10px 14px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">Reply %</th>
-              </tr>
-              {"".join(f'''
-              <tr style="border-top:1px solid #e5e7eb;">
-                <td style="padding:10px 14px;font-size:13px;color:#374151;font-weight:500;">{row["name"][:30]}</td>
-                <td style="padding:10px 14px;text-align:center;font-size:13px;">{row["emails_sent"]}</td>
-                <td style="padding:10px 14px;text-align:center;font-size:13px;">{row["replies"]}</td>
-                <td style="padding:10px 14px;text-align:center;font-size:13px;font-weight:600;color:#7c3aed;">{row["meetings"]}</td>
-                <td style="padding:10px 14px;text-align:center;font-size:13px;color:#16a34a;">{row["reply_rate"]}%</td>
-              </tr>''' for row in m["campaign_rows"])}
-            </table>
-          </td>
-        </tr>
-        '''}
+        {active_campaigns_html}
 
         <!-- Footer -->
         <tr>
