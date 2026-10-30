@@ -130,7 +130,9 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "   - negative / unsubscribe: brief, respectful, offer an easy opt-out.\n"
         "   - neutral: warm, re-engage with a soft question.\n"
         "4. Honor the length guidance the user provided in the prompt.\n"
-        "5. End with either a clear question or a specific next step.\n\n"
+        "5. End with either a clear question or a specific next step.\n"
+        "6. Sign with the signature given in the prompt, as written. Never write placeholders in brackets such as "
+        "[Your Name] or [Company]: leave out what you do not know.\n\n"
         "Output strict JSON only, with exactly these keys: "
         '{"subject": "...", "body": "...", "reasoning": "..."}'
     )
@@ -153,7 +155,9 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "   - negative / unsubscribe: brief, respectful, offer an easy opt-out.\n"
         "   - neutral: warm, re-engage with a soft question.\n"
         "4. Honor the length guidance the user provided in the prompt.\n"
-        "5. End with a clear question or a specific next step.\n\n"
+        "5. End with a clear question or a specific next step.\n"
+        "6. Sign with the signature given in the prompt, as written. Never write placeholders in brackets such as "
+        "[Your Name] or [Company]: leave out what you do not know.\n\n"
         "Output strict JSON only, with exactly these keys: "
         '{"interest_level": "...", "analysis": "...", "subject": "...", "body": "...", "reasoning": "..."}'
     )
@@ -674,6 +678,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             f"INCOMING SUBJECT: {reply.reply_subject}\n"
             f"INCOMING BODY:\n{for_ai(reply.reply_content)}\n\n"
             f"User instructions: {user_context or '(none)'}\n\n"
+            f"Signature:\n{self._signature()}\n\n"
             "Draft the reply now, returning the JSON object described in the system prompt."
         )
 
@@ -716,6 +721,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             f"{for_ai(msg.body) or '(empty body)'}\n\n"
             f"{attachments_block}"
             f"User instructions: {user_context or '(none)'}\n\n"
+            f"Signature:\n{self._signature()}\n\n"
             "First classify the sender's interest_level, write a short analysis, "
             "then draft the reply. Return the JSON object described in the system prompt."
         )
@@ -760,6 +766,41 @@ class ReplyDraftAgent(MarketingBaseAgent):
         lines.append('--- end of prior messages ---\n')
         return '\n'.join(lines) + '\n'
 
+    def _signature(self):
+        """Who signs the reply: the person drafting and the company, or the company's team when the login is the
+        company itself. On live a draft ended "[Your Name] [Your Position] [Your Company] [Your Contact
+        Information]"."""
+        from core.models import Company, CompanyUser
+        company = ''
+        if self.company_id:
+            company = (Company.objects.filter(pk=self.company_id).values_list('name', flat=True).first() or '').strip()
+        name = ''
+        if self.user is not None:
+            name = (CompanyUser.objects.filter(login_user=self.user).values_list('full_name', flat=True).first()
+                    or '').strip()
+        if name and company and name.lower() != company.lower():
+            return f'{name}\n{company}'
+        return f'The {company} team' if company else name
+
+    # "[Your Name]", "[Company Name]", "[Your Contact Information]": what the AI writes where it lacks a fact.
+    _PLACEHOLDER = re.compile(r'\[(?:your|company|recipient|sender|name|position|title|contact|phone|email|date)'
+                              r'[^\]\n]{0,40}\]', re.IGNORECASE)
+
+    def _without_placeholders(self, body):
+        """The draft without bracketed placeholders, and signed when that left its sign-off empty."""
+        if not self._PLACEHOLDER.search(body or ''):
+            return body
+        lines = [self._PLACEHOLDER.sub('', line).rstrip() for line in body.splitlines()]
+        kept = []
+        for line, original in zip(lines, body.splitlines()):
+            if line.strip() or not original.strip():
+                kept.append(line)
+        text = re.sub(r'\n{3,}', '\n\n', '\n'.join(kept)).strip()
+        last = text.splitlines()[-1].strip() if text else ''
+        if re.fullmatch(r'(best|kind|warm)?\s*regards,?|thanks,?|thank you,?|sincerely,?|best,?', last, re.IGNORECASE):
+            text = f'{text}\n{self._signature()}'.strip()
+        return text
+
     _VALID_INTEREST_LEVELS = {
         'positive', 'negative', 'neutral', 'requested_info',
         'objection', 'unsubscribe', 'not_analyzed',
@@ -772,7 +813,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             return self._re_prefix(fallback_subject), (raw or '').strip(), ''
 
         subject = (data.get('subject') or fallback_subject or '').strip()
-        body = (data.get('body') or '').strip()
+        body = self._without_placeholders((data.get('body') or '').strip())
         reasoning = (data.get('reasoning') or '').strip()
         return self._re_prefix(subject), body, reasoning
 
@@ -783,7 +824,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             return self._re_prefix(fallback_subject), (raw or '').strip(), '', '', ''
 
         subject = (data.get('subject') or fallback_subject or '').strip()
-        body = (data.get('body') or '').strip()
+        body = self._without_placeholders((data.get('body') or '').strip())
         reasoning = (data.get('reasoning') or '').strip()
         interest_level = (data.get('interest_level') or '').strip().lower()
         if interest_level not in self._VALID_INTEREST_LEVELS:

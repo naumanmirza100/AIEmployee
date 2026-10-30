@@ -18,8 +18,9 @@ CATEGORIES = [c for c, _ in CATEGORY_CHOICES]
 PRIORITIES = [p for p, _ in PRIORITY_CHOICES]
 #: Mail older than this is not read by the AI.
 WINDOW_DAYS = 7
-#: Emails read per mailbox in one run of the job; the rest wait for the next run.
-PER_RUN = 15
+#: Emails read per mailbox in one run of the job; the rest wait for the next run. At 15, a Gmail connected on live
+#: with 50 recent emails took 20 minutes to be read.
+PER_RUN = 25
 
 SYSTEM_PROMPT = """You sort a company's incoming email for the person who answers it.
 
@@ -33,7 +34,8 @@ category, one of:
 - billing: an invoice, a payment, a refund, a quotation to pay
 - meeting: arranging, moving or cancelling a meeting or call
 - internal: from a colleague inside the company
-- newsletter: a newsletter, notification, receipt, marketing mail or any automatic message
+- newsletter: a newsletter, a notification from a service or app (GitHub, Google, a bank, a hosting company), a
+  receipt, marketing mail or any other automatic message
 - personal: personal mail
 - other: none of these
 
@@ -46,12 +48,16 @@ priority, one of:
 
 summary: one sentence in English, at most 25 words, saying who wants or tells what. Name the person, with their
 company when the email gives it, never "the sender": "Kiran Shah (Capital Dental) asks the monthly price for two
-branches." Only what the email says: no guesses, no greeting, no advice.
+branches." Only what the email says: no guesses, no greeting, no advice. Use names, never "he" or
+"she": a name does not tell you who someone is.
 
-needs_reply: true when the sender asks something or waits for an answer; false otherwise."""
+needs_reply: true when a person asks something or waits for an answer; false otherwise, and always false for an
+automatic message, even an urgent one: nobody reads a reply to it."""
 
 # Words a no-reply or bulk sender leaves, for the fallback when the AI's answer cannot be read.
 _BULK = re.compile(r'no-?reply|newsletter|notifications?@|mailer-daemon|unsubscribe|do not reply', re.IGNORECASE)
+# A sender address nobody reads: a reply to it goes nowhere, whatever the AI says.
+_NO_REPLY = re.compile(r'no-?reply|do-?not-?reply|mailer-daemon|notifications?@', re.IGNORECASE)
 
 
 def triage_prompt(email) -> str:
@@ -113,7 +119,12 @@ def triage_email(email, agent) -> dict:
     except Exception as exc:
         raise AIUnreachable(str(exc)) from exc
     try:
-        return read_triage(raw)
+        fields = read_triage(raw)
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         logger.warning('triage: email %s read by the fallback: %s', email.id, exc)
         return fallback_triage(email)
+    # On live, Render's "Server failure detected" from no-reply@render.com came back urgent (right) and needing a
+    # reply (wrong): it would sit in "Needs a reply" for good.
+    if _NO_REPLY.search(email.reply_to or email.from_email or ''):
+        fields['needs_reply'] = False
+    return fields
