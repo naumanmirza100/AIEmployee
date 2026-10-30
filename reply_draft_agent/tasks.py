@@ -34,6 +34,11 @@ def delete_reply_draft_account_data(user_ids, email_account_id, drop_account_row
     except EmailAccount.DoesNotExist:
         logger.warning(f'EmailAccount {email_account_id} not found during async delete')
         return
+    # Connected again between the click and this job: its mail, drafts and the account itself stay. Disconnecting
+    # and quickly reconnecting deleted the new connection (CO-251).
+    if account.is_reply_agent_account:
+        logger.info('Reply Draft account %s was connected again; nothing is deleted.', account.id)
+        return
 
     # 1) Delete ReplyDraftAttachments — batch and defer file cleanup
     logger.info(f'Starting ReplyDraftAttachment cleanup for users {user_ids}...')
@@ -86,7 +91,9 @@ def delete_reply_draft_account_data(user_ids, email_account_id, drop_account_row
     # endpoint before this refactor.
     if drop_account_row:
         try:
-            EmailAccount.objects.filter(pk=account.pk).delete()
+            # Only while neither role wants it: it may have been reconnected, or added to Marketing, meanwhile.
+            EmailAccount.objects.filter(pk=account.pk, is_reply_agent_account=False,
+                                        is_marketing_account=False).delete()
             logger.info(f'Dropped EmailAccount row {account.id} ({account.email})')
         except Exception as exc:
             logger.warning(f'Failed to drop EmailAccount {account.id}: {exc}')
@@ -141,3 +148,73 @@ def delete_attachment_files(file_paths, attachment_type='draft'):
         f'Cleaned up {deleted} {attachment_type} attachment files '
         f'({errors} errors, skipped {len(file_paths) - deleted - errors} missing files)'
     )
+
+
+@shared_task(name='reply_draft_agent.tasks.triage_inbox_task')
+def triage_inbox_task():
+    """Every five minutes: the AI reads the new mail of each Reply Draft mailbox (category, priority, one sentence)
+    and tells the mailbox's login about an urgent email. Each email is claimed before it is read, so two workers
+    never read the same one; a key or quota problem stops that mailbox until the next run."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from core.api_key_service import KeyServiceError
+    from core.logins import company_id_for
+    from core.models import Company
+    from marketing_agent.models import EmailAccount
+    from .agents.reply_draft_agent import ReplyDraftAgent
+    from .alerts import urgent_email
+    from .permissions import company_has_module
+    from .triage import PER_RUN, WINDOW_DAYS, triage_email
+
+    read = 0
+    for account in EmailAccount.objects.filter(is_reply_agent_account=True, is_active=True).select_related('owner'):
+        company_id = company_id_for(account.owner)
+        company = Company.objects.filter(pk=company_id).first() if company_id else None
+        if company is None or not company_has_module(company):
+            continue
+        now = timezone.now()
+        ids = list(InboxEmail.objects.filter(email_account=account, direction='in', triaged_at__isnull=True,
+                                             received_at__gte=now - timedelta(days=WINDOW_DAYS))
+                   .order_by('-received_at').values_list('id', flat=True)[:PER_RUN])
+        if not ids:
+            continue
+        agent = ReplyDraftAgent(user=account.owner, company_id=company_id)
+        for email_id in ids:
+            if not InboxEmail.objects.filter(pk=email_id, triaged_at__isnull=True).update(triaged_at=timezone.now()):
+                continue
+            email = InboxEmail.objects.select_related('email_account').get(pk=email_id)
+            try:
+                fields = triage_email(email, agent)
+            except KeyServiceError as exc:
+                InboxEmail.objects.filter(pk=email_id).update(triaged_at=None)
+                logger.warning('triage: mailbox %s stopped, no AI for company %s: %s', account.id, company_id, exc)
+                break
+            InboxEmail.objects.filter(pk=email_id).update(**fields)
+            read += 1
+            if fields['priority'] == 'urgent' and email.received_at >= timezone.now() - timedelta(days=1):
+                for key, value in fields.items():
+                    setattr(email, key, value)
+                urgent_email(email)
+    return {'read': read}
+
+
+@shared_task(name='reply_draft_agent.tasks.daily_inbox_digest_task')
+def daily_inbox_digest_task():
+    """Once a day, in the morning: each Reply Draft mailbox's day in a few lines, by email to whoever wants it."""
+    from core.logins import company_id_for
+    from core.models import Company
+    from marketing_agent.models import EmailAccount
+    from .alerts import send_digest
+    from .permissions import company_has_module
+
+    sent = 0
+    for account in EmailAccount.objects.filter(is_reply_agent_account=True, is_active=True).select_related('owner'):
+        company_id = company_id_for(account.owner)
+        company = Company.objects.filter(pk=company_id).first() if company_id else None
+        if company is None or not company_has_module(company):
+            continue
+        try:
+            sent += bool(send_digest(account))
+        except Exception:
+            logger.exception('daily inbox digest failed for mailbox %s', account.id)
+    return {'sent': sent}

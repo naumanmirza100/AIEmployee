@@ -742,6 +742,9 @@ urlpatterns = [
     re_path(r'^reply-draft/accounts/create/?$', reply_draft_api.create_reply_account, name='reply_draft_create_account'),
     re_path(r'^reply-draft/accounts/delete/?$', reply_draft_api.delete_reply_account, name='reply_draft_delete_account'),
     re_path(r'^reply-draft/analytics/?$', reply_draft_api.reply_analytics, name='reply_draft_analytics'),
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/summarize/?$', reply_draft_api.summarize_conversation, name='reply_draft_summarize_conversation'),  # POST
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/attachments/(?P<attachment_id>\d+)/summarize/?$', reply_draft_api.summarize_attachment, name='reply_draft_summarize_attachment'),  # POST
+    re_path(r'^reply-draft/ask/?$', reply_draft_api.ask_inbox, name='reply_draft_ask'),  # POST
 
     # Operations Notifications
     re_path(r'^operations/notifications/?$', operations_agent.list_notifications, name='operations_notifications_list'),  # GET
