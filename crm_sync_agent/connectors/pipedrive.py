@@ -50,13 +50,12 @@ class PipedriveConnector(BaseCRMConnector):
     # BaseCRMConnector interface
     # ------------------------------------------------------------------ #
 
-    def ping(self) -> bool:
-        try:
-            resp = self._get('/users/me')
-            data = resp.json() or {}
-            return data.get('success') is True
-        except CRMError:
-            return False
+    label = 'Pipedrive'
+
+    def _ping(self) -> bool:
+        resp = self._get('/users/me')
+        data = resp.json() or {}
+        return data.get('success') is True
 
     def find_contact_by_email(self, email: str) -> Optional[dict]:
         resp = self._get('/persons/search', params={

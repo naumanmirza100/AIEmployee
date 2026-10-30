@@ -59,12 +59,11 @@ class HubSpotConnector(BaseCRMConnector):
     # BaseCRMConnector interface
     # ------------------------------------------------------------------ #
 
-    def ping(self) -> bool:
-        try:
-            resp = self._get('/crm/v3/objects/contacts', params={'limit': 1})
-            return resp.status_code == 200
-        except CRMError:
-            return False
+    label = 'HubSpot'
+
+    def _ping(self) -> bool:
+        resp = self._get('/crm/v3/objects/contacts', params={'limit': 1})
+        return resp.status_code == 200
 
     def find_contact_by_email(self, email: str) -> Optional[dict]:
         if not email:
@@ -136,15 +135,20 @@ class HubSpotConnector(BaseCRMConnector):
         sent_at,
         direction: str = 'OUTBOUND',
     ) -> Optional[str]:
+        metadata = {
+            'subject': subject[:500] if subject else '(no subject)',
+            'text': body[:10000] if body else '',
+        }
+        outbound = direction.upper() == 'OUTBOUND'
+        if outbound:
+            metadata['status'] = 'SENT'
+        # Mail from a customer is its own kind, INCOMING_EMAIL. It went as an EMAIL with status 'RECEIVED', which
+        # HubSpot does not have: "400 Unable to process JSON" for every Reply Draft customer email (live run, 31 Oct).
         return self._log_engagement(
-            eng_type='EMAIL',
+            eng_type='EMAIL' if outbound else 'INCOMING_EMAIL',
             contact_id=crm_contact_id,
             timestamp=_to_hs_timestamp(sent_at),
-            metadata={
-                'subject': subject[:500] if subject else '(no subject)',
-                'text': body[:10000] if body else '',
-                'status': 'SENT' if direction.upper() == 'OUTBOUND' else 'RECEIVED',
-            },
+            metadata=metadata,
         )
 
     def log_meeting(
@@ -178,7 +182,8 @@ class HubSpotConnector(BaseCRMConnector):
         )
 
     #: What each kind of record needs on a HubSpot key, for the card's message.
-    _PERMISSION = {'EMAIL': ('emails', 'sales-email-read'), 'MEETING': ('meetings', 'crm.objects.contacts.write'),
+    _PERMISSION = {'EMAIL': ('emails', 'sales-email-read'), 'INCOMING_EMAIL': ('emails', 'sales-email-read'),
+                   'MEETING': ('meetings', 'crm.objects.contacts.write'),
                    'NOTE': ('notes', 'crm.objects.contacts.write')}
 
     def _log_engagement(self, eng_type: str, contact_id: str, timestamp: int, metadata: dict) -> Optional[str]:

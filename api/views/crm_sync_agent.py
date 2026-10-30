@@ -95,6 +95,27 @@ def _serialize_log(log: CRMSyncLog) -> dict:
     }
 
 
+def _refusal(company, integration):
+    """None when the CRM takes the integration's credentials, else what to tell the person.
+
+    In the live run (31 Oct) a wrong HubSpot key was saved and the page said "HubSpot connected!"; nothing failed
+    until the queue ran. Connect and a changed key now try the key first, and Test Connection says why it failed."""
+    from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+    from crm_sync_agent.connectors.base import CRMError
+    try:
+        return CRMSyncAgent(company)._get_connector(integration).check()
+    except CRMError as exc:                     # a required field missing, said by the connector
+        return str(exc)
+    except Exception:
+        logger.exception('CRM check failed unexpectedly: company=%s provider=%s', company.pk, integration.provider)
+        return 'The CRM could not be checked just now. Try again in a minute.'
+
+
+def _not_taken(reason):
+    # 'message' is what the screens read from an error; 'error' is kept for older ones.
+    return Response({'status': 'failed', 'message': reason, 'error': reason}, status=status.HTTP_400_BAD_REQUEST)
+
+
 # ------------------------------------------------------------------ #
 # Integrations — list / create
 # ------------------------------------------------------------------ #
@@ -145,6 +166,11 @@ def integrations_list(request):
         is_active=data.get('is_active', True),
     )
     integration.set_credentials(data.get('credentials') or {})
+    reason = _refusal(company, integration)
+    if reason:
+        return _not_taken(reason)
+    integration.last_ping_at = timezone.now()
+    integration.last_ping_ok = True
     integration.save()
     logger.info('CRM integration created: company=%d provider=%s', company.pk, provider)
     return Response(_serialize_integration(integration, request), status=status.HTTP_201_CREATED)
@@ -183,7 +209,13 @@ def integration_detail(request, integration_id: int):
         before = integration.get_credentials()
         integration.set_credentials(_merged_credentials(integration, data['credentials']))
         if integration.get_credentials() != before:
-            # A new key: what waited for the old one goes out again, and the old refusals no longer hold.
+            # A new key is tried before it replaces the old one.
+            reason = _refusal(company, integration)
+            if reason:
+                return _not_taken(reason)
+            integration.last_ping_at = timezone.now()
+            integration.last_ping_ok = True
+            # What waited for the old key goes out again, and the old refusals no longer hold.
             integration.missing_permission = ''
             from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
             CRMSyncAgent.release_waiting(integration)
@@ -213,18 +245,9 @@ def integration_ping(request, integration_id: int):
         return Response({'error': 'Integration not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
-    from crm_sync_agent.connectors.base import CRMError
 
-    try:
-        agent = CRMSyncAgent(company)
-        connector = agent._get_connector(integration)
-        ok = connector.ping()
-    except CRMError as exc:
-        ok = False
-        logger.warning('CRM ping failed: %s', exc)
-    except Exception as exc:
-        ok = False
-        logger.exception('CRM ping unexpected error: %s', exc)
+    reason = _refusal(company, integration)
+    ok = reason is None
 
     integration.last_ping_at = timezone.now()
     integration.last_ping_ok = ok
@@ -236,10 +259,8 @@ def integration_ping(request, integration_id: int):
         if released:
             message += f' {released} waiting item(s) go out now.'
         return Response({'status': 'ok', 'message': message})
-    return Response(
-        {'status': 'failed', 'message': 'Could not connect. Check credentials.'},
-        status=status.HTTP_502_BAD_GATEWAY,
-    )
+    # A refused key is an answer, not a server fault: a 502 made the page say only "Ping failed".
+    return Response({'status': 'failed', 'message': reason})
 
 
 # ------------------------------------------------------------------ #

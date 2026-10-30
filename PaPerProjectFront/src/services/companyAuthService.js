@@ -133,8 +133,9 @@ const companyApiRequest = async (endpoint, options = {}) => {
     if (wantBlob) {
       return await response.blob();
     }
-    const data = await response.json();
-    return data;
+    // A delete answers 204 with no body; reading it as JSON threw, so a CRM that was removed said "Delete failed".
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
   } catch (error) {
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
       console.error('Network error - Failed to fetch:', error);
