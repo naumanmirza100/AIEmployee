@@ -572,7 +572,11 @@ const ReplyDraftAgentPage = () => {
           body: d.body,
           tone,
           ai_notes: d.reasoning,
-          to_email: selectedReply.from_email,
+          // Where it will go, as the server sends it: the Reply-To when there is one. A fresh draft for a website
+          // form showed the form's address and no Reply-To note until it was opened again (clean run, 30 Oct).
+          to_email: (isInbox && selectedReply.reply_to) || selectedReply.from_email,
+          reply_to_used: !!(isInbox && selectedReply.reply_to),
+          original_from_email: isInbox ? selectedReply.from_email : '',
           to_name: selectedReply.from_name,
           to_company: selectedReply.from_company,
           original_subject: selectedReply.subject,

@@ -894,6 +894,25 @@ class Command(BaseCommand):
                 result[m.group(1)] = bytes(payload)
         return result
 
+    @staticmethod
+    def _known_thread_key(account, references, in_reply_to):
+        """The conversation of an email this one answers, when the mailbox already has it. The first email of a
+        conversation has no References, so its key comes from its subject, while every answer's comes from that first
+        email's id: an answer to a customer's question never joined it, and "Summarise the conversation" saw one
+        email (the Reply Draft clean run, 30 Oct)."""
+        ids = [t.strip().strip('<>') for t in (references or '').split()]
+        ids += [(in_reply_to or '').strip().strip('<>')]
+        ids = [i for i in dict.fromkeys(ids) if i]
+        if not ids:
+            return ''
+        found = dict(InboxEmail.objects.filter(email_account=account, message_id__in=ids + [f'<{i}>' for i in ids])
+                     .exclude(thread_key='').values_list('message_id', 'thread_key'))
+        for i in ids:                                       # the root first, as compute_thread_key prefers it
+            key = found.get(i) or found.get(f'<{i}>')
+            if key:
+                return key
+        return ''
+
     def _build_inbox_email(self, msg, account, from_email, *, to_email=None, direction='in'):
         """Construct (but do not save) an InboxEmail instance from a parsed message.
 
@@ -944,13 +963,14 @@ class Command(BaseCommand):
         if to_email is None:
             to_email = (account.email or '')
 
-        thread_key = InboxEmail.compute_thread_key(
-            references=references,
-            in_reply_to=in_reply_to,
-            subject=subject,
-            from_email=from_email,
-            to_email=to_email,
-        )
+        thread_key = (self._known_thread_key(account, references, in_reply_to)
+                      or InboxEmail.compute_thread_key(
+                          references=references,
+                          in_reply_to=in_reply_to,
+                          subject=subject,
+                          from_email=from_email,
+                          to_email=to_email,
+                      ))
 
         return InboxEmail(
             owner=account.owner,
