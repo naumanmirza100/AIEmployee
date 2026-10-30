@@ -247,6 +247,18 @@ class AskTests(InboxTestCase):
         self.assertRegex(prompt, rf'\[#{invoice.id}\][^\n]*needs no answer')
         self.assertRegex(prompt, rf'\[#{done.id}\][^\n]*answered by us')
 
+    def test_a_question_about_what_still_needs_an_answer_gets_that_mail_first(self):
+        # On live "Kin emails ka jawab abhi dena baqi hai?" left out a meeting move that waited for an answer.
+        move = self.mail(subject="Moving Thursday's demo", needs_reply=True, received_at=timezone.now() - timedelta(days=2))
+        done = self.mail(subject='Answered', needs_reply=True)
+        ReplyDraft.objects.create(owner=user_for(self.nadia), inbox_email=done, email_account=self.mailbox,
+                                  draft_subject='Re', draft_body='Hello', status='sent')
+        for n in range(14):
+            self.mail(subject=f'Newsletter {n}', needs_reply=False)
+        found = insights.find_emails(self.mailbox, {'terms': ['answer'], 'waiting': True})
+        self.assertEqual(found[0], move)
+        self.assertNotIn(done, found[:1])
+
     def test_a_summarised_attachment_is_part_of_what_the_answer_reads(self):
         # "How much is the invoice?": the amount is in the PDF, not in "Please find attached our invoice".
         invoice = self.mail(subject='Invoice INV-2026-118', body='Please find attached our invoice.')
@@ -288,6 +300,7 @@ class DraftSignatureTests(InboxTestCase):
         self.assertIn('Signature:\nNadia Rehman\nMargalla', llm.call_args.kwargs['prompt'])
         # The sender's language, "hum" in Urdu, and no guessed yes/no (on live: "yes, both branches can share").
         self.assertIn(ReplyDraftAgent.WE_IN_URDU, llm.call_args.kwargs['prompt'])
+        self.assertIn(ReplyDraftAgent.GREETING, llm.call_args.kwargs['prompt'])      # the signed name, not the account's
         self.assertIn('do not answer yes or no', llm.call_args.kwargs['system_prompt'])
         body = ReplyDraft.objects.get(pk=made.data['data']['draft_id']).draft_body
         self.assertNotIn('[', body)

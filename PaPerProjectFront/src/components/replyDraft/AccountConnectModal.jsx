@@ -68,6 +68,7 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
       smtp_host: t.smtp_host,
       imap_host: t.imap_host,
       is_gmail_app_password: typeValue === 'gmail',
+      ...(typeValue === 'gmail' ? { smtp_port: 587, use_tls: true, use_ssl: false } : {}),
     }));
   };
 
@@ -214,12 +215,34 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
                   <Input
                     type="number"
                     value={form.smtp_port}
-                    onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
+                    onChange={(e) => {
+                      const port = e.target.value;
+                      // 465 is SSL from the start and 587 is STARTTLS on every common provider.
+                      const security = String(port) === '465' ? { use_ssl: true, use_tls: false }
+                        : String(port) === '587' ? { use_ssl: false, use_tls: true } : {};
+                      setForm((p) => ({ ...p, smtp_port: port, ...security }));
+                    }}
                     readOnly={isEdit}
                     disabled={isEdit}
                     className={`mt-1 h-9 ${isEdit ? LOCKED_CLS : ''}`}
                   />
                 </div>
+              </div>
+              {/* The window always sent "use TLS", so a mailbox on port 465 (SSL) or one without encryption connected
+                  and then failed on its first send. */}
+              <div>
+                <Label className="text-xs">Security</Label>
+                <select
+                  data-testid="rd-smtp-security"
+                  value={form.use_ssl ? 'ssl' : form.use_tls ? 'tls' : 'none'}
+                  onChange={(e) => setForm((p) => ({ ...p, use_tls: e.target.value === 'tls', use_ssl: e.target.value === 'ssl' }))}
+                  disabled={isEdit}
+                  className={`mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm ${isEdit ? LOCKED_CLS : ''}`}
+                >
+                  <option value="tls">STARTTLS (usually port 587)</option>
+                  <option value="ssl">SSL (usually port 465)</option>
+                  <option value="none">None (a server without encryption)</option>
+                </select>
               </div>
               <div>
                 <Label className="text-xs">
