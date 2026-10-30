@@ -117,7 +117,11 @@ _OUR_FOOTER = re.compile(
 # A question the campaign's words do not answer is neither confirmed nor denied: asked whether reminders go by
 # WhatsApp, the AI answered "only SMS, not WhatsApp" from a description that mentions SMS (manual run, 30 Oct).
 _NOT_IN_THE_FACTS = ('If they ask about something the facts above do not mention, do not say yes or no to it: '
-                     'say you will check and come back to them, or that it can be covered on the call')
+                     'say you will check and come back to them, or that it can be covered on the call. Promise '
+                     'nothing the facts do not offer (a discount, a version made for them, a date)')
+# Answers state facts, so the AI is kept close to them: at 0.5 it added "it can be customised for both your branches"
+# to a price question (the AI SDR film, 30 Oct).
+_ANSWER_TEMPERATURE = 0.2
 
 
 def strip_quoted_reply(text: str) -> str:
@@ -339,7 +343,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             resp = self.groq_client.chat.completions.create(
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
-                temperature=0.5,
+                temperature=_ANSWER_TEMPERATURE,
                 max_tokens=2000,
             )
             from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
@@ -454,7 +458,7 @@ Rules:
 - If the reply means nothing (random letters, an empty message), answer nothing: {{"subject": "", "body": ""}}
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
-        data = self._ask_json(prompt)
+        data = self._ask_json(prompt, temperature=_ANSWER_TEMPERATURE)
         body = str(data.get('body', '')).strip()
         if body:
             result['answer'] = {'subject': str(data.get('subject', ''))[:300], 'body': body}

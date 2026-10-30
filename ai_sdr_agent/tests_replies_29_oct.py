@@ -619,9 +619,11 @@ class EmailAssistantTests(SDRBase):
         agent.groq_client.chat.completions.create.return_value = mock.MagicMock(
             choices=[mock.MagicMock(message=mock.MagicMock(content='{"subject": "Re: x", "body": "Hi"}'))], usage=None)
         agent.generate_more_info_email(self.make_lead(), self.campaign, 'WhatsApp bhi?\n\n> Hi Bob,\n> our app')
-        prompt = agent.groq_client.chat.completions.create.call_args.kwargs['messages'][0]['content']
-        self.assertIn('do not say yes or no to it', prompt)
-        self.assertNotIn('our app', prompt)                            # the quoted email is not their question
+        call = agent.groq_client.chat.completions.create.call_args.kwargs
+        self.assertIn('do not say yes or no to it', call['messages'][0]['content'])
+        self.assertIn('Promise nothing the facts do not offer', call['messages'][0]['content'])
+        self.assertNotIn('our app', call['messages'][0]['content'])    # the quoted email is not their question
+        self.assertEqual(call['temperature'], 0.2)                     # it added "customised for both branches"
 
 
 class LiveRunTests(SDRBase):
@@ -736,6 +738,9 @@ class EmailBrandTests(TestCase):
         self.assertIn('>Margalla &amp; Co<', html)
         self.assertNotIn('AI Employee', html)
         self.assertNotIn('Smart Outreach', html)
+        # No customers the salesperson never named (the AI SDR film, 30 Oct).
+        self.assertNotIn('already using', html)
+        self.assertIn('whether it fits Smile Line', html)
 
 
 class ReturnDateTests(TestCase):
@@ -761,3 +766,84 @@ class UnsubscribeLinkTests(SDRBase):
         done.refresh_from_db()
         self.assertEqual((booked.status, done.status), ('cancelled', 'completed'))
         self.assertTrue(is_blocked(self.company.id, 'sana@clinic.example'))
+
+
+class PastTalkTests(SDRBase):
+    """Found filming the AI SDR (30 Oct): the AI's follow-up said "the patient booking app we discussed" to leads who
+    had only had our emails, although the prompt forbids it."""
+
+    def test_the_ais_steps_claim_no_earlier_conversation(self):
+        import json
+        from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+        agent = OutreachAgent()
+        agent.groq_client = mock.MagicMock()
+        steps = [{'step_order': 3, 'step_type': 'email', 'delay_days': 5, 'name': 'Follow-up',
+                  'subject_template': 'The demo we talked about',
+                  'body_template': 'Hi {first_name}, I wanted to follow up on the patient booking app we discussed. '
+                                   'As we discussed, the demo is free.'}]
+        agent.groq_client.chat.completions.create.return_value = mock.MagicMock(
+            choices=[mock.MagicMock(message=mock.MagicMock(content=json.dumps(steps)))], usage=None)
+        [step] = agent._ai_generate_steps(self.campaign, None)
+        self.assertEqual(step['subject_template'], 'Our demo')
+        self.assertEqual(step['body_template'],
+                         'Hi {first_name}, I wanted to follow up on our patient booking app. The demo is free.')
+
+    def test_the_ais_rewrite_for_one_lead_is_cleaned_too(self):
+        from ai_sdr_agent.models import SDRCampaignStep
+        step = SDRCampaignStep.objects.get(campaign=self.campaign, step_order=1)
+        step.ai_personalize = True
+        with mock.patch('ai_sdr_agent.agents.email_assistant_agent.EmailAssistantAgent.improve_email',
+                        return_value={'subject': 'Hello', 'body': 'Hi Bob, about the app we discussed: it is ready.'}):
+            email = self.agent().generate_personalized_email(self.make_lead(), step, self.campaign)
+        self.assertEqual(email['body'], 'Hi Bob, about our app: it is ready.')
+
+
+class PrepNotesTests(SDRBase):
+    """Found filming the AI SDR (30 Oct): a talking point offered an integration the campaign never mentioned."""
+
+    def test_the_notes_are_told_to_name_nothing_the_campaign_does_not(self):
+        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+        agent = MeetingSchedulingAgent()
+        agent.groq_client = mock.MagicMock()
+        agent.groq_client.chat.completions.create.return_value = mock.MagicMock(
+            choices=[mock.MagicMock(message=mock.MagicMock(content='{"summary": "x"}'))], usage=None)
+        lead = self.make_lead()
+        agent.generate_prep_notes(lead, self.enroll(lead), 'Yes, a demo please\n\n> Hi Bob,\n> https://x.example/unsubscribe/abc')
+        prompt = agent.groq_client.chat.completions.create.call_args.kwargs['messages'][-1]['content']
+        self.assertIn('never names a feature, integration', prompt)
+        self.assertIn('"Yes, a demo please"', prompt)                  # their words, not our quoted email
+        self.assertNotIn('unsubscribe/abc', prompt)
+
+    def test_notes_cut_off_by_a_loop_are_asked_for_again(self):
+        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+        agent = MeetingSchedulingAgent()
+        agent.groq_client = mock.MagicMock()
+        answer = lambda text: mock.MagicMock(choices=[mock.MagicMock(message=mock.MagicMock(content=text))], usage=None)
+        agent.groq_client.chat.completions.create.side_effect = [
+            answer('{"summary": "x", "questions_to_ask": ["Same?", "Same?", "Sa'),
+            answer('{"summary": "Rabia replied", "talking_points": ["The booking app"]}')]
+        lead = self.make_lead()
+        notes = agent.generate_prep_notes(lead, self.enroll(lead), 'Yes')
+        self.assertEqual(notes['talking_points'], ['The booking app'])
+
+
+class FilmFiguresTests(SDRBase):
+    """Found filming the AI SDR (30 Oct): five clinics emailed showed as 2 contacted and 3 replied, and the daily
+    summary was reported sent while its own SMTP code sent nothing."""
+
+    def test_contacted_counts_every_lead_emailed(self):
+        from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent
+        for i in range(3):
+            enrollment = self.enroll(self.make_lead(f'lead{i}@clinic.example'))
+            SDROutreachLog.objects.create(enrollment=enrollment, action_type='email', status='sent',
+                                          sent_at=timezone.now())
+        funnel = {s['stage']: s['count'] for s in AnalyticsAgent().compute_metrics(self.cu)['funnel']}
+        self.assertEqual(funnel['Contacted'], 3)
+
+    def test_the_summary_goes_through_the_sites_mail(self):
+        from django.core import mail
+        from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent
+        self.assertTrue(AnalyticsAgent().send_daily_summary(self.cu))
+        [sent] = mail.outbox
+        self.assertEqual(sent.to, ['cu@test.local'])
+        self.assertIn('SDR Daily Report', sent.subject)

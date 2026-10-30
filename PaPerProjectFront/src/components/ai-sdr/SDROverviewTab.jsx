@@ -364,7 +364,11 @@ export default function SDROverviewTab() {
           {[
             { key: 'qualify',  label: 'Qualify All',       color: '#f59e0b', Icon: Brain,     fn: () => qualifyAllLeads() },
             { key: 'replies',  label: 'Check Replies',     color: '#4ade80', Icon: RefreshCw, fn: () => checkAllReplies() },
-            { key: 'summary',  label: 'Send Daily Report', color: '#60a5fa', Icon: Send,      fn: () => sendSdrDailySummary() },
+            { key: 'summary',  label: 'Send Daily Report', color: '#60a5fa', Icon: Send,      fn: async () => {
+              const res = await sendSdrDailySummary();
+              if ((res?.sent ?? res?.data?.sent) === false) throw new Error('The summary email could not be sent. Try again later.');
+              return res;
+            } },
           ].map(({ key, label, color, Icon, fn }) => (
             <button key={key} disabled={!!actionBusy} onClick={() => runAction(key, fn, `${label} complete`)}
               style={{

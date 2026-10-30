@@ -307,6 +307,29 @@ def unsubscribe_target(claims):
     return None
 
 
+# A lead has had only our emails: the AI's "the patient booking app we discussed" claims a conversation that never
+# took place. The step prompt forbids it, and the model wrote it anyway (the AI SDR film, 30 Oct), so it is taken out.
+_PAST_TALK = (
+    # "As we discussed, the app ..." at a sentence's start -> "The app ..."
+    (re.compile(r"(^|[.!?]\s+|\n)as\s+(?:we\s+)?(?:discussed|talked about)(?:\s+(?:earlier|before|previously|"
+                r"last time))?\s*,\s*(\w)", re.IGNORECASE), lambda m: m.group(1) + m.group(2).upper()),
+    # "the booking app we discussed" -> "our booking app"
+    (re.compile(r"\b(?:the|our)\s+([^.,;:!?\n]{1,60}?)\s+(?:that\s+)?(?:we|we've|we have|I|I've)\s+"
+                r"(?:discussed|talked about|spoke about|chatted about)\b", re.IGNORECASE),
+     lambda m: ('Our ' if m.group(0)[0].isupper() else 'our ') + m.group(1)),
+    # "as we discussed", "as discussed earlier"
+    (re.compile(r",?\s*\bas\s+(?:we\s+)?(?:discussed|talked about)(?:\s+(?:earlier|before|previously|last time))?\b",
+                re.IGNORECASE), ''),
+)
+
+
+def without_past_talk(text: str) -> str:
+    """The text without a claim of an earlier conversation."""
+    for pattern, replacement in _PAST_TALK:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def unsubscribe_address(company_id, email_addr: str) -> None:
     """Opt an address out of everything this company sends."""
     from ai_sdr_agent.models import SDRCampaignEnrollment, SDRLead
@@ -472,7 +495,13 @@ Rules:
             if m:
                 raw = m.group(1).strip()
 
-        return json.loads(raw)
+        steps = json.loads(raw)
+        for step in steps if isinstance(steps, list) else []:
+            if isinstance(step, dict):
+                for field in ('subject_template', 'body_template'):
+                    if isinstance(step.get(field), str):
+                        step[field] = without_past_talk(step[field])
+        return steps
 
     def _default_steps(self, campaign) -> list:
         name = campaign.sender_name or 'the team'
@@ -580,6 +609,9 @@ Rules:
                     'sender_company': campaign.sender_company,
                 },
             )
+            if isinstance(improved, dict):
+                improved = {**improved, **{k: without_past_talk(improved[k]) for k in ('subject', 'body')
+                                           if isinstance(improved.get(k), str)}}
             return improved
         except Exception as exc:
             from core.api_key_service import KeyServiceError
