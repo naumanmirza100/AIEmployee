@@ -47,6 +47,18 @@ class AnswerCheckTests(SDRBase):
         self.assertEqual(email['body'], 'Hi Kiran, SMS reminders are included.')
         self.assertEqual(agent.groq_client.chat.completions.create.call_count, 3)    # writing, and two tries
 
+    def test_a_check_that_drops_most_of_the_answer_is_not_used(self):
+        # On live (30 Oct) a check cut an answer down to "Hi Kiran, Great to hear you're curious!".
+        written = ('{"subject": "Re: x", "body": "Hi Kiran, patients book and move their own appointments, and SMS '
+                   'reminders cut missed visits. WhatsApp is not included. Could we talk on Tuesday? Best, Sam"}')
+        gutted = '{"body": "Hi Kiran, great to hear from you! Best, Sam"}'
+        good = ('{"body": "Hi Kiran, patients book and move their own appointments, and SMS reminders cut missed '
+                'visits. Main WhatsApp ke baare mein check karke bataunga. Could we talk on Tuesday? Best, Sam"}')
+        email = self.agent(written, gutted, good).generate_more_info_email(self.make_lead(), self.campaign, 'WhatsApp?')
+        self.assertIn('Main WhatsApp ke baare mein check karke bataunga.', email['body'])
+        email = self.agent(written, gutted, gutted).generate_more_info_email(self.make_lead(), self.campaign, 'WhatsApp?')
+        self.assertIn('Could we talk on Tuesday?', email['body'])          # as written, rather than gutted
+
     def test_the_email_assistants_answer_is_checked_too(self):
         agent = self.agent('{"category": "wants_more_info", "reason": "asks about WhatsApp"}',
                            '{"subject": "Re: WhatsApp", "body": "Yes, WhatsApp is included."}',
