@@ -14,18 +14,26 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
+from django.db.models import F
 from django.utils import timezone
 
-from crm_sync_agent.connectors.base import BaseCRMConnector, CRMError
+from crm_sync_agent.connectors.base import BaseCRMConnector, CRMError, PermissionMissing
 from crm_sync_agent.connectors.hubspot import HubSpotConnector
 from crm_sync_agent.connectors.salesforce import SalesforceConnector
 from crm_sync_agent.connectors.pipedrive import PipedriveConnector
 from crm_sync_agent.models import (
+    CRMActivityMapping,
     CRMIntegration,
     CRMContactMapping,
     CRMSyncLog,
     CRMSyncQueue,
 )
+
+#: The kinds of mail, as Reply Draft's AI reads them, that are about a customer or a lead and so belong in the CRM.
+#: Newsletters, colleagues' mail and personal mail do not.
+INBOX_KINDS = ('customer', 'sales', 'support', 'billing', 'meeting')
+#: How long entries wait while the CRM's account is over its limit, before one is tried again.
+QUOTA_WAIT_MINUTES = 60
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +89,10 @@ class CRMSyncAgent:
     def enqueue_email_sent(self, outreach_log) -> None:
         """Enqueue email activity when an SDR outreach email is sent."""
         if not self._integrations:
+            return
+        # A LinkedIn step writes a 'sent' row too, its text a reminder to the salesperson; it was logged in the CRM
+        # as an email sent to the lead, subject '(no subject)' (CO-253).
+        if (getattr(outreach_log, 'action_type', 'email') or 'email') != 'email':
             return
         try:
             enrollment = outreach_log.enrollment
@@ -176,11 +188,13 @@ class CRMSyncAgent:
             return      # no time chosen yet: the CRM would file it under "now"
         from datetime import timedelta
         ends = meeting.scheduled_at + timedelta(minutes=meeting.duration_minutes or 30)
+        cancelled = getattr(meeting, 'status', '') == 'cancelled'
         payload = {
             'email': lead.email,
             'title': meeting.title or f'Meeting with {lead.full_name or lead.email}',
             'start_time': meeting.scheduled_at.isoformat(),
             'end_time': ends.isoformat(),
+            'cancelled': cancelled,
             'notes': (
                 f"Booked via AI SDR Agent.\n"
                 f"Lead: {lead.full_name} <{lead.email}>\n"
@@ -188,17 +202,28 @@ class CRMSyncAgent:
                 f"Title: {lead.job_title or 'N/A'}"
             ),
         }
-        # Once per meeting. The CRM's own id for it is not kept, so sending it
-        # again after it has gone would add a second meeting there. One still
-        # waiting in the queue is brought up to date by `_enqueue` instead.
+        # Sent once; after that a change (a new time, a cancellation) goes as an update to the meeting the CRM
+        # already has, through the id it gave back (CO-275). Saving without a change sends nothing.
+        on_crm = {m.integration_id: m for m in CRMActivityMapping.objects.filter(
+            source_type=CRMSyncQueue.SOURCE_SDR_MEETING, source_id=meeting.pk)}
         sent = set(CRMSyncQueue.objects.filter(
             object_type=CRMSyncQueue.TYPE_MEETING, source_type=CRMSyncQueue.SOURCE_SDR_MEETING,
-            source_id=meeting.pk,
+            source_id=meeting.pk, operation=CRMSyncQueue.OP_CREATE,
         ).exclude(status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED])
             .values_list('integration_id', flat=True))
         for integration in self._integrations:
-            if not integration.sync_meetings or integration.id in sent:
+            if not integration.sync_meetings:
                 continue
+            if integration.id in on_crm:
+                last = self._last_sent_meeting(integration, meeting.pk)
+                if last and all(last.get(k) == payload[k] for k in ('start_time', 'end_time', 'title', 'cancelled')):
+                    continue
+                self._enqueue(integration=integration, object_type=CRMSyncQueue.TYPE_MEETING,
+                              operation=CRMSyncQueue.OP_UPDATE, source_type=CRMSyncQueue.SOURCE_SDR_MEETING,
+                              source_id=meeting.pk, payload=payload, priority=2)
+                continue
+            if integration.id in sent or cancelled:
+                continue        # going now, or cancelled before it ever reached the CRM
             self._enqueue(
                 integration=integration,
                 object_type=CRMSyncQueue.TYPE_MEETING,
@@ -208,6 +233,71 @@ class CRMSyncAgent:
                 payload=payload,
                 priority=2,
             )
+
+    @staticmethod
+    def _last_sent_meeting(integration, meeting_id):
+        """The meeting as the CRM last had it from us: the payload of the newest entry that went."""
+        row = (CRMSyncQueue.objects.filter(integration=integration, object_type=CRMSyncQueue.TYPE_MEETING,
+                                           source_type=CRMSyncQueue.SOURCE_SDR_MEETING, source_id=meeting_id,
+                                           status=CRMSyncQueue.STATUS_DONE)
+               .order_by('-last_attempted_at', '-id').first())
+        return row.payload if row else None
+
+    # ------------------------------------------------------------------ #
+    # Reply Draft (the AI Inbox / Communications Manager)
+    # ------------------------------------------------------------------ #
+
+    def enqueue_inbox_email(self, email) -> None:
+        """An email to the company's inbox from a customer or a lead, as Reply Draft's AI read it, logged on the
+        sender's CRM contact (made from their name when the CRM has none). Once per email and per CRM."""
+        if not self._integrations or email.direction != 'in' or email.category not in INBOX_KINDS:
+            return
+        sender = (email.reply_to or email.from_email or '').strip().lower()
+        if not sender:
+            return
+        from reply_draft_agent.text import own_words
+        payload = {
+            'email': sender,
+            'contact_name': (email.from_name or '').strip() if not email.reply_to else '',
+            'subject': email.subject or '',
+            'body': own_words(email.body or '')[:5000],
+            'sent_at': email.received_at.isoformat() if email.received_at else None,
+            'direction': 'INBOUND',
+            'source': 'reply_draft',
+        }
+        self._enqueue_once(CRMSyncQueue.SOURCE_INBOX_EMAIL, email.pk, payload)
+
+    def enqueue_inbox_reply(self, draft, to_email: str, subject: str, body: str) -> None:
+        """A reply sent from Reply Draft, logged on the recipient's CRM contact. Once per reply and per CRM."""
+        if not self._integrations or not to_email:
+            return
+        inbox = getattr(draft, 'inbox_email', None)
+        name = ''
+        if inbox is not None and not inbox.reply_to and (inbox.from_email or '').lower() == to_email.lower():
+            name = (inbox.from_name or '').strip()
+        payload = {
+            'email': to_email.strip().lower(),
+            'contact_name': name,
+            'subject': subject or '',
+            'body': (body or '')[:5000],
+            'sent_at': (draft.sent_at or timezone.now()).isoformat(),
+            'direction': 'OUTBOUND',
+            'source': 'reply_draft',
+        }
+        self._enqueue_once(CRMSyncQueue.SOURCE_INBOX_REPLY, draft.pk, payload)
+
+    def _enqueue_once(self, source_type, source_id, payload) -> None:
+        """An email activity, for each CRM that takes emails and does not have it yet."""
+        sent = set(CRMSyncQueue.objects.filter(
+            object_type=CRMSyncQueue.TYPE_EMAIL, source_type=source_type, source_id=source_id,
+        ).exclude(status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED])
+            .values_list('integration_id', flat=True))
+        for integration in self._integrations:
+            if not integration.sync_emails or integration.id in sent:
+                continue
+            self._enqueue(integration=integration, object_type=CRMSyncQueue.TYPE_EMAIL,
+                          operation=CRMSyncQueue.OP_CREATE, source_type=source_type, source_id=source_id,
+                          payload=payload, priority=5)
 
     # ------------------------------------------------------------------ #
     # Queue processing
@@ -233,8 +323,9 @@ class CRMSyncAgent:
 
         stats = {'processed': 0, 'succeeded': 0, 'failed': 0, 'skipped': 0}
         self._quota_blocked = False
+        items = list(items)
         for item in items:
-            if item.attempts >= item.max_attempts:
+            if item.attempts >= item.max_attempts or not self._claim(item):
                 stats['skipped'] += 1
                 continue
             stats['processed'] += 1
@@ -258,30 +349,46 @@ class CRMSyncAgent:
                 break
         return stats
 
-    def _process_item(self, item: CRMSyncQueue) -> bool:
-        """Process one queue item. Returns True on success."""
-        item.status = CRMSyncQueue.STATUS_PROCESSING
-        item.attempts += 1
-        item.last_attempted_at = timezone.now()
-        item.save(update_fields=['status', 'attempts', 'last_attempted_at'])
+    @staticmethod
+    def _claim(item: CRMSyncQueue) -> bool:
+        """Take the entry for this run, or learn that another run has. Every save of a lead, email, meeting or
+        reply started its own thread over the same waiting entries, each marking an entry 'processing' only when it
+        reached it, so two could send the same email, meeting or contact (CO-206)."""
+        now = timezone.now()
+        taken = CRMSyncQueue.objects.filter(
+            pk=item.pk, status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED],
+            attempts__lt=F('max_attempts'),
+        ).update(status=CRMSyncQueue.STATUS_PROCESSING, attempts=F('attempts') + 1, last_attempted_at=now)
+        if not taken:
+            return False
+        item.refresh_from_db(fields=['status', 'attempts', 'last_attempted_at', 'payload', 'operation'])
+        return True
 
+    def _process_item(self, item: CRMSyncQueue) -> bool:
+        """Process one queue item, already claimed. Returns True on success."""
         try:
             connector = self._get_connector(item.integration)
         except CRMError as exc:
             return self._fail_item(item, str(exc), retriable=exc.retriable)
         except Exception as exc:
-            return self._fail_item(item, f'Connector init error: {exc}', retriable=False)
+            return self._fail_item(item, f'The CRM connection could not be set up ({type(exc).__name__}).',
+                                   retriable=False)
 
         try:
             crm_id = self._dispatch(connector, item)
+        except PermissionMissing as exc:
+            return self._skip_item(item, exc)
         except CRMError as exc:
             if self._is_quota_error(exc):
                 self._quota_blocked = True
                 self._mark_limit_reached(item.integration, str(exc))
+                return self._wait_for_room(item, str(exc))
+            if exc.status_code == 401 or (exc.status_code == 403 and item.object_type == CRMSyncQueue.TYPE_CONTACT):
+                return self._wait_for_key(item, str(exc))
             return self._fail_item(item, str(exc), retriable=exc.retriable)
         except Exception as exc:
             logger.exception('Unexpected error processing CRM queue item %d', item.pk)
-            return self._fail_item(item, f'Unexpected: {exc}', retriable=True)
+            return self._fail_item(item, f'Unexpected error ({type(exc).__name__}).', retriable=True)
 
         # Success — a write went through, so the account is no longer over its
         # limit (user freed up space / upgraded). Clear any stale limit flag.
@@ -291,6 +398,54 @@ class CRMSyncAgent:
         item.save(update_fields=['status', 'error_message'])
         self._write_log(item, status=CRMSyncLog.STATUS_SUCCESS, crm_object_id=crm_id or '')
         return True
+
+    def _skip_item(self, item: CRMSyncQueue, exc: PermissionMissing) -> bool:
+        """Not sent, for lack of a permission: recorded as skipped, said on the card, not tried again."""
+        item.status = CRMSyncQueue.STATUS_SKIPPED
+        item.error_message = str(exc)[:2000]
+        item.save(update_fields=['status', 'error_message'])
+        integration = item.integration
+        if integration.missing_permission != str(exc)[:2000]:
+            integration.missing_permission = str(exc)[:2000]
+            integration.save(update_fields=['missing_permission'])
+        self._write_log(item, status=CRMSyncLog.STATUS_SKIPPED, error=str(exc))
+        return False
+
+    def _wait_for_key(self, item: CRMSyncQueue, error: str) -> bool:
+        """The CRM refused the key: the entry waits, its attempt not counted, until the key works again (a test of
+        the connection, or a new key). It used to spend all its attempts and stay failed for good (CO-159)."""
+        item.status = CRMSyncQueue.STATUS_WAITING
+        item.error_message = error[:2000]
+        item.attempts = max(0, item.attempts - 1)
+        item.save(update_fields=['status', 'error_message', 'attempts'])
+        integration = item.integration
+        if not integration.key_refused_at:
+            integration.key_refused_at = timezone.now()
+            integration.last_ping_ok = False
+            integration.save(update_fields=['key_refused_at', 'last_ping_ok'])
+        self._write_log(item, status=CRMSyncLog.STATUS_FAILED, error=error)
+        return False
+
+    def _wait_for_room(self, item: CRMSyncQueue, error: str) -> bool:
+        """The CRM's account is full: the entry is tried again in an hour, its attempt not counted. One more entry
+        used to be killed on every run while the account was full (CO-159)."""
+        item.status = CRMSyncQueue.STATUS_FAILED
+        item.error_message = error[:2000]
+        item.attempts = max(0, item.attempts - 1)
+        item.scheduled_at = timezone.now() + timedelta(minutes=QUOTA_WAIT_MINUTES)
+        item.save(update_fields=['status', 'error_message', 'attempts', 'scheduled_at'])
+        self._write_log(item, status=CRMSyncLog.STATUS_FAILED, error=error)
+        return False
+
+    @staticmethod
+    def release_waiting(integration: CRMIntegration) -> int:
+        """The key works again: what waited for it goes out on the next run."""
+        count = CRMSyncQueue.objects.filter(integration=integration, status=CRMSyncQueue.STATUS_WAITING).update(
+            status=CRMSyncQueue.STATUS_PENDING, scheduled_at=timezone.now(), attempts=0)
+        if integration.key_refused_at:
+            integration.key_refused_at = None
+            integration.save(update_fields=['key_refused_at'])
+        return count
 
     def _dispatch(self, connector: BaseCRMConnector, item: CRMSyncQueue) -> Optional[str]:
         """Route the item to the correct connector method."""
@@ -335,10 +490,13 @@ class CRMSyncAgent:
         self, connector: BaseCRMConnector, item: CRMSyncQueue, p: dict
     ) -> Optional[str]:
         email = p.get('email', '')
-        crm_contact_id = self._resolve_crm_contact_id(
-            item.integration, CRMContactMapping.SOURCE_SDR_LEAD,
-            email, connector, p
-        )
+        if item.source_type in (CRMSyncQueue.SOURCE_INBOX_EMAIL, CRMSyncQueue.SOURCE_INBOX_REPLY):
+            crm_contact_id = self._inbox_contact(item.integration, connector, p)
+        else:
+            crm_contact_id = self._resolve_crm_contact_id(
+                item.integration, CRMContactMapping.SOURCE_SDR_LEAD,
+                email, connector, p
+            )
         if not crm_contact_id:
             raise CRMError(f'Cannot resolve CRM contact for email {email}', retriable=True)
 
@@ -364,12 +522,16 @@ class CRMSyncAgent:
         self, connector: BaseCRMConnector, item: CRMSyncQueue, p: dict
     ) -> Optional[str]:
         email = p.get('email', '')
-        crm_contact_id = self._resolve_crm_contact_id(
-            item.integration, CRMContactMapping.SOURCE_SDR_LEAD,
-            email, connector, p
-        )
-        if not crm_contact_id:
-            raise CRMError(f'Cannot resolve CRM contact for meeting {email}', retriable=True)
+        already = CRMActivityMapping.objects.filter(integration=item.integration, source_type=item.source_type,
+                                                    source_id=item.source_id).exists()
+        crm_contact_id = None
+        if not already and not p.get('cancelled'):
+            crm_contact_id = self._resolve_crm_contact_id(
+                item.integration, CRMContactMapping.SOURCE_SDR_LEAD,
+                email, connector, p
+            )
+            if not crm_contact_id:
+                raise CRMError(f'Cannot resolve CRM contact for meeting {email}', retriable=True)
 
         from django.utils.dateparse import parse_datetime
         start_time = None
@@ -385,13 +547,28 @@ class CRMSyncAgent:
             except Exception:
                 pass
 
-        return connector.log_meeting(
+        mapping = CRMActivityMapping.objects.filter(integration=item.integration, source_type=item.source_type,
+                                                    source_id=item.source_id).first()
+        if mapping is not None:
+            # On the CRM already: moved or cancelled there (CO-275).
+            connector.update_meeting(mapping.crm_object_id, title=p.get('title', 'Meeting'),
+                                     start_time=start_time or timezone.now(), end_time=end_time,
+                                     notes=p.get('notes', ''), cancelled=bool(p.get('cancelled')))
+            return mapping.crm_object_id
+        if p.get('cancelled'):
+            return None
+        crm_id = connector.log_meeting(
             crm_contact_id=crm_contact_id,
             title=p.get('title', 'Meeting'),
             start_time=start_time or timezone.now(),
             end_time=end_time,
             notes=p.get('notes', ''),
         )
+        if crm_id:
+            CRMActivityMapping.objects.update_or_create(
+                integration=item.integration, source_type=item.source_type, source_id=item.source_id,
+                defaults={'crm_object_id': crm_id, 'company': self.company})
+        return crm_id
 
     def _sync_note(
         self, connector: BaseCRMConnector, item: CRMSyncQueue, p: dict
@@ -473,6 +650,18 @@ class CRMSyncAgent:
                 pass
         return crm_id
 
+    def _inbox_contact(self, integration: CRMIntegration, connector: BaseCRMConnector, p: dict) -> Optional[str]:
+        """The CRM contact for a Reply Draft email: found by address, or made from the name the email gave (only
+        mail the AI read as a customer's or a lead's comes here). An existing contact is never changed. With
+        'Contacts' switched off for the CRM nothing is made."""
+        email = (p.get('email') or '').strip().lower()
+        if not email:
+            return None
+        name = (p.get('contact_name') or '').strip()
+        first, _, last = name.partition(' ')
+        details = {'email': email, 'first_name': first, 'last_name': last, 'name': name, 'source': 'reply_draft'}
+        return connector.find_or_create_contact(email, details, create=bool(integration.sync_contacts))
+
     def _get_connector(self, integration: CRMIntegration) -> BaseCRMConnector:
         if integration.pk in self._connector_cache:
             return self._connector_cache[integration.pk]
@@ -517,9 +706,15 @@ class CRMSyncAgent:
         ).first()
 
         if existing:
+            # Queued again (the lead saved again, Sync All): it is tried afresh. An entry that had used up its
+            # attempts stayed dead, its contents updated and never sent (CO-159).
             existing.payload = payload
             existing.scheduled_at = timezone.now()
-            existing.save(update_fields=['payload', 'scheduled_at'])
+            existing.operation = operation
+            if existing.status == CRMSyncQueue.STATUS_FAILED:
+                existing.status = CRMSyncQueue.STATUS_PENDING
+                existing.attempts = 0
+            existing.save(update_fields=['payload', 'scheduled_at', 'operation', 'status', 'attempts'])
             return
 
         CRMSyncQueue.objects.create(

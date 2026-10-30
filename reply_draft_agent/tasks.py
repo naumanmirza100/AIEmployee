@@ -164,6 +164,7 @@ def triage_inbox_task():
     from .agents.reply_draft_agent import ReplyDraftAgent
     from .alerts import urgent_email
     from .permissions import company_has_module
+    from crm_sync_agent.signals import queue_inbox_email
     from .triage import PER_RUN, WINDOW_DAYS, AIUnreachable, triage_email
 
     read = 0
@@ -201,10 +202,12 @@ def triage_inbox_task():
             unreachable = 0
             InboxEmail.objects.filter(pk=email_id).update(**fields)
             read += 1
+            for key, value in fields.items():
+                setattr(email, key, value)
             if fields['priority'] == 'urgent' and email.received_at >= timezone.now() - timedelta(days=1):
-                for key, value in fields.items():
-                    setattr(email, key, value)
                 urgent_email(email)
+            # Mail from a customer or a lead goes to the company's CRM, when it has CRM Sync.
+            queue_inbox_email(email)
     return {'read': read}
 
 

@@ -11,7 +11,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError, is_blank
+from .base import BaseCRMConnector, CRMError, is_blank, network_error
 
 logger = logging.getLogger(__name__)
 
@@ -128,17 +128,34 @@ class PipedriveConnector(BaseCRMConnector):
         end_time=None,
         notes: str = '',
     ) -> Optional[str]:
-        activity = {
+        activity = self._meeting_fields(title, start_time, end_time, notes)
+        activity['person_id'] = int(crm_contact_id)
+        resp = self._post('/activities', json=activity)
+        return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
+
+    def update_meeting(self, crm_meeting_id: str, title: str, start_time, end_time=None, notes: str = '',
+                       cancelled: bool = False) -> None:
+        """Moved: the activity's date and time. Cancelled: the activity is deleted from Pipedrive (CO-275)."""
+        if cancelled:
+            self._request('DELETE', f'/activities/{crm_meeting_id}')
+            return
+        self._put(f'/activities/{crm_meeting_id}', json=self._meeting_fields(title, start_time, end_time, notes))
+
+    @staticmethod
+    def _meeting_fields(title, start_time, end_time, notes) -> dict:
+        """A meeting still to come is not marked done; every one was, even next week's (CO-275)."""
+        fields = {
             'subject': (title or 'Meeting')[:255],
             'note': (notes or '')[:5000],
             'type': 'meeting',
-            'person_id': int(crm_contact_id),
-            'done': 1,
+            'done': 1 if (hasattr(start_time, 'timestamp') and start_time <= datetime.now(dt_timezone.utc)) else 0,
             'due_date': _pd_date(start_time),
             'due_time': _pd_time(start_time),
         }
-        resp = self._post('/activities', json=activity)
-        return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
+        if end_time is not None and hasattr(end_time, 'timestamp') and hasattr(start_time, 'timestamp'):
+            minutes = max(1, int((end_time - start_time).total_seconds() // 60))
+            fields['duration'] = f'{minutes // 60:02d}:{minutes % 60:02d}'
+        return fields
 
     def log_note(self, crm_contact_id: str, body: str) -> Optional[str]:
         note = {
@@ -172,12 +189,6 @@ class PipedriveConnector(BaseCRMConnector):
             out['job_title'] = str(props['job_title'])[:255]
         return out
 
-    def _params(self, extra: dict | None = None) -> dict:
-        p = {'api_token': self._token}
-        if extra:
-            p.update(extra)
-        return p
-
     def _get(self, path: str, params=None):
         return self._request('GET', path, params=params)
 
@@ -188,17 +199,19 @@ class PipedriveConnector(BaseCRMConnector):
         return self._request('PUT', path, json=json)
 
     def _request(self, method: str, path: str, params=None, json=None):
+        """The key goes in the x-api-token header, which Pipedrive's v1 API takes for every call. It went in the
+        address, and a failed call's message, with the address in it, was saved in the sync log (CO-158)."""
         url = f'{PIPEDRIVE_BASE}{path}'
-        qp = self._params(params)
         try:
             resp = requests.request(
                 method, url,
-                params=qp,
+                headers={'x-api-token': self._token},
+                params=params,
                 json=json,
                 timeout=self._timeout,
             )
         except requests.RequestException as exc:
-            raise CRMError(f'Pipedrive network error: {exc}', retriable=True) from exc
+            raise network_error('Pipedrive', exc) from exc
 
         if 200 <= resp.status_code < 300:
             return resp

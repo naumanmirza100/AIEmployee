@@ -11,7 +11,8 @@ import {
   Reply,
   Target,
   UserCog,
-  CalendarClock
+  CalendarClock,
+  RefreshCw
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -19,7 +20,7 @@ const ModuleCardsSection = () => {
   // "Module Not Purchased" screens and by the company dashboard. HomePage
   // scrolls the section into view; this brings the right card into view within
   // it and rings it, so a visitor landing here from one specific agent is not
-  // left hunting through nine cards for the one they wanted.
+  // left hunting through ten cards for the one they wanted.
   const { hash } = useLocation();
   const targetModule = useMemo(() => {
     const q = hash.indexOf('?');
@@ -62,7 +63,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-blue-500',
       gradientFrom: gradientColors['blue-500'],
       gradientTo: gradientColors['cyan-500'],
-      price: 99,
+      price: 129,
       pricePeriod: 'month',
       features: [
         'Automated CV parsing and screening',
@@ -102,7 +103,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-green-500',
       gradientFrom: gradientColors['green-500'],
       gradientTo: gradientColors['emerald-500'],
-      price: 199,
+      price: 149,
       pricePeriod: 'month',
       features: [
         'AI task prioritization',
@@ -142,7 +143,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-amber-500',
       gradientFrom: gradientColors['amber-500'],
       gradientTo: gradientColors['orange-500'],
-      price: 179,
+      price: 129,
       pricePeriod: 'month',
       features: [
         'Document processing & parsing (PDF, DOCX, Excel)',
@@ -177,20 +178,20 @@ const ModuleCardsSection = () => {
     {
       title: 'Reply Draft Agent',
       moduleName: 'reply_draft_agent',
-      description: 'AI-assisted email reply drafting with human-in-the-loop review. Drafts replies from incoming emails, you edit and approve before sending.',
+      description: "Reads your inbox, says what needs you and drafts the replies in the sender's language. You edit and approve before anything is sent.",
       icon: Reply,
       iconColor: 'text-cyan-500',
       gradientFrom: gradientColors['cyan-500'],
       gradientTo: gradientColors['blue-500'],
-      price: 79,
+      price: 99,
       pricePeriod: 'month',
       features: [
-        'AI-generated reply drafts from inbox',
-        'Tone selection (professional, casual, empathetic)',
-        'Regenerate with custom instructions',
-        'Inline edit before approving',
-        'Proper email threading (In-Reply-To)',
-        'Full version history of regenerations'
+        'AI triage: priority, kind and what each email wants',
+        "Reply drafts in the sender's language, signed by you",
+        'Summaries of conversations and attached files',
+        'Ask the inbox questions in plain words',
+        'Edit, regenerate and approve before sending',
+        'Alerts for urgent mail and replies that wait'
       ],
       highlight: false,
     },
@@ -202,7 +203,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-purple-500',
       gradientFrom: gradientColors['purple-500'],
       gradientTo: gradientColors['blue-500'],
-      price: 129,
+      price: 99,
       pricePeriod: 'month',
       features: [
         'Knowledge Q&A from your handbook & policies',
@@ -222,7 +223,7 @@ const ModuleCardsSection = () => {
       iconColor: 'text-violet-500',
       gradientFrom: gradientColors['purple-500'],
       gradientTo: gradientColors['pink-500'],
-      price: 179,
+      price: 129,
       pricePeriod: 'month',
       features: [
         'Natural language meeting scheduling',
@@ -231,6 +232,26 @@ const ModuleCardsSection = () => {
         'Calendar auto-planning & free slot suggestions',
         'AI document authoring (agenda, minutes, briefings)',
         'Proactive reminders & daily digest'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'CRM Sync',
+      moduleName: 'crm_sync_agent',
+      description: 'Keeps your CRM up to date with what AI SDR and Reply Draft do: leads, emails, calls, replies and customer mail, in HubSpot, Pipedrive or Salesforce.',
+      icon: RefreshCw,
+      iconColor: 'text-teal-500',
+      gradientFrom: gradientColors['emerald-500'],
+      gradientTo: gradientColors['cyan-500'],
+      price: 49,
+      pricePeriod: 'month',
+      features: [
+        'HubSpot, Pipedrive and Salesforce',
+        'AI SDR leads as contacts, never overwriting yours',
+        "Emails, calls and replies on each contact's timeline",
+        'Moved and cancelled calls updated in the CRM',
+        'Reply Draft: customer mail and the replies sent',
+        'A queue that retries and says what the CRM refused'
       ],
       highlight: false,
     }

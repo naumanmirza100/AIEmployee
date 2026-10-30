@@ -19,6 +19,21 @@ def is_blank(value) -> bool:
     return value is None or not str(value).strip()
 
 
+def network_error(provider: str, exc: Exception) -> 'CRMError':
+    """A CRM that could not be reached, said without the request. The library's own message names the address,
+    and Pipedrive's address carried the key, which then sat in the sync log every login can read (CO-158)."""
+    return CRMError(f'{provider} could not be reached ({type(exc).__name__}). It is tried again.', retriable=True)
+
+
+class PermissionMissing(CRMError):
+    """The CRM refused one kind of record for lack of a permission (the key, or the plan). Recorded as skipped and
+    said on the card; it used to be recorded as sent (CO-162)."""
+
+    def __init__(self, what: str, message: str):
+        super().__init__(message, retriable=False, status_code=403)
+        self.what = what
+
+
 class BaseCRMConnector(ABC):
     """
     Minimal interface every CRM connector must implement.
@@ -107,3 +122,8 @@ class BaseCRMConnector(ABC):
     @abstractmethod
     def log_note(self, crm_contact_id: str, body: str) -> Optional[str]:
         """Attach a plain-text note to a contact. Returns the CRM note ID or None."""
+
+    def update_meeting(self, crm_meeting_id: str, title: str, start_time, end_time=None, notes: str = '',
+                       cancelled: bool = False) -> None:
+        """Move a meeting already in the CRM, or mark it cancelled there (CO-275)."""
+        raise CRMError('This CRM cannot update a meeting.', retriable=False)
