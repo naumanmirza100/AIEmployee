@@ -237,7 +237,8 @@ class WhatTheAIIsToldTests(ReplyAnswersTestCase):
             choices=[mock.Mock(message=mock.Mock(content='{"subject": "s", "body": "b"}'))])
         with mock.patch('ai_sdr_agent.agents.sdr_key_resolver.record_sdr_usage'):
             writer.generate_more_info_email(self.lead, self.campaign, 'tell me more')
-        return writer.groq_client.chat.completions.create.call_args.kwargs['messages'][0]['content']
+        # The first call writes the answer; the second checks it against the facts.
+        return writer.groq_client.chat.completions.create.call_args_list[0].kwargs['messages'][0]['content']
 
     def test_the_campaigns_own_description_is_what_it_may_use(self):
         prompt = self.prompt_for('Payroll software for clinics. Runs payroll in ten minutes.')

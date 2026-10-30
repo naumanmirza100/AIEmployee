@@ -354,7 +354,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             data = json.loads(content)
             return {
                 'subject': data.get('subject', f"Re: {campaign.sender_company} — More Details")[:500],
-                'body': data.get('body', ''),
+                'body': self._checked_answer(about, strip_quoted_reply(original_reply), data.get('body', '')),
             }
         except Exception as exc:
             from core.api_key_service import KeyServiceError
@@ -386,18 +386,64 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
         'direct': 'brief and direct, no small talk',
     }
 
-    def _ask_json(self, prompt, temperature=0.5):
+    def _checked_answer(self, facts: str, their_words: str, body: str) -> str:
+        """The answer read once more against the facts, by itself: a rule among many in the writing prompt was not
+        enough. On live after PR #344 an answer still told Kiran "WhatsApp reminders are not currently included",
+        in English to her Roman Urdu. Where the check fails, the answer stays as it was."""
+        if not (body or '').strip():
+            return body
+        prompt = f"""You check a sales answer before it is shown to the salesperson.
+
+What we offer (the ONLY facts): {facts or '(nothing has been written down)'}
+The prospect wrote: \"\"\"{(their_words or '')[:600]}\"\"\"
+The answer: \"\"\"{body[:2500]}\"\"\"
+
+Work in three steps:
+1. Name the language and script the prospect wrote in (for example "Roman Urdu, Latin letters" or "English").
+2. List every sentence of the answer that says something about our offer the facts do not say. Saying that a thing
+   is NOT included or NOT available counts too, as do prices, promises and results.
+3. Write the answer again, wholly in the prospect's language and script, with each listed sentence replaced by
+   saying you will check and come back to them. Keep the greeting, the points that are in the facts, the request
+   and the sign-off.
+
+Return ONLY JSON: {{"language": "...", "unsupported": ["..."], "body": "..."}}"""
+        # The model thinks before it answers, and its thinking counts against max_tokens: at 2,000 the check came back
+        # empty or cut off two times in four. More room, and a second try.
+        checked = ''
+        for attempt in (1, 2):
+            try:
+                checked = str(self._ask_json(prompt, temperature=0, max_tokens=6000).get('body', '')).strip()
+                break
+            except Exception as exc:
+                from core.api_key_service import KeyServiceError
+                if isinstance(exc, KeyServiceError):
+                    raise
+                logger.warning('EmailAssistantAgent: the answer check failed (try %d of 2): %s', attempt, exc)
+        if not checked:
+            return body
+        # The model sometimes writes its line breaks as the two characters \n, and says "I will check" once for
+        # each sentence it replaced.
+        checked = checked.replace('\\n', '\n')
+        lines = []
+        for line in checked.split('\n'):
+            if line.strip() and lines and line.strip() == lines[-1].strip():
+                continue
+            lines.append(line)
+        return '\n'.join(lines).strip() or body
+
+    def _ask_json(self, prompt, temperature=0.5, max_tokens=2000):
         if not self.groq_client:
             raise ValueError('The AI is not available for your company right now (no AI key or no tokens left).')
         resp = self.groq_client.chat.completions.create(
             model=self.model, messages=[{'role': 'user', 'content': prompt}],
-            temperature=temperature, max_tokens=2000)
+            temperature=temperature, max_tokens=max_tokens)
         from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
         record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
         content = resp.choices[0].message.content.strip()
         if '```' in content:
             content = content.split('```')[1].lstrip('json').strip()
-        return json.loads(content)
+        # strict=False: the model's JSON sometimes has real line breaks inside a string.
+        return json.loads(content, strict=False)
 
     def write_email(self, kind, tone, prospect: dict, sender: dict, offer: str) -> dict:
         """A personal outreach email from a kind, a tone and what the person typed about the prospect."""
@@ -461,6 +507,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
         data = self._ask_json(prompt, temperature=_ANSWER_TEMPERATURE)
         body = str(data.get('body', '')).strip()
         if body:
+            body = self._checked_answer(offer, strip_quoted_reply(reply_text), body)
             result['answer'] = {'subject': str(data.get('subject', ''))[:300], 'body': body}
         return result
 

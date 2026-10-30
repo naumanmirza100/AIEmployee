@@ -612,14 +612,14 @@ class EmailAssistantTests(SDRBase):
                                 '{"subject": "Re: reminders", "body": "Hi, ..."}')
         with patch:
             self.call(views.sdr_assistant_read, {'reply': 'Kya reminders WhatsApp par bhi jate hain?'})
-        prompt = client.chat.completions.create.call_args.kwargs['messages'][0]['content']
+        prompt = client.chat.completions.create.call_args_list[1].kwargs['messages'][0]['content']
         self.assertIn('do not say yes or no to it', prompt)
         agent = EmailAssistantAgent()
         agent.groq_client = mock.MagicMock()
         agent.groq_client.chat.completions.create.return_value = mock.MagicMock(
             choices=[mock.MagicMock(message=mock.MagicMock(content='{"subject": "Re: x", "body": "Hi"}'))], usage=None)
         agent.generate_more_info_email(self.make_lead(), self.campaign, 'WhatsApp bhi?\n\n> Hi Bob,\n> our app')
-        call = agent.groq_client.chat.completions.create.call_args.kwargs
+        call = agent.groq_client.chat.completions.create.call_args_list[0].kwargs      # [1] is the check
         self.assertIn('do not say yes or no to it', call['messages'][0]['content'])
         self.assertIn('Promise nothing the facts do not offer', call['messages'][0]['content'])
         self.assertNotIn('our app', call['messages'][0]['content'])    # the quoted email is not their question
