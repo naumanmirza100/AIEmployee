@@ -409,27 +409,32 @@ Work in three steps:
 Return ONLY JSON: {{"language": "...", "unsupported": ["..."], "body": "..."}}"""
         # The model thinks before it answers, and its thinking counts against max_tokens: at 2,000 the check came back
         # empty or cut off two times in four. More room, and a second try.
-        checked = ''
         for attempt in (1, 2):
             try:
-                checked = str(self._ask_json(prompt, temperature=0, max_tokens=6000).get('body', '')).strip()
-                break
+                checked = self._tidy(str(self._ask_json(prompt, temperature=0, max_tokens=6000).get('body', '')))
             except Exception as exc:
                 from core.api_key_service import KeyServiceError
                 if isinstance(exc, KeyServiceError):
                     raise
                 logger.warning('EmailAssistantAgent: the answer check failed (try %d of 2): %s', attempt, exc)
-        if not checked:
-            return body
-        # The model sometimes writes its line breaks as the two characters \n, and says "I will check" once for
-        # each sentence it replaced.
-        checked = checked.replace('\\n', '\n')
+                continue
+            # A check rewrites a sentence or two; it never drops most of the answer. On live it once cut one down to
+            # "Hi Kiran, Great to hear you're curious!" (30 Oct): such a rewrite is not used.
+            if len(checked) >= len(body.strip()) // 2:
+                return checked
+            logger.warning('EmailAssistantAgent: the answer check dropped most of the answer (try %d of 2)', attempt)
+        return body
+
+    @staticmethod
+    def _tidy(text: str) -> str:
+        """The model sometimes writes its line breaks as the two characters \\n, and says "I will check" once for each
+        sentence it replaced."""
         lines = []
-        for line in checked.split('\n'):
+        for line in text.replace('\\n', '\n').split('\n'):
             if line.strip() and lines and line.strip() == lines[-1].strip():
                 continue
             lines.append(line)
-        return '\n'.join(lines).strip() or body
+        return '\n'.join(lines).strip()
 
     def _ask_json(self, prompt, temperature=0.5, max_tokens=2000):
         if not self.groq_client:
