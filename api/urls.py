@@ -10,9 +10,6 @@ from api.views import review
 from api.views import contact
 from api.views import consultation
 from api.views import agents
-from api.views import pricing
-from api.views import payment
-from api.views import referral
 from api.views import analytics
 from api.views import notification
 from api.views import company
@@ -25,7 +22,6 @@ from api.views import career
 from api.views import applicant
 from api.views import quiz
 from api.views import ai_predictor
-from api.views import chatbot
 from api.views import white_label
 from api.views import company_jobs
 from api.views import pm_agent
@@ -75,7 +71,6 @@ urlpatterns = [
     re_path(r'^public/candidate/portal/(?P<token>[^/]+)/?$', public_jobs.candidate_portal_data, name='candidate_portal_data'),
     
     # Authentication endpoints
-    re_path(r'^auth/register/?$', auth.register, name='register'),
     re_path(r'^auth/login/?$', auth.login, name='login'),
     re_path(r'^auth/refresh/?$', auth.refresh_token, name='refresh_token'),
     re_path(r'^auth/logout/?$', auth.logout, name='logout'),
@@ -109,11 +104,6 @@ urlpatterns = [
     # Project endpoints
     re_path(r'^projects/?$', project.list_projects, name='list_projects'),
     re_path(r'^projects/(?P<id>\d+)/?$', project.get_project, name='get_project'),
-    re_path(r'^projects/create/?$', project.create_project, name='create_project'),
-    re_path(r'^projects/(?P<id>\d+)/update/?$', project.update_project, name='update_project'),
-    re_path(r'^projects/(?P<id>\d+)/delete/?$', project.delete_project, name='delete_project'),
-    re_path(r'^projects/(?P<id>\d+)/apply/?$', project.apply_to_project, name='apply_to_project'),
-    re_path(r'^projects/(?P<id>\d+)/applications/?$', project.get_project_applications, name='get_project_applications'),
     
     # Industry endpoints
     re_path(r'^industries/?$', industry.list_industries, name='list_industries'),
@@ -146,23 +136,9 @@ urlpatterns = [
     # Agent catalogue — source of truth for agent dropdowns/filters everywhere
     re_path(r'^agents/?$', agents.list_agents, name='list_agents'),
 
-    # Pricing endpoints
-    re_path(r'^pricing/plans/?$', pricing.list_pricing_plans, name='list_pricing_plans'),
-    re_path(r'^pricing/subscriptions/?$', pricing.list_subscriptions, name='list_subscriptions'),  # GET
-    re_path(r'^pricing/subscriptions/?$', pricing.create_subscription, name='create_subscription'),  # POST
-    
-    # Payment endpoints
-    re_path(r'^payments/?$', payment.process_payment, name='process_payment'),  # POST
-    re_path(r'^payments/list/?$', payment.list_payments, name='list_payments'),  # GET
-    re_path(r'^payments/invoices/?$', pricing.list_invoices, name='list_invoices'),  # GET (invoices)
-    re_path(r'^payments/methods/?$', payment.list_payment_methods, name='list_payment_methods'),  # GET
-    re_path(r'^payments/methods/?$', payment.add_payment_method, name='add_payment_method'),  # POST
-    
-    # Referral endpoints
-    re_path(r'^referrals/my-code/?$', referral.get_my_referral_code, name='get_my_referral_code'),
-    re_path(r'^referrals/use-code/?$', referral.use_referral_code, name='use_referral_code'),
-    re_path(r'^referrals/my-referrals/?$', referral.get_my_referrals, name='get_my_referrals'),
-    
+    # The old marketplace's pricing, payments and referrals are gone (CO-269): no screen used them,
+    # and one marked an invoice paid with no payment. Agents are bought through modules/ (Stripe).
+
     # Analytics endpoints
     re_path(r'^analytics/events/?$', analytics.log_analytics_event, name='log_analytics_event'),
     re_path(r'^analytics/page-views/?$', analytics.log_page_view, name='log_page_view'),
@@ -362,9 +338,6 @@ urlpatterns = [
     re_path(r'^project-manager/notification-templates/(?P<template_id>\d+)/?$', pm_agent.pm_notification_template_detail, name='pm_notification_template_detail'),
 
     # Chatbot endpoints
-    re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST
-    re_path(r'^chatbot/messages/?$', chatbot.send_chatbot_message, name='send_chatbot_message'),  # POST
-    re_path(r'^chatbot/conversations/(?P<id>\d+)/messages/?$', chatbot.get_conversation_messages, name='get_conversation_messages'),
     
     # White Label endpoints
     re_path(r'^white-label/products/?$', white_label.list_white_label_products, name='list_white_label_products'),

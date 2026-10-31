@@ -1890,7 +1890,7 @@ def get_module_prices(request):
         logger.error('Error getting module prices: %s', str(e), exc_info=True)
         return Response({
             'status': 'error',
-            'message': f'Failed to get module prices: {str(e)}',
+            'message': 'Failed to get module prices.',
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

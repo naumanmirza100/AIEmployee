@@ -6,6 +6,9 @@ from django.shortcuts import get_object_or_404
 
 from core.models import WhiteLabelProduct
 from api.serializers.white_label import WhiteLabelProductSerializer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
@@ -33,10 +36,10 @@ def list_white_label_products(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('list_white_label_products failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch products',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -54,10 +57,10 @@ def get_white_label_product(request, id):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('get_white_label_product failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch product',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -75,9 +78,9 @@ def get_white_label_categories(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('get_white_label_categories failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch categories',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

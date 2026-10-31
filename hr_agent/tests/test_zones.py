@@ -200,12 +200,15 @@ class CompanyZoneTests(ZoneTestCase):
         self.company.refresh_from_db()
         self.assertEqual(self.company.timezone_name, '')
 
-    def test_but_can_save_the_rest_of_the_profile_with_the_zone_unchanged(self):
+    def test_nor_the_rest_of_the_profile_since_the_profile_is_for_admins(self):
+        # It could save the rest with the zone unchanged until CO-97 (31 Oct 2026) made the profile admin-only.
         self.company_zone('Asia/Karachi')
         code, body = self.save(self.member, timezoneName='Asia/Karachi', phone='042 111')
-        self.assertEqual(code, 200, body)
+        self.assertEqual(code, 403, body)
         self.company.refresh_from_db()
-        self.assertEqual((self.company.phone, self.company.timezone_name), ('042 111', 'Asia/Karachi'))
+        self.assertEqual((self.company.phone, self.company.timezone_name), (None, 'Asia/Karachi'))
+        code, body = self.save(self.admin, timezoneName='Asia/Karachi', phone='042 111')
+        self.assertEqual(code, 200, body)
 
     def test_a_name_that_is_not_a_zone_is_refused_and_nothing_is_saved(self):
         code, body = self.save(self.admin, timezoneName='Karachi', phone='042 111')

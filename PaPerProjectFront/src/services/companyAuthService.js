@@ -48,14 +48,15 @@ const handleExpiredSession = (errorData) => {
   const detail = String(errorData?.detail || '');
   const isDeadToken =
     code === 'authentication_failed' ||
-    /invalid token|authentication failed|inactive/i.test(detail);
+    /invalid token|authentication failed|inactive|session has ended/i.test(detail);
 
   if (!isDeadToken) return false;
   // Already heading to login (e.g. several requests failed at once) — don't stack redirects.
   if (window.location.pathname === '/company/login') return true;
 
   clearCompanySession();
-  const reason = /inactive/i.test(detail) ? 'inactive' : 'expired';
+  // 'idle': the server ends a session not used for a while (30 days by default).
+  const reason = /inactive/i.test(detail) ? 'inactive' : /session has ended/i.test(detail) ? 'idle' : 'expired';
   // After signing in again they go back to the page they were on.
   rememberReturnTo(`${window.location.pathname}${window.location.search}`);
   window.location.replace(`/company/login?session=${reason}`);

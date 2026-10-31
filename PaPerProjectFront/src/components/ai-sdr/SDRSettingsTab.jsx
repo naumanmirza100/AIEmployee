@@ -542,6 +542,8 @@ const GoogleMeetCard = () => {
 
   const connected  = !!status?.connected;
   const configured = status?.configured !== false; // server has the OAuth app set up
+  // Connecting and disconnecting is for an owner or admin; a server from before that sends no mayManage.
+  const mayManage  = status?.mayManage !== false;
 
   return (
     <div style={{ ...card }}>
@@ -568,6 +570,10 @@ const GoogleMeetCard = () => {
         <div style={{ flexShrink: 0 }}>
           {loading ? (
             <Loader2 size={20} color="#a855f7" style={{ animation: 'spin 1s linear infinite' }} />
+          ) : !mayManage ? (
+            <span data-testid="sdr-gcal-admins-only" style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 12 }}>
+              An owner or admin connects it
+            </span>
           ) : connected ? (
             <button onClick={handleDisconnect} disabled={busy}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>

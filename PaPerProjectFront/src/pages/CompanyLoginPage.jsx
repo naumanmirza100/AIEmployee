@@ -13,7 +13,9 @@ import { Building2, Loader2, LogIn, Eye, EyeOff, KeyRound, ArrowLeft, MailCheck,
 import LoginSwitch from '@/components/auth/LoginSwitch';
 
 const SESSION_NOTICES = {
-  expired: 'You were signed out because this account was logged out somewhere else. Please log in again.',
+  // Signing out on another device no longer ends this one: each sign-in has its own session.
+  expired: 'Your session has ended. Please log in again.',
+  idle: 'You were signed out because this session was not used for 30 days. Please log in again.',
   inactive: 'This account is no longer active. Contact your administrator for access.',
 };
 

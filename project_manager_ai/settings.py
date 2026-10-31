@@ -364,6 +364,9 @@ MIDDLEWARE = [
     # Sits before CommonMiddleware (per Django docs) and after security.
     # Streamed Q&A answers are left uncompressed, or they arrive all at once.
     'api.middleware.gzip.GZipExceptStreamsMiddleware',
+    # Server errors from the API carry no exception text to the caller; it goes to the log (CO-271).
+    # After gzip in this list, so it reads the reply before it is compressed.
+    'api.middleware.error_text.ServerErrorTextMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware (should be early)
      'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -1431,7 +1434,8 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'core.drf_exceptions.key_service_exception_handler',
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.TokenAuthentication',
+        # One token per sign-in, ended when unused for SESSION_IDLE_DAYS (CO-270).
+        'api.authentication.EmployeeTokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -1496,3 +1500,7 @@ REST_FRAMEWORK = {
 _num_proxies = os.getenv('NUM_PROXIES', '').strip()
 if _num_proxies.isdigit():
     REST_FRAMEWORK['NUM_PROXIES'] = int(_num_proxies)
+
+# A sign-in token that has not been used for this many days stops working (core/sign_in.py, CO-270).
+_idle_days = os.getenv('SESSION_IDLE_DAYS', '').strip()
+SESSION_IDLE_DAYS = int(_idle_days) if _idle_days.isdigit() and int(_idle_days) > 0 else 30

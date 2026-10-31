@@ -72,8 +72,12 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       USE_REDIS: "True"
+    # Only this machine may reach the app's own port: nginx in front of it (127.0.0.1:8000) and the
+    # deploy's health check. Published on every address, http://<server>:8000 answered from the
+    # internet over plain HTTP, round nginx and HTTPS, and a caller there could also choose the
+    # address the per-caller sign-in limits count by (NUM_PROXIES trusts the last forwarded hop).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - media:/app/media
     depends_on:

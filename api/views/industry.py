@@ -7,6 +7,9 @@ from django.shortcuts import get_object_or_404
 from core.models import Industry, IndustryChallenge
 from api.serializers.industry import IndustrySerializer, IndustryChallengeSerializer
 from api.permissions import IsAdmin
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
@@ -23,10 +26,10 @@ def list_industries(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('list_industries failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch industries',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -44,10 +47,10 @@ def get_industry_by_slug(request, slug):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('get_industry_by_slug failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch industry',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -68,9 +71,9 @@ def get_industry_challenges(request, slug):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('get_industry_challenges failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch challenges',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

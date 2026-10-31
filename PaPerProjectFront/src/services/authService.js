@@ -2,31 +2,8 @@
 
 import api, { setToken, setUser, removeToken, getUser, getToken } from './api';
 
-/**
- * Register a new user
- */
-export const register = async (userData) => {
-  try {
-    const response = await api.post('/auth/register', {
-      email: userData.email,
-      password: userData.password,
-      firstName: userData.firstName,
-      lastName: userData.lastName,
-      phone: userData.phone,
-      userType: userData.userType || 'client',
-    });
-    
-    if (response.status === 'success' && response.data.token) {
-      setToken(response.data.token);
-      setUser(response.data.user);
-    }
-    
-    return response;
-  } catch (error) {
-    console.error('Registration error:', error);
-    throw error;
-  }
-};
+// There is no self sign-up for employee logins: their company adds them (the old marketplace
+// sign-up was removed on the server, CO-269). Companies sign up through companyAuthService.
 
 /**
  * Login user
@@ -121,7 +98,6 @@ export const isAdmin = () => {
 };
 
 export default {
-  register,
   login,
   logout,
   getCurrentUser,

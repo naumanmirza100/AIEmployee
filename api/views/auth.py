@@ -1,90 +1,65 @@
-from rest_framework import status, generics
-from rest_framework.decorators import api_view, permission_classes
+import logging
+
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from django.contrib.auth.models import User
-from django.contrib.auth import authenticate
 from django.utils import timezone
-from rest_framework.authtoken.models import Token
 
-from api.serializers.auth import RegisterSerializer, LoginSerializer, UserSerializer
+from api.serializers.auth import LoginSerializer, UserSerializer
+from api.views.company_auth import CompanyAuthThrottle
+from core import sign_in
+from core.models import UserToken
 
+logger = logging.getLogger(__name__)
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def register(request):
-    """Register a new user"""
-    serializer = RegisterSerializer(data=request.data)
-    
-    if serializer.is_valid():
-        user = serializer.save()
-        
-        # Generate token
-        token, created = Token.objects.get_or_create(user=user)
-        
-        # Get user type
-        user_type = 'client'
-        if hasattr(user, 'profile'):
-            role = user.profile.role
-            if role == 'developer':
-                user_type = 'freelancer'
-            elif user.is_staff:
-                user_type = 'admin'
-        
-        user_data = UserSerializer(user).data
-        
-        return Response({
-            'status': 'success',
-            'message': 'User registered successfully',
-            'data': {
-                'user': {
-                    'id': user.id,
-                    'email': user.email,
-                    'userType': user_type,
-                },
-                'token': token.key,
-            }
-        }, status=status.HTTP_201_CREATED)
-    
-    return Response({
-        'status': 'error',
-        'message': 'Validation error',
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
+# The old marketplace sign-up (POST /api/auth/register) is gone (CO-269): it made a working account
+# for any address, with no confirmation and no limit, and no screen used it. Employee logins are
+# made by their company (Users), dashboard logins through the company sign-up.
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([CompanyAuthThrottle])
 def login(request):
-    """Login user"""
+    """Login user (employees and platform staff).
+
+    Limited per caller like the dashboard sign-in, and per account: after
+    sign_in.MAX_WRONG_PASSWORDS wrong passwords the account refuses every password for a while
+    (CO-100). Each sign-in gets its own token (CO-270)."""
+    email = str(request.data.get('email') or '')
+    if email and sign_in.is_locked('user', email):
+        return Response({'status': 'error', 'message': sign_in.LOCKED_MESSAGE},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS)
+
     serializer = LoginSerializer(data=request.data)
-    
+
     if serializer.is_valid():
         user = serializer.validated_data['user']
-        
+        sign_in.right_password('user', email)
+
         # Update last login
         user.last_login = timezone.now()
-        user.save()
-        
-        # Generate or get token
-        token, created = Token.objects.get_or_create(user=user)
-        
+        user.save(update_fields=['last_login'])
+
+        token = sign_in.new_user_token(user)
+
         # Get user type
         user_type = 'client'
         account_status = 'active' if user.is_active else 'inactive'
         role = None
         created_by_company_user = False
-        
+
         if hasattr(user, 'profile'):
             profile = user.profile
             role = profile.role
             created_by_company_user = profile.created_by_company_user is not None
-            
+
             if role == 'developer':
                 user_type = 'freelancer'
             elif user.is_staff:
                 user_type = 'admin'
-        
+
         return Response({
             'status': 'success',
             'message': 'Login successful',
@@ -105,7 +80,9 @@ def login(request):
                 'token': token.key,
             }
         }, status=status.HTTP_200_OK)
-    
+
+    if email:
+        sign_in.wrong_password('user', email)
     return Response({
         'status': 'error',
         'message': serializer.errors.get('non_field_errors', ['Invalid credentials'])[0]
@@ -125,14 +102,10 @@ def refresh_token(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout(request):
-    """Logout user"""
-    # Delete token
-    try:
-        token = Token.objects.get(user=request.user)
-        token.delete()
-    except Token.DoesNotExist:
-        pass
-    
+    """Sign out this device only: its own token is deleted, other devices stay signed in (CO-270)."""
+    if isinstance(request.auth, UserToken):
+        request.auth.delete()
+
     return Response({
         'status': 'success',
         'message': 'Logout successful'
@@ -146,38 +119,18 @@ def get_current_user(request):
     try:
         # Refresh user to get latest data
         request.user.refresh_from_db()
-        
+
         serializer = UserSerializer(request.user)
-        
-        # Debug info - check permission too
-        try:
-            from api.permissions import IsAdmin
-            permission = IsAdmin()
-            has_admin_permission = permission.has_permission(request, None)
-        except Exception as e:
-            has_admin_permission = False
-        
-        debug_info = {
-            'email': request.user.email,
-            'username': request.user.username,
-            'id': request.user.id,
-            'is_staff': request.user.is_staff,
-            'is_superuser': request.user.is_superuser,
-            'is_active': request.user.is_active,
-            'has_admin_permission': has_admin_permission,
-        }
-        
+
         return Response({
             'status': 'success',
             'data': {
                 'user': serializer.data,
-                'debug': debug_info  # Remove this in production
             }
         }, status=status.HTTP_200_OK)
-    except Exception as e:
+    except Exception:
+        logger.exception('auth/me failed for user %s', request.user.pk)
         return Response({
             'status': 'error',
             'message': 'Failed to get current user',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
