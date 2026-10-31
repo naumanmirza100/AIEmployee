@@ -8,6 +8,9 @@ import json
 from core.models import AIPredictorSubmission
 from api.serializers.ai_predictor import AIPredictorSubmissionSerializer
 from api.permissions import IsAdmin
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
@@ -65,10 +68,10 @@ def submit_ai_predictor(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        logger.exception('submit_ai_predictor failed')
         return Response({
             'status': 'error',
             'message': 'Failed to submit prediction request',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

@@ -6,6 +6,9 @@ from django.utils import timezone
 
 from core.models import AnalyticsEvent, PageView
 from api.serializers.analytics import AnalyticsEventSerializer, PageViewSerializer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
@@ -53,10 +56,10 @@ def log_analytics_event(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        logger.exception('log_analytics_event failed')
         return Response({
             'status': 'error',
             'message': 'Failed to log event',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -99,9 +102,9 @@ def log_page_view(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        logger.exception('log_page_view failed')
         return Response({
             'status': 'error',
             'message': 'Failed to log page view',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

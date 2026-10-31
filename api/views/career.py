@@ -9,6 +9,9 @@ from django.utils import timezone
 from recruitment_agent.models import JobDescription, CareerApplication
 from api.serializers.career import JobDescriptionSerializer, CareerApplicationSerializer
 from api.permissions import IsAdmin
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
@@ -92,10 +95,10 @@ def list_job_positions(request):
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
+        logger.exception('list_job_positions failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch job positions',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

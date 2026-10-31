@@ -68,20 +68,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const register = async (userData) => {
-    try {
-      const response = await authService.register(userData);
-      if (response.status === 'success' && response.data.user) {
-        setUser(response.data.user);
-        setIsAuthenticated(true);
-        return response;
-      }
-      throw new Error(response.message || 'Registration failed');
-    } catch (error) {
-      throw error;
-    }
-  };
-
   const logout = async () => {
     signedOutOnPurpose();
     try {
@@ -107,7 +93,6 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated,
     loading,
     login,
-    register,
     logout,
     updateUser,
     isClient: () => user?.userType === 'client',

@@ -1041,11 +1041,13 @@ class CompanyRegistrationToken(models.Model):
 
 
 class CompanyUserToken(models.Model):
-    """Authentication tokens for CompanyUser"""
-    company_user = models.OneToOneField(CompanyUser, on_delete=models.CASCADE, related_name='auth_token')
+    """A dashboard login's session: one per sign-in, so each device signs out on its own (CO-270).
+    Not used for SESSION_IDLE_DAYS, it stops working (core/sign_in.py)."""
+    company_user = models.ForeignKey(CompanyUser, on_delete=models.CASCADE, related_name='auth_tokens')
     key = models.CharField(max_length=40, unique=True, db_index=True)
     created = models.DateTimeField(auto_now_add=True)
-    
+    last_used = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         verbose_name = 'Company User Token'
         verbose_name_plural = 'Company User Tokens'
@@ -1058,6 +1060,24 @@ class CompanyUserToken(models.Model):
     
     def __str__(self):
         return f"Token for {self.company_user.email}"
+
+
+class UserToken(models.Model):
+    """An employee or platform login's session (auth.User): one per sign-in (CO-270).
+
+    DRF's own authtoken.Token allows one per login, shared by every device and good for ever. Those
+    still work once: api.authentication.EmployeeTokenAuthentication turns one into a UserToken with
+    the same key the first time it is used."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='session_tokens')
+    key = models.CharField(max_length=40, unique=True, db_index=True)
+    created = models.DateTimeField(auto_now_add=True)
+    last_used = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'User session token'
+
+    def __str__(self):
+        return f"Session for {self.user.email or self.user.username}"
 
 
 # ============================================================================

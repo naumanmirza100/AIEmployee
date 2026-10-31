@@ -6,6 +6,9 @@ import json
 
 from core.models import QuizResponse
 from api.serializers.quiz import QuizResponseSerializer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
@@ -60,9 +63,9 @@ def submit_quiz_response(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        logger.exception('submit_quiz_response failed')
         return Response({
             'status': 'error',
             'message': 'Failed to submit quiz response',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
