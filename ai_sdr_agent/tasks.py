@@ -10,6 +10,7 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -783,40 +784,52 @@ def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = Fals
     Executes independent research on an existing lead.
     Safe against concurrent runs and respects subscription access.
     """
-    from ai_sdr_agent.models import SDRLead, SDRCampaign
+    from ai_sdr_agent.models import SDRAgentSettings, SDRLead, SDRCampaign
     from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
 
-    lead = SDRLead.all_objects.filter(pk=lead_id).select_related('company_user__company').first()
-    if not lead:
+    company_lookup = SDRLead.all_objects.filter(pk=lead_id).select_related('company_user__company').first()
+    if not company_lookup:
         return {'status': 'error', 'error': f'Lead {lead_id} not found', 'lead_id': lead_id}
 
-    company = lead.company_user.company
+    company_user = company_lookup.company_user
+    company = company_user.company
     if not _has_sdr_access(company, {}):
         return {'status': 'error', 'error': 'No active AI SDR subscription', 'lead_id': lead_id}
 
-    if not isinstance(lead.raw_data, dict):
-        lead.raw_data = {}
+    # Claimed under a row lock, so two simultaneous requests cannot both start (and pay for) the same research.
+    with transaction.atomic():
+        lead = SDRLead.all_objects.select_for_update().get(pk=lead_id)
+        if not isinstance(lead.raw_data, dict):
+            lead.raw_data = {}
 
-    current_status = lead.raw_data.get('research_status')
-    if not force:
-        if current_status == 'completed':
-            return {
-                'status': 'already_completed',
-                'lead_id': lead_id,
-                'profile': lead.raw_data.get('research_profile'),
-            }
+        current_status = lead.raw_data.get('research_status')
         if current_status == 'running':
             # Check if stuck (running for > 15 mins)
             updated_at = lead.updated_at or timezone.now()
             if (timezone.now() - updated_at) < timedelta(minutes=15):
                 return {'status': 'already_running', 'lead_id': lead_id}
+        if not force and current_status == 'completed':
+            return {
+                'status': 'already_completed',
+                'lead_id': lead_id,
+                'profile': lead.raw_data.get('research_profile'),
+            }
+        lead.raw_data['research_status'] = 'running'
+        lead.save(update_fields=['raw_data', 'updated_at'])
 
     campaign = None
     if campaign_id:
-        campaign = SDRCampaign.objects.filter(pk=campaign_id).first()
+        campaign = SDRCampaign.objects.filter(pk=campaign_id, company_user=company_user).first()
 
     try:
-        agent = LeadResearchAgent(company=company)
+        # The keys the user saved in Settings, as the rest of the SDR agent uses
+        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+        agent = LeadResearchAgent(
+            company=company,
+            apollo_api_key=(sdr_settings.apollo_api_key or None) if sdr_settings else None,
+            apify_token=(sdr_settings.apify_api_token or None) if sdr_settings else None,
+            apify_actor=(sdr_settings.apify_actor_id or None) if sdr_settings else None,
+        )
         profile = agent.research_lead(lead, campaign=campaign)
         return {'status': 'success', 'lead_id': lead_id, 'profile': profile}
     except Exception as exc:
@@ -832,7 +845,7 @@ def research_leads_batch_impl(lead_ids: list[int], campaign_id: int = None, forc
     completed_count = 0
     failed_count = 0
 
-    for lid in lead_ids:
+    for lid in dict.fromkeys(lead_ids):
         res = research_lead_impl(lid, campaign_id=campaign_id, force=force)
         results.append(res)
         if res.get('status') in ('success', 'already_completed'):

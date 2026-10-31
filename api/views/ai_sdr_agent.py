@@ -33,6 +33,7 @@ from ai_sdr_agent.agents.lead_research_agent import (
     ApifyApprovalRequired, LeadResearchAgent, apify_actor_page_url,
 )
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
+from ai_sdr_agent.agents.lead_validator import normalize_linkedin_url
 from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
 from contextlib import contextmanager
@@ -646,9 +647,7 @@ def research_leads(request):
             existing_linkedin = set()
             existing_names = set()
 
-            def _norm_li(url):
-                u = (url or '').strip().lower().rstrip('/')
-                return u.split('?')[0] if u else ''
+            _norm_li = normalize_linkedin_url
 
             for em, fn, cn, li in existing_leads_qs:
                 if em:
@@ -828,25 +827,24 @@ def research_lead_endpoint(request, lead_id):
             'buying_signals': lead.buying_signals,
         })
 
-    # POST: Trigger research
-    force = bool(request.data.get('force', False))
+    # POST: Trigger research. Runs through the same claim as the background task, so a double click or a second
+    # tab returns the finished profile or a "running" answer instead of paying for the research twice.
+    from ai_sdr_agent.tasks import research_lead_impl
     campaign_id = request.data.get('campaign_id')
-    campaign = None
-    if campaign_id:
-        campaign = SDRCampaign.objects.filter(company_user=company_user, pk=campaign_id).first()
-
-    researcher = _get_research_agent(company_user.company, company_user=company_user)
-    try:
-        profile = researcher.research_lead(lead, campaign=campaign)
-        return Response({
-            'status': 'success',
-            'lead_id': lead.id,
-            'research_status': profile.get('research_status', 'completed'),
-            'research_profile': profile,
-        })
-    except Exception as exc:
-        logger.error("Error researching lead %s: %s", lead_id, exc)
-        return Response({'status': 'error', 'message': str(exc)}, status=500)
+    result = research_lead_impl(lead.id, campaign_id=campaign_id, force=bool(request.data.get('force', False)))
+    if result['status'] == 'already_running':
+        return Response({'status': 'error', 'message': 'Research is already running for this lead.'}, status=409)
+    if result['status'] not in ('success', 'already_completed'):
+        logger.error("Error researching lead %s: %s", lead_id, result.get('error'))
+        return Response({'status': 'error', 'message': result.get('error', 'Research failed.')}, status=500)
+    profile = result.get('profile') or {}
+    return Response({
+        'status': 'success',
+        'lead_id': lead.id,
+        'research_status': profile.get('research_status', 'completed'),
+        'research_profile': profile,
+        'cached': result['status'] == 'already_completed',
+    })
 
 
 @api_view(['POST'])
@@ -863,23 +861,17 @@ def research_leads_batch_endpoint(request):
         return Response({'status': 'error', 'message': 'lead_ids must be a non-empty list of IDs.'}, status=400)
 
     # Restrict to leads belonging to this user (capped at 50 per batch)
-    leads = list(SDRLead.all_objects.filter(company_user=company_user, pk__in=lead_ids[:50]))
-    if not leads:
+    owned_ids = list(SDRLead.all_objects.filter(company_user=company_user, pk__in=lead_ids[:50]).values_list('pk', flat=True))
+    if not owned_ids:
         return Response({'status': 'error', 'message': 'No matching leads found.'}, status=404)
 
-    campaign_id = request.data.get('campaign_id')
-    campaign = None
-    if campaign_id:
-        campaign = SDRCampaign.objects.filter(company_user=company_user, pk=campaign_id).first()
-
-    researcher = _get_research_agent(company_user.company, company_user=company_user)
-    results = researcher.research_leads_batch(leads, campaign=campaign)
-
-    return Response({
-        'status': 'success',
-        'total': len(leads),
-        'results': results,
-    })
+    from ai_sdr_agent.tasks import research_leads_batch_impl
+    batch = research_leads_batch_impl(
+        owned_ids,
+        campaign_id=request.data.get('campaign_id'),
+        force=bool(request.data.get('force', False)),
+    )
+    return Response({'status': 'success', **batch})
 
 
 @api_view(['POST'])
@@ -907,9 +899,7 @@ def fetch_apify_leads(request):
             'email', 'full_name', 'company_name', 'linkedin_url'
         )
 
-        def _norm_li(url):
-            u = (url or '').strip().lower().rstrip('/')
-            return u.split('?')[0] if u else ''
+        _norm_li = normalize_linkedin_url
 
         seen_email, seen_nc, seen_li, seen_name = set(), set(), set(), set()
         for em, fn, cn, li in existing_qs:

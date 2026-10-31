@@ -1552,25 +1552,30 @@ const SDRLeadsTab = () => {
                 {selectedLead.research_profile.company_research?.overview && (
                   <p style={{ color: 'hsl(var(--pt-e0f2fe))', fontSize: 12.5, lineHeight: 1.5, marginBottom: 10 }}>
                     {selectedLead.research_profile.company_research.overview.toLowerCase() === 'unknown'
-                      ? `Baseline intelligence: ${selectedLead.company_name} in ${selectedLead.company_industry || 'commercial sector'}. (Official website was unreachable).`
+                      ? 'Research could not establish what this company does.'
                       : selectedLead.research_profile.company_research.overview}
                   </p>
                 )}
 
-                {selectedLead.research_profile.prospect_research?.decision_making_relevance && (
+                {selectedLead.research_profile.verification?.prospect?.reason && (
+                  <p style={{ color: selectedLead.research_profile.verification.prospect.status === 'verified' ? '#34d399' : '#fbbf24', fontSize: 12, marginBottom: 10 }}>
+                    {selectedLead.research_profile.verification.prospect.reason}
+                  </p>
+                )}
+
+                {selectedLead.research_profile.prospect_research?.decision_making_relevance
+                  && selectedLead.research_profile.prospect_research.decision_making_relevance.toLowerCase() !== 'unknown' && (
                   <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, background: 'rgba(0,0,0,0.2)' }}>
                     <span style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', display: 'block', marginBottom: 2 }}>Prospect Context</span>
                     <span style={{ color: '#f1f5f9', fontSize: 12 }}>
-                      {selectedLead.research_profile.prospect_research.decision_making_relevance.toLowerCase() === 'unknown'
-                        ? `${selectedLead.job_title} at ${selectedLead.company_name} (${selectedLead.seniority_level || 'Decision Maker'}).`
-                        : selectedLead.research_profile.prospect_research.decision_making_relevance}
+                      {selectedLead.research_profile.prospect_research.decision_making_relevance}
                     </span>
                   </div>
                 )}
 
                 {Array.isArray(selectedLead.research_profile.evidence) && selectedLead.research_profile.evidence.length > 0 && (
                   <div>
-                    <span style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Verified Sources ({selectedLead.research_profile.evidence.length})</span>
+                    <span style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Evidence ({selectedLead.research_profile.evidence.length})</span>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {selectedLead.research_profile.evidence.slice(0, 3).map((ev, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11 }}>
