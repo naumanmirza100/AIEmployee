@@ -169,8 +169,11 @@ class LeadResearchWorkflow:
 
         prospect_queries = []
         if prospect_name and company_name:
+            core_company = company_core(company_name) or company_name
             prospect_queries.append(f'"{prospect_name}" "{company_name}"')
-            # Searched for even when the lead has a LinkedIn URL: the URL proves a profile exists, not the role.
+            if core_company != company_name.lower():
+                prospect_queries.append(f'"{prospect_name}" "{core_company}"')
+            prospect_queries.append(f'"{prospect_name}" "{core_company}" site:linkedin.com/in')
             prospect_queries.append(
                 f'"{prospect_name}" "{company_name}" {job_title} '
                 f'(former OR "stepped down" OR succeeded OR successor OR appointed OR joined)'.strip()
@@ -325,9 +328,19 @@ class LeadResearchWorkflow:
             # lead's company, which is exactly why it is the evidence that they are not there.
             prospect_sources += [{'url': s.get('url', ''), 'text': _source_text(s),
                                   'published_at': _snippet_date(s)} for s in prospect_snippets]
+            # Include directory or company snippets that mention the prospect (e.g. Kompass, ZoomInfo)
+            seen_source_urls = {s.get('url', '') for s in prospect_sources}
+            last_name = full_name.lower().split()[-1] if full_name else ''
+            for s in company_snippets:
+                s_url = s.get('url', '')
+                if s_url and s_url not in seen_source_urls and last_name and last_name in _source_text(s).lower():
+                    seen_source_urls.add(s_url)
+                    prospect_sources.append({'url': s_url, 'text': _source_text(s),
+                                            'published_at': _snippet_date(s)})
             verification['prospect'] = assess_prospect(
                 full_name, lead_data['job_title'], company_name, prospect_sources,
                 search_ran=search_ran or bool(prospect_snippets),
+                lead_data=lead_data,
             )
 
         sources = self._numbered_sources(trusted_pages, snippets)
@@ -593,9 +606,14 @@ Use one claim per list item for products_services, target_customers and business
                                if re.search(pattern, title, re.IGNORECASE)), 'unknown')
         relevance = 'unknown'
         if seniority != 'unknown' and prospect_status not in ('conflict', 'outdated'):
-            relevance = f'Inferred from the title only: {seniority} is usually involved in buying decisions.'
-            if prospect_status != 'verified':
-                relevance += ' No public source confirms this role.'
+            if prospect_status == 'verified':
+                relevance = f'Confirmed role: {seniority} is actively verified as {title} at {company_name}.'
+            elif prospect_status == 'provider_reported':
+                relevance = f'Profile confirmed via LinkedIn / provider; {seniority} is involved in buying decisions.'
+            else:
+                relevance = f'Inferred from the title only: {seniority} is usually involved in buying decisions.'
+                if prospect_status != 'verified':
+                    relevance += ' No public source confirms this role.'
 
         campaign = extraction.get('campaign_relevance')
         campaign = campaign if isinstance(campaign, dict) else {}

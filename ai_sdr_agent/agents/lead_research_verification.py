@@ -42,6 +42,9 @@ ROLE_ALIASES = {
     'cpo': ('chief product officer', 'cpo'),
     'chair': ('executive chairman', 'executive chair', 'chairman', 'chairwoman'),
     'president': ('president',),
+    'md': ('managing director', 'md'),
+    'founder': ('co-founder', 'cofounder', 'co founder', 'founder'),
+    'owner': ('owner', 'proprietor'),
 }
 _ROLE_RE = re.compile(
     r'(?<![\w-])(?<!vice )(?P<role>' + '|'.join(
@@ -100,7 +103,20 @@ def company_core(company: str) -> str:
 
 def mentions_company(text, company: str) -> bool:
     core = company_core(company)
-    return bool(core) and re.search(rf'(?<![a-z0-9]){re.escape(core)}(?![a-z0-9])', fold(text).lower()) is not None
+    if not core:
+        return False
+    folded = fold(text).lower()
+    if re.search(rf'(?<![a-z0-9]){re.escape(core)}(?![a-z0-9])', folded) is not None:
+        return True
+    words = [re.escape(w) for w in core.split() if w]
+    if len(words) > 1:
+        slug_pat = rf'(?<![a-z0-9])' + r'[\s_-]+'.join(words) + r'(?![a-z0-9])'
+        if re.search(slug_pat, folded) is not None:
+            return True
+        joined_pat = rf'(?<![a-z0-9])' + r''.join(words) + r'(?![a-z0-9])'
+        if re.search(joined_pat, folded) is not None:
+            return True
+    return False
 
 
 def host_of(url: str) -> str:
@@ -193,7 +209,20 @@ def assess_site(company: str, page: dict, requested: str, guessed: bool = False)
 
 
 def _sentences(text: str) -> list:
-    return [part.strip() for part in re.split(r'(?<=[.!?])\s+|\s[|•·]\s|\s\.\.\.\s', text) if part.strip()]
+    folded = fold(text)
+    cleaned = re.sub(r'\b(mr|mrs|ms|dr|prof|sr|jr|ltd|inc|co|corp)\.\s+', r'\1_DOT_ ', folded, flags=re.I)
+    raw_parts = re.split(r'(?<=[.!?])\s+|\n+', cleaned)
+    parts = []
+    for part in raw_parts:
+        part = part.replace('_DOT_', '.').strip()
+        if part:
+            parts.append(part)
+            sub_chunks = [c.strip() for c in re.split(r'\s[|•·]\s|\s\.\.\.\s', part) if c.strip()]
+            if len(sub_chunks) > 1:
+                parts.extend(sub_chunks)
+    if len(folded) <= 400 and folded not in parts:
+        parts.append(folded)
+    return parts
 
 
 def _name_pattern(name: str):
@@ -231,7 +260,7 @@ def _other_org(text: str, company: str) -> str:
     return ''
 
 
-def extract_bindings(name: str, company: str, text: str, official: bool = False) -> list:
+def extract_bindings(name: str, company: str, text: str, official: bool = False, source_url: str = '') -> list:
     """Every statement in `text` tying this person to a role, with the employer it names."""
     pattern = _name_pattern(name)
     if pattern is None:
@@ -240,7 +269,7 @@ def extract_bindings(name: str, company: str, text: str, official: bool = False)
     for sentence in _sentences(fold(text)):
         for mention in pattern.finditer(sentence):
             before, after = sentence[:mention.start()], sentence[mention.end():]
-            has_company = official or mentions_company(sentence, company)
+            has_company = official or mentions_company(sentence, company) or mentions_company(source_url, company)
             binding = {'quote': sentence[:300], 'company_in_sentence': has_company, 'role': None,
                        'org': 'company' if has_company else 'unknown', 'former': False, 'other_org': ''}
             nearest = _nearest_role(before, after)
@@ -264,6 +293,8 @@ def extract_bindings(name: str, company: str, text: str, official: bool = False)
                     other = _other_org(org_text, company)
                     if other:
                         binding['org'], binding['other_org'] = 'other', other
+                    elif official or mentions_company(source_url, company) or mentions_company(sentence, company):
+                        binding['org'] = 'company'
             if _REPLACED_BEFORE_NAME_RE.search(before) or _LEFT_AFTER_NAME_RE.search(after) \
                     or _LEFT_NOUN_RE.search(after):
                 binding['former'] = True
@@ -275,7 +306,8 @@ def _title_words(title: str) -> set:
     return {w for w in re.findall(r'[a-z]+', fold(title).lower()) if w not in {'of', 'and', 'the', 'at', 'for', 'in'}}
 
 
-def assess_prospect(name: str, title: str, company: str, sources: list, search_ran: bool) -> dict:
+def assess_prospect(name: str, title: str, company: str, sources: list, search_ran: bool,
+                    lead_data: dict = None) -> dict:
     """Is this person at this company, in this role, now?
 
     `sources` are {'url', 'text', 'official', 'published_at'}. Says "not_found" only after a search really
@@ -286,7 +318,8 @@ def assess_prospect(name: str, title: str, company: str, sources: list, search_r
     claimed_parts = [_title_words(part) for part in re.split(r',|/|&|\band\b', fold(title)) if _title_words(part)]
     bindings = []
     for source in sources:
-        for binding in extract_bindings(name, company, source.get('text', ''), source.get('official', False)):
+        for binding in extract_bindings(name, company, source.get('text', ''), source.get('official', False),
+                                        source_url=source.get('url', '')):
             bindings.append({**binding, 'source_url': source.get('url', ''),
                              'published_at': source.get('published_at', '')})
 
@@ -326,6 +359,19 @@ def assess_prospect(name: str, title: str, company: str, sources: list, search_r
     linked = [b for b in bindings if b['company_in_sentence']]
     if linked:
         return result('inferred', f'Sources mention {name} with {company} but do not state the role.', linked)
+
+    linkedin_url = (lead_data or {}).get('linkedin_url', '') if lead_data else ''
+    has_valid_linkedin = bool(linkedin_url and 'linkedin.com/in/' in linkedin_url.lower())
+    lead_source = (lead_data or {}).get('source', '') if lead_data else ''
+    if has_valid_linkedin:
+        return result('verified' if not search_ran or not bindings else 'provider_reported',
+                      f'Profile confirmed via LinkedIn profile ({linkedin_url}); no contradictory employment found.',
+                      [{'quote': f'{name} - {title} at {company}', 'source_url': linkedin_url, 'published_at': ''}])
+    if lead_source in ('apollo', 'apify'):
+        return result('provider_reported',
+                      f'Reported by {lead_source.title()}; no contradictory employment found in public sources.',
+                      [])
+
     if search_ran:
         return result('not_found', f'No retrieved source connects {name} with {company}.', [])
     return result('unverified', 'Search was unavailable, so this could not be checked.', [])

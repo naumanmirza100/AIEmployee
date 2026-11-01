@@ -726,6 +726,50 @@ class ProspectAssessmentTests(SimpleTestCase):
         self.assertEqual(self.check('VP Sales', 'Stripe', 'Jane Roe, VP Marketing at Stripe, spoke.', name='Jane Roe'),
                          'inferred')
 
+    def test_managing_director_confirmed_from_directory_quote(self):
+        sources = [{
+            'url': 'https://in.kompass.com/en/c/malone-roofing/gb25066220/',
+            'text': 'Mr Paul Hughes. MD/Chief Operating Officer (Managing Director)',
+            'official': False,
+        }]
+        res = assess_prospect('Paul Hughes', 'Managing Director', 'Malone Roofing Ltd', sources, search_ran=True)
+        self.assertEqual(res['status'], 'verified')
+        self.assertIn('Malone Roofing', res['reason'])
+
+    def test_managing_director_confirmed_from_google_search_snippet(self):
+        snippet = (
+            'Paul Hughes - Managing Director at Malone Roofing. '
+            'Newbury, England, United Kingdom · Managing Director · Malone Roofing Ltd. '
+            'Managing Director at Malone Roofing · Experience: Malone Roofing Ltd'
+        )
+        sources = [{
+            'url': 'https://uk.linkedin.com/in/paul-hughes-64283042',
+            'text': snippet,
+            'official': False,
+        }]
+        res = assess_prospect('Paul Hughes', 'Managing Director', 'Malone Roofing Ltd', sources, search_ran=True)
+        self.assertEqual(res['status'], 'verified')
+
+    def test_linkedin_url_fallback_when_search_snippets_empty(self):
+        lead_data = {
+            'linkedin_url': 'https://uk.linkedin.com/in/paul-hughes-64283042',
+            'source': 'apify',
+        }
+        res = assess_prospect('Paul Hughes', 'Managing Director', 'Malone Roofing Ltd', [], search_ran=True, lead_data=lead_data)
+        self.assertIn(res['status'], ('verified', 'provider_reported'))
+        self.assertNotEqual(res['status'], 'not_found')
+
+    def test_owner_and_founder_titles_recognized(self):
+        res_owner = assess_prospect('John Doe', 'Owner', 'Doe Plumbing',
+                                    [{'url': 'https://s/1', 'text': 'John Doe, owner of Doe Plumbing, spoke.', 'official': False}],
+                                    search_ran=True)
+        self.assertEqual(res_owner['status'], 'verified')
+
+        res_founder = assess_prospect('Jane Smith', 'Founder', 'Acme Tech',
+                                      [{'url': 'https://s/2', 'text': 'Acme Tech founder Jane Smith announced a product.', 'official': False}],
+                                      search_ran=True)
+        self.assertEqual(res_founder['status'], 'verified')
+
 
 class VerificationHelperTests(SimpleTestCase):
     def test_seniority_uses_whole_words(self):

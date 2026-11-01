@@ -366,7 +366,11 @@ class LeadResearchAgent:
 
                 prospect_check = verification.get('prospect') or {}
                 flags = [f for f in (lead_obj.data_quality_flags or []) if not f.startswith('Research: ')]
-                if prospect_check.get('status') in ('not_found', 'conflict', 'outdated'):
+                has_linkedin = bool(lead_obj.linkedin_url and 'linkedin.com/in/' in lead_obj.linkedin_url.lower())
+                # Only penalize genuinely conflicting or outdated roles, or not_found if no LinkedIn profile exists
+                if prospect_check.get('status') in ('conflict', 'outdated'):
+                    flags.append(f"Research: {prospect_check.get('reason')}")
+                elif prospect_check.get('status') == 'not_found' and not has_linkedin and lead_obj.source not in ('apollo', 'apify'):
                     flags.append(f"Research: {prospect_check.get('reason')}")
                 lead_obj.data_quality_flags = flags
                 update_fields.append('data_quality_flags')
