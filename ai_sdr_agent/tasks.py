@@ -872,6 +872,100 @@ def research_leads_batch_task(self, lead_ids: list[int], campaign_id: int = None
 
 
 # ---------------------------------------------------------------------------
+# Lead Enrichment — independent, multi-provider waterfall with compliant web discovery
+# ---------------------------------------------------------------------------
+
+def enrich_lead_impl(lead_id: int, force: bool = False) -> dict:
+    """
+    Executes independent lead enrichment on an existing lead.
+    Safe against concurrent duplicate runs and respects SDR access.
+    """
+    from ai_sdr_agent.models import SDRAgentSettings, SDRLead
+    from ai_sdr_agent.agents.enrichment_agent import EnrichmentAgent
+
+    company_lookup = SDRLead.all_objects.filter(pk=lead_id).select_related('company_user__company').first()
+    if not company_lookup:
+        return {'status': 'error', 'error': f'Lead {lead_id} not found', 'lead_id': lead_id}
+
+    company_user = company_lookup.company_user
+    company = company_user.company
+    if not _has_sdr_access(company, {}):
+        return {'status': 'error', 'error': 'No active AI SDR subscription', 'lead_id': lead_id}
+
+    # Concurrency control under row lock
+    with transaction.atomic():
+        lead = SDRLead.all_objects.select_for_update().get(pk=lead_id)
+        if not isinstance(lead.raw_data, dict):
+            lead.raw_data = {}
+
+        enrichment_blob = lead.raw_data.get('enrichment') or {}
+        current_status = enrichment_blob.get('status')
+        if current_status == 'running':
+            updated_at = lead.updated_at or timezone.now()
+            if (timezone.now() - updated_at) < timedelta(minutes=15):
+                return {'status': 'already_running', 'lead_id': lead_id}
+        if not force and current_status in ('completed', 'partial'):
+            return {
+                'status': 'already_completed',
+                'lead_id': lead_id,
+                'contract': enrichment_blob,
+            }
+        enrichment_blob['status'] = 'running'
+        lead.raw_data['enrichment'] = enrichment_blob
+        lead.save(update_fields=['raw_data', 'updated_at'])
+
+    try:
+        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+        apollo_key = (sdr_settings.apollo_api_key or None) if sdr_settings else None
+        agent = EnrichmentAgent(
+            company=company,
+            company_user=company_user,
+            apollo_api_key=apollo_key,
+        )
+        res = agent.enrich_lead(lead, force=force)
+
+        return res
+    except Exception as exc:
+        logger.error("enrich_lead_impl failed for lead=%d: %s", lead_id, exc, exc_info=True)
+        return {'status': 'failed', 'lead_id': lead_id, 'error': str(exc)}
+
+
+def enrich_leads_batch_impl(lead_ids: list[int], force: bool = False) -> dict:
+    """
+    Executes independent enrichment on a batch of existing leads.
+    """
+    results = []
+    completed_count = 0
+    failed_count = 0
+
+    for lid in dict.fromkeys(lead_ids):
+        res = enrich_lead_impl(lid, force=force)
+        results.append(res)
+        if res.get('status') in ('success', 'already_completed'):
+            completed_count += 1
+        elif res.get('status') == 'failed':
+            failed_count += 1
+
+    return {
+        'total': len(lead_ids),
+        'completed': completed_count,
+        'failed': failed_count,
+        'results': results,
+    }
+
+
+@shared_task(bind=True, name='ai_sdr_agent.tasks.enrich_lead_task', max_retries=1)
+def enrich_lead_task(self, lead_id: int, force: bool = False):
+    return enrich_lead_impl(lead_id, force=force)
+
+
+@shared_task(bind=True, name='ai_sdr_agent.tasks.enrich_leads_batch_task', max_retries=1)
+def enrich_leads_batch_task(self, lead_ids: list[int], force: bool = False):
+    return enrich_leads_batch_impl(lead_ids, force=force)
+
+
+
+# ---------------------------------------------------------------------------
 # Lead qualification queue — background, batched, self-retrying
 # ---------------------------------------------------------------------------
 QUALIFY_BATCH_SIZE = 5        # leads scored per scheduler tick

@@ -233,6 +233,9 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'source': lead.source,
         'research_status': raw.get('research_status', 'none'),
         'research_profile': raw.get('research_profile'),
+        'enrichment_status': (raw.get('enrichment') or {}).get('status', 'none') if isinstance(raw.get('enrichment'), dict) else 'none',
+        'enrichment_contract': raw.get('enrichment') if isinstance(raw.get('enrichment'), dict) else None,
+        'personal_email': (raw.get('enrichment') or {}).get('personal_email', '') if isinstance(raw.get('enrichment'), dict) else '',
         'qualified_at': lead.qualified_at.isoformat() if lead.qualified_at else None,
         'created_at': lead.created_at.isoformat(),
         'updated_at': lead.updated_at.isoformat(),
@@ -872,6 +875,107 @@ def research_leads_batch_endpoint(request):
         force=bool(request.data.get('force', False)),
     )
     return Response({'status': 'success', **batch})
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def enrich_lead_endpoint(request, lead_id):
+    """
+    POST: Run independent lead enrichment workflow on an existing lead.
+    GET: Retrieve existing enrichment contract, verification status, and provenance.
+    """
+    company_user = request.user
+    lead = SDRLead.all_objects.filter(company_user=company_user, pk=lead_id).first()
+    if not lead:
+        return Response({'status': 'error', 'message': f'Lead {lead_id} not found.'}, status=404)
+
+    if request.method == 'GET':
+        raw_data = lead.raw_data if isinstance(lead.raw_data, dict) else {}
+        enrichment_blob = raw_data.get('enrichment') or {}
+        return Response({
+            'status': 'success',
+            'lead_id': lead.id,
+            'enrichment_status': enrichment_blob.get('status', 'none'),
+            'enrichment_contract': enrichment_blob,
+            'email': lead.email,
+            'phone': lead.phone,
+            'job_title': lead.job_title,
+            'company_domain': lead.company_domain,
+            'company_website': lead.company_website,
+            'linkedin_url': lead.linkedin_url,
+            'confidence_score': lead.confidence_score,
+            'data_quality_flags': lead.data_quality_flags,
+        })
+
+    # POST: Trigger enrichment
+    is_async = bool(request.data.get('async', False))
+    force = bool(request.data.get('force', False))
+
+    if is_async:
+        from ai_sdr_agent.tasks import enrich_lead_task
+        task = enrich_lead_task.delay(lead.id, force=force)
+        return Response({
+            'status': 'queued',
+            'lead_id': lead.id,
+            'task_id': task.id,
+            'message': 'Enrichment job queued in background.',
+        })
+
+    from ai_sdr_agent.tasks import enrich_lead_impl
+    result = enrich_lead_impl(lead.id, force=force)
+    if result.get('status') == 'already_running':
+        return Response({'status': 'error', 'message': 'Enrichment is already running for this lead.'}, status=409)
+    if result.get('status') not in ('success', 'already_completed'):
+        logger.error('Error enriching lead %s: %s', lead_id, result.get('error'))
+        return Response({'status': 'error', 'message': result.get('error', 'Enrichment failed.')}, status=500)
+
+    contract = result.get('contract') or {}
+    return Response({
+        'status': 'success',
+        'lead_id': lead.id,
+        'enrichment_status': contract.get('status', 'completed'),
+        'changes': result.get('changes', {}),
+        'summary': result.get('summary', {}),
+        'contract': contract,
+        'cached': result.get('status') == 'already_completed',
+    })
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def enrich_leads_batch_endpoint(request):
+    """
+    POST: Run independent enrichment on multiple existing leads.
+    Expects JSON: {'lead_ids': [1, 2, ...], 'force': bool, 'async': bool}
+    """
+    company_user = request.user
+    lead_ids = request.data.get('lead_ids', [])
+    if not lead_ids or not isinstance(lead_ids, list):
+        return Response({'status': 'error', 'message': 'lead_ids must be a non-empty list of IDs.'}, status=400)
+
+    owned_ids = list(SDRLead.all_objects.filter(company_user=company_user, pk__in=lead_ids[:50]).values_list('pk', flat=True))
+    if not owned_ids:
+        return Response({'status': 'error', 'message': 'No matching leads found.'}, status=404)
+
+    is_async = bool(request.data.get('async', False))
+    force = bool(request.data.get('force', False))
+
+    if is_async:
+        from ai_sdr_agent.tasks import enrich_leads_batch_task
+        task = enrich_leads_batch_task.delay(owned_ids, force=force)
+        return Response({
+            'status': 'queued',
+            'lead_count': len(owned_ids),
+            'task_id': task.id,
+            'message': f'{len(owned_ids)} leads queued for background enrichment.',
+        })
+
+    from ai_sdr_agent.tasks import enrich_leads_batch_impl
+    batch = enrich_leads_batch_impl(owned_ids, force=force)
+    return Response({'status': 'success', **batch})
+
 
 
 @api_view(['POST'])

@@ -617,3 +617,4 @@ class SDRLeadResearchJob(models.Model):
 
     def __str__(self):
         return f"ResearchJob #{self.id} — {self.status} ({self.leads_created} leads)"
+

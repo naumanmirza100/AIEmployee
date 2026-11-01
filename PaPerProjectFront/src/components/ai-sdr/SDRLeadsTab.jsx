@@ -19,6 +19,7 @@ import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
   researchLead, getLeadResearch, researchLeads, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
+  enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads,
 } from '@/services/aiSdrService';
 
@@ -605,6 +606,7 @@ const SDRLeadsTab = () => {
   const [addingLead, setAddingLead] = useState(false);
   const [qualifyingId, setQualifyingId] = useState(null);
   const [researchingId, setResearchingId] = useState(null);
+  const [enrichingId, setEnrichingId] = useState(null);
 
   const [searchRaw, setSearchRaw] = useState('');
   const [filterTemp, setFilterTemp] = useState('');
@@ -811,6 +813,41 @@ const SDRLeadsTab = () => {
     } catch (e) {
       toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
     } finally { setDeletingSingle(false); }
+  };
+
+  const handleEnrichOne = async (lead) => {
+    if (!lead?.id) return;
+    setEnrichingId(lead.id);
+    try {
+      const resp = await enrichLead(lead.id, { force: true });
+      const data = resp?.data || resp;
+      toast({
+        title: 'Enrichment Complete',
+        description: `Verified contact info & data enriched for ${lead.full_name || lead.company_name || 'lead'}.`,
+      });
+      if (selectedLead?.id === lead.id) {
+        setSelectedLead(prev => ({
+          ...prev,
+          email: data?.contract?.fields?.email?.value || prev.email,
+          phone: data?.contract?.fields?.phone?.value || prev.phone,
+          job_title: data?.contract?.fields?.job_title?.value || prev.job_title,
+          company_domain: data?.contract?.fields?.company_domain?.value || prev.company_domain,
+          company_website: data?.contract?.fields?.company_website?.value || prev.company_website,
+          linkedin_url: data?.contract?.fields?.linkedin_url?.value || prev.linkedin_url,
+          enrichment_status: data.enrichment_status || 'completed',
+          enrichment_contract: data.contract,
+        }));
+      }
+      loadLeads();
+    } catch (e) {
+      toast({
+        title: 'Enrichment Failed',
+        description: e?.response?.data?.message || 'Could not complete enrichment waterfall.',
+        variant: 'destructive',
+      });
+    } finally {
+      setEnrichingId(null);
+    }
   };
 
   const handleResearchOne = async (lead) => {
@@ -1623,6 +1660,10 @@ const SDRLeadsTab = () => {
 
             {/* Actions */}
             <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid var(--sfc-1e0f38)', flexWrap: 'wrap' }}>
+              <Button onClick={() => handleEnrichOne(selectedLead)} disabled={enrichingId === selectedLead.id} style={{ flex: 1, minWidth: 140, background: 'linear-gradient(90deg,#059669,#10b981)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {enrichingId === selectedLead.id ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                {selectedLead.enrichment_status === 'completed' ? 'Re-enrich' : 'Enrich Lead'}
+              </Button>
               <Button onClick={() => handleResearchOne(selectedLead)} disabled={researchingId === selectedLead.id} style={{ flex: 1, minWidth: 140, background: 'linear-gradient(90deg,#0284c7,#0369a1)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                 {researchingId === selectedLead.id ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
                 {selectedLead.research_status === 'completed' ? 'Re-research' : 'Research Lead'}
