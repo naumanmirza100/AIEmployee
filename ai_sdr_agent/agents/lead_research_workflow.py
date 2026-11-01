@@ -23,6 +23,7 @@ from ai_sdr_agent.agents.lead_research_tools import ApifySearchTool, WebpageExtr
 from ai_sdr_agent.agents.lead_research_verification import (
     assess_prospect,
     assess_site,
+    clean_company_name,
     company_core,
     ground_claim,
     host_of,
@@ -144,6 +145,7 @@ class LeadResearchWorkflow:
         Avoids redundant web requests when facts are already verified.
         """
         company_name = lead_data.get('company_name', '').strip()
+        clean_company = clean_company_name(company_name) or company_name
         domain = lead_data.get('company_domain', '').strip()
         website = lead_data.get('company_website', '').strip()
         prospect_name = lead_data.get('full_name', '').strip()
@@ -152,30 +154,34 @@ class LeadResearchWorkflow:
         # Determine primary web target
         primary_site = website or domain
         site_is_guessed = False
-        if not primary_site and company_name:
+        if not primary_site and clean_company:
             # Only a candidate: it is checked against the company name before anything on it is used
-            clean_name = re.sub(r'[^a-zA-Z0-9]', '', company_core(company_name))
+            clean_name = re.sub(r'[^a-zA-Z0-9]', '', company_core(clean_company))
             primary_site = f"{clean_name}.com"
             site_is_guessed = True
 
         company_queries = []
-        if company_name:
+        if clean_company:
             company_queries.append(
-                f'"{company_name}" (funding OR raised OR acquisition OR partnership OR launch OR appointed) '
+                f'"{clean_company}" (funding OR raised OR acquisition OR partnership OR launch OR appointed) '
                 f'after:{search_since_date()}'
             )
             if site_is_guessed:
-                company_queries.append(f'"{company_name}" official website')
+                company_queries.append(f'"{clean_company}" official website')
 
         prospect_queries = []
-        if prospect_name and company_name:
-            core_company = company_core(company_name) or company_name
-            prospect_queries.append(f'"{prospect_name}" "{company_name}"')
-            if core_company != company_name.lower():
+        if prospect_name and clean_company:
+            core_company = company_core(clean_company) or clean_company
+            prospect_queries.append(f'"{prospect_name}" "{clean_company}"')
+            if core_company != clean_company.lower():
                 prospect_queries.append(f'"{prospect_name}" "{core_company}"')
+            if domain:
+                dom_label = re.sub(r'[^a-z0-9]', '', domain.split('.')[0])
+                if dom_label and len(dom_label) >= 4 and dom_label != core_company.lower():
+                    prospect_queries.append(f'"{prospect_name}" "{dom_label}"')
             prospect_queries.append(f'"{prospect_name}" "{core_company}" site:linkedin.com/in')
             prospect_queries.append(
-                f'"{prospect_name}" "{company_name}" {job_title} '
+                f'"{prospect_name}" "{clean_company}" {job_title} '
                 f'(former OR "stepped down" OR succeeded OR successor OR appointed OR joined)'.strip()
             )
 
@@ -331,7 +337,7 @@ class LeadResearchWorkflow:
             # Include directory or company snippets that mention the prospect (e.g. Kompass, ZoomInfo)
             seen_source_urls = {s.get('url', '') for s in prospect_sources}
             last_name = full_name.lower().split()[-1] if full_name else ''
-            for s in company_snippets:
+            for s in company.get('snippets', []):
                 s_url = s.get('url', '')
                 if s_url and s_url not in seen_source_urls and last_name and last_name in _source_text(s).lower():
                     seen_source_urls.add(s_url)
@@ -675,7 +681,7 @@ Use one claim per list item for products_services, target_customers and business
 
         score = {'verified': 35, 'inferred': 15, 'provider_reported': 15}.get(company, 5 if company == 'unverified' else 0)
         if prospect:
-            score += {'verified': 30, 'inferred': 15, 'unverified': 5}.get(prospect, 0)
+            score += {'verified': 30, 'inferred': 15, 'provider_reported': 20, 'unverified': 5}.get(prospect, 0)
         elif company == 'verified':
             score += 20
 

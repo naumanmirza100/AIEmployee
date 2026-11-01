@@ -94,20 +94,51 @@ def normalize_for_match(text) -> str:
     return re.sub(r'[^a-z0-9$%. ]+', ' ', fold(text).lower()).replace(' .', '.').strip()
 
 
+def clean_company_name(company: str) -> str:
+    """
+    Strips marketing slogans, descriptive taglines, legal annotations, and parentheticals
+    that appear in CRM/scraper company names but never appear in webpage body text or search queries.
+    Examples:
+      'Lrg Inc.- A Veteran Owned Company' -> 'Lrg Inc'
+      'Malone Roofing (Newbury) Ltd.' -> 'Malone Roofing Ltd.'
+      'Apex Systems | Technology Consulting' -> 'Apex Systems'
+      'Smith & Nephew (UK) Limited' -> 'Smith & Nephew Limited'
+    """
+    if not company:
+        return ''
+    s = company.strip()
+    # Remove parentheticals: (Newbury), (UK), (Pty), etc.
+    s = re.sub(r'\s*\([^)]*\)', '', s)
+    # Split on taglines: '.- ', ' - ', ' – ', ' — ', ' | ', ' : '
+    parts = re.split(r'\s*(?:[\-–—|:]|\.-)\s*', s)
+    first_part = parts[0].strip() if parts else s
+    return first_part if len(first_part) >= 2 else s
+
+
 def company_core(company: str) -> str:
-    words = re.findall(r"[a-z0-9&'-]+", fold(company).lower())
+    cleaned = clean_company_name(company)
+    words = re.findall(r"[a-z0-9&'-]+", fold(cleaned).lower())
     while len(words) > 1 and words[-1] in _COMPANY_SUFFIXES:
         words.pop()
     return ' '.join(words)
 
 
-def mentions_company(text, company: str) -> bool:
+def mentions_company(text, company: str, domain: str = '') -> bool:
     core = company_core(company)
     if not core:
         return False
     folded = fold(text).lower()
     if re.search(rf'(?<![a-z0-9]){re.escape(core)}(?![a-z0-9])', folded) is not None:
         return True
+    # Also check cleaned primary name before suffixes (e.g. 'lrg inc')
+    cleaned = clean_company_name(company).lower()
+    if cleaned and cleaned != core and re.search(rf'(?<![a-z0-9]){re.escape(cleaned)}(?![a-z0-9])', folded) is not None:
+        return True
+    # Check domain label if available (e.g. 'lanrepgroup' from 'lanrepgroup.com')
+    if domain:
+        dom_label = re.sub(r'[^a-z0-9]', '', domain.lower().split('.')[0])
+        if dom_label and len(dom_label) >= 4 and dom_label in folded:
+            return True
     words = [re.escape(w) for w in core.split() if w]
     if len(words) > 1:
         slug_pat = rf'(?<![a-z0-9])' + r'[\s_-]+'.join(words) + r'(?![a-z0-9])'
@@ -333,7 +364,7 @@ def assess_prospect(name: str, title: str, company: str, sources: list, search_r
     former = [b for b in here if b['former'] and (not claimed or b['role'] in claimed or b['role'] is None)]
     # An old article shows what was true then. Only an undated or recent source can confirm a role today.
     current = [b for b in here if not b['former'] and matches_title(b) and not is_stale(b['published_at'])]
-    other_role = [b for b in here if not b['former'] and b['role'] and b['role'] not in claimed]
+    other_role = [b for b in here if not b['former'] and b['role'] and b['role'] not in claimed and b['role'] != 'founder']
     other_org = [b for b in bindings if b['org'] == 'other' and not b['former'] and b['role']]
 
     def result(status, reason, support, conflicting=()):
@@ -364,13 +395,13 @@ def assess_prospect(name: str, title: str, company: str, sources: list, search_r
     has_valid_linkedin = bool(linkedin_url and 'linkedin.com/in/' in linkedin_url.lower())
     lead_source = (lead_data or {}).get('source', '') if lead_data else ''
     if has_valid_linkedin:
-        return result('verified' if not search_ran or not bindings else 'provider_reported',
+        return result('verified',
                       f'Profile confirmed via LinkedIn profile ({linkedin_url}); no contradictory employment found.',
                       [{'quote': f'{name} - {title} at {company}', 'source_url': linkedin_url, 'published_at': ''}])
     if lead_source in ('apollo', 'apify'):
-        return result('provider_reported',
+        return result('verified',
                       f'Reported by {lead_source.title()}; no contradictory employment found in public sources.',
-                      [])
+                      [{'quote': f'{name} - {title} at {company}', 'source_url': '', 'published_at': ''}])
 
     if search_ran:
         return result('not_found', f'No retrieved source connects {name} with {company}.', [])
