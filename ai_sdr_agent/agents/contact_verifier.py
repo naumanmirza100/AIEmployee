@@ -220,6 +220,7 @@ def normalize_phone(phone_str: str, default_country_code: str = "+1") -> str:
         return ""
 
     raw = phone_str.strip()
+    raw = re.sub(r'(\+\d{1,3})\s*\(\s*0\s*\)', r'\1', raw)
     has_plus = raw.startswith("+")
     digits = re.sub(r"\D", "", raw)
 

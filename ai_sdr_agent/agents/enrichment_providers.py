@@ -332,7 +332,7 @@ class PublicWebEnrichmentProvider(BaseEnrichmentProvider):
             domain_or_url=domain,
             lead_name=lead_name,
             missing_fields=missing_fields,
-            max_pages=3,
+            max_pages=5,
         )
         return enriched
 

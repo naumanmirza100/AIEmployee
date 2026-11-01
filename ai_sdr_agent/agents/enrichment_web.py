@@ -51,7 +51,10 @@ ENRICHMENT_SUBPAGE_CANDIDATES = [
 
 # Regex patterns for extracting emails and phones from public web pages
 _PUBLIC_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
-_PUBLIC_PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}\b")
+_PUBLIC_PHONE_RE = re.compile(
+    r"(?:(?:\+\d{1,3}[\s.-]?(?:\(0\)\s*)?|\b0)\d{1,4}[\s.-]?\d{2,4}[\s.-]?\d{3,4}(?:[\s.-]?\d{1,4})?|"
+    r"\b(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}\b)"
+)
 _PUBLIC_LINKEDIN_RE = re.compile(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[a-zA-Z0-9_\-%]+", re.I)
 _PUBLIC_TWITTER_RE = re.compile(r"https?://(?:www\.)?(?:twitter\.com|x\.com)/[a-zA-Z0-9_]{1,30}", re.I)
 _PUBLIC_GITHUB_RE = re.compile(r"https?://(?:www\.)?github\.com/[a-zA-Z0-9_\-]+", re.I)
@@ -153,7 +156,7 @@ class CompliantWebEnricher:
         domain_or_url: str,
         lead_name: str,
         missing_fields: Set[str],
-        max_pages: int = 3,
+        max_pages: int = 5,
     ) -> Tuple[Dict[str, FieldProvenance], List[Dict[str, Any]]]:
         """
         Visits the company website and target subpages to discover missing lead fields.
@@ -172,7 +175,16 @@ class CompliantWebEnricher:
         domain = parsed.netloc
 
         candidate_urls = [base_url]
-        for _, paths in ENRICHMENT_SUBPAGE_CANDIDATES:
+        # Prioritize contact subpages when phone or email is missing
+        if "phone" in missing_fields or "email" in missing_fields:
+            ordered_subpages = sorted(
+                ENRICHMENT_SUBPAGE_CANDIDATES,
+                key=lambda x: 0 if x[0] == "contact" else 1 if x[0] == "about" else 2
+            )
+        else:
+            ordered_subpages = ENRICHMENT_SUBPAGE_CANDIDATES
+
+        for _, paths in ordered_subpages:
             for p in paths:
                 candidate_urls.append(urljoin(base_url + "/", p.lstrip("/")))
 
