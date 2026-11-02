@@ -136,6 +136,9 @@ class SalesforceConnector(BaseCRMConnector):
         direction: str = 'OUTBOUND',
     ) -> Optional[str]:
         self._ensure_token()
+        # No 'Type': the field is hidden in some Salesforce plans (Starter), and every email failed there with
+        # "No such column 'Type' on sobject of type Task" (live check, 2 Nov 2026). TaskSubtype marks it an email;
+        # an org without that field gets the task without it.
         task = {
             'WhoId': crm_contact_id,
             'Subject': (subject or '(no subject)')[:255],
@@ -143,9 +146,14 @@ class SalesforceConnector(BaseCRMConnector):
             'Status': 'Completed',
             'TaskSubtype': 'Email',
             'ActivityDate': _sf_datetime(sent_at)[:10],
-            'Type': 'Email',
         }
-        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Task/', json=task)
+        try:
+            resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Task/', json=task)
+        except CRMError as exc:
+            if exc.status_code != 400 or 'TaskSubtype' not in str(exc):
+                raise
+            plain = {key: value for key, value in task.items() if key != 'TaskSubtype'}
+            resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Task/', json=plain)
         return str((resp.json() or {}).get('id', '')) or None
 
     def log_meeting(

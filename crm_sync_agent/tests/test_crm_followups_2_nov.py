@@ -211,6 +211,18 @@ class SalesforceSignsInWithAnApp(base.CRMBase):
         self.assertEqual(shown['client_secret'], '********')
         self.assertNotIn('synthetic-key', shown['client_id'])
 
+    def test_an_email_goes_without_the_type_field_some_plans_hide(self):
+        token = answer(200, {'access_token': 'at', 'instance_url': 'https://acme-dev.my.salesforce.com'})
+        refused = answer(400, [{'errorCode': 'INVALID_FIELD'}])
+        refused.text = "No such column 'TaskSubtype' on sobject of type Task"
+        with mock.patch('crm_sync_agent.connectors.salesforce.requests.post', return_value=token),                 mock.patch('crm_sync_agent.connectors.salesforce.requests.request',
+                           side_effect=[refused, answer(201, {'id': '00T1'})]) as req:
+            self.assertEqual(SalesforceConnector(self.CREDS).log_email_activity('003X', 'Prices', 'Hello', None), '00T1')
+        first, second = (call[1]['json'] for call in req.call_args_list)
+        self.assertNotIn('Type', first)
+        self.assertEqual(first['TaskSubtype'], 'Email')
+        self.assertNotIn('TaskSubtype', second)
+
     def test_a_reason_overrides_the_status_code_words(self):
         self.assertEqual(refusal('Salesforce', CRMError('x', status_code=401, reason='Because.')), 'Because.')
 
