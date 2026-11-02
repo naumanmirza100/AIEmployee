@@ -388,7 +388,7 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
     try {
       const res = await syncCrmLeads(integration.id);
       toast({ title: 'Sync queued!', description: res?.message && res.status === 'done' ? res.message
-        : `AI SDR leads, emails and calls, Reply Draft's last month of customer mail and Frontline's customers and tickets go to ${cfg.label} in the next minutes.` });
+        : `AI SDR leads, emails and calls, Reply Draft's last month of customer mail${integration.sync_marketing ? ", Marketing's campaign replies" : ''} and Frontline's customers and tickets go to ${cfg.label} in the next minutes.` });
     } catch {
       toast({ title: 'Sync failed', variant: 'destructive' });
     } finally {
