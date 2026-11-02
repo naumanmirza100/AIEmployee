@@ -409,7 +409,14 @@ def documents(ctx, args):
 # ---- This week, across the agents ----------------------------------------------------------------------------------
 
 def week(ctx, args):
-    """One line per agent for the period (default: the last 7 days), each read under its agent's rule."""
+    """One line per agent for the period (default: the last 7 days), each read under its agent's rule.
+
+    What happened can't be in the future: live on a Monday, "this week" came as today to Sunday and the answer was
+    one morning's work. A period that starts today or later, or reaches past today, is read as the 7 days to today."""
+    if args.get('start') and _day(args['start']) >= ctx.today:
+        args = {k: v for k, v in args.items() if k not in ('start', 'end')}
+    elif args.get('end') and _day(args['end']) > ctx.today:
+        args = {**args, 'end': ctx.today.isoformat()}
     start, end, begins, ends = _aware_range(ctx, args, back=True)
     m, cu, facts = ctx.modules, ctx.company_user, []
 
