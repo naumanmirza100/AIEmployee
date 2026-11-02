@@ -404,7 +404,10 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
   const handleToggle = async (key, label) => {
     try {
       await updateCrmIntegration(integration.id, { [key]: !integration[key] });
-      toast({ title: `${label} ${integration[key] ? 'no longer go' : 'now go'} to ${cfg.label}` });
+      // Changes back come from the CRM: "Changes from Pipedrive now go to Pipedrive" read backwards (found filming).
+      toast({ title: key === 'sync_back'
+        ? `Changes made in ${cfg.label} ${integration[key] ? 'no longer come back' : 'now come back to your agents every 15 minutes'}`
+        : `${label} ${integration[key] ? 'no longer go' : 'now go'} to ${cfg.label}` });
       onRefresh();
     } catch (e) {
       toast({ title: 'Not changed', description: e?.message, variant: 'destructive' });

@@ -370,6 +370,12 @@ class CRMSyncAgent:
         sender = (email.reply_to or email.from_email or '').strip().lower()
         if not sender:
             return
+        # Someone who asked to be left alone (the company's do-not-email list) is not put in the CRM by their mail:
+        # a campaign's "remove me" reply landed in the inbox, was read as a customer's, and made them a contact
+        # there (found filming, 2 Nov 2026). The Marketing path never sends such a reply either.
+        from core.do_not_email import is_blocked
+        if is_blocked(self.company, sender):
+            return
         from reply_draft_agent.text import own_words
         payload = {
             'email': sender,

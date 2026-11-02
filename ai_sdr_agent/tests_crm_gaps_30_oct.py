@@ -218,6 +218,14 @@ class InboxTests(base.CRMBase):
         self.assertTrue(contact.call_args.kwargs['create'])
         self.assertEqual(logged.call_args.kwargs['direction'], 'INBOUND')
 
+    def test_mail_from_someone_who_asked_to_be_left_alone_does_not_go(self):
+        # Found filming, 2 Nov 2026: a campaign's "remove me" reply reached the inbox and made the person a CRM contact.
+        from core.do_not_email import block
+        from crm_sync_agent.signals import queue_inbox_email
+        block(self.company, 'kiran@clinic.test', source='marketing')
+        queue_inbox_email(self.mail(subject='Please remove me', body='Stop emailing us.'))
+        self.assertEqual(self.queued(CRMSyncQueue.TYPE_EMAIL), [])
+
     def test_a_reply_sent_goes_on_the_recipients_contact_once(self):
         from crm_sync_agent.signals import queue_inbox_reply
         draft = ReplyDraft.objects.create(owner=user_for(self.cu), inbox_email=self.mail(),
