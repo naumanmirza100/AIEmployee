@@ -114,6 +114,68 @@ def on_sdr_lead_saved(sender, instance, created, **kwargs):
 
 
 # ------------------------------------------------------------------ #
+# Frontline — its customers, and a note when a ticket opens and when it is resolved
+# ------------------------------------------------------------------ #
+
+def support_goes_to_crm(company) -> bool:
+    """True when this company's Frontline customers and tickets go to a CRM through CRM Sync. Frontline's own older
+    HubSpot link stands aside then, so nothing is sent twice (Frontline_agent/signals.py)."""
+    from core.modules import has_module
+    from crm_sync_agent.models import CRMIntegration
+    return bool(company) and has_module(company, 'crm_sync_agent') and CRMIntegration.objects.filter(
+        company=company, is_active=True, sync_support=True).exists()
+
+
+@receiver(post_save, sender='Frontline_agent.Contact')
+def on_frontline_contact_saved(sender, instance, created, **kwargs):
+    try:
+        if not support_goes_to_crm(instance.company):
+            return
+        _get_agent(instance.company).enqueue_support_contact(instance)
+        _process_async(instance.company)
+    except Exception:
+        logger.exception('CRM signal error on Frontline contact save (contact=%s)', getattr(instance, 'pk', '?'))
+
+
+@receiver(post_save, sender='Frontline_agent.Ticket')
+def on_frontline_ticket_saved(sender, instance, created, **kwargs):
+    try:
+        if instance.contact_id is None or not support_goes_to_crm(instance.company):
+            return
+        agent = _get_agent(instance.company)
+        agent.enqueue_support_contact(instance.contact)       # a customer from before the CRM was connected
+        agent.enqueue_support_ticket(instance)
+        _process_async(instance.company)
+    except Exception:
+        logger.exception('CRM signal error on Frontline ticket save (ticket=%s)', getattr(instance, 'pk', '?'))
+
+
+# ------------------------------------------------------------------ #
+# Marketing — a reply to a campaign, once the AI has read it (only with "Marketing replies" on)
+# ------------------------------------------------------------------ #
+
+def _company_of_owner(user):
+    from core.logins import company_id_for
+    from core.models import Company
+    from core.modules import has_module
+    company_id = company_id_for(user) if user is not None else None
+    company = Company.objects.filter(pk=company_id).first() if company_id else None
+    return company if company is not None and has_module(company, 'crm_sync_agent') else None
+
+
+@receiver(post_save, sender='marketing_agent.Reply')
+def on_marketing_reply_saved(sender, instance, created, **kwargs):
+    try:
+        company = _company_of_owner(instance.campaign.owner)
+        if company is None or not _has_active_integrations(company):
+            return
+        _get_agent(company).enqueue_marketing_reply(instance)
+        _process_async(company)
+    except Exception:
+        logger.exception('CRM signal error on Marketing reply save (reply=%s)', getattr(instance, 'pk', '?'))
+
+
+# ------------------------------------------------------------------ #
 # SDR Outreach Log — log email activity on successful send
 # ------------------------------------------------------------------ #
 

@@ -23,8 +23,8 @@ class CRMIntegration(models.Model):
 
     # Credentials stored as JSON — provider-specific keys documented per connector.
     # HubSpot:    {"access_token": "pat-..."}
-    # Salesforce: {"client_id": "...", "client_secret": "...", "username": "...",
-    #              "password": "...", "security_token": "...", "domain": "login"}
+    # Salesforce: {"instance_url": "acme.my.salesforce.com", "client_id": "...", "client_secret": "..."}
+    #             (before 2 Nov 2026: client_id, client_secret, username, password, security_token, domain)
     # Pipedrive:  {"api_token": "..."}
     # Stored encrypted: {"enc": "<Fernet token of the JSON>"}. Read and written
     # through get_credentials() / set_credentials(), never directly. Rows saved
@@ -35,7 +35,7 @@ class CRMIntegration(models.Model):
     field_mappings = models.JSONField(default=dict)
 
     #: Credential fields that say where to sign in, not how; shown as they are.
-    NOT_SECRET = ('domain', 'username')
+    NOT_SECRET = ('domain', 'username', 'instance_url')
 
     def get_credentials(self) -> dict:
         """The saved credentials, readable. They used to be kept in clear text
@@ -86,6 +86,17 @@ class CRMIntegration(models.Model):
     sync_emails = models.BooleanField(default=True)
     sync_meetings = models.BooleanField(default=True)
     sync_notes = models.BooleanField(default=True)
+    # Frontline's customers and their tickets (a note when a ticket is opened and when it is resolved). They went to
+    # HubSpot only, through a key of Frontline's own, and overwrote the name and phone HubSpot had (2 Nov 2026).
+    sync_support = models.BooleanField(default=True)
+    # Marketing: the people who reply to a campaign, with their reply. Off until switched on, so a company's CRM
+    # does not fill with every newsletter reader (2 Nov 2026).
+    sync_marketing = models.BooleanField(default=False)
+    # Deals: off until switched on with a pipeline and stage picked from the company's own CRM. One deal per person,
+    # when an AI SDR lead books a call or a Marketing reply is read as interested (2 Nov 2026).
+    sync_deals = models.BooleanField(default=False)
+    #: {"pipeline_id", "pipeline_label", "stage_id", "stage_label"}, as the CRM named them when picked.
+    deal_settings = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
 
     last_ping_at = models.DateTimeField(null=True, blank=True)
@@ -123,9 +134,11 @@ class CRMContactMapping(models.Model):
 
     SOURCE_SDR_LEAD = 'sdr_lead'
     SOURCE_FRONTLINE = 'frontline_contact'
+    SOURCE_MARKETING_LEAD = 'marketing_lead'
     SOURCE_TYPES = [
         (SOURCE_SDR_LEAD, 'SDR Lead'),
         (SOURCE_FRONTLINE, 'Frontline Contact'),
+        (SOURCE_MARKETING_LEAD, 'Marketing Lead'),
     ]
 
     company = models.ForeignKey(
@@ -163,11 +176,13 @@ class CRMSyncLog(models.Model):
     TYPE_EMAIL = 'email_activity'
     TYPE_MEETING = 'meeting'
     TYPE_NOTE = 'note'
+    TYPE_DEAL = 'deal'
     OBJECT_TYPES = [
         (TYPE_CONTACT, 'Contact'),
         (TYPE_EMAIL, 'Email Activity'),
         (TYPE_MEETING, 'Meeting'),
         (TYPE_NOTE, 'Note'),
+        (TYPE_DEAL, 'Deal'),
     ]
 
     OP_CREATE = 'create'
@@ -234,11 +249,13 @@ class CRMSyncQueue(models.Model):
     TYPE_EMAIL = 'email_activity'
     TYPE_MEETING = 'meeting'
     TYPE_NOTE = 'note'
+    TYPE_DEAL = 'deal'
     OBJECT_TYPES = [
         (TYPE_CONTACT, 'Contact'),
         (TYPE_EMAIL, 'Email Activity'),
         (TYPE_MEETING, 'Meeting'),
         (TYPE_NOTE, 'Note'),
+        (TYPE_DEAL, 'Deal'),
     ]
 
     OP_CREATE = 'create'
@@ -253,6 +270,10 @@ class CRMSyncQueue(models.Model):
     SOURCE_SDR_MEETING = 'sdr_meeting'
     SOURCE_SDR_NOTE = 'sdr_note'
     SOURCE_FRONTLINE = 'frontline_contact'
+    SOURCE_FRONTLINE_TICKET = 'frontline_ticket'
+    SOURCE_FRONTLINE_TICKET_DONE = 'frontline_ticket_done'
+    SOURCE_MARKETING_LEAD = 'marketing_lead'
+    SOURCE_MARKETING_REPLY = 'marketing_reply'
     # The Inbox Manager's part of the client's list: mail from customers and leads, and the replies sent.
     SOURCE_INBOX_EMAIL = 'inbox_email'
     SOURCE_INBOX_REPLY = 'inbox_reply'
@@ -262,6 +283,10 @@ class CRMSyncQueue(models.Model):
         (SOURCE_SDR_MEETING, 'SDR Meeting'),
         (SOURCE_SDR_NOTE, 'SDR Note'),
         (SOURCE_FRONTLINE, 'Frontline Contact'),
+        (SOURCE_FRONTLINE_TICKET, 'Frontline: ticket opened'),
+        (SOURCE_FRONTLINE_TICKET_DONE, 'Frontline: ticket resolved'),
+        (SOURCE_MARKETING_LEAD, 'Marketing: a person who replied'),
+        (SOURCE_MARKETING_REPLY, 'Marketing: their reply'),
         (SOURCE_INBOX_EMAIL, 'Reply Draft: email received'),
         (SOURCE_INBOX_REPLY, 'Reply Draft: reply sent'),
     ]

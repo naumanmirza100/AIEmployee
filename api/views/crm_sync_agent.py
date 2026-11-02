@@ -70,6 +70,10 @@ def _serialize_integration(integration: CRMIntegration, request=None) -> dict:
         'sync_emails': integration.sync_emails,
         'sync_meetings': integration.sync_meetings,
         'sync_notes': integration.sync_notes,
+        'sync_support': integration.sync_support,
+        'sync_marketing': integration.sync_marketing,
+        'sync_deals': integration.sync_deals,
+        'deal_settings': integration.deal_settings or {},
         'is_active': integration.is_active,
         'last_ping_at': integration.last_ping_at,
         'last_ping_ok': integration.last_ping_ok,
@@ -163,6 +167,8 @@ def integrations_list(request):
         sync_emails=data.get('sync_emails', True),
         sync_meetings=data.get('sync_meetings', True),
         sync_notes=data.get('sync_notes', True),
+        sync_support=data.get('sync_support', True),
+        sync_marketing=data.get('sync_marketing', False),
         is_active=data.get('is_active', True),
     )
     integration.set_credentials(data.get('credentials') or {})
@@ -221,11 +227,72 @@ def integration_detail(request, integration_id: int):
             CRMSyncAgent.release_waiting(integration)
     if 'field_mappings' in data:
         integration.field_mappings = data['field_mappings']
-    for flag in ('sync_contacts', 'sync_emails', 'sync_meetings', 'sync_notes', 'is_active'):
+    for flag in ('sync_contacts', 'sync_emails', 'sync_meetings', 'sync_notes', 'sync_support', 'sync_marketing',
+                 'is_active'):
         if flag in data:
             setattr(integration, flag, bool(data[flag]))
+    if 'deal_settings' in data or 'sync_deals' in data:
+        problem = _apply_deals(company, integration, data)
+        if problem:
+            return _not_taken(problem)
     integration.save()
     return Response(_serialize_integration(integration, request))
+
+
+def _apply_deals(company, integration, data):
+    """Deals on with a pipeline and stage that the CRM has (checked against it, and kept with its names), or off.
+    None when done, else what to tell the person."""
+    if 'deal_settings' in data:
+        wanted = data.get('deal_settings') or {}
+        pipeline_id, stage_id = str(wanted.get('pipeline_id') or ''), str(wanted.get('stage_id') or '')
+        pipelines, reason = _pipelines(company, integration)
+        if reason:
+            return reason
+        pipeline = next((p for p in pipelines if p['id'] == pipeline_id), None)
+        stage = next((s for s in (pipeline or {}).get('stages', []) if s['id'] == stage_id), None)
+        if pipeline is None or stage is None:
+            return f'{integration.get_provider_display()} has no such pipeline and stage. Choose them again.'
+        integration.deal_settings = {'pipeline_id': pipeline['id'], 'pipeline_label': pipeline['label'],
+                                     'stage_id': stage['id'], 'stage_label': stage['label']}
+    if 'sync_deals' in data:
+        on = bool(data['sync_deals'])
+        if on and not (integration.deal_settings or {}).get('stage_id'):
+            return 'Choose the pipeline and stage new deals go into first.'
+        integration.sync_deals = on
+    return None
+
+
+def _pipelines(company, integration):
+    """([pipelines], None) from the CRM, or ([], what to tell the person)."""
+    from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+    from crm_sync_agent.connectors.base import CRMError, refusal
+    try:
+        connector = CRMSyncAgent(company)._get_connector(integration)
+        return connector.list_pipelines(), None
+    except CRMError as exc:
+        return [], refusal(integration.get_provider_display(), exc)
+    except Exception:
+        logger.exception('CRM pipelines could not be read: company=%s provider=%s', company.pk, integration.provider)
+        return [], 'The CRM could not be asked just now. Try again in a minute.'
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def integration_pipelines(request, integration_id: int):
+    """The company's deal pipelines and stages, read from its CRM, to choose where new deals go."""
+    company = request.user.company
+    try:
+        integration = CRMIntegration.objects.get(pk=integration_id, company=company)
+    except CRMIntegration.DoesNotExist:
+        return Response({'error': 'Integration not found.'}, status=status.HTTP_404_NOT_FOUND)
+    refused = _admins_only(request)
+    if refused:
+        return refused
+    pipelines, reason = _pipelines(company, integration)
+    if reason:
+        return _not_taken(reason)
+    return Response({'status': 'success', 'pipelines': pipelines})
 
 
 # ------------------------------------------------------------------ #
@@ -292,8 +359,10 @@ def integration_sync_leads(request, integration_id: int):
         return Response({
             'status': 'done',
             'message': (f"Synced {counts['leads']} leads, {counts['emails']} emails, "
-                        f"{counts['meetings']} meetings, {counts.get('inbox_emails', 0)} inbox emails and "
-                        f"{counts.get('inbox_replies', 0)} replies."),
+                        f"{counts['meetings']} meetings, {counts.get('inbox_emails', 0)} inbox emails, "
+                        f"{counts.get('inbox_replies', 0)} replies, {counts.get('support_customers', 0)} support "
+                        f"customers, {counts.get('support_tickets', 0)} tickets and "
+                        f"{counts.get('marketing_replies', 0)} campaign replies."),
             'result': result,
         })
 

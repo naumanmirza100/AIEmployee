@@ -19,22 +19,24 @@ PIPEDRIVE_BASE = 'https://api.pipedrive.com/v1'
 DEFAULT_TIMEOUT = 12
 
 
+def _utc(dt):
+    """Pipedrive reads an activity's due_date and due_time as UTC. A time in another zone went as it was, so a
+    call at 15:00 in Karachi showed at 15:00 UTC, five hours late."""
+    if dt is None or not hasattr(dt, 'strftime'):
+        return datetime.now(dt_timezone.utc)
+    if getattr(dt, 'tzinfo', None) is not None and hasattr(dt, 'astimezone'):
+        return dt.astimezone(dt_timezone.utc)
+    return dt
+
+
 def _pd_date(dt) -> str:
-    """Format datetime as YYYY-MM-DD for Pipedrive date fields."""
-    if dt is None:
-        return datetime.now(dt_timezone.utc).strftime('%Y-%m-%d')
-    if hasattr(dt, 'strftime'):
-        return dt.strftime('%Y-%m-%d')
-    return datetime.now(dt_timezone.utc).strftime('%Y-%m-%d')
+    """Format datetime as YYYY-MM-DD (UTC) for Pipedrive date fields."""
+    return _utc(dt).strftime('%Y-%m-%d')
 
 
 def _pd_time(dt) -> str:
-    """Format datetime as HH:MM for Pipedrive time fields."""
-    if dt is None:
-        return datetime.now(dt_timezone.utc).strftime('%H:%M')
-    if hasattr(dt, 'strftime'):
-        return dt.strftime('%H:%M')
-    return datetime.now(dt_timezone.utc).strftime('%H:%M')
+    """Format datetime as HH:MM (UTC) for Pipedrive time fields."""
+    return _utc(dt).strftime('%H:%M')
 
 
 class PipedriveConnector(BaseCRMConnector):
@@ -162,6 +164,25 @@ class PipedriveConnector(BaseCRMConnector):
             'person_id': int(crm_contact_id),
         }
         resp = self._post('/notes', json=note)
+        return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
+
+    # ------------------------------------------------------------------ #
+    # Deals
+    # ------------------------------------------------------------------ #
+
+    def list_pipelines(self) -> list:
+        pipes = (self._get('/pipelines').json() or {}).get('data') or []
+        stages = (self._get('/stages').json() or {}).get('data') or []
+        out = []
+        for p in pipes:
+            own = sorted((s for s in stages if s.get('pipeline_id') == p.get('id')), key=lambda s: s.get('order_nr', 0))
+            out.append({'id': str(p.get('id')), 'label': p.get('name') or str(p.get('id')),
+                        'stages': [{'id': str(s.get('id')), 'label': s.get('name') or str(s.get('id'))} for s in own]})
+        return out
+
+    def create_deal(self, crm_contact_id: str, name: str, pipeline_id: str, stage_id: str) -> Optional[str]:
+        resp = self._post('/deals', json={'title': (name or 'New deal')[:255], 'person_id': int(crm_contact_id),
+                                          'pipeline_id': int(pipeline_id), 'stage_id': int(stage_id)})
         return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
 
     # ------------------------------------------------------------------ #

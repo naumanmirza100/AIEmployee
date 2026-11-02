@@ -193,4 +193,5 @@ class SyncEverythingTests(ConnectionBase):
                 mock.patch.object(agent_module.CRMSyncAgent, 'process_pending', return_value={'processed': 4}):
             code, body = self.call(views.integration_sync_leads, self.member, integration_id=integration.id)
         self.assertEqual((code, body['status']), (200, 'done'), body)
-        self.assertEqual(body['message'], 'Synced 2 leads, 1 emails, 1 meetings, 0 inbox emails and 0 replies.')
+        self.assertEqual(body['message'], 'Synced 2 leads, 1 emails, 1 meetings, 0 inbox emails, 0 replies, '
+                                          '0 support customers, 0 tickets and 0 campaign replies.')

@@ -592,6 +592,9 @@ export const deleteCrmIntegration = async (id) => {
   catch (e) { console.error('CRM delete error:', e); throw e; }
 };
 
+// The company's deal pipelines and stages, read from its CRM, to choose where new deals go.
+export const getCrmPipelines = async (id) => companyApi.get(`/crm-sync/integrations/${id}/pipelines/`);
+
 export const pingCrmIntegration = async (id) => {
   try { return await companyApi.post(`/crm-sync/integrations/${id}/ping/`); }
   catch (e) { console.error('CRM ping error:', e); throw e; }

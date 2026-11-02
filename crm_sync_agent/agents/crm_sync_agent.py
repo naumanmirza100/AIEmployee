@@ -41,6 +41,12 @@ logger = logging.getLogger(__name__)
 _BACKOFF_SECONDS = [0, 120, 600, 3600]
 
 
+def _deal_name(name: str, email: str, company: str) -> str:
+    """'Usman Tariq (Tariq Foods)': who, and for whom."""
+    who = (name or '').strip() or (email or '').strip() or 'New deal'
+    return f'{who} ({company.strip()})' if (company or '').strip() else who
+
+
 def _backoff_delay(attempts: int) -> int:
     idx = min(attempts, len(_BACKOFF_SECONDS) - 1)
     return _BACKOFF_SECONDS[idx]
@@ -234,6 +240,52 @@ class CRMSyncAgent:
                 priority=2,
             )
 
+        if not cancelled:
+            self._enqueue_deal(CRMSyncQueue.SOURCE_SDR_LEAD, lead.pk, self._lead_to_contact_payload(lead),
+                               _deal_name(lead.full_name, lead.email, lead.company_name),
+                               CRMContactMapping.SOURCE_SDR_LEAD)
+
+    # ------------------------------------------------------------------ #
+    # Deals: one per person, when an AI SDR lead books a call or a Marketing reply is read as interested
+    # ------------------------------------------------------------------ #
+
+    def _enqueue_deal(self, source_type, source_id, details: dict, deal_name: str, mapping_source: str) -> None:
+        """A deal for each CRM with deals on and a stage picked, unless that person has one there already."""
+        wanted = [i for i in self._integrations if i.sync_deals and (i.deal_settings or {}).get('stage_id')]
+        if not wanted:
+            return
+        made = set(CRMContactMapping.objects.filter(source_type=mapping_source, source_id=source_id)
+                   .exclude(crm_deal_id='').values_list('integration_id', flat=True))
+        queued = set(CRMSyncQueue.objects.filter(object_type=CRMSyncQueue.TYPE_DEAL, source_type=source_type,
+                                                 source_id=source_id)
+                     .exclude(status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED])
+                     .values_list('integration_id', flat=True))
+        payload = {**details, 'deal_name': deal_name, 'contact_id': source_id, 'mapping_source': mapping_source}
+        for integration in wanted:
+            if integration.id not in made and integration.id not in queued:
+                self._enqueue(integration=integration, object_type=CRMSyncQueue.TYPE_DEAL,
+                              operation=CRMSyncQueue.OP_CREATE, source_type=source_type, source_id=source_id,
+                              payload=payload, priority=4)
+
+    def _sync_deal(self, connector: BaseCRMConnector, item: CRMSyncQueue, p: dict) -> Optional[str]:
+        settings = item.integration.deal_settings or {}
+        if not item.integration.sync_deals or not settings.get('stage_id'):
+            return None                                     # switched off after it was queued
+        source = p.get('mapping_source') or CRMContactMapping.SOURCE_SDR_LEAD
+        if source == CRMContactMapping.SOURCE_SDR_LEAD:
+            contact = self._resolve_crm_contact_id(item.integration, source, p.get('email', ''), connector, p)
+        else:
+            contact = self._payload_contact(item.integration, connector, p, source)
+        if not contact:
+            raise CRMError(f"Cannot resolve CRM contact for deal {p.get('email', '')}", retriable=True)
+        deal = connector.create_deal(contact, p.get('deal_name') or 'New deal', settings.get('pipeline_id', ''),
+                                     settings['stage_id'])
+        if deal:
+            CRMContactMapping.objects.update_or_create(
+                integration=item.integration, source_type=source, source_id=item.source_id,
+                defaults={'crm_contact_id': contact, 'crm_deal_id': deal, 'company': self.company})
+        return deal
+
     @staticmethod
     def _last_sent_meeting(integration, meeting_id):
         """The meeting as the CRM last had it from us: the payload of the newest entry that went."""
@@ -285,6 +337,134 @@ class CRMSyncAgent:
             'source': 'reply_draft',
         }
         self._enqueue_once(CRMSyncQueue.SOURCE_INBOX_REPLY, draft.pk, payload)
+
+    # ------------------------------------------------------------------ #
+    # Frontline (customer support): its customers, and a note per ticket
+    # ------------------------------------------------------------------ #
+
+    TICKET_DONE = ('resolved', 'closed', 'auto_resolved')
+
+    def enqueue_support_contact(self, contact) -> None:
+        """A Frontline customer, once per CRM that takes support items: found there by address and filled in where
+        blank, or made from the name and phone Frontline has. Once it is in a CRM, later saves (each new message
+        updates the customer) send nothing more."""
+        if not self._integrations or not (contact.email or '').strip():
+            return
+        mapped = set(CRMContactMapping.objects.filter(
+            source_type=CRMContactMapping.SOURCE_FRONTLINE, source_id=contact.pk).values_list('integration_id', flat=True))
+        name = (contact.name or '').strip()
+        first, _, last = name.partition(' ')
+        payload = {'email': contact.email.strip().lower(), 'name': name, 'first_name': first, 'last_name': last,
+                   'phone': (contact.phone or '').strip(), 'source': 'frontline'}
+        for integration in self._integrations:
+            if integration.sync_support and integration.sync_contacts and integration.id not in mapped:
+                self._enqueue(integration=integration, object_type=CRMSyncQueue.TYPE_CONTACT,
+                              operation=CRMSyncQueue.OP_CREATE, source_type=CRMSyncQueue.SOURCE_FRONTLINE,
+                              source_id=contact.pk, payload=payload, priority=3)
+
+    def enqueue_support_ticket(self, ticket) -> None:
+        """A note on the customer's CRM contact when a ticket is opened, and another when it is resolved. Each once
+        per CRM. A ticket with no customer (raised by staff) has nobody to file it under and sends nothing."""
+        contact = getattr(ticket, 'contact', None)
+        if not self._integrations or contact is None or not (contact.email or '').strip():
+            return
+        base = {'email': contact.email.strip().lower(), 'contact_id': contact.pk,
+                'contact_name': (contact.name or '').strip(), 'source': 'frontline'}
+        opened = (f'Support ticket #{ticket.pk} opened: {ticket.title}\n'
+                  f'Priority: {ticket.get_priority_display()} · Category: {ticket.get_category_display()}\n\n'
+                  f'{(ticket.description or "").strip()[:2000]}')
+        self._enqueue_note_once(CRMSyncQueue.SOURCE_FRONTLINE_TICKET, ticket.pk, {**base, 'note_body': opened})
+        if ticket.status in self.TICKET_DONE:
+            done = (f'Support ticket #{ticket.pk} {ticket.get_status_display().lower()}: {ticket.title}'
+                    + (f'\n\n{ticket.resolution.strip()[:2000]}' if (ticket.resolution or '').strip() else ''))
+            self._enqueue_note_once(CRMSyncQueue.SOURCE_FRONTLINE_TICKET_DONE, ticket.pk, {**base, 'note_body': done})
+
+    def _enqueue_note_once(self, source_type, source_id, payload) -> None:
+        queued = set(CRMSyncQueue.objects.filter(object_type=CRMSyncQueue.TYPE_NOTE, source_type=source_type,
+                                                 source_id=source_id)
+                     .exclude(status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED])
+                     .values_list('integration_id', flat=True))
+        for integration in self._integrations:
+            if integration.sync_support and integration.sync_notes and integration.id not in queued:
+                self._enqueue(integration=integration, object_type=CRMSyncQueue.TYPE_NOTE,
+                              operation=CRMSyncQueue.OP_CREATE, source_type=source_type, source_id=source_id,
+                              payload=payload, priority=5)
+
+    # ------------------------------------------------------------------ #
+    # Marketing: the people who reply to a campaign, and their reply (off until switched on)
+    # ------------------------------------------------------------------ #
+
+    def enqueue_marketing_reply(self, reply) -> None:
+        """A reply to a Marketing campaign, once the AI has read it: the person as a CRM contact, and the reply on
+        their timeline with the campaign it answered. A request to unsubscribe goes nowhere."""
+        lead = getattr(reply, 'lead', None)
+        if (not self._integrations or lead is None or not (lead.email or '').strip()
+                or reply.interest_level in ('unsubscribe', 'not_analyzed')):
+            return
+        wanted = [i for i in self._integrations if i.sync_marketing]
+        if not wanted:
+            return
+        email = lead.email.strip().lower()
+        details = {'email': email, 'first_name': (lead.first_name or '').strip(), 'last_name': (lead.last_name or '').strip(),
+                   'phone': (lead.phone or '').strip(), 'company': (lead.company or '').strip(),
+                   'job_title': (lead.job_title or '').strip(), 'source': 'marketing'}
+        details['name'] = f"{details['first_name']} {details['last_name']}".strip()
+        mapped = set(CRMContactMapping.objects.filter(
+            source_type=CRMContactMapping.SOURCE_MARKETING_LEAD, source_id=lead.pk).values_list('integration_id', flat=True))
+        answered = getattr(reply, 'triggering_email', None)
+        context = f'Reply to the Marketing campaign "{reply.campaign.name}"'
+        if answered is not None and answered.subject:
+            context += f', email "{answered.subject}"'
+        payload = {**details, 'contact_id': lead.pk, 'subject': reply.reply_subject or f'Re: {reply.campaign.name}',
+                   'body': f'{(reply.reply_content or "").strip()[:4500]}\n\n— {context}. '
+                           f'The AI read it as: {reply.get_interest_level_display()}.',
+                   'sent_at': reply.replied_at.isoformat() if reply.replied_at else None, 'direction': 'INBOUND'}
+        sent = set(CRMSyncQueue.objects.filter(object_type=CRMSyncQueue.TYPE_EMAIL, source_id=reply.pk,
+                                               source_type=CRMSyncQueue.SOURCE_MARKETING_REPLY)
+                   .exclude(status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED])
+                   .values_list('integration_id', flat=True))
+        for integration in wanted:
+            if integration.sync_contacts and integration.id not in mapped:
+                self._enqueue(integration=integration, object_type=CRMSyncQueue.TYPE_CONTACT,
+                              operation=CRMSyncQueue.OP_CREATE, source_type=CRMSyncQueue.SOURCE_MARKETING_LEAD,
+                              source_id=lead.pk, payload=details, priority=3)
+            if integration.sync_emails and integration.id not in sent:
+                self._enqueue(integration=integration, object_type=CRMSyncQueue.TYPE_EMAIL,
+                              operation=CRMSyncQueue.OP_CREATE, source_type=CRMSyncQueue.SOURCE_MARKETING_REPLY,
+                              source_id=reply.pk, payload=payload, priority=5)
+        if reply.interest_level == 'positive':
+            self._enqueue_deal(CRMSyncQueue.SOURCE_MARKETING_LEAD, lead.pk, {**details, 'contact_id': lead.pk},
+                               _deal_name(details['name'], email, details['company']),
+                               CRMContactMapping.SOURCE_MARKETING_LEAD)
+
+    def _support_contact(self, integration: CRMIntegration, connector: BaseCRMConnector, p: dict) -> Optional[str]:
+        return self._payload_contact(integration, connector, p, CRMContactMapping.SOURCE_FRONTLINE)
+
+    def _payload_contact(self, integration: CRMIntegration, connector: BaseCRMConnector, p: dict,
+                         mapping_source: str) -> Optional[str]:
+        """The CRM contact for a Frontline ticket note or a Marketing reply: from the saved link, else found by
+        address, else made from the person's details in the payload (with 'Contacts' on). An existing contact is
+        never changed."""
+        contact_id = p.get('contact_id')
+        if contact_id:
+            mapping = CRMContactMapping.objects.filter(integration=integration, source_id=contact_id,
+                                                       source_type=mapping_source).first()
+            if mapping:
+                return mapping.crm_contact_id
+        email = (p.get('email') or '').strip().lower()
+        if not email:
+            return None
+        name = (p.get('contact_name') or p.get('name') or '').strip()
+        first, _, last = name.partition(' ')
+        details = {'email': email, 'first_name': p.get('first_name') or first, 'last_name': p.get('last_name') or last,
+                   'name': name, 'phone': p.get('phone', ''), 'company': p.get('company', ''),
+                   'job_title': p.get('job_title', ''), 'source': p.get('source', '')}
+        crm_id = connector.find_or_create_contact(email, details, create=bool(integration.sync_contacts))
+        if crm_id and contact_id:
+            CRMContactMapping.objects.update_or_create(
+                integration=integration, source_type=mapping_source, source_id=contact_id,
+                defaults={'crm_contact_id': crm_id, 'company': self.company})
+        return crm_id
 
     def _enqueue_once(self, source_type, source_id, payload) -> None:
         """An email activity, for each CRM that takes emails and does not have it yet."""
@@ -463,6 +643,9 @@ class CRMSyncAgent:
         if item.object_type == CRMSyncQueue.TYPE_NOTE:
             return self._sync_note(connector, item, p)
 
+        if item.object_type == CRMSyncQueue.TYPE_DEAL:
+            return self._sync_deal(connector, item, p)
+
         raise CRMError(f'Unknown object_type: {item.object_type}', retriable=False)
 
     def _sync_contact(
@@ -492,6 +675,8 @@ class CRMSyncAgent:
         email = p.get('email', '')
         if item.source_type in (CRMSyncQueue.SOURCE_INBOX_EMAIL, CRMSyncQueue.SOURCE_INBOX_REPLY):
             crm_contact_id = self._inbox_contact(item.integration, connector, p)
+        elif item.source_type == CRMSyncQueue.SOURCE_MARKETING_REPLY:
+            crm_contact_id = self._payload_contact(item.integration, connector, p, CRMContactMapping.SOURCE_MARKETING_LEAD)
         else:
             crm_contact_id = self._resolve_crm_contact_id(
                 item.integration, CRMContactMapping.SOURCE_SDR_LEAD,
@@ -574,10 +759,13 @@ class CRMSyncAgent:
         self, connector: BaseCRMConnector, item: CRMSyncQueue, p: dict
     ) -> Optional[str]:
         email = p.get('email', '')
-        crm_contact_id = self._resolve_crm_contact_id(
-            item.integration, CRMContactMapping.SOURCE_SDR_LEAD,
-            email, connector, p
-        )
+        if item.source_type in (CRMSyncQueue.SOURCE_FRONTLINE_TICKET, CRMSyncQueue.SOURCE_FRONTLINE_TICKET_DONE):
+            crm_contact_id = self._support_contact(item.integration, connector, p)
+        else:
+            crm_contact_id = self._resolve_crm_contact_id(
+                item.integration, CRMContactMapping.SOURCE_SDR_LEAD,
+                email, connector, p
+            )
         if not crm_contact_id:
             raise CRMError(f'Cannot resolve CRM contact for note {email}', retriable=True)
 

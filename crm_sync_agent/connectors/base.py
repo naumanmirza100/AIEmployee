@@ -8,10 +8,14 @@ from typing import Optional
 class CRMError(Exception):
     """Normalized CRM error. `retriable=False` means do not retry (bad token, bad payload)."""
 
-    def __init__(self, message: str, retriable: bool = True, status_code: Optional[int] = None):
+    def __init__(self, message: str, retriable: bool = True, status_code: Optional[int] = None,
+                 reason: Optional[str] = None):
         super().__init__(message)
         self.retriable = retriable
         self.status_code = status_code
+        # What to tell the person, when the connector knows better than the status code (Salesforce says which
+        # part of its set-up is missing). Never the CRM's raw answer.
+        self.reason = reason
 
 
 def is_blank(value) -> bool:
@@ -28,6 +32,8 @@ def network_error(provider: str, exc: Exception) -> 'CRMError':
 def refusal(label: str, exc: CRMError) -> str:
     """Why a CRM would not take the credentials, in words for the person connecting it. Never the CRM's raw answer,
     which can name the request."""
+    if getattr(exc, 'reason', None):
+        return exc.reason
     code = getattr(exc, 'status_code', None)
     what = 'sign-in details' if label == 'Salesforce' else 'key'
     if code is None:
@@ -164,3 +170,14 @@ class BaseCRMConnector(ABC):
                        cancelled: bool = False) -> None:
         """Move a meeting already in the CRM, or mark it cancelled there (CO-275)."""
         raise CRMError('This CRM cannot update a meeting.', retriable=False)
+
+    # Deals (2 Nov 2026): off until the company switches them on and picks where new deals go.
+
+    def list_pipelines(self) -> list:
+        """The company's deal pipelines and their stages, in the CRM's order:
+        [{"id": "...", "label": "...", "stages": [{"id": "...", "label": "..."}]}]."""
+        raise CRMError('This CRM has no deals here.', retriable=False)
+
+    def create_deal(self, crm_contact_id: str, name: str, pipeline_id: str, stage_id: str) -> Optional[str]:
+        """A deal in the chosen pipeline and stage, linked to the contact. Returns its id."""
+        raise CRMError('This CRM has no deals here.', retriable=False)
