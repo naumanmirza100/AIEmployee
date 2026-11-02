@@ -651,6 +651,13 @@ const SDRLeadsTab = () => {
       setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0 });
       setPagination(resp?.pagination || { page: 1, page_size: pageSize, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
       setSelectedIds(new Set());
+      if (resp?.data) {
+        setSelectedLead(prev => {
+          if (!prev?.id) return prev;
+          const fresh = resp.data.find(l => l.id === prev.id);
+          return fresh ? { ...prev, ...fresh } : prev;
+        });
+      }
     } catch (e) {
       toast({ title: 'Failed to load leads', description: e?.message, variant: 'destructive' });
     } finally { setLoading(false); }
@@ -825,12 +832,12 @@ const SDRLeadsTab = () => {
       if (updatedFields.length > 0) {
         toast({
           title: 'Enrichment Complete',
-          description: Successfully added  for .,
+          description: `Successfully added ${updatedFields.join(', ')} for ${lead.full_name || lead.email || 'lead'}.`,
         });
       } else {
         toast({
           title: 'Enrichment Finished (No New Data)',
-          description: No additional contact details found on public website or providers for .,
+          description: `No additional contact details found on public website or providers for ${lead.full_name || lead.email || 'lead'}.`,
         });
       }
       if (selectedLead?.id === lead.id) {
@@ -869,8 +876,12 @@ const SDRLeadsTab = () => {
         description: `Intelligence gathered for ${lead.company_name || lead.full_name || 'lead'}`,
       });
       if (selectedLead?.id === lead.id) {
+        const pStatus = data?.research_profile?.verification?.prospect?.status;
         setSelectedLead(prev => ({
           ...prev,
+          data_quality_flags: pStatus === 'verified'
+            ? (prev.data_quality_flags || []).filter(f => !f.startsWith('Research:'))
+            : (prev.data_quality_flags || []),
           research_status: data.research_status || 'completed',
           research_profile: data.research_profile,
         }));
@@ -1496,19 +1507,26 @@ const SDRLeadsTab = () => {
             )}
 
             {/* Data Quality Flags */}
-            {(selectedLead.data_quality_flags || []).length > 0 && (
-              <div style={{ marginBottom: 20, padding: '10px 14px', borderRadius: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                  <ShieldAlert size={13} style={{ color: 'hsl(var(--pt-f59e0b))' }} />
-                  <h4 style={{ color: 'hsl(var(--pt-f59e0b))', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Data Quality Issues</h4>
+            {(() => {
+              const isProspectVerified = selectedLead.research_profile?.verification?.prospect?.status === 'verified';
+              const displayFlags = (selectedLead.data_quality_flags || []).filter(
+                f => !(isProspectVerified && f.startsWith('Research:'))
+              );
+              if (!displayFlags.length) return null;
+              return (
+                <div style={{ marginBottom: 20, padding: '10px 14px', borderRadius: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <ShieldAlert size={13} style={{ color: 'hsl(var(--pt-f59e0b))' }} />
+                    <h4 style={{ color: 'hsl(var(--pt-f59e0b))', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Data Quality Issues</h4>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {displayFlags.map((flag, i) => (
+                      <span key={i} style={{ color: 'hsl(var(--pt-fef3c7))', fontSize: 12 }}>• {flag}</span>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {selectedLead.data_quality_flags.map((flag, i) => (
-                    <span key={i} style={{ color: 'hsl(var(--pt-fef3c7))', fontSize: 12 }}>• {flag}</span>
-                  ))}
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Contact */}
             <div style={{ marginBottom: 20 }}>
