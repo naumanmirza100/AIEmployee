@@ -9,12 +9,7 @@ Calculates performance metrics for the AI SDR system and delivers:
 from __future__ import annotations
 
 import logging
-import os
-import smtplib
-import ssl
 from datetime import timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
 from django.conf import settings
 from django.db.models import Count, Q
@@ -39,7 +34,10 @@ class AnalyticsAgent:
             SDROutreachLog, SDRMeeting,
         )
 
-        now       = timezone.now()
+        # 'Today' is the company's day, not the UTC one (CO-240).
+        from core.scheduling import zone_name
+        from core.scheduling.conflicts import zone_info
+        now       = timezone.now().astimezone(zone_info(zone_name(company_user.company.timezone_name)))
         today_start     = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start      = today_start - timedelta(days=now.weekday())          # Mon
         last_week_start = week_start - timedelta(days=7)
@@ -87,9 +85,12 @@ class AnalyticsAgent:
         # ── Enrollments / Replies ─────────────────────────────────────
         enroll_qs = SDRCampaignEnrollment.objects.filter(campaign__company_user=company_user)
         total_enrolled  = enroll_qs.count()
-        replied_week    = enroll_qs.filter(replied_at__gte=week_start).count()
-        replied_lweek   = enroll_qs.filter(replied_at__gte=last_week_start, replied_at__lt=last_week_end).count()
-        replied_total   = enroll_qs.filter(status__in=['replied', 'unsubscribed']).count()
+        # A reply is something the lead wrote, not an away message nor an unsubscribe click, which both set a
+        # reply time (CO-240).
+        answered_qs     = enroll_qs.exclude(reply_content='').exclude(reply_sentiment='out_of_office')
+        replied_week    = answered_qs.filter(replied_at__gte=week_start).count()
+        replied_lweek   = answered_qs.filter(replied_at__gte=last_week_start, replied_at__lt=last_week_end).count()
+        replied_total   = answered_qs.count()
 
         # Reply breakdown by sentiment
         sentiment_counts = {
@@ -99,12 +100,15 @@ class AnalyticsAgent:
         }
 
         # ── Meetings ──────────────────────────────────────────────────
+        # Booked means a time was settled (confirmed_at): a meeting row is made the moment a reply reads as
+        # interest, before any time, and cancelled ones were counted too (CO-240).
         meet_qs = SDRMeeting.objects.filter(company_user=company_user)
-        meetings_today  = meet_qs.filter(created_at__gte=today_start).count()
-        meetings_week   = meet_qs.filter(created_at__gte=week_start).count()
-        meetings_lweek  = meet_qs.filter(created_at__gte=last_week_start, created_at__lt=last_week_end).count()
-        meetings_month  = meet_qs.filter(created_at__gte=month_start).count()
-        meetings_total  = meet_qs.count()
+        booked_qs       = meet_qs.filter(confirmed_at__isnull=False).exclude(status='cancelled')
+        meetings_today  = booked_qs.filter(confirmed_at__gte=today_start).count()
+        meetings_week   = booked_qs.filter(confirmed_at__gte=week_start).count()
+        meetings_lweek  = booked_qs.filter(confirmed_at__gte=last_week_start, confirmed_at__lt=last_week_end).count()
+        meetings_month  = booked_qs.filter(confirmed_at__gte=month_start).count()
+        meetings_total  = booked_qs.count()
         meetings_scheduled = meet_qs.filter(status='scheduled').count()
         meetings_completed = meet_qs.filter(status='completed').count()
 
@@ -117,7 +121,7 @@ class AnalyticsAgent:
         campaign_rows = []
         for c in camp_qs.filter(status='active').order_by('-emails_sent')[:5]:
             enrolled  = c.enrollments.count()
-            replied   = c.enrollments.filter(status__in=['replied', 'unsubscribed']).count()
+            replied   = c.enrollments.exclude(reply_content='').exclude(reply_sentiment='out_of_office').count()
             reply_rate = round((replied / enrolled * 100) if enrolled else 0, 1)
             campaign_rows.append({
                 'id': c.id,
@@ -133,7 +137,7 @@ class AnalyticsAgent:
         reply_rate_week = round((replied_week / emails_week * 100) if emails_week else 0, 1)
         # Of the leads who replied, how many have a meeting. All meetings over replies counted the ones
         # added by hand too, which follow no reply, and the rate read 200%.
-        replied_with_meeting = (meet_qs.filter(enrollment__in=enroll_qs.filter(status__in=['replied', 'unsubscribed']))
+        replied_with_meeting = (booked_qs.filter(enrollment__in=answered_qs)
                                 .values('enrollment').distinct().count())
         meeting_rate    = round((replied_with_meeting / replied_total * 100) if replied_total else 0, 1)
 
@@ -147,20 +151,26 @@ class AnalyticsAgent:
                 'date': day_start.strftime('%b %d'),
                 'emails': logs_qs.filter(sent_at__gte=day_start, sent_at__lt=day_end, status='sent').count(),
                 'leads':  leads_qs.filter(created_at__gte=day_start, created_at__lt=day_end).count(),
-                'meetings': meet_qs.filter(created_at__gte=day_start, created_at__lt=day_end).count(),
+                'meetings': booked_qs.filter(confirmed_at__gte=day_start, confirmed_at__lt=day_end).count(),
             })
 
         # ── Funnel ────────────────────────────────────────────────────
+        # Contacted = the leads emailed at least once. It was counted by the lead's status, which sending never sets,
+        # so five clinics emailed showed as 2 contacted and 3 replied (the AI SDR film, 30 Oct).
+        contacted = max(logs_qs.filter(status='sent').values('enrollment__lead_id').distinct().count(), replied_total)
         funnel = [
             {'stage': 'Total Leads',  'count': leads_total,                                             'color': '#a78bfa'},
-            {'stage': 'Contacted',    'count': leads_qs.filter(status__in=['contacted','replied','meeting_scheduled','converted']).count(), 'color': '#60a5fa'},
+            {'stage': 'Contacted',    'count': contacted,                                               'color': '#60a5fa'},
             {'stage': 'Replied',      'count': replied_total,                                           'color': '#4ade80'},
             {'stage': 'Meetings',     'count': meetings_total,                                          'color': '#34d399'},
             {'stage': 'Converted',    'count': leads_qs.filter(status='converted').count(),             'color': '#fbbf24'},
         ]
 
         # ── Alert ─────────────────────────────────────────────────────
-        low_meetings_alert = meetings_week < MEETINGS_ALERT_THRESHOLD
+        # About the week just ended, and only once a campaign ran through it: a new account was greeted with a
+        # 'Low meetings alert' (found in the live run of 29 Oct).
+        ran_last_week = SDRCampaign.objects.filter(company_user=company_user, activated_at__lt=week_start).exists()
+        low_meetings_alert = ran_last_week and meetings_lweek < MEETINGS_ALERT_THRESHOLD
 
         return {
             # Summary cards
@@ -235,7 +245,7 @@ class AnalyticsAgent:
                 <div style="background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;padding:14px 18px;">
                   <strong style="color:#92400e;">⚠️ Alert: Low Meeting Bookings</strong><br>
                   <span style="color:#78350f;font-size:13px;">
-                    Only <strong>{m['meetings_week']}</strong> meeting(s) booked this week —
+                    Only <strong>{m['meetings_lweek']}</strong> meeting(s) booked last week —
                     below the target of {m['meetings_alert_threshold']}.
                     Consider reviewing reply rates and follow-up sequences.
                   </span>
@@ -291,7 +301,7 @@ class AnalyticsAgent:
   <!-- Header -->
   <tr>
     <td style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:12px 12px 0 0;padding:28px 32px;">
-      <div style="color:#fff;font-size:20px;font-weight:700;">AI Employee — SDR Daily Report</div>
+      <div style="color:#fff;font-size:20px;font-weight:700;">Pay Per Project — AI SDR Daily Report</div>
       <div style="color:rgba(255,255,255,0.7);font-size:13px;margin-top:4px;">{now_str}</div>
     </td>
   </tr>
@@ -364,7 +374,7 @@ class AnalyticsAgent:
         <tr>
           <td style="border-top:1px solid #e5e7eb;padding-top:18px;">
             <p style="font-size:12px;color:#9ca3af;margin:0;">
-              This is an automated daily report from your AI Employee SDR system.
+              This is an automated daily report from your Pay Per Project AI SDR.
               Total lifetime stats: {m['leads_total']} leads · {m['emails_total']} emails · {m['meetings_total']} meetings.
             </p>
           </td>
@@ -394,7 +404,7 @@ class AnalyticsAgent:
         if not to_email:
             return False
 
-        subject = f"⚠️ SDR Alert: Only {meetings_this_week} meeting(s) booked this week (target: {MEETINGS_ALERT_THRESHOLD})"
+        subject = f"⚠️ SDR Alert: Only {meetings_this_week} meeting(s) booked last week (target: {MEETINGS_ALERT_THRESHOLD})"
 
         html = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
@@ -402,12 +412,12 @@ class AnalyticsAgent:
 <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
   <div style="background:linear-gradient(135deg,#dc2626,#b91c1c);padding:24px 28px;">
     <div style="color:#fff;font-size:18px;font-weight:700;">⚠️ Low Meeting Alert</div>
-    <div style="color:rgba(255,255,255,0.75);font-size:12px;margin-top:4px;">AI Employee SDR System</div>
+    <div style="color:rgba(255,255,255,0.75);font-size:12px;margin-top:4px;">Pay Per Project · AI SDR</div>
   </div>
   <div style="padding:28px;">
     <p style="font-size:15px;color:#1f2937;">
-      Your SDR system has only booked <strong style="color:#dc2626;">{meetings_this_week}</strong> meeting(s)
-      this week, which is below the target of <strong>{MEETINGS_ALERT_THRESHOLD}</strong>.
+      Your SDR system booked only <strong style="color:#dc2626;">{meetings_this_week}</strong> meeting(s)
+      last week, below the target of <strong>{MEETINGS_ALERT_THRESHOLD}</strong>.
     </p>
     <p style="font-size:13px;color:#6b7280;">Possible actions to improve:</p>
     <ul style="font-size:13px;color:#374151;line-height:1.8;">
@@ -419,8 +429,8 @@ class AnalyticsAgent:
     </ul>
     <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;">
     <p style="font-size:11px;color:#9ca3af;">
-      This alert fires when weekly meetings fall below {MEETINGS_ALERT_THRESHOLD}.
-      You can change this threshold in analytics_agent.py (MEETINGS_ALERT_THRESHOLD).
+      Sent on Mondays when last week had fewer than {MEETINGS_ALERT_THRESHOLD} calls booked. You can turn it off
+      under Notification settings, "Sales reports".
     </p>
   </div>
 </div>
@@ -433,30 +443,17 @@ class AnalyticsAgent:
     # ------------------------------------------------------------------
 
     def _send_email(self, to_email: str, subject: str, html: str) -> bool:
-        smtp_host     = getattr(settings, 'EMAIL_HOST',     os.environ.get('EMAIL_HOST', ''))
-        smtp_port     = int(getattr(settings, 'EMAIL_PORT', os.environ.get('EMAIL_PORT', 587)))
-        smtp_user     = getattr(settings, 'EMAIL_HOST_USER',     os.environ.get('EMAIL_HOST_USER', ''))
-        smtp_password = getattr(settings, 'EMAIL_HOST_PASSWORD', os.environ.get('EMAIL_HOST_PASSWORD', ''))
-        from_email    = getattr(settings, 'DEFAULT_FROM_EMAIL', smtp_user) or smtp_user
+        # Through the site's own mail settings, as every other email it sends. It had SMTP code of its own that
+        # needed a user name and password and forced STARTTLS, so where the site sends without them nothing went,
+        # while the screen said it had (the AI SDR film, 30 Oct).
+        from django.core.mail import EmailMultiAlternatives
+        from django.utils.html import strip_tags
 
-        if not (smtp_host and smtp_user and smtp_password):
-            logger.warning('AnalyticsAgent._send_email: SMTP not configured (EMAIL_HOST/USER/PASSWORD missing)')
-            return False
-
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', '') or getattr(settings, 'EMAIL_HOST_USER', '')
         try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From']    = f'AI Employee SDR <{from_email}>'
-            msg['To']      = to_email
-            msg.attach(MIMEText(html, 'html', 'utf-8'))
-
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP(smtp_host, smtp_port) as server:
-                server.ehlo()
-                server.starttls(context=ctx)
-                server.login(smtp_user, smtp_password)
-                server.sendmail(from_email, to_email, msg.as_string())
-
+            msg = EmailMultiAlternatives(subject, strip_tags(html), from_email, [to_email])
+            msg.attach_alternative(html, 'text/html')
+            msg.send()
             logger.info('AnalyticsAgent: email sent to %s subject="%s"', to_email, subject)
             return True
         except Exception as exc:

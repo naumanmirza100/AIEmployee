@@ -135,7 +135,7 @@ Lead Data: {lead_summary}
 
 Scoring model (total = 100 points):
 1. company_quality (0-30): Does the company have a professional website (0-10)? Active business presence / real company (0-10)? Clear service offerings / known industry (0-10)?
-2. contact_quality (0-20): Is this person a decision-maker (C-suite/VP/Director/Head) (0-10)? Do they have verified email and/or phone (0-10)?
+2. contact_quality (0-20): Is this person a decision-maker (C-suite/VP/Director/Head) (0-10)? Is an email and/or phone given (0-10)? Nothing has been verified: never call an email or phone "verified".
 3. business_fit (0-25): How well does the industry match ICP (0-15)? Does company size fit ICP range (0-10)?
 4. engagement_signals (0-15): Active LinkedIn presence (0-5)? Has buying signals or recent news (0-5)? Uses relevant technologies (0-5)?
 5. data_completeness (0-10): Is the profile complete — name, email, title, company, location all present (0-10)?
@@ -318,7 +318,7 @@ Score this lead now:"""
         if _get_field(lead, 'linkedin_url'):
             strengths.append("LinkedIn profile available for research")
         if not _get_field(lead, 'email'):
-            concerns.append("No verified email address")
+            concerns.append("No email address")
         if bd['company_quality'] < 15:
             concerns.append("Limited company information available")
 

@@ -89,7 +89,8 @@ const CompanyProfilePage = () => {
   };
 
   const setField = (name, val) => setForm((f) => ({ ...f, [name]: val }));
-  // Only an owner or admin may change the company's time zone: it moves everyone's leave on the calendar.
+  // Only an owner or admin may change the company's profile, its time zone (it moves everyone's leave on
+  // the calendar) included.
   const mayChangeZone = ['owner', 'admin'].includes(profile?.user?.role);
   const startEdit = () => {
     // Never set before: offer the zone this browser is in. Nothing is saved until Save is pressed.
@@ -206,7 +207,13 @@ const CompanyProfilePage = () => {
                 </div>
               </div>
 
-              {activeTab === 'profile' && (
+              {activeTab === 'profile' && !mayChangeZone && (
+                // The profile is changed by an owner or admin only (the server refuses anyone else).
+                <p className="shrink-0 inline-flex items-center gap-1.5 text-xs text-white/45" data-testid="company-profile-admins-only">
+                  <Lock className="h-3.5 w-3.5" /> Only an owner or admin can edit the profile
+                </p>
+              )}
+              {activeTab === 'profile' && mayChangeZone && (
                 <div className="shrink-0">
                   {!editing ? (
                     <Button onClick={startEdit} className="border-0 text-white"
@@ -427,7 +434,12 @@ const IntegrationsTab = () => {
               ? (gcal.googleEmail || 'Connected account')
               : 'Not connected'}
           </span>
-          {gcal.connected ? (
+          {gcal.mayManage === false ? (
+            // A server from before this check sends no mayManage: the buttons stay.
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-white/45 shrink-0" data-testid="gcal-admins-only">
+              <Lock className="h-3 w-3" /> An owner or admin connects it
+            </span>
+          ) : gcal.connected ? (
             <Button variant="outline" size="sm" onClick={handleDisconnect} disabled={working}
                     className="border-white/15 text-white/80 hover:text-white rounded-full shrink-0">
               {working ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}

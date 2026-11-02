@@ -1,14 +1,13 @@
 """Salesforce CRM connector — Contacts, Tasks (emails), Events (meetings), Notes.
 
-Credentials required in CRMIntegration.credentials:
+Credentials in CRMIntegration.credentials, from an External Client App with the client credentials flow on:
     {
-        "client_id":      "3MVG...",
-        "client_secret":  "...",
-        "username":       "user@example.com",
-        "password":       "MyPassword",
-        "security_token": "AbCdEf...",   # append to password for login
-        "domain":         "login"         # "login" (prod) or "test" (sandbox)
+        "instance_url":   "yourcompany.my.salesforce.com",   # the org's My Domain
+        "client_id":      "3MVG...",                         # Consumer Key
+        "client_secret":  "...",                             # Consumer Secret
     }
+Saved before 2 Nov 2026 (the username-password flow, which Salesforce is retiring):
+    {"client_id", "client_secret", "username", "password", "security_token", "domain": "login" | "test"}
 """
 from __future__ import annotations
 
@@ -18,7 +17,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError, is_blank
+from .base import BaseCRMConnector, CRMError, is_blank, network_error
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +36,47 @@ def _sf_datetime(dt) -> str:
     return dt.astimezone(dt_timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
+def _host(value: str) -> str:
+    """The org's sign-in host from what was typed: 'https://acme.my.salesforce.com/', the Lightning address people
+    copy from the browser ('acme.lightning.force.com'), or the old 'login' / 'test'."""
+    host = str(value or '').strip().lower()
+    host = host.split('://', 1)[-1].split('/', 1)[0]
+    if host.endswith('.lightning.force.com'):
+        host = host[:-len('.lightning.force.com')] + '.my.salesforce.com'
+    if '.' not in host:
+        host = f'{host or "login"}.salesforce.com'
+    return host
+
+
+def _sign_in_reason(resp, with_password: bool) -> str:
+    """Salesforce's sign-in refusal in words for the person connecting, from its error code. Never its raw text."""
+    try:
+        body = resp.json() or {}
+    except ValueError:
+        body = {}
+    error = str(body.get('error') or '')
+    detail = str(body.get('error_description') or '').lower()
+    if with_password:
+        return ('Salesforce refused the username and password. New Salesforce accounts no longer allow this way '
+                "of signing in: connect with an app's key and secret and your My Domain instead.")
+    if error in ('invalid_client_id', 'invalid_client'):
+        return "Salesforce doesn't know this key and secret. Copy both again from the app (Consumer Key and Secret)."
+    if error == 'unsupported_grant_type' or 'client credentials' in detail or 'run-as' in detail or 'user' in detail:
+        return ("Salesforce took the key but the app can't sign in by itself. In the app: tick Enable Client "
+                'Credentials Flow, and on its Policies tab set Run As to a user.')
+    if 'domain' in detail or resp.status_code == 404:
+        return 'Salesforce did not answer at this address. Use your My Domain, e.g. yourcompany.my.salesforce.com.'
+    return 'Salesforce refused the sign-in. Check the My Domain, key and secret, and try again.'
+
+
 class SalesforceConnector(BaseCRMConnector):
     """Salesforce REST API connector using the Username-Password OAuth2 flow."""
 
     def __init__(self, credentials: dict, timeout: int = DEFAULT_TIMEOUT):
-        required = ('client_id', 'client_secret', 'username', 'password', 'security_token')
+        if credentials.get('username') and credentials.get('password') and not credentials.get('instance_url'):
+            required = ('client_id', 'client_secret', 'username', 'password', 'security_token')    # saved before 2 Nov 2026
+        else:
+            required = ('instance_url', 'client_id', 'client_secret')
         missing = [k for k in required if not credentials.get(k)]
         if missing:
             raise CRMError(
@@ -57,17 +92,16 @@ class SalesforceConnector(BaseCRMConnector):
     # BaseCRMConnector interface
     # ------------------------------------------------------------------ #
 
-    def ping(self) -> bool:
-        try:
-            self._ensure_token()
-            resp = self._get(f'/services/data/{SF_API_VERSION}/limits')
-            return resp.status_code == 200
-        except CRMError:
-            return False
+    label = 'Salesforce'
+
+    def _ping(self) -> bool:
+        self._ensure_token()
+        resp = self._get(f'/services/data/{SF_API_VERSION}/limits')
+        return resp.status_code == 200
 
     def find_contact_by_email(self, email: str) -> Optional[dict]:
         self._ensure_token()
-        q = f"SELECT Id, FirstName, LastName, Email, Phone, Title FROM Contact WHERE Email = '{email.replace(chr(39), '')}' LIMIT 1"
+        q = f"SELECT Id, FirstName, LastName, Email, Phone, Title, AccountId FROM Contact WHERE Email = '{email.replace(chr(39), '')}' LIMIT 1"
         resp = self._get(f'/services/data/{SF_API_VERSION}/query', params={'q': q})
         records = (resp.json() or {}).get('records') or []
         if records:
@@ -77,9 +111,28 @@ class SalesforceConnector(BaseCRMConnector):
 
     def create_contact(self, email: str, properties: dict) -> str:
         self._ensure_token()
-        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Contact/',
-                          json=self._build_contact_payload(email, properties))
+        payload = self._build_contact_payload(email, properties)
+        account = self._account(properties.get('company'))
+        if account:
+            payload['AccountId'] = account
+        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Contact/', json=payload)
         return str((resp.json() or {}).get('id', ''))
+
+    def _account(self, company) -> Optional[str]:
+        """The Salesforce Account for a company name: found by exact name, or made. A contact's company is the
+        Account it belongs to; none was sent, so contacts reached Salesforce without their company, and a contact
+        with no Account is private to the user who made it (found filming, 2 Nov 2026)."""
+        name = str(company or '').strip()
+        if not name:
+            return None
+        literal = name.replace('\\', '\\\\').replace("'", "\\'")
+        found = self._get(f'/services/data/{SF_API_VERSION}/query',
+                          params={'q': f"SELECT Id FROM Account WHERE Name = '{literal}' LIMIT 1"})
+        records = (found.json() or {}).get('records') or []
+        if records and records[0].get('Id'):
+            return records[0]['Id']
+        made = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Account/', json={'Name': name[:255]})
+        return (made.json() or {}).get('id') or None
 
     def upsert_contact(self, email: str, properties: dict) -> str:
         self._ensure_token()
@@ -89,6 +142,11 @@ class SalesforceConnector(BaseCRMConnector):
 
         sf_id = existing['id']
         blanks = self._blanks_to_fill(existing.get('properties') or {}, properties)
+        # A contact with no Account gets the one for its company; one that has an Account keeps it.
+        if not is_blank(properties.get('company')) and is_blank((existing.get('properties') or {}).get('AccountId')):
+            account = self._account(properties['company'])
+            if account:
+                blanks['AccountId'] = account
         if blanks:
             self._patch(f'/services/data/{SF_API_VERSION}/sobjects/Contact/{sf_id}', json=blanks)
         return sf_id
@@ -102,6 +160,9 @@ class SalesforceConnector(BaseCRMConnector):
         direction: str = 'OUTBOUND',
     ) -> Optional[str]:
         self._ensure_token()
+        # No 'Type': the field is hidden in some Salesforce plans (Starter), and every email failed there with
+        # "No such column 'Type' on sobject of type Task" (live check, 2 Nov 2026). TaskSubtype marks it an email;
+        # an org without that field gets the task without it.
         task = {
             'WhoId': crm_contact_id,
             'Subject': (subject or '(no subject)')[:255],
@@ -109,9 +170,14 @@ class SalesforceConnector(BaseCRMConnector):
             'Status': 'Completed',
             'TaskSubtype': 'Email',
             'ActivityDate': _sf_datetime(sent_at)[:10],
-            'Type': 'Email',
         }
-        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Task/', json=task)
+        try:
+            resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Task/', json=task)
+        except CRMError as exc:
+            if exc.status_code != 400 or 'TaskSubtype' not in str(exc):
+                raise
+            plain = {key: value for key, value in task.items() if key != 'TaskSubtype'}
+            resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Task/', json=plain)
         return str((resp.json() or {}).get('id', '')) or None
 
     def log_meeting(
@@ -128,16 +194,33 @@ class SalesforceConnector(BaseCRMConnector):
                 end_time = start_time + timedelta(hours=1)
             else:
                 end_time = start_time
+        # Start and end only. 'DurationInMinutes': 60 went with them, so every half-hour meeting disagreed with itself
+        # and Salesforce refuses that (CO-161).
         event = {
             'WhoId': crm_contact_id,
             'Subject': (title or 'Meeting')[:255],
             'Description': (notes or '')[:32000],
             'StartDateTime': _sf_datetime(start_time),
             'EndDateTime': _sf_datetime(end_time),
-            'DurationInMinutes': 60,
         }
         resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Event/', json=event)
         return str((resp.json() or {}).get('id', '')) or None
+
+    def update_meeting(self, crm_meeting_id: str, title: str, start_time, end_time=None, notes: str = '',
+                       cancelled: bool = False) -> None:
+        """Moved: the Event's start and end. Cancelled: the Event is deleted (CO-275)."""
+        self._ensure_token()
+        path = f'/services/data/{SF_API_VERSION}/sobjects/Event/{crm_meeting_id}'
+        if cancelled:
+            self._request('DELETE', path)
+            return
+        if end_time is None and hasattr(start_time, 'timestamp'):
+            end_time = start_time + timedelta(minutes=30)
+        fields = {'Subject': (title or 'Meeting')[:255], 'StartDateTime': _sf_datetime(start_time),
+                  'EndDateTime': _sf_datetime(end_time)}
+        if notes:
+            fields['Description'] = notes[:32000]
+        self._patch(path, json=fields)
 
     def log_note(self, crm_contact_id: str, body: str) -> Optional[str]:
         self._ensure_token()
@@ -150,32 +233,84 @@ class SalesforceConnector(BaseCRMConnector):
         return str((resp.json() or {}).get('id', '')) or None
 
     # ------------------------------------------------------------------ #
+    # Deals: Salesforce opportunities, whose "pipeline" is the Stage picklist
+    # ------------------------------------------------------------------ #
+
+    #: Days ahead an opportunity's Close Date is set; Salesforce requires one.
+    CLOSE_IN_DAYS = 30
+
+    def list_pipelines(self) -> list:
+        self._ensure_token()
+        fields = (self._get(f'/services/data/{SF_API_VERSION}/sobjects/Opportunity/describe').json() or {}).get('fields') or []
+        stage = next((f for f in fields if f.get('name') == 'StageName'), {})
+        stages = [{'id': v.get('value'), 'label': v.get('label') or v.get('value')}
+                  for v in stage.get('picklistValues') or [] if v.get('active', True)]
+        return [{'id': 'opportunity', 'label': 'Opportunities', 'stages': stages}]
+
+    def create_deal(self, crm_contact_id: str, name: str, pipeline_id: str, stage_id: str) -> Optional[str]:
+        self._ensure_token()
+        from datetime import date
+        close = (date.today() + timedelta(days=self.CLOSE_IN_DAYS)).isoformat()
+        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Opportunity/',
+                          json={'Name': (name or 'New deal')[:120], 'StageName': stage_id, 'CloseDate': close})
+        opp = str((resp.json() or {}).get('id', ''))
+        if opp:
+            self._post(f'/services/data/{SF_API_VERSION}/sobjects/OpportunityContactRole/',
+                       json={'OpportunityId': opp, 'ContactId': crm_contact_id, 'IsPrimary': True})
+        return opp or None
+
+    def changed_contacts(self, since) -> list:
+        """Contacts with LastModifiedDate after `since`, oldest first, at most 2,000 a run."""
+        self._ensure_token()
+        q = ('SELECT Id, Email, FirstName, LastName, Phone, Title, Account.Name FROM Contact '
+             f'WHERE LastModifiedDate > {_sf_datetime(since)} ORDER BY LastModifiedDate LIMIT 2000')
+        records = (self._get(f'/services/data/{SF_API_VERSION}/query', params={'q': q}).json() or {}).get('records') or []
+        return [{'id': r.get('Id'), 'email': r.get('Email') or '', 'first_name': r.get('FirstName') or '',
+                 'last_name': r.get('LastName') or '', 'phone': r.get('Phone') or '', 'job_title': r.get('Title') or '',
+                 'company': ((r.get('Account') or {}).get('Name') or '')} for r in records]
+
+    # ------------------------------------------------------------------ #
     # Auth
     # ------------------------------------------------------------------ #
 
+    def _uses_password(self) -> bool:
+        """The old way, only when no My Domain was given: a connection changed to the new way keeps its old
+        fields in the merged credentials."""
+        return bool(self._creds.get('username') and self._creds.get('password') and not self._creds.get('instance_url'))
+
     def _ensure_token(self):
+        """Sign in. With an External Client App's key and secret and the org's My Domain (the client credentials
+        flow), as Salesforce now asks. Salesforce has switched the username-password flow off in new orgs and is
+        retiring it (2026); a connection saved that way still signs in that way while its org allows it."""
         if self._access_token:
             return
-        domain = self._creds.get('domain', 'login')
-        token_url = f'https://{domain}.salesforce.com/services/oauth2/token'
-        password = self._creds['password'] + self._creds.get('security_token', '')
-        data = {
-            'grant_type': 'password',
-            'client_id': self._creds['client_id'],
-            'client_secret': self._creds['client_secret'],
-            'username': self._creds['username'],
-            'password': password,
-        }
+        if self._uses_password():
+            token_url = f"https://{_host(self._creds.get('domain') or 'login')}/services/oauth2/token"
+            data = {
+                'grant_type': 'password',
+                'client_id': self._creds['client_id'],
+                'client_secret': self._creds['client_secret'],
+                'username': self._creds['username'],
+                'password': self._creds['password'] + self._creds.get('security_token', ''),
+            }
+        else:
+            token_url = f"https://{_host(self._creds['instance_url'])}/services/oauth2/token"
+            data = {
+                'grant_type': 'client_credentials',
+                'client_id': self._creds['client_id'],
+                'client_secret': self._creds['client_secret'],
+            }
         try:
             resp = requests.post(token_url, data=data, timeout=self._timeout)
         except requests.RequestException as exc:
-            raise CRMError(f'Salesforce auth network error: {exc}', retriable=True) from exc
+            raise network_error('Salesforce', exc) from exc
 
         if resp.status_code != 200:
             raise CRMError(
                 f'Salesforce auth failed ({resp.status_code}): {resp.text[:300]}',
                 retriable=resp.status_code >= 500,
-                status_code=resp.status_code,
+                status_code=401 if resp.status_code in (400, 401, 403) else resp.status_code,
+                reason=_sign_in_reason(resp, self._uses_password()),
             )
         body = resp.json()
         self._access_token = body['access_token']
@@ -200,8 +335,8 @@ class SalesforceConnector(BaseCRMConnector):
             out['LastName'] = (parts[-1] if parts else 'Unknown')[:80]
         if props.get('phone'):
             out['Phone'] = str(props['phone'])[:40]
-        # The company name is not sent. A Contact has no 'Company' field, and the
-        # 'AccountId': None that used to go with it would, on an update, have cut an
+        # A Contact has no 'Company' field: the company is its Account, found or made in
+        # create_contact. 'AccountId': None is never sent: on an update it would cut an
         # existing contact loose from its account.
         if props.get('job_title'):
             out['Title'] = str(props['job_title'])[:128]
@@ -250,7 +385,7 @@ class SalesforceConnector(BaseCRMConnector):
                 timeout=self._timeout,
             )
         except requests.RequestException as exc:
-            raise CRMError(f'Salesforce network error: {exc}', retriable=True) from exc
+            raise network_error('Salesforce', exc) from exc
 
         # 204 No Content is success for PATCH
         if resp.status_code in (200, 201, 204):
@@ -265,10 +400,13 @@ class SalesforceConnector(BaseCRMConnector):
                 status_code=resp.status_code,
             )
         if resp.status_code in (403,):
+            api_off = 'API_DISABLED_FOR_ORG' in resp.text
             raise CRMError(
                 f'Salesforce permission denied ({resp.status_code}): {resp.text[:200]}',
                 retriable=False,
                 status_code=resp.status_code,
+                reason=("This Salesforce plan doesn't let outside tools in (no API access). Enterprise and higher "
+                        'include it; smaller plans need the API add-on from Salesforce.') if api_off else None,
             )
         if resp.status_code == 429 or resp.status_code >= 500:
             raise CRMError(

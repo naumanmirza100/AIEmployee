@@ -240,6 +240,7 @@ const MarketingDashboard = () => {
   const handleCloseHowItWorks = () => {
     setHowItWorksOpen(false);
     markTutorialSeen(MARKETING_HOWITWORKS_KEY);
+    window.dispatchEvent(new Event('marketing-howitworks-closed'));   // OutreachCampaign's mailbox notice waits for it
   };
 
   const { glow: spotlightTour, tooltip: spotlightTooltip, dismiss: dismissNudge } = useTutorialNudge(MARKETING_TOUR_KEY);

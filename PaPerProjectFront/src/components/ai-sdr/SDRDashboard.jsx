@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   LayoutDashboard, Users, Mail, Calendar, BarChart3,
-  RefreshCw, Menu, Check, Settings,
+  RefreshCw, Menu, Check, Settings, Sparkles,
 } from 'lucide-react';
 
 import SDROverviewTab from './SDROverviewTab';
@@ -19,6 +19,7 @@ import SDROutreachTab from './SDROutreachTab';
 import SDRMeetingsTab from './SDRMeetingsTab';
 import SDRAnalyticsTab from './SDRAnalyticsTab';
 import SDRCRMSyncTab from './SDRCRMSyncTab';
+import SDREmailAssistantTab from './SDREmailAssistantTab';
 import SDRSettingsTab from './SDRSettingsTab';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 
@@ -28,6 +29,7 @@ const TAB_ITEMS = [
   { value: 'outreach',  icon: Mail,            label: 'Outreach' },
   { value: 'meetings',  icon: Calendar,        label: 'Meetings' },
   { value: 'analytics', icon: BarChart3,       label: 'Analytics' },
+  { value: 'email-assistant', icon: Sparkles,  label: 'Email Assistant' },
   { value: 'crm-sync',  icon: RefreshCw,       label: 'CRM Sync' },
   { value: 'settings',  icon: Settings,        label: 'Settings' },
 ];
@@ -38,6 +40,7 @@ const PATH_TO_TAB = {
   outreach:  'outreach',
   meetings:  'meetings',
   analytics: 'analytics',
+  'email-assistant': 'email-assistant',
   'crm-sync':'crm-sync',
   settings:  'settings',
 };
@@ -48,6 +51,7 @@ const TAB_TO_PATH = {
   outreach:  'outreach',
   meetings:  'meetings',
   analytics: 'analytics',
+  'email-assistant': 'email-assistant',
   'crm-sync':'crm-sync',
   settings:  'settings',
 };
@@ -91,6 +95,9 @@ const SDRDashboard = () => {
         </TabsContent>
         <TabsContent value="analytics" className="mt-4">
           <SDRAnalyticsTab />
+        </TabsContent>
+        <TabsContent value="email-assistant" className="mt-4">
+          <SDREmailAssistantTab />
         </TabsContent>
         <TabsContent value="crm-sync" className="mt-4">
           {/* CRM Sync is bought separately. Shown to everyone, connecting a CRM

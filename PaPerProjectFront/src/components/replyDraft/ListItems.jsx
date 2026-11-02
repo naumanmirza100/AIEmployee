@@ -1,7 +1,7 @@
 import React from 'react';
 import { Quote, Zap } from 'lucide-react';
 import { Avatar } from './SharedUI';
-import { INTEREST_STYLES, STATUS_STYLES } from './replyDraftConstants';
+import { CATEGORY_LABELS, INTEREST_STYLES, PRIORITY_STYLES, STATUS_STYLES } from './replyDraftConstants';
 import { formatRelative } from './replyDraftHelpers';
 
 export const InboxItem = ({ reply, active, onClick }) => {
@@ -14,6 +14,10 @@ export const InboxItem = ({ reply, active, onClick }) => {
     ? (reply.to_email || 'Unknown recipient')
     : (reply.from_name || reply.from_email || 'Unknown');
   const personEmail = isOutgoing ? reply.to_email : reply.from_email;
+  // The AI's triage, once it has read the mail: its sentence replaces the raw preview, and "Not Analyzed" (which
+  // only a draft used to change) gives way to the kind of email.
+  const priority = !isOutgoing && reply.priority ? PRIORITY_STYLES[reply.priority] : null;
+  const showInterest = !isOutgoing && (reply.interest_level !== 'not_analyzed' || !reply.category);
   return (
     <button
       onClick={onClick}
@@ -23,7 +27,10 @@ export const InboxItem = ({ reply, active, onClick }) => {
       <Avatar name={personName} email={personEmail} size="md" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2 mb-0.5">
-          <span className={`text-sm font-semibold truncate ${active ? 'text-white' : 'text-gray-100'}`}>
+          <span className={`text-sm font-semibold truncate flex items-center gap-1.5 ${active ? 'text-white' : 'text-gray-100'}`}>
+            {priority && (reply.priority === 'urgent' || reply.priority === 'high') && (
+              <span title={`${priority.label} priority`} className={`h-2 w-2 rounded-full shrink-0 ${priority.dot}`} />
+            )}
             {isOutgoing ? `To: ${personName}` : personName}
           </span>
           <span className="text-[10px] text-gray-500 shrink-0">{formatRelative(reply.replied_at)}</span>
@@ -31,13 +38,23 @@ export const InboxItem = ({ reply, active, onClick }) => {
         <div className="text-xs text-gray-300 truncate font-medium mb-1">
           {reply.subject || '(no subject)'}
         </div>
-        {reply.preview ? (
+        {(!isOutgoing && reply.ai_summary) || reply.preview ? (
           <div className="text-xs text-gray-500 line-clamp-2 leading-snug mb-1.5">
-            {reply.preview}
+            {(!isOutgoing && reply.ai_summary) || reply.preview}
           </div>
         ) : null}
         <div className="flex items-center gap-1.5 flex-wrap">
-          {!isOutgoing && (
+          {priority && reply.priority !== 'normal' && (
+            <span data-testid="rd-priority" className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${priority.className}`}>
+              {priority.label}
+            </span>
+          )}
+          {!isOutgoing && reply.category && (
+            <span data-testid="rd-category" className="inline-flex items-center text-[10px] font-medium text-cyan-200 px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+              {CATEGORY_LABELS[reply.category] || reply.category}
+            </span>
+          )}
+          {showInterest && (
             <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${style.className}`}>
               {style.label}
             </span>

@@ -34,8 +34,8 @@ def is_gone(employee) -> bool:
 
 def end_access(employee) -> dict:
     """Switch off this person's logins and remember which. Returns the record."""
-    from rest_framework.authtoken.models import Token
     from core.models import CompanyUser, CompanyUserToken
+    from core.sign_in import end_user_sessions
     from hr_agent.handover import dashboard_login
     from hr_agent.models import Employee
 
@@ -66,7 +66,7 @@ def end_access(employee) -> dict:
     # Platform staff are not a company's to switch off.
     for user in User.objects.filter(pk__in=user_ids, is_active=True, is_staff=False, is_superuser=False):
         User.objects.filter(pk=user.pk).update(is_active=False)
-        Token.objects.filter(user=user).delete()
+        end_user_sessions(user)
         record['user_ids'].append(user.pk)
 
     Employee.objects.filter(pk=employee.pk).update(access_ended=record)

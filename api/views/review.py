@@ -6,6 +6,9 @@ from django.db.models import Avg, Count
 
 from core.models import Review
 from api.serializers.review import ReviewSerializer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
@@ -31,10 +34,10 @@ def list_reviews(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('list_reviews failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch reviews',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -67,9 +70,9 @@ def get_reviews_summary(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('get_reviews_summary failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch reviews summary',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

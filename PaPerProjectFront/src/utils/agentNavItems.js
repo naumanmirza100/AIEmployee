@@ -17,7 +17,6 @@ import {
   HelpCircle,
   Calendar,
   Star,
-  FlaskConical,
   Settings,
   FileText,
   MessageSquareText,
@@ -125,7 +124,6 @@ const ALL_AGENTS = [
       { label: 'Interviews',       icon: Calendar,        path: '/recruitment/interviews' },
       { label: 'Workflows',        icon: Workflow,        path: '/recruitment/workflows' },
       { label: 'Saved Prompts',    icon: Star,            path: '/recruitment/saved-prompts' },
-      { label: 'API Tester',       icon: FlaskConical,    path: '/recruitment/api-tester' },
       {
         label: 'Settings', icon: Settings, path: '/recruitment/settings/email',
         basePath: '/recruitment/settings',
@@ -222,6 +220,7 @@ const ALL_AGENTS = [
     children: [
       { label: 'Dashboard', icon: LayoutDashboard, path: '/reply-draft/dashboard' },
       { label: 'Emails',    icon: Mail,            path: '/reply-draft/emails' },
+      { label: 'Ask the inbox', icon: MessageSquare, path: '/reply-draft/ask' },
     ],
   },
   {
@@ -233,6 +232,7 @@ const ALL_AGENTS = [
       { label: 'Outreach',  icon: Mail,            path: '/ai-sdr/outreach' },
       { label: 'Meetings',  icon: Calendar,        path: '/ai-sdr/meetings' },
       { label: 'Analytics', icon: BarChart3,       path: '/ai-sdr/analytics' },
+      { label: 'Email Assistant', icon: Sparkles,  path: '/ai-sdr/email-assistant' },
       { label: 'CRM Sync',  icon: RefreshCw,       path: '/ai-sdr/crm-sync' },
       { label: 'Settings',  icon: Settings,        path: '/ai-sdr/settings' },
       { label: 'Do-not-email list', icon: MailX,   path: '/company/settings/do-not-email' },

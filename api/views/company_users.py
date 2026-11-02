@@ -111,8 +111,9 @@ def _hr_record_for_new_login(company_user, data):
 
 def _new_login(company_user, data):
     """Make an employee login from the Add User form's fields: the checks and the records behind
-    `create_user`, shared with the Excel import. Returns (user, record, token), or the refusal as a
-    Response."""
+    `create_user`, shared with the Excel import. Returns (user, record), or the refusal as a
+    Response. No sign-in token is made: one used to be made and handed to the admin who added the
+    person, which let that admin act as them. A session starts only when the person signs in."""
 
     # Validate required fields
     email = (data.get('email') or '').strip().lower()
@@ -307,11 +308,8 @@ def _new_login(company_user, data):
         if data.get('location'):
             profile.location = data.get('location')
         profile.save()
-    
-    # Generate token for the new user (optional - for auto-login)
-    from rest_framework.authtoken.models import Token
-    token, _ = Token.objects.get_or_create(user=user)
-    return user, record, token
+
+    return user, record
 
 
 @api_view(['POST'])
@@ -332,7 +330,7 @@ def create_user(request):
         made = _new_login(company_user, data)
         if isinstance(made, Response):
             return made
-        user, record, token = made
+        user, record = made
 
         serializer = UserListSerializer(user)
         
@@ -341,7 +339,6 @@ def create_user(request):
             'message': 'User created successfully',
             'data': {
                 'user': serializer.data,
-                'token': token.key,  # Return token for potential auto-login
                 'employee_id': record.id if record is not None else None,
             }
         }, status=status.HTTP_201_CREATED)
@@ -650,8 +647,8 @@ def delete_user(request, userId):
                    previous_status=previous, access=hr_access.summary(record))
         # With no record to speak for it, or one already offboarded, the login is switched off directly.
         if User.objects.filter(pk=user.pk, is_active=True).update(is_active=False):
-            from rest_framework.authtoken.models import Token
-            Token.objects.filter(user_id=user.pk).delete()
+            from core.sign_in import end_user_sessions
+            end_user_sessions(user.pk)
 
         return Response({
             'status': 'success',

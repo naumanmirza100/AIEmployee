@@ -42,6 +42,9 @@ export default function CrmSyncPage() {
   }
 
   const bought = purchasedModules.includes('crm_sync_agent');
+  // What it carries comes from AI SDR, Reply Draft, Frontline and Marketing; with none of them, a connected CRM stayed
+  // empty and nothing said why (CO-207). Marketing was left out: a company with only it was told there was nothing.
+  const feeders = ['ai_sdr_agent', 'reply_draft_agent', 'frontline_agent', 'marketing_agent'].filter((m) => purchasedModules.includes(m));
   // Had it and lost it (a failed card, or it ended): say which, not "not part of your plan".
   const lapsed = allPurchases.find((p) => p.module_name === 'crm_sync_agent')?.status;
 
@@ -61,6 +64,16 @@ export default function CrmSyncPage() {
           navItems={getAgentNavItems(purchasedModules, 'crm-sync', navigate)}
         />
         <div className="container mx-auto px-4 sm:px-10 py-6 max-w-full">
+          {bought && feeders.length === 0 && (
+            <div data-testid="crm-needs-agent" className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+              CRM Sync sends your CRM what the <b>AI SDR</b>, <b>Reply Draft</b>, <b>Frontline</b> and{' '}
+              <b>Marketing</b> agents do: leads, emails, calls, replies, customer mail, support customers and tickets,
+              and campaign replies. Your company has none of them yet, so there is nothing to send.{' '}
+              <button type="button" className="underline" onClick={() => navigate('/company/dashboard/ai-agents')}>
+                See AI agents
+              </button>
+            </div>
+          )}
           {bought ? <SDRCRMSyncTab /> : lapsed ? (
             <div className="flex justify-center pt-10">
               <AgentLocked title="CRM Sync" moduleKey="crm_sync_agent" status={lapsed} />
@@ -70,7 +83,8 @@ export default function CrmSyncPage() {
               <Lock className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
               <h1 className="text-lg font-semibold text-foreground">CRM Sync is not part of your plan</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                It sends contacts, emails, replies and meetings to HubSpot, Salesforce or Pipedrive.
+                It sends what AI SDR, Reply Draft, Frontline and Marketing do (contacts, emails, calls, replies,
+                customer mail, support tickets, campaign replies) to HubSpot, Salesforce or Pipedrive.
               </p>
               <Button className="mt-4 w-full" onClick={() => navigate('/company/dashboard/ai-agents')}>
                 See AI agents

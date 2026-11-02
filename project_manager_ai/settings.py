@@ -364,6 +364,9 @@ MIDDLEWARE = [
     # Sits before CommonMiddleware (per Django docs) and after security.
     # Streamed Q&A answers are left uncompressed, or they arrive all at once.
     'api.middleware.gzip.GZipExceptStreamsMiddleware',
+    # Server errors from the API carry no exception text to the caller; it goes to the log (CO-271).
+    # After gzip in this list, so it reads the reply before it is compressed.
+    'api.middleware.error_text.ServerErrorTextMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware (should be early)
      'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -1098,6 +1101,19 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 300.0,  # Every 5 minutes
         'options': {'expires': 600}
     },
+
+    # Reply Draft: the AI reads the new mail (category, priority, one sentence) and tells about urgent mail, every
+    # 5 minutes after the mailbox read; and each mailbox's day by email, at 08:05 Pakistan time.
+    'reply-draft-triage-inbox': {
+        'task': 'reply_draft_agent.tasks.triage_inbox_task',
+        'schedule': 300.0,
+        'options': {'expires': 600},
+    },
+    'reply-draft-daily-digest': {
+        'task': 'reply_draft_agent.tasks.daily_inbox_digest_task',
+        'schedule': _crontab(hour=3, minute=5),
+        'options': {'expires': 6 * 3600},
+    },
     
     # There is no separate "retry failed emails" job, on purpose. The sequence sender
     # above does not move a contact forward when a send fails, so it tries that step
@@ -1359,6 +1375,13 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 3600.0,
         'options': {'expires': 7200},
     },
+    # Changes made in the CRM (names, phones, job titles, companies), copied back for the CRMs that have it on —
+    # every 15 minutes.
+    'crm-pull-changes': {
+        'task': 'crm_sync_agent.tasks.pull_crm_changes',
+        'schedule': 900.0,
+        'options': {'expires': 1800},
+    },
     # Audit log retention — weekly purge of rows older than the configured
     # window (default 730 days). Prevents unbounded growth.
     'hr-purge-audit-log': {
@@ -1425,7 +1448,8 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'core.drf_exceptions.key_service_exception_handler',
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.TokenAuthentication',
+        # One token per sign-in, ended when unused for SESSION_IDLE_DAYS (CO-270).
+        'api.authentication.EmployeeTokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -1468,6 +1492,8 @@ REST_FRAMEWORK = {
         'hr_crud': '1000/hour',
         # AI Executive Meeting Assistant throttles
         'exec_llm': '30/hour',
+        # The Company Assistant (two AI calls a question), per login.
+        'assistant_llm': '120/hour',
         # As Project Manager: the overview alone makes three list calls and is refreshed
         # from many places, and the people search sends a call per letter typed.
         'exec_crud': '1000/hour',
@@ -1490,3 +1516,7 @@ REST_FRAMEWORK = {
 _num_proxies = os.getenv('NUM_PROXIES', '').strip()
 if _num_proxies.isdigit():
     REST_FRAMEWORK['NUM_PROXIES'] = int(_num_proxies)
+
+# A sign-in token that has not been used for this many days stops working (core/sign_in.py, CO-270).
+_idle_days = os.getenv('SESSION_IDLE_DAYS', '').strip()
+SESSION_IDLE_DAYS = int(_idle_days) if _idle_days.isdigit() and int(_idle_days) > 0 else 30

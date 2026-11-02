@@ -201,10 +201,17 @@ class ModuleAccessMiddleware:
 
     @staticmethod
     def _company_for_auth_user_token(token_key):
+        # Sessions are UserTokens since CO-270; a DRF token from before is still read here, and
+        # becomes a UserToken when DRF authenticates the request.
         try:
-            from rest_framework.authtoken.models import Token
-            token = Token.objects.select_related('user').get(key=token_key)
+            from core.models import UserToken
+            token = UserToken.objects.select_related('user').filter(key=token_key).first()
+            if token is None:
+                from rest_framework.authtoken.models import Token
+                token = Token.objects.select_related('user').filter(key=token_key).first()
         except Exception:
+            return None
+        if token is None:
             return None      # invalid token — let DRF produce the 401
         return ModuleAccessMiddleware._company_for_django_user(token.user)
 

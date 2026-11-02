@@ -9,6 +9,9 @@ from django.core.files.base import ContentFile
 from core.models import ContactMessage, Complaint
 from api.serializers.contact import ContactMessageSerializer, ComplaintSerializer
 from api.permissions import IsAdmin
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
@@ -60,10 +63,10 @@ def submit_contact_form(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        logger.exception('submit_contact_form failed')
         return Response({
             'status': 'error',
             'message': 'Failed to submit contact form',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -105,10 +108,10 @@ def submit_complaint(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        logger.exception('submit_complaint failed')
         return Response({
             'status': 'error',
             'message': 'Failed to submit complaint',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

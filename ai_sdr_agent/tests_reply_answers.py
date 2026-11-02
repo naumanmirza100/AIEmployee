@@ -22,7 +22,7 @@ from core.models import Company, CompanyUser
 from project_manager_agent.models import PMNotification
 
 WANTS_MORE = {'action': 'send_info', 'category': 'wants_more_info', 'label': 'Wants more info'}
-SAYS_STOP = {'action': 'stop', 'category': 'not_interested', 'label': 'Not interested'}
+SAYS_STOP = {'action': 'unsubscribe', 'category': 'unsubscribe', 'label': 'Unsubscribe'}
 
 
 class ReplyAnswersTestCase(SDRBase):
@@ -99,10 +99,9 @@ class HeldForAPersonTests(ReplyAnswersTestCase):
         writer = mock.MagicMock()
         writer.generate_more_info_email.return_value = {'subject': 'S', 'body': 'B'}
         sender = mock.MagicMock()
-        with mock.patch('ai_sdr_agent.agents.email_assistant_agent.EmailAssistantAgent', return_value=writer), \
-                mock.patch.object(views, '_get_outreach_agent', return_value=sender):
-            result = views._apply_reply_action(self.cu, self.campaign, self.enrolment, self.lead, WANTS_MORE,
-                                               'tell me more')
+        # The button hands its own agents to the shared reply rules (ai_sdr_agent/reply_actions.py).
+        result = views._apply_reply_action(self.cu, self.campaign, self.enrolment, self.lead, WANTS_MORE,
+                                           'tell me more', email_agent=writer, outreach_agent=sender)
         sender.send_email.assert_not_called()
         self.assertEqual((result['action'], result['answer_held'], result['info_email_sent']),
                          ('answer_waiting', True, False))
@@ -238,7 +237,8 @@ class WhatTheAIIsToldTests(ReplyAnswersTestCase):
             choices=[mock.Mock(message=mock.Mock(content='{"subject": "s", "body": "b"}'))])
         with mock.patch('ai_sdr_agent.agents.sdr_key_resolver.record_sdr_usage'):
             writer.generate_more_info_email(self.lead, self.campaign, 'tell me more')
-        return writer.groq_client.chat.completions.create.call_args.kwargs['messages'][0]['content']
+        # The first call writes the answer; the second checks it against the facts.
+        return writer.groq_client.chat.completions.create.call_args_list[0].kwargs['messages'][0]['content']
 
     def test_the_campaigns_own_description_is_what_it_may_use(self):
         prompt = self.prompt_for('Payroll software for clinics. Runs payroll in ten minutes.')

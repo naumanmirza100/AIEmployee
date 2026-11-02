@@ -12,6 +12,9 @@ from rest_framework.response import Response
 
 from core.api_key_service import supported_providers
 from core.models import Agent, AdminPricingConfig
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
@@ -68,8 +71,8 @@ def list_agents(request):
         return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
 
     except Exception as e:
+        logger.exception('list_agents failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch agents',
-            'error': str(e),
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

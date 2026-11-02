@@ -94,24 +94,16 @@ class IsCompanyAdmin(permissions.BasePermission):
 
 
 class IsCompanyUserOnly(permissions.BasePermission):
-    """Allow access only to authenticated CompanyUser instances (logged in through company login)."""
-    
+    """Allow access only to authenticated CompanyUser instances (logged in through company login).
+
+    An employee login (auth.User) used to pass too. That was safe only because every view using
+    this also names the dashboard-token sign-in, which never yields an auth.User (CO-220); now
+    the permission says what its name says by itself."""
+
     def has_permission(self, request, view):
-        # Check if request.user exists
-        if not request.user:
-            return False
-        
-        # Check if user is a CompanyUser instance (from CompanyUserTokenAuthentication)
         from core.models import CompanyUser
-        if isinstance(request.user, CompanyUser):
-            # CompanyUser is authenticated if it exists and is active
-            return request.user.is_active
-        
-        # If it's a regular User, check is_authenticated
-        if hasattr(request.user, 'is_authenticated'):
-            return request.user.is_authenticated
-        
-        return False
+        user = getattr(request, 'user', None)
+        return isinstance(user, CompanyUser) and bool(user.is_active)
 
 
 class OptionalAuth(permissions.BasePermission):

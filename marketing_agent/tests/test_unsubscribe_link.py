@@ -69,6 +69,13 @@ class UnsubscribeLinkTests(MarketingTestCase):
         self.assertRegex(html, r'href="https://api\.example\.test/api/marketing/unsubscribe/')
         self.assertNotRegex(html, r'url=[^"]*marketing/unsubscribe')
 
+    def test_the_open_counter_is_one_picture_not_hidden(self):
+        """Found in the Gmail check of 29 Oct: all three emails went to Spam; two hidden pictures are a spam sign."""
+        _, message = self.send()
+        html = message.alternatives[0][0]
+        self.assertEqual(len(re.findall(r'<img [^>]*src="https://api\.example\.test/token\?t=', html)), 1)
+        self.assertNotRegex(html, r'display:\s*none|visibility:\s*hidden')
+
     def test_the_footer_goes_inside_the_body(self):
         _, message = self.send()
         html = message.alternatives[0][0]

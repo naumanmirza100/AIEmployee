@@ -17,11 +17,11 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.contrib.auth.hashers import make_password, check_password
-from rest_framework.authtoken.models import Token
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from api.serializers.company import CompanySerializer
+from core import sign_in
 from core.models import Company, CompanyUser, CompanyRegistrationToken, CompanyUserToken
 
 logger = logging.getLogger(__name__)
@@ -114,11 +114,11 @@ def verify_registration_token(request):
             }
         }, status=status.HTTP_200_OK)
     
-    except Exception as e:
+    except Exception:
+        logger.exception('verify_registration_token failed')
         return Response({
             'status': 'error',
             'message': 'Failed to verify token',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -130,7 +130,6 @@ def register_company_user(request):
     try:
         data = request.data
         token = data.get('token')
-        email = data.get('email')
         password = data.get('password')
         full_name = data.get('fullName') or data.get('full_name', '')
 
@@ -163,20 +162,27 @@ def register_company_user(request):
 
         company = registration_token.company
 
-        # Email/name come from the company signup — no need to re-enter them.
-        # Fall back to the company's own email/name when not provided.
-        if not email:
-            email = company.email
+        # The first login is always made at the address the link was emailed to (CO-99). An address
+        # sent by the browser used to be taken as it came, so a sign-up link could make a login at
+        # any address, even one that already had a dashboard login at another company; sign-in and
+        # "Forgot password" then picked one of the two. More logins are added from Logins & roles.
+        email = (company.email or '').strip()
         if not full_name:
             full_name = company.name
-        
-        # Check if email already exists for this company
-        if CompanyUser.objects.filter(company=company, email=email).exists():
+        if not email:
             return Response({
                 'status': 'error',
-                'message': 'Email already registered for this company'
+                'message': 'This company has no email address to make the login with. Contact support.'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        # One dashboard login per address, across every company, as on Logins & roles.
+        if CompanyUser.objects.filter(email__iexact=email).exists():
+            return Response({
+                'status': 'error',
+                'message': 'That address already has a dashboard login. Sign in with it, or sign the '
+                           'company up with another address.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # The first login of a company is the person who set it up, so they get
         # `admin` — otherwise nobody could ever reach the admin-only endpoints,
         # since the product has no screen for changing a role. Later logins get
@@ -196,9 +202,9 @@ def register_company_user(request):
         registration_token.used_at = timezone.now()
         registration_token.save()
         
-        # Generate or get authentication token for the newly registered user
-        auth_token, created = CompanyUserToken.objects.get_or_create(company_user=company_user)
-        
+        # A token for this sign-in (CO-270)
+        auth_token = sign_in.new_dashboard_token(company_user)
+
         return Response({
             'status': 'success',
             'message': 'Company account registered successfully',
@@ -215,11 +221,11 @@ def register_company_user(request):
             }
         }, status=status.HTTP_201_CREATED)
     
-    except Exception as e:
+    except Exception:
+        logger.exception('register_company_user failed')
         return Response({
             'status': 'error',
             'message': 'Failed to register company account',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -310,7 +316,6 @@ def company_signup(request):
         return Response({
             'status': 'error',
             'message': 'Failed to create account',
-            'error': str(e),
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -330,7 +335,13 @@ def login_company_user(request):
                 'status': 'error',
                 'message': 'Email and password are required'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        # Wrong passwords are counted on the account as well as per caller (CO-100).
+        email = str(email)
+        if sign_in.is_locked('dashboard', email):
+            return Response({'status': 'error', 'message': sign_in.LOCKED_MESSAGE},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         # Find company user
         try:
             if company_id:
@@ -345,18 +356,21 @@ def login_company_user(request):
                 company_user = qs.first()
                 company = company_user.company
         except (CompanyUser.DoesNotExist, Company.DoesNotExist):
+            sign_in.wrong_password('dashboard', email)
             return Response({
                 'status': 'error',
                 'message': 'Invalid email or password'
             }, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         # Verify password
         if not check_password(password, company_user.password_hash):
+            sign_in.wrong_password('dashboard', email)
             return Response({
                 'status': 'error',
                 'message': 'Invalid email or password'
             }, status=status.HTTP_401_UNAUTHORIZED)
-        
+        sign_in.right_password('dashboard', email)
+
         # Check if user is active
         if not company_user.is_active:
             return Response({
@@ -368,9 +382,9 @@ def login_company_user(request):
         company_user.last_login = timezone.now()
         company_user.save()
         
-        # Generate or get token
-        token, created = CompanyUserToken.objects.get_or_create(company_user=company_user)
-        
+        # A token for this sign-in only: each device signs out on its own (CO-270)
+        token = sign_in.new_dashboard_token(company_user)
+
         return Response({
             'status': 'success',
             'message': 'Login successful',
@@ -387,11 +401,11 @@ def login_company_user(request):
             }
         }, status=status.HTTP_200_OK)
     
-    except Exception as e:
+    except Exception:
+        logger.exception('login_company_user failed')
         return Response({
             'status': 'error',
             'message': 'Failed to login',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -399,11 +413,9 @@ def login_company_user(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def logout_company_user(request):
-    """Invalidate the company user's auth token."""
-    try:
-        CompanyUserToken.objects.filter(company_user=request.user).delete()
-    except Exception:
-        pass
+    """Sign out this device only: its own token is deleted, other devices stay signed in (CO-270)."""
+    if isinstance(request.auth, CompanyUserToken):
+        request.auth.delete()
     return Response({'status': 'success', 'message': 'Logged out successfully.'}, status=status.HTTP_200_OK)
 
 
@@ -453,12 +465,20 @@ def get_company_profile(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def update_company_profile(request):
-    """Update the company profile. Email is intentionally NOT editable here."""
+    """Update the company profile. Email is intentionally NOT editable here.
+
+    For an owner or admin only (CO-97), like the AI keys, CRM connections and holidays: any login
+    could rename the company or change its phone, website and address."""
     company_user = request.user
     company = company_user.company
     if not company:
         return Response({'status': 'error', 'message': 'No company associated with this account.'},
                         status=status.HTTP_404_NOT_FOUND)
+    from api.permissions import IsCompanyAdmin
+    if company_user.role not in IsCompanyAdmin.ADMIN_ROLES:
+        return Response({'status': 'error',
+                         'message': "Only an owner or admin can change the company's profile."},
+                        status=status.HTTP_403_FORBIDDEN)
 
     data = request.data
     # Only these fields are editable — email is excluded on purpose.

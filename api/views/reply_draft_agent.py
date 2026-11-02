@@ -6,6 +6,7 @@ Resolves the CompanyUser to a Django User (same bridge marketing uses) because
 the underlying models (Lead, Reply, EmailAccount) are keyed on User.
 """
 import base64
+import json
 import logging
 import re
 from datetime import datetime, timedelta
@@ -25,6 +26,8 @@ from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
 from reply_draft_agent.models import ReplyDraft, InboxEmail, InboxAttachment, ReplyDraftAttachment
 from reply_draft_agent.tasks import delete_reply_draft_account_data
 from reply_draft_agent.permissions import company_has_module
+from reply_draft_agent.insights import (ask_inbox as _ask_inbox, can_summarize, summarize_attachment as
+                                        _summarize_attachment, summarize_conversation as _summarize_conversation)
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +294,16 @@ def _rewrite_cid_refs(html, attachments):
     return _CID_REF_RE.sub(_replace, html)
 
 
+def _stored_json(text):
+    """A summary the AI made, as stored (JSON), or None."""
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
 def _serialize_inbox_email(m, *, include_body=False):
     """Serialize an InboxEmail row. See _serialize_reply for ``include_body`` semantics.
 
@@ -319,8 +332,17 @@ def _serialize_inbox_email(m, *, include_body=False):
         'campaign': '',
         'analysis': m.analysis or '',
         'thread_key': getattr(m, 'thread_key', '') or '',
+        'reply_to': getattr(m, 'reply_to', '') or '',
+        # Triage, by the AI as the mail arrived: empty until it has been read.
+        'category': getattr(m, 'category', '') or '',
+        'priority': getattr(m, 'priority', '') or '',
+        'ai_summary': getattr(m, 'ai_summary', '') or '',
+        'needs_reply': getattr(m, 'needs_reply', None),
+        'triaged': bool(getattr(m, 'triaged_at', None)),
     }
     if include_body:
+        out['thread_summary'] = _stored_json(getattr(m, 'thread_summary', ''))
+        out['thread_summary_count'] = getattr(m, 'thread_summary_count', 0) or 0
         out['body'] = m.body or ''
         body_html = getattr(m, 'body_html', '') or ''
         # Frontend uses this to decide whether to call the lazy-fetch
@@ -372,6 +394,8 @@ def _serialize_inbox_email(m, *, include_body=False):
                 'content_type': att.content_type,
                 'size_bytes': att.size_bytes,
                 'download_url': f'/api/reply-draft/inbox/{m.id}/attachments/{att.id}/download',
+                'summary': _stored_json(getattr(att, 'summary', '')),
+                'can_summarize': can_summarize(att.filename, att.content_type),
             })
         out['attachments'] = attachments
 
@@ -463,8 +487,10 @@ def _serialize_draft(d):
         to_name = _sender_name(d.lead)
         to_company = d.lead.company
     elif d.inbox_email_id and d.inbox_email:
-        to_email = d.inbox_email.from_email
-        to_name = d.inbox_email.from_name
+        # The answer goes to Reply-To when the email had one (a web form's customer), and the reviewer is shown
+        # both addresses (CO-205).
+        to_email = d.inbox_email.reply_to or d.inbox_email.from_email
+        to_name = '' if d.inbox_email.reply_to else d.inbox_email.from_name
         to_company = ''
     elif getattr(d, 'compose_to_email', ''):
         # Fresh-compose draft (no source email). The recipient is whatever
@@ -518,7 +544,21 @@ def _serialize_draft(d):
         # distinguish reply vs compose drafts without an extra round-trip.
         'body_format': getattr(d, 'body_format', 'text') or 'text',
         'compose_to_email': getattr(d, 'compose_to_email', '') or '',
+        # The email came From another address than the one the answer goes to (Reply-To).
+        'original_from_email': d.inbox_email.from_email if d.inbox_email_id and d.inbox_email else '',
+        'reply_to_used': bool(d.inbox_email_id and d.inbox_email and d.inbox_email.reply_to),
+        'approved_by': _login_name(d.approved_by_id),
+        'sent_by': _login_name(d.sent_by_id),
     }
+
+
+def _login_name(user_id):
+    """The name of the dashboard login behind a user record, for "approved by" and "sent by"."""
+    if not user_id:
+        return ''
+    from core.models import CompanyUser
+    login = CompanyUser.objects.filter(login_user_id=user_id).only('full_name', 'email').first()
+    return (login.full_name or login.email) if login else ''
 
 
 def _parse_days_filter(value):
@@ -622,11 +662,28 @@ def dashboard(request):
             'drafts_failed': drafts_qs.filter(status='failed').count(),
         }
 
+        # What needs someone, from the AI's triage of the last week's mail: urgent mail, mail waiting for an
+        # answer that nobody has answered, and the week by kind.
+        week = inbox_pool.filter(received_at__gte=timezone.now() - timedelta(days=7))
+        answered = ReplyDraft.objects.filter(owner_id__in=user_ids, inbox_email__in=week, status='sent') \
+            .values('inbox_email_id')
+        waiting = week.filter(needs_reply=True).exclude(id__in=answered)
+        needs_you = {
+            'urgent': week.filter(priority='urgent').exclude(id__in=answered).count(),
+            'waiting_for_answer': waiting.count(),
+            'not_read_yet': week.filter(triaged_at__isnull=True).count(),
+            'by_category': {row['category']: row['c'] for row in week.exclude(category='').order_by()
+                            .values('category').annotate(c=Count('id'))},
+            'top': [_serialize_inbox_email(m) for m in week.filter(priority__in=('urgent', 'high'))
+                    .exclude(id__in=answered).order_by('-received_at')[:5]],
+        }
+
         recent_drafts = list(drafts_qs.select_related('lead', 'inbox_email').order_by('-created_at')[:10])
         return Response({
             'status': 'success',
             'data': {
                 'stats': stats,
+                'needs_you': needs_you,
                 'recent_drafts': [_serialize_draft(d) for d in recent_drafts],
             }
         }, status=status.HTTP_200_OK)
@@ -842,7 +899,7 @@ def list_inbox_attachments(request, email_id):
     is_bounce = _is_bounce_email(email)
     payload = []
     for att in InboxAttachment.objects.filter(inbox_email_id=email.id).only(
-        'id', 'filename', 'content_type', 'size_bytes', 'is_inline', 'created_at'
+        'id', 'filename', 'content_type', 'size_bytes', 'is_inline', 'created_at', 'summary'
     ):
         # Inline images are shown in the list too (downloadable), matching
         # the detail serializer; non-image inline parts stay hidden.
@@ -859,6 +916,8 @@ def list_inbox_attachments(request, email_id):
             'size_bytes': att.size_bytes,
             'created_at': att.created_at.isoformat() if att.created_at else None,
             'download_url': f'/api/reply-draft/inbox/{email.id}/attachments/{att.id}/download',
+            'summary': _stored_json(att.summary),
+            'can_summarize': can_summarize(att.filename, att.content_type),
         })
     return Response({'status': 'success', 'data': payload})
 
@@ -983,6 +1042,10 @@ def fetch_inbox_attachments(request, email_id):
                 'content_type': att.content_type,
                 'size_bytes': att.size_bytes,
                 'download_url': f'/api/reply-draft/inbox/{inbox.id}/attachments/{att.id}/download',
+                # As in the email's own serializer: without these an attachment fetched on first open had no
+                # "Summarise this file" (the Reply Draft film, 30 Oct).
+                'summary': _stored_json(getattr(att, 'summary', '')),
+                'can_summarize': can_summarize(att.filename, att.content_type),
             })
         return out
 
@@ -1059,20 +1122,28 @@ def fetch_inbox_attachments(request, email_id):
         # adding them produces zero matches on Gmail. Quote so Message-IDs
         # with special characters don't break the SEARCH command.
         mid_for_search = inbox.message_id.strip().lstrip('<').rstrip('>')
+        # A folder that could not be opened, searched or read is not "not there": the email was marked as having
+        # no attachments for good after one failed try (CO-250).
+        probe_failed = False
         for folder in folders_to_try:
             try:
                 folder_arg = f'"{folder}"' if folder != 'INBOX' else 'INBOX'
                 status_sel, _ = mail.select(folder_arg, readonly=True)
                 if status_sel != 'OK':
+                    probe_failed = True
                     continue
                 status_search, search_data = mail.search(
                     None, 'HEADER', 'Message-ID', f'"{mid_for_search}"'
                 )
-                if status_search != 'OK' or not search_data or not search_data[0]:
+                if status_search != 'OK':
+                    probe_failed = True
+                    continue
+                if not search_data or not search_data[0]:
                     continue
                 eid = search_data[0].split()[0]
-                status_fetch, msg_data = mail.fetch(eid, '(RFC822)')
+                status_fetch, msg_data = mail.fetch(eid, '(BODY.PEEK[])')
                 if status_fetch != 'OK':
+                    probe_failed = True
                     continue
                 # imaplib returns a list mixing tuples and parens — the
                 # second element of the first tuple is the body bytes.
@@ -1083,17 +1154,27 @@ def fetch_inbox_attachments(request, email_id):
                 if msg_obj is not None:
                     break
             except Exception as inner_e:
+                probe_failed = True
                 logger.warning(
                     'fetch_inbox_attachments: probe failed in %r for email %s: %s',
                     folder, inbox.id, inner_e,
                 )
                 continue
 
+        if msg_obj is None and probe_failed:
+            # Tried again on the next open.
+            return Response({
+                'status': 'error',
+                'message': 'The mailbox could not be searched just now, so the attachments are not shown. '
+                           'Open the email again in a minute.',
+                'error': 'mailbox_search_failed',
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         if msg_obj is None:
-            # Email is no longer on the IMAP server (deleted/expunged) —
-            # mark as fetched so we don't retry on every open.
+            # Searched everywhere without an error and not there: archived, moved or deleted. Said on screen, and
+            # not tried again.
             InboxEmail.objects.filter(pk=inbox.pk).update(attachments_fetched=True)
-            return Response({'status': 'success', 'data': [], 'fetched': True})
+            return Response({'status': 'success', 'data': [], 'fetched': True, 'missing': True,
+                             'message': 'The original is no longer in the Inbox, so its attachments cannot be shown.'})
 
         # Reuse the sync command's attachment walker so behavior stays
         # identical to what an inline-extracted email would have produced.
@@ -1446,7 +1527,8 @@ def generate_draft(request):
                         status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        agent = ReplyDraftAgent(user=user, company_id=request.user.company_id)
+        agent = ReplyDraftAgent(user=user, company_id=request.user.company_id,
+                                owner_ids=_company_bridge_user_ids(request.user))
         result = agent.generate_draft(
             original_email_id=original_email_id,
             inbox_email_id=inbox_email_id,
@@ -1627,7 +1709,8 @@ def regenerate_draft(request, draft_id):
 
     payload = request.data or {}
     try:
-        agent = ReplyDraftAgent(user=user, company_id=request.user.company_id)
+        agent = ReplyDraftAgent(user=user, company_id=request.user.company_id,
+                                owner_ids=_company_bridge_user_ids(request.user))
         result = agent.regenerate_draft(
             draft_id=draft_id,
             new_instructions=payload.get('new_instructions', ''),
@@ -1655,7 +1738,7 @@ def approve_draft(request, draft_id):
     user = _get_or_create_user_for_company_user(request.user)
 
     payload = request.data or {}
-    agent = ReplyDraftAgent(user=user)
+    agent = ReplyDraftAgent(user=user, owner_ids=_company_bridge_user_ids(request.user))
     result = agent.approve_draft(
         draft_id=draft_id,
         edited_subject=payload.get('edited_subject'),
@@ -1676,7 +1759,7 @@ def send_draft(request, draft_id):
         return gate
     user = _get_or_create_user_for_company_user(request.user)
 
-    agent = ReplyDraftAgent(user=user)
+    agent = ReplyDraftAgent(user=user, owner_ids=_company_bridge_user_ids(request.user))
     result = agent.send_approved(draft_id=draft_id)
     if not result.get('success'):
         return Response({'status': 'error', 'message': result.get('error')},
@@ -1693,12 +1776,11 @@ def reject_draft(request, draft_id):
         return gate
     user = _get_or_create_user_for_company_user(request.user)
 
-    try:
-        draft = ReplyDraft.objects.get(id=draft_id, owner=user)
-    except ReplyDraft.DoesNotExist:
+    draft = ReplyDraft.objects.filter(id=draft_id, owner_id__in=_company_bridge_user_ids(request.user)).first()
+    if draft is None:
         return Response({'status': 'error', 'message': 'Draft not found'},
                         status=status.HTTP_404_NOT_FOUND)
-    if draft.status == 'sent':
+    if draft.status in ('sent', 'sending'):
         return Response({'status': 'error', 'message': 'Already sent'},
                         status=status.HTTP_400_BAD_REQUEST)
     draft.status = 'rejected'
@@ -1748,7 +1830,14 @@ def create_reply_account(request):
         # and we'll preserve what marketing populated. Same protection
         # the marketing-side create_email_account applies in the other
         # direction.
+        company_ids = _company_bridge_user_ids(request.user)
         existing = EmailAccount.objects.filter(owner=user, email__iexact=email).first()
+        if existing is None:
+            # A colleague updating the company's mailbox (a rotated app password) edits it in place; they could
+            # see the inbox but not change its password (CO-204).
+            company_account = _get_reply_account(company_ids)
+            if company_account is not None and (company_account.email or '').lower() == email:
+                existing = company_account
 
         smtp_host = (data.get('smtp_host') or '').strip()
         smtp_port_raw = data.get('smtp_port')
@@ -1811,13 +1900,23 @@ def create_reply_account(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # On an edit of a Reply Draft mailbox only the passwords and the sync scope change, so the login is tested
+        # against the stored server: a request naming another host, with the password left blank, made the server
+        # log in there with the stored password (CO-248).
+        imap_use_ssl = bool(data.get('imap_use_ssl', True))
+        if existing is not None and existing.is_reply_agent_account:
+            imap_host = existing.imap_host or imap_host
+            imap_use_ssl = bool(existing.imap_use_ssl)
+            imap_port = existing.imap_port or (993 if imap_use_ssl else 143)
+            imap_username = existing.imap_username or imap_username
+
         # Verify IMAP credentials BEFORE we save the account so the user
         # sees the auth error immediately. Without this the account gets
         # created, the background sync fails, and the UI just spins.
         from api.views.marketing_agent import verify_imap_credentials
         ok, err = verify_imap_credentials(
             imap_host, imap_port,
-            bool(data.get('imap_use_ssl', True)),
+            imap_use_ssl,
             imap_username, imap_password,
         )
         if not ok:
@@ -1839,7 +1938,7 @@ def create_reply_account(request):
         cross_tenant = (
             EmailAccount.objects
             .filter(email__iexact=email)
-            .exclude(owner=user)
+            .exclude(owner_id__in=company_ids)
             .first()
         )
         if cross_tenant is not None:
@@ -2318,14 +2417,13 @@ def _validate_upload_magic_bytes(upload, content_type):
 def _resolve_user_draft(request, draft_id):
     """Look up a ReplyDraft owned by the calling company user.
 
-    Returns ``(draft, error_response)``. The bridged Django User is what the
-    draft's ``owner`` FK points at, so we filter by id+owner — this also
-    serves as the tenancy check (a different company's draft just 404s).
+    Returns ``(draft, error_response)``. Any login of the company may work on a colleague's draft (CO-204): the
+    draft's owner must be one of the company's user records, which is also the tenancy check (a different company's
+    draft just 404s).
     """
-    user = _get_or_create_user_for_company_user(request.user)
     draft = (
         ReplyDraft.objects
-        .filter(id=draft_id, owner=user)
+        .filter(id=draft_id, owner_id__in=_company_bridge_user_ids(request.user))
         .select_related('email_account')
         .first()
     )
@@ -2520,3 +2618,110 @@ def download_draft_attachment(request, draft_id, attachment_id):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+
+# ==========================================================================
+# What the AI can say about the mail: summaries and questions (30 Oct 2026)
+# ==========================================================================
+
+def _company_inbox_email(request, email_id):
+    """An email of the company's Reply Draft mailbox, or (None, error response)."""
+    account = _get_reply_account(_company_bridge_user_ids(request.user))
+    email = InboxEmail.objects.filter(id=email_id, email_account=account).first() if account else None
+    if email is None:
+        return None, Response({'status': 'error', 'message': 'Email not found'}, status=status.HTTP_404_NOT_FOUND)
+    return email, None
+
+
+def _insight_agent(request):
+    return ReplyDraftAgent(user=_get_or_create_user_for_company_user(request.user),
+                           company_id=request.user.company_id)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def summarize_conversation(request, email_id):
+    """The AI's summary of the email's whole conversation: what happened, what is next, what is still unanswered."""
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    email, err = _company_inbox_email(request, email_id)
+    if err is not None:
+        return err
+    try:
+        summary = _summarize_conversation(email, _insight_agent(request))
+    except KeyServiceError:
+        raise
+    except Exception:
+        logger.exception('summarize_conversation failed for email %s', email_id)
+        return Response({'status': 'error', 'message': 'The summary could not be made just now. Try again.'},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return Response({'status': 'success', 'data': summary})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def summarize_attachment(request, email_id, attachment_id):
+    """The AI's summary of a PDF, Word or text file attached to the email."""
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    email, err = _company_inbox_email(request, email_id)
+    if err is not None:
+        return err
+    att = InboxAttachment.objects.filter(id=attachment_id, inbox_email=email).first()
+    if att is None or not att.file:
+        return Response({'status': 'error', 'message': 'Attachment not found'}, status=status.HTTP_404_NOT_FOUND)
+    if not can_summarize(att.filename, att.content_type):
+        return Response({'status': 'error', 'message': 'Only PDF, Word and text files can be summarised.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        summary = _summarize_attachment(att, _insight_agent(request))
+    except KeyServiceError:
+        raise
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception:
+        logger.exception('summarize_attachment failed for attachment %s', attachment_id)
+        return Response({'status': 'error', 'message': 'The summary could not be made just now. Try again.'},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return Response({'status': 'success', 'data': summary})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def ask_inbox(request):
+    """A question about the company's inbox, in any language, answered from its emails with the emails named.
+
+    Body: {"question": "...", "history": [{"question": "...", "answer": "..."}]} (the earlier turns, at most 3 used).
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    question = ' '.join(str((request.data or {}).get('question') or '').split())
+    if len(question) < 3:
+        return Response({'status': 'error', 'message': 'Type a question about your email.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if len(question) > 500:
+        return Response({'status': 'error', 'message': 'Keep the question under 500 characters.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    account = _get_reply_account(_company_bridge_user_ids(request.user))
+    if account is None:
+        return Response({'status': 'error', 'message': 'Connect the inbox first.', 'error': 'no_reply_account'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    history = []
+    for turn in (request.data or {}).get('history') or []:
+        if isinstance(turn, dict) and turn.get('question') and turn.get('answer'):
+            history.append((str(turn['question']), str(turn['answer'])))
+    try:
+        data = _ask_inbox(question, account, _insight_agent(request), history=history)
+    except KeyServiceError:
+        raise
+    except Exception:
+        logger.exception('ask_inbox failed')
+        return Response({'status': 'error', 'message': 'The answer could not be made just now. Try again.'},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return Response({'status': 'success', 'data': data})

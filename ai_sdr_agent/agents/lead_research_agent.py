@@ -81,6 +81,15 @@ class ApifyApprovalRequired(ValueError):
             f"Open it on Apify and click Approve, then try again: {self.approval_url}"
         )
 
+NO_SOURCE_MESSAGE = (
+    'Lead search needs an Apollo.io or Apify key. Add one under SDR Agent → Settings, '
+    'or bring your leads in from a file (Import CSV) or add them one by one.'
+)
+
+
+class NoLeadSource(ValueError):
+    """Neither an Apollo nor an Apify key is set, so there is nothing to search: the person adds one."""
+
 # Default Apify actor — Google Search scraper (free, no Bright Data needed)
 DEFAULT_APIFY_ACTOR = "apify/google-search-scraper"
 
@@ -435,14 +444,14 @@ class LeadResearchAgent:
         """Return a list of raw lead dicts for the given ICP profile."""
         if source == 'apify':
             if not self.apify_token:
-                raise ValueError(
+                raise NoLeadSource(
                     'Apify API token not configured. '
                     'Go to SDR Agent → Settings and enter your Apify API token.'
                 )
             return dedupe_leads(self._search_apify(icp_profile, count))
         if source == 'apollo':
             if not self.apollo_api_key:
-                raise ValueError(
+                raise NoLeadSource(
                     'Apollo API key not configured. '
                     'Go to SDR Agent → Settings and enter your Apollo.io API key.'
                 )
@@ -458,6 +467,13 @@ class LeadResearchAgent:
         if self.apollo_api_key:
             providers.append(('Apollo.io', self._search_apollo))
         if self.apify_token and self.apify_actor:
+            return self._search_apify(icp_profile, count)
+        raise NoLeadSource(NO_SOURCE_MESSAGE)
+
+    def _apify_headers(self) -> dict:
+        """The token goes in a header: in the web address it was written into the log, the research record and the
+        message on the customer's screen by any failed request (CO-142)."""
+        return {'Authorization': f'Bearer {self.apify_token}'}
             providers.append(('Apify', self._search_apify))
         if not providers:
             raise ValueError(
@@ -495,7 +511,9 @@ class LeadResearchAgent:
         if self.apify_token:
             sources.insert(0, 'apify')
         if self.apollo_api_key:
-            sources.insert(0, 'apollo')
+            sources.append('apollo')
+        if self.apify_token:
+            sources.append('apify')
         return sources
 
     # ------------------------------------------------------------------

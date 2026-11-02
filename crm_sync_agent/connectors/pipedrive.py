@@ -11,7 +11,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError, is_blank
+from .base import BaseCRMConnector, CRMError, is_blank, network_error
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +19,31 @@ PIPEDRIVE_BASE = 'https://api.pipedrive.com/v1'
 DEFAULT_TIMEOUT = 12
 
 
+def _utc(dt):
+    """Pipedrive reads an activity's due_date and due_time as UTC. A time in another zone went as it was, so a
+    call at 15:00 in Karachi showed at 15:00 UTC, five hours late."""
+    if dt is None or not hasattr(dt, 'strftime'):
+        return datetime.now(dt_timezone.utc)
+    if getattr(dt, 'tzinfo', None) is not None and hasattr(dt, 'astimezone'):
+        return dt.astimezone(dt_timezone.utc)
+    return dt
+
+
 def _pd_date(dt) -> str:
-    """Format datetime as YYYY-MM-DD for Pipedrive date fields."""
-    if dt is None:
-        return datetime.now(dt_timezone.utc).strftime('%Y-%m-%d')
-    if hasattr(dt, 'strftime'):
-        return dt.strftime('%Y-%m-%d')
-    return datetime.now(dt_timezone.utc).strftime('%Y-%m-%d')
+    """Format datetime as YYYY-MM-DD (UTC) for Pipedrive date fields."""
+    return _utc(dt).strftime('%Y-%m-%d')
 
 
 def _pd_time(dt) -> str:
-    """Format datetime as HH:MM for Pipedrive time fields."""
-    if dt is None:
-        return datetime.now(dt_timezone.utc).strftime('%H:%M')
-    if hasattr(dt, 'strftime'):
-        return dt.strftime('%H:%M')
-    return datetime.now(dt_timezone.utc).strftime('%H:%M')
+    """Format datetime as HH:MM (UTC) for Pipedrive time fields."""
+    return _utc(dt).strftime('%H:%M')
+
+
+def _primary(items) -> str:
+    """The primary value of a Pipedrive email or phone list, else the first one with a value."""
+    values = [i for i in (items or []) if isinstance(i, dict) and i.get('value')]
+    chosen = next((i for i in values if i.get('primary')), values[0] if values else None)
+    return str(chosen.get('value')) if chosen else ''
 
 
 class PipedriveConnector(BaseCRMConnector):
@@ -50,13 +59,12 @@ class PipedriveConnector(BaseCRMConnector):
     # BaseCRMConnector interface
     # ------------------------------------------------------------------ #
 
-    def ping(self) -> bool:
-        try:
-            resp = self._get('/users/me')
-            data = resp.json() or {}
-            return data.get('success') is True
-        except CRMError:
-            return False
+    label = 'Pipedrive'
+
+    def _ping(self) -> bool:
+        resp = self._get('/users/me')
+        data = resp.json() or {}
+        return data.get('success') is True
 
     def find_contact_by_email(self, email: str) -> Optional[dict]:
         resp = self._get('/persons/search', params={
@@ -72,8 +80,27 @@ class PipedriveConnector(BaseCRMConnector):
         return None
 
     def create_contact(self, email: str, properties: dict) -> str:
-        resp = self._post('/persons', json=self._build_person_payload(email, properties))
+        payload = self._build_person_payload(email, properties)
+        org = self._organization(properties.get('company'))
+        if org:
+            payload['org_id'] = org
+        resp = self._post('/persons', json=payload)
         return str(((resp.json() or {}).get('data') or {}).get('id', ''))
+
+    def _organization(self, company) -> Optional[int]:
+        """The Pipedrive Organization for a company name: found by exact name, or made. A person's company is an
+        Organization linked to them; it went nowhere, so contacts reached Pipedrive without their company (found
+        in the live check, 2 Nov 2026)."""
+        name = str(company or '').strip()
+        if not name:
+            return None
+        found = self._get('/organizations/search', params={'term': name, 'fields': 'name', 'exact_match': 'true',
+                                                           'limit': 1}).json() or {}
+        items = (found.get('data') or {}).get('items') or []
+        if items and (items[0].get('item') or {}).get('id'):
+            return int(items[0]['item']['id'])
+        made = self._post('/organizations', json={'name': name[:255]}).json() or {}
+        return (made.get('data') or {}).get('id')
 
     def upsert_contact(self, email: str, properties: dict) -> str:
         existing = self.find_contact_by_email(email)
@@ -83,10 +110,11 @@ class PipedriveConnector(BaseCRMConnector):
         pid = existing['id']
         # A person who is already there keeps their name and every email and phone
         # they have. This used to PUT one name, a one-item email list and a one-item
-        # phone list, and a PUT replaces the lists whole. Only a phone or job title
-        # the person does not have at all is added, and for that the full record is
-        # read first: the search result does not say.
-        wanted = {key: properties.get(key) for key in ('phone', 'job_title') if not is_blank(properties.get(key))}
+        # phone list, and a PUT replaces the lists whole. Only a phone or a company
+        # (Organization) the person does not have at all is added, and for that the
+        # full record is read first: the search result does not say. Pipedrive has no
+        # job title on a person, so none is sent.
+        wanted = {key: properties.get(key) for key in ('phone', 'company') if not is_blank(properties.get(key))}
         if wanted:
             person = ((self._get(f'/persons/{pid}').json() or {}).get('data') or {})
             blanks = {}
@@ -94,8 +122,10 @@ class PipedriveConnector(BaseCRMConnector):
                             for p in (person.get('phone') or []))
             if 'phone' in wanted and not has_phone:
                 blanks['phone'] = [{'value': str(wanted['phone']), 'primary': True}]
-            if 'job_title' in wanted and is_blank(person.get('job_title')):
-                blanks['job_title'] = str(wanted['job_title'])[:255]
+            if 'company' in wanted and not person.get('org_id'):
+                org = self._organization(wanted['company'])
+                if org:
+                    blanks['org_id'] = org
             if blanks:
                 self._put(f'/persons/{pid}', json=blanks)
         return pid
@@ -128,17 +158,34 @@ class PipedriveConnector(BaseCRMConnector):
         end_time=None,
         notes: str = '',
     ) -> Optional[str]:
-        activity = {
+        activity = self._meeting_fields(title, start_time, end_time, notes)
+        activity['person_id'] = int(crm_contact_id)
+        resp = self._post('/activities', json=activity)
+        return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
+
+    def update_meeting(self, crm_meeting_id: str, title: str, start_time, end_time=None, notes: str = '',
+                       cancelled: bool = False) -> None:
+        """Moved: the activity's date and time. Cancelled: the activity is deleted from Pipedrive (CO-275)."""
+        if cancelled:
+            self._request('DELETE', f'/activities/{crm_meeting_id}')
+            return
+        self._put(f'/activities/{crm_meeting_id}', json=self._meeting_fields(title, start_time, end_time, notes))
+
+    @staticmethod
+    def _meeting_fields(title, start_time, end_time, notes) -> dict:
+        """A meeting still to come is not marked done; every one was, even next week's (CO-275)."""
+        fields = {
             'subject': (title or 'Meeting')[:255],
             'note': (notes or '')[:5000],
             'type': 'meeting',
-            'person_id': int(crm_contact_id),
-            'done': 1,
+            'done': 1 if (hasattr(start_time, 'timestamp') and start_time <= datetime.now(dt_timezone.utc)) else 0,
             'due_date': _pd_date(start_time),
             'due_time': _pd_time(start_time),
         }
-        resp = self._post('/activities', json=activity)
-        return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
+        if end_time is not None and hasattr(end_time, 'timestamp') and hasattr(start_time, 'timestamp'):
+            minutes = max(1, int((end_time - start_time).total_seconds() // 60))
+            fields['duration'] = f'{minutes // 60:02d}:{minutes % 60:02d}'
+        return fields
 
     def log_note(self, crm_contact_id: str, body: str) -> Optional[str]:
         note = {
@@ -147,6 +194,46 @@ class PipedriveConnector(BaseCRMConnector):
         }
         resp = self._post('/notes', json=note)
         return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
+
+    # ------------------------------------------------------------------ #
+    # Deals
+    # ------------------------------------------------------------------ #
+
+    def list_pipelines(self) -> list:
+        pipes = (self._get('/pipelines').json() or {}).get('data') or []
+        stages = (self._get('/stages').json() or {}).get('data') or []
+        out = []
+        for p in pipes:
+            own = sorted((s for s in stages if s.get('pipeline_id') == p.get('id')), key=lambda s: s.get('order_nr', 0))
+            out.append({'id': str(p.get('id')), 'label': p.get('name') or str(p.get('id')),
+                        'stages': [{'id': str(s.get('id')), 'label': s.get('name') or str(s.get('id'))} for s in own]})
+        return out
+
+    def create_deal(self, crm_contact_id: str, name: str, pipeline_id: str, stage_id: str) -> Optional[str]:
+        resp = self._post('/deals', json={'title': (name or 'New deal')[:255], 'person_id': int(crm_contact_id),
+                                          'pipeline_id': int(pipeline_id), 'stage_id': int(stage_id)})
+        return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
+
+    def changed_contacts(self, since) -> list:
+        """Pipedrive's Recents for people, since a UTC time, 500 a page, at most 2,000 a run."""
+        out, start = [], 0
+        stamp = _utc(since).strftime('%Y-%m-%d %H:%M:%S')
+        for _ in range(4):
+            body = self._get('/recents', params={'since_timestamp': stamp, 'items': 'person', 'start': start,
+                                                 'limit': 500}).json() or {}
+            for row in body.get('data') or []:
+                person = row.get('data') or {}
+                if row.get('item') != 'person' or not person or person.get('active_flag') is False:
+                    continue
+                out.append({'id': str(person.get('id') or row.get('id')), 'email': _primary(person.get('email')),
+                            'first_name': person.get('first_name') or '', 'last_name': person.get('last_name') or '',
+                            'phone': _primary(person.get('phone')), 'job_title': person.get('job_title') or '',
+                            'company': person.get('org_name') or ''})
+            more = ((body.get('additional_data') or {}).get('pagination') or {}).get('more_items_in_collection')
+            if not more:
+                break
+            start += 500
+        return out
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -168,15 +255,7 @@ class PipedriveConnector(BaseCRMConnector):
         }
         if props.get('phone'):
             out['phone'] = [{'value': str(props['phone']), 'primary': True}]
-        if props.get('job_title'):
-            out['job_title'] = str(props['job_title'])[:255]
         return out
-
-    def _params(self, extra: dict | None = None) -> dict:
-        p = {'api_token': self._token}
-        if extra:
-            p.update(extra)
-        return p
 
     def _get(self, path: str, params=None):
         return self._request('GET', path, params=params)
@@ -188,17 +267,19 @@ class PipedriveConnector(BaseCRMConnector):
         return self._request('PUT', path, json=json)
 
     def _request(self, method: str, path: str, params=None, json=None):
+        """The key goes in the x-api-token header, which Pipedrive's v1 API takes for every call. It went in the
+        address, and a failed call's message, with the address in it, was saved in the sync log (CO-158)."""
         url = f'{PIPEDRIVE_BASE}{path}'
-        qp = self._params(params)
         try:
             resp = requests.request(
                 method, url,
-                params=qp,
+                headers={'x-api-token': self._token},
+                params=params,
                 json=json,
                 timeout=self._timeout,
             )
         except requests.RequestException as exc:
-            raise CRMError(f'Pipedrive network error: {exc}', retriable=True) from exc
+            raise network_error('Pipedrive', exc) from exc
 
         if 200 <= resp.status_code < 300:
             return resp

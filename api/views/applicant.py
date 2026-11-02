@@ -6,6 +6,9 @@ from django.shortcuts import get_object_or_404
 
 from recruitment_agent.models import CareerApplication
 from api.serializers.career import CareerApplicationSerializer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
@@ -41,9 +44,9 @@ def get_application_status(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('get_application_status failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch application status',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

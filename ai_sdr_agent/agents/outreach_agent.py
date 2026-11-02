@@ -205,6 +205,21 @@ def claim_reply(enrollment, reply: dict) -> bool:
         key = hashlib.sha1(raw.encode('utf-8', 'replace')).hexdigest()
     key = key[:255]
 
+    # Per company and address, not per enrolment: a lead in two campaigns who replied once was answered twice, two
+    # meetings and two 'pick a time' emails (CO-243). The other enrolment only stops its own emails.
+    lead_email = (getattr(enrollment.lead, 'email', '') or '').strip()
+    if lead_email:
+        company_id = enrollment.campaign.company_user.company_id
+        others = (SDRCampaignEnrollment.objects
+                  .filter(campaign__company_user__company_id=company_id, lead__email__iexact=lead_email)
+                  .exclude(id=enrollment.id))
+        if others.filter(last_reply_message_id=key).exists():
+            SDRCampaignEnrollment.objects.filter(id=enrollment.id).exclude(last_reply_message_id=key).update(
+                last_reply_message_id=key)
+            SDRCampaignEnrollment.objects.filter(id=enrollment.id, status='active').update(
+                status='replied', replied_at=received_at or timezone.now())
+            return False
+
     claimed = (
         SDRCampaignEnrollment.objects.filter(id=enrollment.id)
         .exclude(last_reply_message_id=key)
@@ -225,6 +240,17 @@ def is_email_suppressed(company_user, email_addr: str) -> bool:
     """
     from core.do_not_email import is_blocked
     return is_blocked(getattr(company_user, 'company_id', None), email_addr)
+
+
+class OnDoNotEmailList(ValueError):
+    """The address unsubscribed or bounced in this company, so nothing more is sent to it."""
+
+
+def refuse_if_suppressed(company_user, email_addr: str) -> None:
+    """Every email to a lead asks the do-not-email list first: the meeting emails, the AI's 'more information' answer
+    and 'We missed you' did not, so someone who unsubscribed by link still got the reminder (CO-144)."""
+    if is_email_suppressed(company_user, email_addr):
+        raise OnDoNotEmailList(f'{email_addr} is on the do-not-email list, so nothing was sent.')
 
 
 def make_unsubscribe_token(enrollment_id: int, company_id=None, email: str = '') -> str:
@@ -281,6 +307,29 @@ def unsubscribe_target(claims):
     return None
 
 
+# A lead has had only our emails: the AI's "the patient booking app we discussed" claims a conversation that never
+# took place. The step prompt forbids it, and the model wrote it anyway (the AI SDR film, 30 Oct), so it is taken out.
+_PAST_TALK = (
+    # "As we discussed, the app ..." at a sentence's start -> "The app ..."
+    (re.compile(r"(^|[.!?]\s+|\n)as\s+(?:we\s+)?(?:discussed|talked about)(?:\s+(?:earlier|before|previously|"
+                r"last time))?\s*,\s*(\w)", re.IGNORECASE), lambda m: m.group(1) + m.group(2).upper()),
+    # "the booking app we discussed" -> "our booking app"
+    (re.compile(r"\b(?:the|our)\s+([^.,;:!?\n]{1,60}?)\s+(?:that\s+)?(?:we|we've|we have|I|I've)\s+"
+                r"(?:discussed|talked about|spoke about|chatted about)\b", re.IGNORECASE),
+     lambda m: ('Our ' if m.group(0)[0].isupper() else 'our ') + m.group(1)),
+    # "as we discussed", "as discussed earlier"
+    (re.compile(r",?\s*\bas\s+(?:we\s+)?(?:discussed|talked about)(?:\s+(?:earlier|before|previously|last time))?\b",
+                re.IGNORECASE), ''),
+)
+
+
+def without_past_talk(text: str) -> str:
+    """The text without a claim of an earlier conversation."""
+    for pattern, replacement in _PAST_TALK:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def unsubscribe_address(company_id, email_addr: str) -> None:
     """Opt an address out of everything this company sends."""
     from ai_sdr_agent.models import SDRCampaignEnrollment, SDRLead
@@ -301,6 +350,11 @@ def unsubscribe_address(company_id, email_addr: str) -> None:
         SDRLead.all_objects.filter(
             company_user__company_id=company_id, email__iexact=email_addr,
         ).update(status='disqualified')
+    # A lead who opted out keeps no call, by the email's link as by a reply (the link left the call booked: manual
+    # run, 30 Oct). Outside the transaction: each call is saved on its own so the shared calendar drops it too.
+    from ai_sdr_agent.reply_actions import cancel_meetings_of
+    cancel_meetings_of(SDRCampaignEnrollment.objects.filter(
+        campaign__company_user__company_id=company_id, lead__email__iexact=email_addr))
 
 
 def apply_unsubscribe(enrollment) -> None:
@@ -342,12 +396,15 @@ def _detect_bounce(msg, raw_bytes, sender_email, subject, email_map):
     if not hard:
         return None
 
-    failed = (msg.get('X-Failed-Recipients') or '').lower()
+    # Whole addresses only: 'ann@acme.com' is inside 'joann@acme.com', and a notice about Joann was filed against
+    # Ann (CO-244). The header and the report's Final-Recipient lines first, then the address standing alone.
+    failed = set(re.findall(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+', (msg.get('X-Failed-Recipients') or '').lower()))
+    failed |= set(re.findall(r'final-recipient:\s*rfc822;\s*<?([^\s>]+)', blob))
     for addr in email_map:
         if addr in failed:
             return addr
     for addr in email_map:
-        if addr in blob:
+        if re.search(r'(?<![\w.+-])' + re.escape(addr) + r'(?![\w-])', blob):
             return addr
     return None
 
@@ -409,7 +466,16 @@ Return exactly this JSON array (4 objects):
 Rules:
 - Use {{first_name}}, {{company_name}}, {{job_title}}, {{company_industry}} as placeholders
 - Keep emails 3-5 sentences, professional, value-focused
-- Do NOT use markdown in body_template"""
+- Do NOT use markdown in body_template
+- The campaign goal above is the ONLY thing you know about our offer. Never state a number, percentage, result,
+  customer, integration or feature that it does not give; no "clinics like yours saw 30% fewer no-shows"
+- You know nothing about the prospect beyond the placeholders: never say you noticed, saw or read anything about
+  them or their company, and never call them "leading" or praise their work
+- They have only had your earlier emails: never write "as we discussed" or "the app we talked about"
+- One clear request per email, and sign off with {(campaign.sender_name or 'the sender').split()[0]}"""
+        # Found in the live run of 29 Oct: the steps promised "a 30% drop in missed appointments", "15% more
+        # appointments" and a "fully integrated" app, none of which the campaign said, in emails sent in the
+        # salesperson's name.
 
         resp = self.groq_client.chat.completions.create(
             model=self.model,
@@ -429,20 +495,30 @@ Rules:
             if m:
                 raw = m.group(1).strip()
 
-        return json.loads(raw)
+        steps = json.loads(raw)
+        for step in steps if isinstance(steps, list) else []:
+            if isinstance(step, dict):
+                for field in ('subject_template', 'body_template'):
+                    if isinstance(step.get(field), str):
+                        step[field] = without_past_talk(step[field])
+        return steps
 
     def _default_steps(self, campaign) -> list:
         name = campaign.sender_name or 'the team'
         company = campaign.sender_company or 'us'
+        # The campaign's own words about the offer, never a "[key value proposition]" left to fill (the send refused
+        # it) nor praise of work nobody has seen.
+        offer = ' '.join((campaign.description or '').split())
+        offer = (offer[:400].rsplit('.', 1)[0] + '.') if len(offer) > 400 and '.' in offer[:400] else offer
+        about = f"{offer}\n\n" if offer else f"I'd like to tell you briefly what {company} does.\n\n"
         return [
             {
                 "step_order": 1, "step_type": "email", "delay_days": 1,
                 "name": "Introduction",
-                "subject_template": "Quick question about {company_name}",
+                "subject_template": "Quick question for {company_name}",
                 "body_template": (
                     f"Hi {{first_name}},\n\n"
-                    f"I came across {{company_name}} and noticed the great work your team is doing in {{company_industry}}.\n\n"
-                    f"We help companies like yours [key value proposition]. I'd love to share how we've helped similar teams.\n\n"
+                    f"I'm {name} from {company}. {about}"
                     f"Would you be open to a quick 15-minute call this week?\n\n"
                     f"Best,\n{name}\n{company}"
                 ),
@@ -460,7 +536,7 @@ Rules:
                 "body_template": (
                     f"Hi {{first_name}},\n\n"
                     f"I know things get busy — just wanted to follow up on my previous message.\n\n"
-                    f"I have a few ideas specific to {{company_name}} that I think could be valuable. Even a 10-minute call would be worth your time.\n\n"
+                    f"If it is of interest to {{company_name}}, a short call is the quickest way to see whether it fits.\n\n"
                     f"Available this week?\n\n"
                     f"Best,\n{name}"
                 ),
@@ -533,6 +609,9 @@ Rules:
                     'sender_company': campaign.sender_company,
                 },
             )
+            if isinstance(improved, dict):
+                improved = {**improved, **{k: without_past_talk(improved[k]) for k in ('subject', 'body')
+                                           if isinstance(improved.get(k), str)}}
             return improved
         except Exception as exc:
             from core.api_key_service import KeyServiceError
@@ -587,14 +666,7 @@ Rules:
         and the platform's inbox read into a customer's campaign. With no name
         or no password this now returns blanks, and the caller skips the check.
         """
-        username = campaign.smtp_username or ''
-        password = campaign.smtp_password or ''
-        if not username or not password:
-            return '', campaign.imap_port or 993, '', ''
-
-        imap_host = campaign.imap_host or (_derive_imap_host(campaign.smtp_host) if campaign.smtp_host else '')
-        imap_port = campaign.imap_port or 993
-        return imap_host, imap_port, username, password
+        return imap_credentials(campaign)
 
     def check_inbox_for_replies(self, campaign, enrollments: list) -> list:
         """
@@ -833,6 +905,7 @@ Rules:
 
     def send_email(self, campaign, to_email: str, subject: str, body: str,
                    unsubscribe_url: str = '', in_reply_to: str = '') -> None:
+        refuse_if_suppressed(campaign.company_user, to_email)
         if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
             raise ValueError(
                 "Campaign SMTP credentials not configured. "
@@ -931,6 +1004,10 @@ Rules:
             raise ValueError(f"SMTP error: {exc}") from exc
         except smtplib.SMTPException as exc:
             raise ValueError(f"SMTP error: {exc}") from exc
+        except OSError as exc:
+            # The sending server cannot be reached: the same for every lead, so the campaign stops and says why;
+            # each lead used to fail three times and be parked (CO-198).
+            raise MailboxRefusedError(f"could not connect to {host}:{port} ({exc})") from exc
 
     # ------------------------------------------------------------------
     # Process a single enrollment step
@@ -1251,6 +1328,14 @@ Rules:
             note = step.body_template or f"Send LinkedIn connection to {lead.display_name} ({lead.linkedin_url or 'no URL'})"
             SDROutreachLog.objects.create(**log_base, status='sent', body_sent=note)
             result_status = 'sent'
+            # Nothing is sent on LinkedIn by the agent: the salesperson is given it to do. It was only logged as
+            # "sent" (found in the live run of 29 Oct).
+            from ai_sdr_agent.alerts import tell_salesperson
+            note_filled = (note.replace('{first_name}', lead.first_name or lead.display_name)
+                           .replace('{company_name}', lead.company_name or 'their company'))
+            tell_salesperson(campaign.company_user, 'sdr_linkedin_step', f'LinkedIn step for {lead.display_name}',
+                             note_filled + (f' Profile: {lead.linkedin_url}' if lead.linkedin_url else ''),
+                             link='/ai-sdr/outreach')
 
         # current_step was already atomically advanced above (via UPDATE).
         # Now just set next_action_at (or mark completed) and save those fields only.
@@ -1320,3 +1405,57 @@ def _extract_email_body(msg) -> str:
         except Exception:
             pass
     return ''
+
+
+def try_mailbox_logins(smtp_host, smtp_port, use_tls, username, password, imap_host='', imap_port=993):
+    """What is wrong with these mailbox settings, in words for the person, or '' when both logins work.
+
+    Settings used to be saved untried: a wrong password showed only as leads paused one by one, and an inbox that
+    could not be read as nothing at all (CO-197, CO-198)."""
+    if not (smtp_host and username and password):
+        return ''
+    port = int(smtp_port or 587)
+    refused = ('The sending server refused the login{said}. Check the user name and password; for Gmail use an app '
+               'password.')
+    try:
+        server = smtplib.SMTP_SSL(smtp_host, port, timeout=15) if port == 465 else smtplib.SMTP(smtp_host, port, timeout=15)
+    except (smtplib.SMTPException, OSError) as exc:
+        return f'Could not reach the sending server {smtp_host}:{port} ({exc}).'
+    with server:
+        try:
+            server.ehlo()
+            if use_tls and port != 465:
+                server.starttls(context=ssl.create_default_context())
+                server.ehlo()
+        except (smtplib.SMTPException, OSError) as exc:
+            return f'Could not reach the sending server {smtp_host}:{port} ({exc}).'
+        try:
+            server.login(username, password)
+        except smtplib.SMTPAuthenticationError as exc:
+            return refused.format(said=f' ({exc.smtp_code} {_text(exc.smtp_error)})')
+        except (smtplib.SMTPServerDisconnected, ConnectionError):
+            # Gmail answers a wrong password and hangs up, so the next way of logging in finds the line closed. It
+            # was shown as "could not reach the server" (live run of 29 Oct).
+            return refused.format(said=' and closed the connection')
+        except (smtplib.SMTPException, OSError) as exc:
+            return f'The sending server did not accept the login ({exc}).'
+    imap_host = imap_host or _derive_imap_host(smtp_host)
+    try:
+        with imaplib.IMAP4_SSL(imap_host, int(imap_port or 993), timeout=15) as imap:
+            imap.login(username, password)
+    except imaplib.IMAP4.error as exc:
+        return (f'Sending works, but the inbox {imap_host} refused the login ({_text(exc)}), so replies could not '
+                'be read. Check the IMAP settings.')
+    except OSError as exc:
+        return f'Sending works, but the inbox {imap_host}:{imap_port} could not be reached ({exc}).'
+    return ''
+
+
+def imap_credentials(campaign):
+    """(imap_host, imap_port, username, password) from the campaign's own mailbox settings; blanks without them."""
+    username = campaign.smtp_username or ''
+    password = campaign.smtp_password or ''
+    if not username or not password:
+        return '', campaign.imap_port or 993, '', ''
+    imap_host = campaign.imap_host or (_derive_imap_host(campaign.smtp_host) if campaign.smtp_host else '')
+    return imap_host, campaign.imap_port or 993, username, password

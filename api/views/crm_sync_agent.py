@@ -47,18 +47,35 @@ def _merged_credentials(integration: CRMIntegration, incoming) -> dict:
     return merged
 
 
-def _serialize_integration(integration: CRMIntegration) -> dict:
+def _is_admin(request) -> bool:
+    return getattr(request.user, 'role', None) in IsCompanyAdmin.ADMIN_ROLES
+
+
+def _serialize_integration(integration: CRMIntegration, request=None) -> dict:
+    preview = integration.credentials_preview()
+    if request is not None and not _is_admin(request):
+        # Only the people who may change the key see any of it; the form still gets the field names (CO-160).
+        preview = {key: '' for key in preview}
     return {
         'id': integration.pk,
         'provider': integration.provider,
         'provider_label': integration.get_provider_display(),
         # Masked. The real values never leave the server.
-        'credentials_preview': integration.credentials_preview(),
+        'credentials_preview': preview,
+        'key_refused_at': integration.key_refused_at,
+        'missing_permission': integration.missing_permission,
+        'waiting': CRMSyncQueue.objects.filter(integration=integration, status=CRMSyncQueue.STATUS_WAITING).count(),
         'field_mappings': integration.field_mappings,
         'sync_contacts': integration.sync_contacts,
         'sync_emails': integration.sync_emails,
         'sync_meetings': integration.sync_meetings,
         'sync_notes': integration.sync_notes,
+        'sync_support': integration.sync_support,
+        'sync_marketing': integration.sync_marketing,
+        'sync_deals': integration.sync_deals,
+        'deal_settings': integration.deal_settings or {},
+        'sync_back': integration.sync_back,
+        'last_pulled_at': integration.last_pulled_at,
         'is_active': integration.is_active,
         'last_ping_at': integration.last_ping_at,
         'last_ping_ok': integration.last_ping_ok,
@@ -84,6 +101,27 @@ def _serialize_log(log: CRMSyncLog) -> dict:
     }
 
 
+def _refusal(company, integration):
+    """None when the CRM takes the integration's credentials, else what to tell the person.
+
+    In the live run (31 Oct) a wrong HubSpot key was saved and the page said "HubSpot connected!"; nothing failed
+    until the queue ran. Connect and a changed key now try the key first, and Test Connection says why it failed."""
+    from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+    from crm_sync_agent.connectors.base import CRMError
+    try:
+        return CRMSyncAgent(company)._get_connector(integration).check()
+    except CRMError as exc:                     # a required field missing, said by the connector
+        return str(exc)
+    except Exception:
+        logger.exception('CRM check failed unexpectedly: company=%s provider=%s', company.pk, integration.provider)
+        return 'The CRM could not be checked just now. Try again in a minute.'
+
+
+def _not_taken(reason):
+    # 'message' is what the screens read from an error; 'error' is kept for older ones.
+    return Response({'status': 'failed', 'message': reason, 'error': reason}, status=status.HTTP_400_BAD_REQUEST)
+
+
 # ------------------------------------------------------------------ #
 # Integrations — list / create
 # ------------------------------------------------------------------ #
@@ -97,7 +135,7 @@ def integrations_list(request):
 
     if request.method == 'GET':
         qs = CRMIntegration.objects.filter(company=company).order_by('provider')
-        return Response([_serialize_integration(i) for i in qs])
+        return Response([_serialize_integration(i, request) for i in qs])
 
     # POST — create
     refused = _admins_only(request)
@@ -131,12 +169,19 @@ def integrations_list(request):
         sync_emails=data.get('sync_emails', True),
         sync_meetings=data.get('sync_meetings', True),
         sync_notes=data.get('sync_notes', True),
+        sync_support=data.get('sync_support', True),
+        sync_marketing=data.get('sync_marketing', False),
         is_active=data.get('is_active', True),
     )
     integration.set_credentials(data.get('credentials') or {})
+    reason = _refusal(company, integration)
+    if reason:
+        return _not_taken(reason)
+    integration.last_ping_at = timezone.now()
+    integration.last_ping_ok = True
     integration.save()
     logger.info('CRM integration created: company=%d provider=%s', company.pk, provider)
-    return Response(_serialize_integration(integration), status=status.HTTP_201_CREATED)
+    return Response(_serialize_integration(integration, request), status=status.HTTP_201_CREATED)
 
 
 # ------------------------------------------------------------------ #
@@ -156,7 +201,7 @@ def integration_detail(request, integration_id: int):
         return Response({'error': 'Integration not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'GET':
-        return Response(_serialize_integration(integration))
+        return Response(_serialize_integration(integration, request))
 
     refused = _admins_only(request)
     if refused:
@@ -169,14 +214,87 @@ def integration_detail(request, integration_id: int):
     # PUT / PATCH
     data = request.data
     if 'credentials' in data:
+        before = integration.get_credentials()
         integration.set_credentials(_merged_credentials(integration, data['credentials']))
+        if integration.get_credentials() != before:
+            # A new key is tried before it replaces the old one.
+            reason = _refusal(company, integration)
+            if reason:
+                return _not_taken(reason)
+            integration.last_ping_at = timezone.now()
+            integration.last_ping_ok = True
+            # What waited for the old key goes out again, and the old refusals no longer hold.
+            integration.missing_permission = ''
+            from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+            CRMSyncAgent.release_waiting(integration)
     if 'field_mappings' in data:
         integration.field_mappings = data['field_mappings']
-    for flag in ('sync_contacts', 'sync_emails', 'sync_meetings', 'sync_notes', 'is_active'):
+    for flag in ('sync_contacts', 'sync_emails', 'sync_meetings', 'sync_notes', 'sync_support', 'sync_marketing',
+                 'sync_back', 'is_active'):
         if flag in data:
             setattr(integration, flag, bool(data[flag]))
+    if 'deal_settings' in data or 'sync_deals' in data:
+        problem = _apply_deals(company, integration, data)
+        if problem:
+            return _not_taken(problem)
     integration.save()
-    return Response(_serialize_integration(integration))
+    return Response(_serialize_integration(integration, request))
+
+
+def _apply_deals(company, integration, data):
+    """Deals on with a pipeline and stage that the CRM has (checked against it, and kept with its names), or off.
+    None when done, else what to tell the person."""
+    if 'deal_settings' in data:
+        wanted = data.get('deal_settings') or {}
+        pipeline_id, stage_id = str(wanted.get('pipeline_id') or ''), str(wanted.get('stage_id') or '')
+        pipelines, reason = _pipelines(company, integration)
+        if reason:
+            return reason
+        pipeline = next((p for p in pipelines if p['id'] == pipeline_id), None)
+        stage = next((s for s in (pipeline or {}).get('stages', []) if s['id'] == stage_id), None)
+        if pipeline is None or stage is None:
+            return f'{integration.get_provider_display()} has no such pipeline and stage. Choose them again.'
+        integration.deal_settings = {'pipeline_id': pipeline['id'], 'pipeline_label': pipeline['label'],
+                                     'stage_id': stage['id'], 'stage_label': stage['label']}
+    if 'sync_deals' in data:
+        on = bool(data['sync_deals'])
+        if on and not (integration.deal_settings or {}).get('stage_id'):
+            return 'Choose the pipeline and stage new deals go into first.'
+        integration.sync_deals = on
+    return None
+
+
+def _pipelines(company, integration):
+    """([pipelines], None) from the CRM, or ([], what to tell the person)."""
+    from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+    from crm_sync_agent.connectors.base import CRMError, refusal
+    try:
+        connector = CRMSyncAgent(company)._get_connector(integration)
+        return connector.list_pipelines(), None
+    except CRMError as exc:
+        return [], refusal(integration.get_provider_display(), exc)
+    except Exception:
+        logger.exception('CRM pipelines could not be read: company=%s provider=%s', company.pk, integration.provider)
+        return [], 'The CRM could not be asked just now. Try again in a minute.'
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def integration_pipelines(request, integration_id: int):
+    """The company's deal pipelines and stages, read from its CRM, to choose where new deals go."""
+    company = request.user.company
+    try:
+        integration = CRMIntegration.objects.get(pk=integration_id, company=company)
+    except CRMIntegration.DoesNotExist:
+        return Response({'error': 'Integration not found.'}, status=status.HTTP_404_NOT_FOUND)
+    refused = _admins_only(request)
+    if refused:
+        return refused
+    pipelines, reason = _pipelines(company, integration)
+    if reason:
+        return _not_taken(reason)
+    return Response({'status': 'success', 'pipelines': pipelines})
 
 
 # ------------------------------------------------------------------ #
@@ -196,29 +314,22 @@ def integration_ping(request, integration_id: int):
         return Response({'error': 'Integration not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
-    from crm_sync_agent.connectors.base import CRMError
 
-    try:
-        agent = CRMSyncAgent(company)
-        connector = agent._get_connector(integration)
-        ok = connector.ping()
-    except CRMError as exc:
-        ok = False
-        logger.warning('CRM ping failed: %s', exc)
-    except Exception as exc:
-        ok = False
-        logger.exception('CRM ping unexpected error: %s', exc)
+    reason = _refusal(company, integration)
+    ok = reason is None
 
     integration.last_ping_at = timezone.now()
     integration.last_ping_ok = ok
     integration.save(update_fields=['last_ping_at', 'last_ping_ok'])
 
     if ok:
-        return Response({'status': 'ok', 'message': 'Connection successful.'})
-    return Response(
-        {'status': 'failed', 'message': 'Could not connect. Check credentials.'},
-        status=status.HTTP_502_BAD_GATEWAY,
-    )
+        released = CRMSyncAgent.release_waiting(integration)      # the key works again (CO-159)
+        message = 'Connection successful.'
+        if released:
+            message += f' {released} waiting item(s) go out now.'
+        return Response({'status': 'ok', 'message': message})
+    # A refused key is an answer, not a server fault: a 502 made the page say only "Ping failed".
+    return Response({'status': 'failed', 'message': reason})
 
 
 # ------------------------------------------------------------------ #
@@ -250,7 +361,10 @@ def integration_sync_leads(request, integration_id: int):
         return Response({
             'status': 'done',
             'message': (f"Synced {counts['leads']} leads, {counts['emails']} emails, "
-                        f"{counts['meetings']} meetings."),
+                        f"{counts['meetings']} meetings, {counts.get('inbox_emails', 0)} inbox emails, "
+                        f"{counts.get('inbox_replies', 0)} replies, {counts.get('support_customers', 0)} support "
+                        f"customers, {counts.get('support_tickets', 0)} tickets and "
+                        f"{counts.get('marketing_replies', 0)} campaign replies."),
             'result': result,
         })
 
@@ -301,11 +415,19 @@ def queue_status(request):
         .order_by('status', 'object_type')
     )
 
+    # An entry the CRM could not take just now (not reached, busy, full) is marked failed but tried again by itself
+    # until its attempts run out: it counts as pending, not failed. The page showed "Failed 2" and a Retry button
+    # for two emails that went by themselves two minutes later (found filming, 2 Nov 2026).
+    from django.db.models import F, Q
+    retrying = Q(status=CRMSyncQueue.STATUS_FAILED, attempts__lt=F('max_attempts'))
     return Response({
         'total': CRMSyncQueue.objects.filter(company=company).count(),
-        'pending': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_PENDING).count(),
-        'failed': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_FAILED).count(),
+        'pending': CRMSyncQueue.objects.filter(Q(status=CRMSyncQueue.STATUS_PENDING) | retrying, company=company).count(),
+        'failed': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_FAILED,
+                                              attempts__gte=F('max_attempts')).count(),
         'done': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_DONE).count(),
+        'waiting': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_WAITING).count(),
+        'skipped': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_SKIPPED).count(),
         'breakdown': breakdown,
     })
 
@@ -321,13 +443,17 @@ def retry_failed(request):
     company_user = request.user
     company = company_user.company
 
+    # Every entry that did not go, with its attempts back to none. Only those with attempts left were taken, so
+    # the button said '0 items re-queued' for the ones it named (CO-159). Skipped ones (a permission the CRM did
+    # not give) go too: the permission may have been added since.
     count = CRMSyncQueue.objects.filter(
         company=company,
-        status=CRMSyncQueue.STATUS_FAILED,
-        attempts__lt=3,
+        status__in=[CRMSyncQueue.STATUS_FAILED, CRMSyncQueue.STATUS_WAITING, CRMSyncQueue.STATUS_SKIPPED],
     ).update(
         status=CRMSyncQueue.STATUS_PENDING,
         scheduled_at=timezone.now(),
         error_message='',
+        attempts=0,
     )
+    CRMIntegration.objects.filter(company=company).update(missing_permission='', key_refused_at=None)
     return Response({'requeued': count})

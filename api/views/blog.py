@@ -9,6 +9,9 @@ from django.utils.text import slugify
 from core.models import BlogPost, BlogTag, BlogPostTag
 from api.serializers.blog import BlogPostSerializer, BlogPostListSerializer, BlogTagSerializer
 from api.permissions import IsAdmin
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
@@ -52,10 +55,10 @@ def list_blog_posts(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('list_blog_posts failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch blog posts',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -85,10 +88,10 @@ def get_blog_post_by_slug(request, slug):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('get_blog_post_by_slug failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch blog post',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -106,10 +109,10 @@ def get_blog_categories(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('get_blog_categories failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch categories',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -127,9 +130,9 @@ def list_blog_tags(request):
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.exception('list_blog_tags failed')
         return Response({
             'status': 'error',
             'message': 'Failed to fetch tags',
-            'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

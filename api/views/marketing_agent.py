@@ -1057,9 +1057,11 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
         return (None, 'Invalid file format. Please upload CSV, XLSX, or XLS files.')
     from django.db import transaction
     if file_extension == 'csv':
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
     else:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(uploaded_file, dtype=str, keep_default_na=False)
+    # Every cell as the text typed: by default "n/a", "NA" or "null" became empty (an address "n/a" was reported as
+    # missing, not as wrong) and a phone number lost its leading 0.
     if df.empty:
         return (None, 'File is empty')
     df.columns = df.columns.str.lower().str.strip()
@@ -3848,6 +3850,7 @@ def api_marketing_generate_graph(request):
             'status': 'success',
             'data': {
                 'chart': result['chart'],
+                'answer': result.get('answer', ''),     # instead of a chart, when the request is not one of this data
                 'insights': result.get('insights', ''),
                 'source': 'llm' if bool(getattr(graph_agent, 'last_llm_used', False)) else 'database',
             }

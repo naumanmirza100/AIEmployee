@@ -28,6 +28,24 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+# Every value Fernet makes starts like this; a Google refresh token ("1//...") never does.
+_SEALED_PREFIX = 'gAAAAA'
+
+
+def seal_refresh_token(token: str) -> str:
+    """What is stored for a refresh token: encrypted, as the CRM passwords are (CO-97)."""
+    from core.crypto_utils import encrypt_secret
+    return encrypt_secret(token)
+
+
+def refresh_token_of(cfg) -> str:
+    """The usable refresh token from a stored config. Tokens saved before CO-97 are plain text."""
+    stored = (cfg or {}).get('refresh_token') or ''
+    if stored.startswith(_SEALED_PREFIX):
+        from core.crypto_utils import decrypt_secret
+        return decrypt_secret(stored)
+    return stored
+
 
 def is_google_connected(company) -> bool:
     """True when this company has a usable Google Calendar connection.
@@ -55,7 +73,7 @@ def _calendar(company):
     client_id = getattr(settings, 'GOOGLE_CLIENT_ID', '')
     client_secret = getattr(settings, 'GOOGLE_CLIENT_SECRET', '')
     cfg = (getattr(company, 'google_calendar_config', None) or {}) if company else {}
-    refresh_token = cfg.get('refresh_token', '')
+    refresh_token = refresh_token_of(cfg)
     if not cfg.get('connected') or not refresh_token:
         logger.info("Company has not connected Google Calendar — skipping.")
         return None

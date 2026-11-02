@@ -21,7 +21,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError, is_blank
+from .base import BaseCRMConnector, CRMError, PermissionMissing, is_blank, network_error
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +59,11 @@ class HubSpotConnector(BaseCRMConnector):
     # BaseCRMConnector interface
     # ------------------------------------------------------------------ #
 
-    def ping(self) -> bool:
-        try:
-            resp = self._get('/crm/v3/objects/contacts', params={'limit': 1})
-            return resp.status_code == 200
-        except CRMError:
-            return False
+    label = 'HubSpot'
+
+    def _ping(self) -> bool:
+        resp = self._get('/crm/v3/objects/contacts', params={'limit': 1})
+        return resp.status_code == 200
 
     def find_contact_by_email(self, email: str) -> Optional[dict]:
         if not email:
@@ -136,15 +135,20 @@ class HubSpotConnector(BaseCRMConnector):
         sent_at,
         direction: str = 'OUTBOUND',
     ) -> Optional[str]:
+        metadata = {
+            'subject': subject[:500] if subject else '(no subject)',
+            'text': body[:10000] if body else '',
+        }
+        outbound = direction.upper() == 'OUTBOUND'
+        if outbound:
+            metadata['status'] = 'SENT'
+        # Mail from a customer is its own kind, INCOMING_EMAIL. It went as an EMAIL with status 'RECEIVED', which
+        # HubSpot does not have: "400 Unable to process JSON" for every Reply Draft customer email (live run, 31 Oct).
         return self._log_engagement(
-            eng_type='EMAIL',
+            eng_type='EMAIL' if outbound else 'INCOMING_EMAIL',
             contact_id=crm_contact_id,
             timestamp=_to_hs_timestamp(sent_at),
-            metadata={
-                'subject': subject[:500] if subject else '(no subject)',
-                'text': body[:10000] if body else '',
-                'status': 'SENT' if direction.upper() == 'OUTBOUND' else 'RECEIVED',
-            },
+            metadata=metadata,
         )
 
     def log_meeting(
@@ -156,7 +160,7 @@ class HubSpotConnector(BaseCRMConnector):
         notes: str = '',
     ) -> Optional[str]:
         start_ms = _to_hs_timestamp(start_time)
-        end_ms = _to_hs_timestamp(end_time) if end_time else start_ms + 3_600_000
+        end_ms = _to_hs_timestamp(end_time) if end_time else start_ms + 1_800_000
         return self._log_engagement(
             eng_type='MEETING',
             contact_id=crm_contact_id,
@@ -177,8 +181,14 @@ class HubSpotConnector(BaseCRMConnector):
             metadata={'body': body[:10000] if body else ''},
         )
 
+    #: What each kind of record needs on a HubSpot key, for the card's message.
+    _PERMISSION = {'EMAIL': ('emails', 'sales-email-read'), 'INCOMING_EMAIL': ('emails', 'sales-email-read'),
+                   'MEETING': ('meetings', 'crm.objects.contacts.write'),
+                   'NOTE': ('notes', 'crm.objects.contacts.write')}
+
     def _log_engagement(self, eng_type: str, contact_id: str, timestamp: int, metadata: dict) -> Optional[str]:
-        """Use legacy Engagements v1 API — works on free HubSpot accounts."""
+        """The Engagements v1 API: works on free HubSpot accounts and with service keys (tried 30 Oct 2026). A refusal
+        for lack of a permission is raised as PermissionMissing; it was swallowed and the sync counted it as sent."""
         payload = {
             'engagement': {'active': True, 'type': eng_type, 'timestamp': timestamp},
             'associations': {'contactIds': [int(contact_id)]},
@@ -189,9 +199,84 @@ class HubSpotConnector(BaseCRMConnector):
             return str(((resp.json() or {}).get('engagement') or {}).get('id', '')) or None
         except CRMError as e:
             if e.status_code == 403:
-                logger.warning('HubSpot: engagement scope missing for type=%s (free plan limitation)', eng_type)
-                return None
+                what, scope = self._PERMISSION.get(eng_type, (eng_type.lower(), ''))
+                raise PermissionMissing(what, f'HubSpot refused the {what}: the key lacks a permission'
+                                              + (f' ({scope}).' if scope else '.')) from e
             raise
+
+    def update_meeting(self, crm_meeting_id: str, title: str, start_time, end_time=None, notes: str = '',
+                       cancelled: bool = False) -> None:
+        """The meeting moved, or cancelled, in HubSpot. A v1 engagement's id is its v3 meeting id (tried 30 Oct)."""
+        start_ms = _to_hs_timestamp(start_time)
+        end_ms = _to_hs_timestamp(end_time) if end_time else start_ms + 1_800_000
+        props = {
+            'hs_timestamp': start_ms,
+            'hs_meeting_start_time': start_ms,
+            'hs_meeting_end_time': end_ms,
+            'hs_meeting_title': (title or 'Meeting')[:500],
+            'hs_meeting_outcome': 'CANCELED' if cancelled else 'SCHEDULED',
+        }
+        if notes:
+            props['hs_meeting_body'] = notes[:5000]
+        self._patch(f'/crm/v3/objects/meetings/{crm_meeting_id}', json={'properties': props})
+
+    # ------------------------------------------------------------------ #
+    # Deals
+    # ------------------------------------------------------------------ #
+
+    #: HubSpot's own association type: a deal to its contact.
+    DEAL_TO_CONTACT = 3
+
+    def list_pipelines(self) -> list:
+        try:
+            resp = self._get('/crm/v3/pipelines/deals')
+        except CRMError as e:
+            if e.status_code == 403:
+                raise CRMError(str(e), retriable=False, status_code=403,
+                               reason='HubSpot would not show your deal pipelines. Give the key the deals '
+                                      'permissions (crm.objects.deals.read and write), then try again.') from e
+            raise
+        pipelines = []
+        for p in (resp.json() or {}).get('results') or []:
+            stages = sorted(p.get('stages') or [], key=lambda s: s.get('displayOrder', 0))
+            pipelines.append({'id': str(p.get('id')), 'label': p.get('label') or str(p.get('id')),
+                              'stages': [{'id': str(s.get('id')), 'label': s.get('label') or str(s.get('id'))}
+                                         for s in stages if not s.get('archived')]})
+        return pipelines
+
+    def create_deal(self, crm_contact_id: str, name: str, pipeline_id: str, stage_id: str) -> Optional[str]:
+        body = {'properties': {'dealname': (name or 'New deal')[:255], 'pipeline': pipeline_id, 'dealstage': stage_id},
+                'associations': self._contact_association(crm_contact_id, self.DEAL_TO_CONTACT)}
+        try:
+            resp = self._post('/crm/v3/objects/deals', json=body)
+        except CRMError as e:
+            if e.status_code == 403:
+                raise PermissionMissing('deals', 'HubSpot refused the deals: the key lacks a permission '
+                                                 '(crm.objects.deals.write).') from e
+            raise
+        return str((resp.json() or {}).get('id', '')) or None
+
+    def changed_contacts(self, since) -> list:
+        """HubSpot's contact search on lastmodifieddate, 100 a page, at most 2,000 a run (the rest come next run:
+        the oldest go first and the time moves on only past what was read)."""
+        out, after = [], None
+        for _ in range(20):
+            body = {'filterGroups': [{'filters': [{'propertyName': 'lastmodifieddate', 'operator': 'GTE',
+                                                   'value': str(_to_hs_timestamp(since))}]}],
+                    'properties': ['email', 'firstname', 'lastname', 'phone', 'jobtitle', 'company'],
+                    'sorts': [{'propertyName': 'lastmodifieddate', 'direction': 'ASCENDING'}], 'limit': 100}
+            if after:
+                body['after'] = after
+            data = self._post('/crm/v3/objects/contacts/search', json=body).json() or {}
+            for r in data.get('results') or []:
+                p = r.get('properties') or {}
+                out.append({'id': str(r.get('id')), 'email': p.get('email') or '', 'first_name': p.get('firstname') or '',
+                            'last_name': p.get('lastname') or '', 'phone': p.get('phone') or '',
+                            'job_title': p.get('jobtitle') or '', 'company': p.get('company') or ''})
+            after = ((data.get('paging') or {}).get('next') or {}).get('after')
+            if not after:
+                break
+        return out
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -272,7 +357,7 @@ class HubSpotConnector(BaseCRMConnector):
                 timeout=self._timeout,
             )
         except requests.RequestException as exc:
-            raise CRMError(f'HubSpot network error: {exc}', retriable=True) from exc
+            raise network_error('HubSpot', exc) from exc
 
         if 200 <= resp.status_code < 300:
             return resp

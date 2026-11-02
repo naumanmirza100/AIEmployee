@@ -47,6 +47,12 @@ def _backend_base() -> str:
     ).rstrip('/')
 
 
+def _video_link(meeting) -> str:
+    """The call's own room for 'Your video call link', never the campaign's scheduling page (CO-150)."""
+    link = meeting.calendar_link or ''
+    return link if link.startswith(('https://meet.jit.si/', 'https://meet.google.com/')) else ''
+
+
 def _booking_base() -> str:
     """Base URL for the browser-facing /book/<token> page.
 
@@ -180,8 +186,11 @@ _PREP_SYSTEM_PROMPT = (
 # HTML Email Builder Helpers
 # ---------------------------------------------------------------------------
 
-def _base_html(content: str, preview_text: str = '') -> str:
-    """Wrap email content in a responsive base template."""
+def _base_html(content: str, preview_text: str = '', brand: str = '') -> str:
+    """Wrap email content in a responsive base template, headed with the sender's company (`brand`, escaped).
+
+    The header said "AI Employee · Smart Outreach Platform": the lead saw the tool's name, not the company writing
+    to them (live run of 29 Oct)."""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -200,8 +209,7 @@ def _base_html(content: str, preview_text: str = '') -> str:
           <!-- Header Bar -->
           <tr>
             <td style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:12px 12px 0 0;padding:28px 36px;text-align:center;">
-              <span style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">AI Employee</span>
-              <span style="display:block;color:rgba(255,255,255,0.65);font-size:12px;margin-top:4px;letter-spacing:0.04em;text-transform:uppercase;">Smart Outreach Platform</span>
+              <span style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">{brand}</span>
             </td>
           </tr>
 
@@ -278,7 +286,9 @@ def _build_scheduling_html(first_name, sender, sender_title, sender_company,
         f'<li style="margin-bottom:6px;color:#374151;font-size:14px;">{b}</li>'
         for b in [
             'Your current priorities and challenges',
-            'How companies like yours are already using our solution',
+            # It said "How companies like yours are already using our solution": customers the salesperson never
+            # named, in an email sent in their name (the AI SDR film, 30 Oct).
+            f'What we offer, and whether it fits {company_name or "your team"}',
             'Any questions you have — we keep it open and no-pressure',
         ]
     )
@@ -332,7 +342,7 @@ def _build_scheduling_html(first_name, sender, sender_title, sender_company,
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Hi {first_name}, let's schedule our call — pick a time that works for you.")
+    return _base_html(body_html, preview_text=f"Hi {first_name}, let's schedule our call — pick a time that works for you.", brand=sender_company or sender)
 
 
 @_escape_args
@@ -435,7 +445,7 @@ def _build_confirmation_html(first_name, sender, sender_title, sender_company,
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Your meeting is confirmed, {first_name}! Here are the details.")
+    return _base_html(body_html, preview_text=f"Your meeting is confirmed, {first_name}! Here are the details.", brand=sender_company or sender)
 
 
 @_escape_args
@@ -479,7 +489,7 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
       </table>
 
       <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
-        See you tomorrow, {first_name}!
+        See you soon, {first_name}!
       </p>
       <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
         Just a friendly heads-up — your call is coming up.
@@ -491,7 +501,7 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
         <tr>
           <td style="padding:20px 24px;">
             <p style="margin:0 0 14px;color:#7c3aed;font-size:12px;font-weight:700;
-                      text-transform:uppercase;letter-spacing:0.06em;">Tomorrow's Call</p>
+                      text-transform:uppercase;letter-spacing:0.06em;">Your Call</p>
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               {_detail_row('Topic', title)}
               {_divider()}
@@ -528,11 +538,11 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
       <hr style="border:none;border-top:1px solid #f3f4f6;margin:20px 0;"/>
 
       <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
-        Looking forward to our conversation tomorrow!<br/>
+        Looking forward to our conversation!<br/>
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Reminder: your call is tomorrow at {scheduled_str}.")
+    return _base_html(body_html, preview_text=f"Reminder: your call is on {scheduled_str}.", brand=sender_company or sender)
 
 
 @_escape_args
@@ -589,7 +599,7 @@ def _build_completion_html(first_name, sender, sender_title, sender_company,
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Thank you for our {title} — great connecting with you!")
+    return _base_html(body_html, preview_text=f"Thank you for our {title} — great connecting with you!", brand=sender_company or sender)
 
 
 @_escape_args
@@ -660,7 +670,7 @@ def _build_approval_request_html(first_name, sender, sender_title, sender_compan
         {sender_block}
       </p>
     """
-    return _base_html(body_html, preview_text=f"Does {proposed_time_str} work for your {title}?")
+    return _base_html(body_html, preview_text=f"Does {proposed_time_str} work for your {title}?", brand=sender_company or sender)
 
 
 # ---------------------------------------------------------------------------
@@ -692,14 +702,16 @@ class MeetingSchedulingAgent:
     # ------------------------------------------------------------------
 
     def generate_prep_notes(self, lead, enrollment=None, reply_text: str = '') -> dict:
-        if self.groq_client:
+        # Tried twice: the model now and then repeats one question until it runs out of room, and the notes are not
+        # JSON (two of three tries on 30 Oct). A second try is a fresh draw.
+        for attempt in (1, 2) if self.groq_client else ():
             try:
                 return self._ai_prep_notes(lead, enrollment, reply_text)
             except Exception as exc:
                 from core.api_key_service import KeyServiceError
                 if isinstance(exc, KeyServiceError):
                     raise
-                logger.warning("AI prep notes failed, using defaults: %s", exc)
+                logger.warning("AI prep notes failed (try %d of 2): %s", attempt, exc)
         return self._default_prep_notes(lead, reply_text)
 
     def _ai_prep_notes(self, lead, enrollment, reply_text: str) -> dict:
@@ -708,7 +720,10 @@ class MeetingSchedulingAgent:
         if lead.recent_news:
             recent_news = (lead.recent_news[0] or {}).get('title', '')
 
-        reply_excerpt = (reply_text or '')[:400] or 'No reply text available'
+        # The lead's words only: with our quoted email and its long unsubscribe link in it, the model echoed the link
+        # and ran out of room, and the notes fell back to the template (the AI SDR film, 30 Oct).
+        from ai_sdr_agent.agents.email_assistant_agent import strip_quoted_reply
+        reply_excerpt = (strip_quoted_reply(reply_text or '') or reply_text or '')[:400] or 'No reply text available'
         campaign_name = enrollment.campaign.name if enrollment else 'Outreach Campaign'
         campaign_desc = enrollment.campaign.description if enrollment else ''
         emails_sent = enrollment.current_step if enrollment else 1
@@ -727,7 +742,12 @@ Campaign: {campaign_name} — {campaign_desc}
 Emails sent before reply: {emails_sent}
 Lead's reply: "{reply_excerpt}"
 
-Return exactly this JSON:
+Rules:
+- The campaign line above is all you know about what we offer. A talking point never names a feature, integration,
+  result or customer it does not give: the salesperson may repeat it on the call
+- What you know about the lead is the lines above; say "may" or "ask" for anything you only guess
+
+Return exactly this JSON, and nothing after it:
 {{
   "summary": "2-3 sentence overview of who this person is and why they replied",
   "talking_points": ["point 1", "point 2", "point 3"],
@@ -737,6 +757,9 @@ Return exactly this JSON:
   "recommended_duration": "30 min",
   "key_insight": "One sentence — the single most important thing to know going into this call"
 }}"""
+        # Found filming the AI SDR (30 Oct): a talking point read "Explain easy integration with existing practice
+        # management software", which the campaign never offered. With the rules after the JSON the model ran on
+        # past 9,000 characters, so they come first.
 
         resp = self.groq_client.chat.completions.create(
             model=self.model,
@@ -766,7 +789,8 @@ Return exactly this JSON:
             "talking_points": [
                 f"Ask about their current challenges in {lead.company_industry or 'their industry'}",
                 "Understand their decision-making process and timeline",
-                "Present case studies from similar companies",
+                # Not "Present case studies from similar companies": there may be none.
+                f"Walk through what we offer, and whether it fits {lead.company_name or 'them'}",
             ],
             "questions_to_ask": [
                 "What prompted you to reply? What's driving this priority right now?",
@@ -874,7 +898,7 @@ Return exactly this JSON:
         sender = campaign.sender_name or campaign.sender_company or 'the team'
         sender_title = campaign.sender_title or ''
         sender_company = campaign.sender_company or ''
-        meet_link = meeting.calendar_link or campaign.calendar_link or ''
+        meet_link = _video_link(meeting)
         scheduled_str = self._format_meeting_time(meeting)
         duration = meeting.duration_minutes or 30
         title = meeting.title or 'Discovery Call'
@@ -914,7 +938,7 @@ Return exactly this JSON:
         logger.info("Confirmation email sent to %s for meeting %s", lead.email, meeting.id)
 
     # ------------------------------------------------------------------
-    # Reminder Email  (sent ~24 hours before meeting)
+    # Reminder Email  (sent up to 26 hours before the call, worded with its time: CO-200)
     # ------------------------------------------------------------------
 
     def send_reminder_email(self, campaign, lead, meeting) -> None:
@@ -923,7 +947,7 @@ Return exactly this JSON:
         sender = campaign.sender_name or campaign.sender_company or 'the team'
         sender_title = campaign.sender_title or ''
         sender_company = campaign.sender_company or ''
-        meet_link = meeting.calendar_link or campaign.calendar_link or ''
+        meet_link = _video_link(meeting)
         scheduled_str = self._format_meeting_time(meeting)
         duration = meeting.duration_minutes or 30
         title = meeting.title or 'Discovery Call'
@@ -932,18 +956,18 @@ Return exactly this JSON:
         if getattr(meeting, 'booking_token', None):
             booking_url = f"{_booking_base()}/book/{meeting.booking_token}"
 
-        subject = f"Reminder: {title} is tomorrow — {scheduled_str}"
+        subject = f"Reminder: {title} — {scheduled_str}"
 
         plain = (
             f"Hi {first_name},\n\n"
-            f"Just a friendly reminder that your call is tomorrow!\n\n"
+            f"Just a friendly reminder of our call on {scheduled_str}.\n\n"
             f"  Topic       : {title}\n"
             f"  Date & Time : {scheduled_str}\n"
             f"  Duration    : {duration} minutes\n"
             + (f"  Join Link   : {meet_link}\n" if meet_link else '')
             + f"\nNo preparation needed — come as you are!\n\n"
             + "Need to reschedule? Just reply to this email and we'll sort it out.\n\n"
-            + f"See you tomorrow!\n\n{sender}"
+            + f"See you then!\n\n{sender}"
             + (f"\n{sender_title}" if sender_title else '')
             + (f"\n{sender_company}" if sender_company else '')
         )
@@ -1066,14 +1090,32 @@ Return exactly this JSON:
 
     def _send_email(self, campaign, to_email: str, subject: str,
                     plain: str, html: str = None) -> None:
+        from ai_sdr_agent.agents.outreach_agent import build_unsubscribe_url, refuse_if_suppressed
+        refuse_if_suppressed(campaign.company_user, to_email)
         if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
             raise ValueError(
                 "Campaign SMTP credentials not configured. "
                 "Add SMTP settings in campaign Settings before sending."
             )
 
+        # The footer said only "reply with unsubscribe"; it now carries the link, as the campaign's own emails do
+        # (CO-144). The reply still works too.
+        enrollment = (campaign.enrollments.select_related('lead', 'campaign__company_user')
+                      .filter(lead__email__iexact=to_email).first())
+        unsubscribe_url = build_unsubscribe_url(enrollment) if enrollment else ''
+        if unsubscribe_url:
+            html = (html or '').replace(
+                'simply reply with <strong>unsubscribe</strong>.',
+                f'reply with <strong>unsubscribe</strong> or <a href="{unsubscribe_url}" '
+                f'style="color:#6b7280;">unsubscribe here</a>.')
+            plain = plain.replace("Reply 'unsubscribe' to opt out.",
+                                  f"Reply 'unsubscribe' or open {unsubscribe_url} to opt out.")
+
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
+        if unsubscribe_url:
+            msg['List-Unsubscribe'] = f'<{unsubscribe_url}>'
+            msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
         display_name = campaign.sender_name or campaign.sender_company or ''
         from_addr = campaign.from_email or campaign.smtp_username
         msg['From'] = f"{display_name} <{from_addr}>" if display_name else from_addr

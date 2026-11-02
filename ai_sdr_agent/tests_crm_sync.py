@@ -152,15 +152,24 @@ class QueueWorkerTests(CRMBase):
 
     def setUp(self):
         super().setUp()
-        mock.patch.stopall()            # the real _process_async, with the thread held back
+        mock.patch.stopall()            # the real _process_async, with the queued run held back
+        from django.core.cache import cache
+        cache.delete(f'crm-sync-run-{self.company.pk}')
 
     def start(self):
-        with mock.patch('crm_sync_agent.signals.threading.Thread') as thread:
+        from crm_sync_agent.tasks import process_crm_sync_queue
+        with mock.patch.object(process_crm_sync_queue, 'apply_async') as run, \
+                self.captureOnCommitCallbacks(execute=True):
             crm_signals._process_async(self.company)
-        return thread.called
+        return run.called
 
     def test_the_queue_is_worked_while_the_company_has_crm_sync(self):
         self.assertTrue(self.start())
+
+    def test_a_burst_of_saves_queues_one_run(self):
+        # A thread per save sent the same entries twice over (CO-206).
+        self.assertTrue(self.start())
+        self.assertFalse(self.start())
 
     def test_and_waits_once_it_has_lapsed(self):
         CompanyModulePurchase.objects.filter(pk=self.subscription.pk).update(status='cancelled')

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { getBookingInfo, confirmBooking } from '@/services/aiSdrService';
 
 // ---------------------------------------------------------------------------
@@ -7,10 +7,6 @@ import { getBookingInfo, confirmBooking } from '@/services/aiSdrService';
 // ---------------------------------------------------------------------------
 
 function pad(n) { return String(n).padStart(2, '0'); }
-
-function toLocalIso(dateStr, timeStr) {
-  return new Date(`${dateStr}T${timeStr}:00`).toISOString();
-}
 
 function fmtDate(isoStr) {
   return new Date(isoStr).toLocaleString(undefined, {
@@ -32,17 +28,30 @@ const MONTH_NAMES = ['January','February','March','April','May','June',
                      'July','August','September','October','November','December'];
 const DAY_NAMES   = ['Su','Mo','Tu','We','Th','Fr','Sa'];
 
-const TIMES = [
-  '08:00','08:30','09:00','09:30','10:00','10:30',
-  '11:00','11:30','12:00','12:30','13:00','13:30',
-  '14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00',
-];
+// The server sends the times the salesperson is free (weekdays, working hours, company time). The page used to
+// offer every half hour from 08:00 to 18:00 of the lead's own day, any day, and refuse afterwards (CO-201).
+function localDay(isoStr) {
+  const d = new Date(isoStr);
+  return isoDate(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function localTime(isoStr) {
+  return new Date(isoStr).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function slotsByDay(slots) {
+  const byDay = {};
+  (slots || []).forEach(iso => { (byDay[localDay(iso)] = byDay[localDay(iso)] || []).push(iso); });
+  return byDay;
+}
+
+const LEAD_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // ---------------------------------------------------------------------------
 // Calendar component
 // ---------------------------------------------------------------------------
 
-function Calendar({ selectedDay, onSelect }) {
+function Calendar({ selectedDay, onSelect, available }) {
   const todayStr = today();
   const todayDate = new Date();
 
@@ -101,7 +110,7 @@ function Calendar({ selectedDay, onSelect }) {
           if (!day) return <div key={`e-${i}`} />;
 
           const iso      = isoDate(viewYear, viewMonth, day);
-          const isPast   = iso < todayStr;          // before today
+          const isPast   = iso < todayStr || !available.has(iso);   // before today, or no free time
           const isToday  = iso === todayStr;
           const isActive = iso === selectedDay;
 
@@ -151,8 +160,6 @@ function Calendar({ selectedDay, onSelect }) {
 
 export default function MeetingBookingPage() {
   const { token } = useParams();
-  const [searchParams] = useSearchParams();
-  const isApproved = searchParams.get('approved') === '1';
 
   const [info, setInfo]         = useState(null);
   const [loading, setLoading]   = useState(true);
@@ -162,44 +169,40 @@ export default function MeetingBookingPage() {
   const [selectedTime, setSelectedTime] = useState(null);
   const [submitting, setSubmitting]     = useState(false);
   const [confirmed, setConfirmed]       = useState(null);
+  const [bookError, setBookError]       = useState('');
 
-  useEffect(() => {
-    getBookingInfo(token)
-      .then(data => {
-        setInfo(data);
-        // Show the confirmed state directly when the meeting is already booked
-        // (lead clicked "Yes" in the approval email, then opened this page) —
-        // either via the ?approved=1 flag or the server's already_booked signal.
-        if (isApproved || data.already_booked) {
-          setConfirmed({
-            title: data.title,
-            scheduled_at: data.scheduled_at || null,
-            duration_minutes: data.duration_minutes,
-            sender_name: data.sender_name,
-            meet_link: data.meet_link || null,
-          });
-        }
-      })
-      .catch(err => {
-        // If meeting is already booked and approved=1, still show confirmed
-        if (isApproved) {
-          setConfirmed({ title: 'Your Meeting', scheduled_at: null, duration_minutes: null, sender_name: '', meet_link: null });
-          setLoading(false);
-          return;
-        }
-        setError(err?.message || err?.error || 'Booking link not found.');
-      })
-      .finally(() => setLoading(false));
-  }, [token, isApproved]);
+  const load = () => getBookingInfo(token)
+    .then(data => {
+      setInfo(data);
+      // Only a scheduled call shows as confirmed; a cancelled or finished one says so (CO-201).
+      if (data.status === 'scheduled') {
+        setConfirmed({
+          title: data.title,
+          scheduled_at: data.scheduled_at || null,
+          duration_minutes: data.duration_minutes,
+          sender_name: data.sender_name,
+          meet_link: data.meet_link || null,
+        });
+      }
+    })
+    .catch(err => setError(err?.message || err?.error || 'Booking link not found.'))
+    .finally(() => setLoading(false));
+
+  useEffect(() => { load(); }, [token]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConfirm = async () => {
-    if (!selectedDay || !selectedTime || submitting) return;
+    if (!selectedTime || submitting) return;
     setSubmitting(true);
+    setBookError('');
     try {
-      const result = await confirmBooking(token, toLocalIso(selectedDay, selectedTime));
+      const result = await confirmBooking(token, selectedTime);
       setConfirmed(result);
     } catch (err) {
-      setError(err?.message || err?.error || 'Failed to book. Please try again.');
+      // The picker stays, with the reason beside it and the free times read again: a refusal replaced the
+      // whole page with "Link unavailable".
+      setBookError(err?.message || err?.error || 'That time could not be booked. Please pick another.');
+      setSelectedTime(null);
+      load();
     } finally {
       setSubmitting(false);
     }
@@ -302,8 +305,24 @@ export default function MeetingBookingPage() {
     </div>
   );
 
+  // ── A call that was cancelled or has been held ──
+  if (info && ['cancelled', 'completed', 'no_show'].includes(info.status)) return (
+    <div style={page}>
+      <div style={{ ...card, textAlign: 'center', marginTop: 40 }}>
+        <h1 style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 20, margin: '0 0 8px' }}>
+          {info.status === 'cancelled' ? 'This call was cancelled' : 'This call has already taken place'}
+        </h1>
+        <p style={{ color: '#6b7280', fontSize: 14 }}>
+          If you would like to talk, just reply to the email you received and we will find a time.
+        </p>
+      </div>
+    </div>
+  );
+
   // ── Main booking UI ──
-  const canConfirm = selectedDay && selectedTime && !submitting;
+  const canConfirm = selectedTime && !submitting;
+  const byDay = slotsByDay(info.free_slots);
+  const available = new Set(Object.keys(byDay));
 
   return (
     <div style={page}>
@@ -330,6 +349,14 @@ export default function MeetingBookingPage() {
           Hi <strong style={{ color: 'var(--text-soft)' }}>{info.lead_first_name || info.lead_name}</strong>,
           please pick a date and time below. Once you confirm, you'll receive a calendar invite.
         </p>
+        <p data-testid="booking-zone" style={{ color: '#6b7280', fontSize: 12, margin: '-18px 0 22px' }}>
+          Times are shown in your time zone ({LEAD_ZONE}).
+        </p>
+        {available.size === 0 && (
+          <p style={{ color: '#f59e0b', fontSize: 13, margin: '0 0 18px' }}>
+            There are no free times in the next two weeks. Please reply to the email and we will find one.
+          </p>
+        )}
 
         {/* ── Two-column layout: Calendar | Time picker ── */}
         <div style={{ display: 'grid', gridTemplateColumns: selectedDay ? '1fr 1fr' : '1fr', gap: 28, alignItems: 'start' }}>
@@ -340,7 +367,8 @@ export default function MeetingBookingPage() {
             <div style={{ background: 'hsl(var(--surface-invert) / 0.02)', border: '1px solid var(--sfc-1e1535)', borderRadius: 12, padding: '16px 14px' }}>
               <Calendar
                 selectedDay={selectedDay}
-                onSelect={d => { setSelectedDay(d); setSelectedTime(null); }}
+                available={available}
+                onSelect={d => { setSelectedDay(d); setSelectedTime(null); setBookError(''); }}
               />
             </div>
           </div>
@@ -350,9 +378,9 @@ export default function MeetingBookingPage() {
             <div>
               <span style={sectionTitle}>Select a time</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
-                {TIMES.map(t => (
-                  <button key={t} style={timeBtn(selectedTime === t)} onClick={() => setSelectedTime(t)}>
-                    {t}
+                {(byDay[selectedDay] || []).map(iso => (
+                  <button key={iso} style={timeBtn(selectedTime === iso)} onClick={() => setSelectedTime(iso)}>
+                    {localTime(iso)}
                   </button>
                 ))}
               </div>
@@ -361,12 +389,12 @@ export default function MeetingBookingPage() {
         </div>
 
         {/* ── Summary ── */}
-        {selectedDay && selectedTime && (
+        {selectedTime && (
           <div style={{ marginTop: 20, padding: '13px 16px', background: 'rgba(168,85,247,0.07)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 18 }}>📅</span>
             <div>
               <p style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 700, fontSize: 14, margin: 0 }}>
-                {fmtDate(toLocalIso(selectedDay, selectedTime))}
+                {fmtDate(selectedTime)}
               </p>
               <p style={{ color: '#6b7280', fontSize: 12, margin: '2px 0 0' }}>
                 {info.duration_minutes}-minute call
@@ -390,6 +418,11 @@ export default function MeetingBookingPage() {
         >
           {submitting ? 'Confirming…' : 'Confirm Meeting'}
         </button>
+        {bookError && (
+          <p data-testid="booking-error" style={{ color: '#f87171', fontSize: 13, marginTop: 10, textAlign: 'center' }}>
+            {bookError}
+          </p>
+        )}
 
       </div>
     </div>

@@ -358,6 +358,8 @@ class EmailService:
                 send_history.message_id = message_id.strip('<>')  # Store without < >
                 send_history.email_account = email_account
                 send_history.save()
+                if hasattr(lead, 'move_to'):
+                    lead.move_to('contacted')
 
             self.sent_count += 1
 
@@ -715,10 +717,11 @@ class EmailService:
             tracking_pixel_url = f"{base_url}/token?t={tracking_token}"
             # No "View in browser" line: it pointed at the open counter, which showed only "Email displayed. You can
             # close this window." (CO-234).
-            # Use multiple pixel methods for better email client compatibility
+            # One plain 1x1 picture. There were two, hidden with display:none and visibility:hidden; hidden images
+            # are a spam sign, and Gmail put all three emails of the 29 Oct Gmail check in Spam.
             tracking_pixel = (
-                f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none; width:1px; height:1px; border:0;" alt="" />'
-                f'<img src="{tracking_pixel_url}" width="1" height="1" border="0" alt="" style="position:absolute; visibility:hidden; width:1px; height:1px;" />'
+                f'<img src="{tracking_pixel_url}" width="1" height="1" border="0" alt="" '
+                f'style="width:1px; height:1px; border:0;" />'
             )
             # Try to inject before </body>
             if '</body>' in html_content.lower():
@@ -907,11 +910,7 @@ class EmailService:
             
             result = self.send_email(template, lead, campaign)
             if result['success']:
-                results['sent'] += 1
-                # Update lead status
-                if lead.status == 'new':
-                    lead.status = 'contacted'
-                    lead.save()
+                results['sent'] += 1        # send_email moved the lead to Contacted
             else:
                 results['failed'] += 1
                 results['errors'].append({

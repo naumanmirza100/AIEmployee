@@ -319,7 +319,7 @@ export default function SDROverviewTab() {
         <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 10, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <AlertTriangle size={16} style={{ color: 'hsl(var(--pt-f59e0b))', flexShrink: 0 }} />
           <span style={{ fontSize: 13, color: 'hsl(var(--pt-fcd34d))' }}>
-            <strong>Low meetings alert:</strong> Only <strong>{meetWeek}</strong> meeting(s) this week — below target of {alertThresh}. Review reply rates or adjust email sequences.
+            <strong>Low meetings alert:</strong> Only <strong>{m.meetings_lweek ?? 0}</strong> meeting(s) booked last week — below target of {alertThresh}. Review reply rates or adjust email sequences.
           </span>
         </div>
       )}
@@ -364,7 +364,11 @@ export default function SDROverviewTab() {
           {[
             { key: 'qualify',  label: 'Qualify All',       color: '#f59e0b', Icon: Brain,     fn: () => qualifyAllLeads() },
             { key: 'replies',  label: 'Check Replies',     color: '#4ade80', Icon: RefreshCw, fn: () => checkAllReplies() },
-            { key: 'summary',  label: 'Send Daily Report', color: '#60a5fa', Icon: Send,      fn: () => sendSdrDailySummary() },
+            { key: 'summary',  label: 'Send Daily Report', color: '#60a5fa', Icon: Send,      fn: async () => {
+              const res = await sendSdrDailySummary();
+              if ((res?.sent ?? res?.data?.sent) === false) throw new Error('The summary email could not be sent. Try again later.');
+              return res;
+            } },
           ].map(({ key, label, color, Icon, fn }) => (
             <button key={key} disabled={!!actionBusy} onClick={() => runAction(key, fn, `${label} complete`)}
               style={{
@@ -400,7 +404,7 @@ export default function SDROverviewTab() {
           </SectionTitle>
           {hotLeads.length === 0 ? (
             <div style={{ textAlign:'center',padding:'24px 0',color:'#4b5563',fontSize:13 }}>
-              No hot leads yet — click <strong style={{ color:'hsl(var(--pt-a78bfa))' }}>Research Leads</strong> above
+              No hot leads yet — import your leads on the <strong style={{ color:'hsl(var(--pt-a78bfa))' }}>Leads</strong> page
             </div>
           ) : (
             <div style={{ display:'flex',flexDirection:'column',gap:8 }}>

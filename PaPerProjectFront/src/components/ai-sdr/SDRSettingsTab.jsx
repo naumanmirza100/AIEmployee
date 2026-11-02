@@ -5,7 +5,9 @@ import {
   Database, Zap, Settings, Wifi, WifiOff, Trash2, Plus,
   Video, Link2,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
+import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getSdrSettings, saveSdrSettings, listCrmIntegrations, createCrmIntegration, updateCrmIntegration, deleteCrmIntegration, pingCrmIntegration } from '@/services/aiSdrService';
 import { getGoogleCalendarStatus, connectGoogleCalendar, disconnectGoogleCalendar } from '@/services/companyAuthService';
 
@@ -540,6 +542,8 @@ const GoogleMeetCard = () => {
 
   const connected  = !!status?.connected;
   const configured = status?.configured !== false; // server has the OAuth app set up
+  // Connecting and disconnecting is for an owner or admin; a server from before that sends no mayManage.
+  const mayManage  = status?.mayManage !== false;
 
   return (
     <div style={{ ...card }}>
@@ -566,6 +570,10 @@ const GoogleMeetCard = () => {
         <div style={{ flexShrink: 0 }}>
           {loading ? (
             <Loader2 size={20} color="#a855f7" style={{ animation: 'spin 1s linear infinite' }} />
+          ) : !mayManage ? (
+            <span data-testid="sdr-gcal-admins-only" style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 12 }}>
+              An owner or admin connects it
+            </span>
           ) : connected ? (
             <button onClick={handleDisconnect} disabled={busy}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>
@@ -598,6 +606,11 @@ const GoogleMeetCard = () => {
 // ---------------------------------------------------------------------------
 const SDRSettingsTab = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
+  // CRM Sync is its own agent. Its forms here were offered to every AI SDR company; without it the list call was
+  // refused, read as "nothing connected", and connecting failed (CO-254).
+  const { purchasedModules } = usePurchasedModules();
+  const hasCrmSync = purchasedModules.includes('crm_sync_agent');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -711,8 +724,8 @@ const SDRSettingsTab = () => {
       icon: RefreshCw,
       label: 'CRMs',
       sublabel: 'HubSpot · Salesforce · Pipedrive',
-      badge: crmIntegrations.length > 0 ? `${crmIntegrations.length} connected` : null,
-      badgeColor: '#4ade80',
+      badge: !hasCrmSync ? 'Not in plan' : crmIntegrations.length > 0 ? `${crmIntegrations.length} connected` : null,
+      badgeColor: hasCrmSync ? '#4ade80' : '#9ca3af',
     },
     {
       key: 'meetings',
@@ -905,7 +918,20 @@ const SDRSettingsTab = () => {
         )}
 
         {/* ════ CRMs panel ════ */}
-        {activePanel === 'crm' && (
+        {activePanel === 'crm' && !hasCrmSync && (
+          <div data-testid="sdr-crm-not-in-plan" style={{ ...card, textAlign: 'center', padding: '28px 18px' }}>
+            <p style={{ color: 'hsl(var(--surface-invert) / 0.6)', fontSize: 13 }}>
+              CRM Sync is a separate agent and is not part of your plan. With it, your leads, emails, calls and replies
+              go to HubSpot, Salesforce or Pipedrive.{' '}
+              <button type="button" onClick={() => navigate('/company/dashboard/ai-agents')}
+                style={{ background: 'none', border: 'none', color: '#a78bfa', textDecoration: 'underline', cursor: 'pointer', fontSize: 13, padding: 0 }}>
+                See AI agents
+              </button>
+            </p>
+          </div>
+        )}
+
+        {activePanel === 'crm' && hasCrmSync && (
           <div>
             {/* Header */}
             <div style={{ marginBottom: 20 }}>

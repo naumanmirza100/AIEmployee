@@ -41,6 +41,17 @@ class Lead(models.Model):
     def __str__(self):
         return f"{self.email} - {self.get_status_display()}"
 
+    # How far a lead has come. Only the old one-off sender ever moved it, so every lead of a sequence stayed "New"
+    # after its emails and replies (found in the live run of 29 Oct 2026).
+    PROGRESS = {'new': 0, 'contacted': 1, 'qualified': 2, 'converted': 3, 'lost': 3}
+
+    def move_to(self, status):
+        """Move the lead forward to `status`: never back, and never out of Converted or Lost, so a status a person
+        set stays."""
+        if self.pk and self.PROGRESS.get(status, 0) > self.PROGRESS.get(self.status, 0):
+            Lead.objects.filter(pk=self.pk).update(status=status, updated_at=timezone.now())
+            self.status = status
+
 
 class CampaignLead(models.Model):
     """Through model for Campaign-Lead ManyToMany relationship with explicit table name"""
@@ -1097,6 +1108,17 @@ def mark_triggering_email_opened_on_reply(sender, instance, created, **kwargs):
             send.opened_at = instance.replied_at or timezone.now()
         send.save(update_fields=['status', 'opened_at', 'updated_at'])
         logger.info(f"Marked EmailSendHistory {send.id} as opened (reply from {instance.lead.email})")
+
+
+@receiver(post_save, sender=Reply)
+def move_lead_on_reply(sender, instance, **kwargs):
+    """A reply moves its lead on: Qualified when it shows interest, Lost when the person asks to stop, else
+    Contacted. Run again when the AI reads the reply later."""
+    if not instance.lead_id:
+        return
+    level = instance.interest_level
+    instance.lead.move_to('qualified' if level in ('positive', 'requested_info')
+                          else 'lost' if level == 'unsubscribe' else 'contacted')
 
 
 # Signal to automatically create CampaignContact when leads are added to campaigns

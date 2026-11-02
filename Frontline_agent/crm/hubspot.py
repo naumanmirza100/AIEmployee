@@ -140,11 +140,14 @@ class HubSpotClient:
         existing = self.find_contact_by_email(email)
         if existing:
             hs_id = existing.get('id')
-            # Only update when the fields we're pushing differ — saves an API call on idle syncs.
+            # A contact already in HubSpot is the customer's: only fields empty there are filled. Frontline's
+            # name and phone used to replace whatever HubSpot held whenever they differed, the fault CRM Sync had
+            # until CO-96 (2 Nov 2026).
             existing_props = existing.get('properties') or {}
-            if self._diff_requires_update(existing_props, name, phone, extra_properties):
-                self.update_contact(hs_id, email=email, name=name, phone=phone,
-                                    extra_properties=extra_properties)
+            wanted = self._build_properties('', name, phone, extra_properties, require_email=False)
+            blanks = {k: v for k, v in wanted.items() if not str(existing_props.get(k) or '').strip()}
+            if blanks:
+                self._patch(f'/crm/v3/objects/contacts/{hs_id}', json={'properties': blanks})
             return str(hs_id)
         created = self.create_contact(email, name=name, phone=phone,
                                       extra_properties=extra_properties)

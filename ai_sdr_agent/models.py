@@ -258,6 +258,10 @@ class SDRCampaign(models.Model):
     # On for new campaigns; campaigns that existed before the switch keep sending.
     review_ai_replies = models.BooleanField(default=True)
     last_replies_checked_at = models.DateTimeField(null=True, blank=True)
+    # What the inbox said the last time it could not be read, and when. It was only logged, and the screen kept
+    # saying the inbox was checked every five minutes (CO-197).
+    inbox_error = models.CharField(max_length=500, blank=True, default='')
+    inbox_error_at = models.DateTimeField(null=True, blank=True)
     activated_at = models.DateTimeField(null=True, blank=True)
 
     # Stats (denormalised for quick reads)
@@ -549,6 +553,17 @@ class SDRMeeting(models.Model):
 
     def __str__(self):
         return f"Meeting with {self.lead.display_name} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        # A call moved to a new time is reminded again: the mark was never cleared, so after a no-show and a new
+        # time no reminder went out (CO-200).
+        if self.pk and self.reminder_sent_at:
+            before = type(self).objects.filter(pk=self.pk).values_list('scheduled_at', flat=True).first()
+            if before != self.scheduled_at:
+                self.reminder_sent_at = None
+                if kwargs.get('update_fields') is not None:
+                    kwargs['update_fields'] = set(kwargs['update_fields']) | {'reminder_sent_at'}
+        super().save(*args, **kwargs)
 
 
 class SDRJobLock(models.Model):

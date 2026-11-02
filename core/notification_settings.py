@@ -51,6 +51,8 @@ AGENT_LABELS = {
     'exec_meeting_agent': 'Executive Meeting',
     'marketing_agent': 'Marketing',
     'operations_agent': 'Operations',
+    'ai_sdr_agent': 'AI SDR',
+    'reply_draft_agent': 'Reply Draft',
     None: 'Everyone',
 }
 #: The heading for topics that several agents share.
@@ -153,6 +155,23 @@ TOPICS = (
           "A campaign of yours cannot go on without you: it could not start, its mailbox stopped "
           "sending, or something else needs a decision. At most once a day for each.",
           'marketing_agent', kinds=('marketing_action_required',)),
+    Topic('sales_calls', 'Sales calls and interested leads',
+          'A lead books a call, accepts the time you proposed or replies with interest, the AI answers a lead for '
+          'you, the reminder before a call, and a LinkedIn step for you to do.',
+          'ai_sdr_agent', kinds=('sdr_call_booked', 'sdr_lead_interested', 'sdr_ai_answered', 'sdr_call_reminder',
+                                 'sdr_linkedin_step'),
+          email_default=True),
+    Topic('sales_reports', 'Sales reports',
+          'The daily AI SDR summary, and on Mondays a note when last week had few calls booked.',
+          'ai_sdr_agent', email_default=True, in_app=False),
+    Topic('inbox_urgent', 'Urgent email',
+          'An email the AI reads as urgent arrives in the Reply Draft inbox: something broken, an angry customer, '
+          'a payment or deadline due today or tomorrow.',
+          'reply_draft_agent', kinds=('inbox_urgent',), email_default=True),
+    Topic('inbox_digest', 'Daily inbox summary',
+          "Each morning, yesterday's mail in the Reply Draft inbox: how many, of which kinds, what is urgent and "
+          'who is waiting for an answer.',
+          'reply_draft_agent', kinds=('inbox_digest',), email_default=True, in_app=False),
     Topic('operations_failed', 'Documents that could not be read',
           'A document you uploaded to Operations failed to process.',
           'operations_agent', kinds=('operations_document_failed',)),

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-import threading
+
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -20,21 +20,67 @@ def _has_active_integrations(company) -> bool:
     return CRMIntegration.objects.filter(company=company, is_active=True).exists()
 
 
-def _process_async(company):
-    """Process pending queue in a background thread (no Celery needed).
+#: Seconds after a save before the company's queue is worked through; saves within it share one run.
+RUN_AFTER_SECONDS = 10
 
-    Not for a company whose CRM Sync subscription is not active: its queue
-    waits, as it does for the scheduled job (core/modules.py)."""
+
+def _process_async(company):
+    """Work through the company's queue shortly, once for a burst of saves.
+
+    Each save started its own thread over the same waiting entries: an import of a few hundred leads, or a
+    sequence sending fifty emails, started that many, and two threads could send the same entry (CO-206). Now one
+    queued run per company and burst (entries are also claimed one by one); without Celery the two-minute
+    scheduled job does it. Not for a company whose CRM Sync subscription is not active (core/modules.py)."""
     from core.modules import has_module
     if not has_module(company, 'crm_sync_agent'):
         return
+    from django.core.cache import cache
+    from django.db import transaction
+    if not cache.add(f'crm-sync-run-{company.pk}', 1, RUN_AFTER_SECONDS):
+        return
 
-    def _run():
+    def _queue():
         try:
-            _get_agent(company).process_pending(limit=20)
+            from crm_sync_agent.tasks import process_crm_sync_queue
+            process_crm_sync_queue.apply_async(kwargs={'company_id': company.pk}, countdown=RUN_AFTER_SECONDS)
         except Exception:
-            logger.exception('CRM background process error (company=%s)', getattr(company, 'pk', '?'))
-    threading.Thread(target=_run, daemon=True).start()
+            logger.warning('CRM sync: no task queue just now; the scheduled job will send company %s\'s entries',
+                           getattr(company, 'pk', '?'))
+    transaction.on_commit(_queue)
+
+
+def queue_inbox_email(email) -> None:
+    """Reply Draft's AI has read an email: if it is from a customer or a lead and the company has CRM Sync, it goes
+    to the CRM. Called by reply_draft_agent's triage job, which saves with update() and so sends no signal."""
+    try:
+        company = _company_of_mailbox(email.email_account)
+        if company is None or not _has_active_integrations(company):
+            return
+        _get_agent(company).enqueue_inbox_email(email)
+        _process_async(company)
+    except Exception:
+        logger.exception('CRM: could not queue inbox email %s', getattr(email, 'pk', '?'))
+
+
+def queue_inbox_reply(draft, to_email, subject, body) -> None:
+    """A reply has been sent from Reply Draft: it goes to the CRM on the recipient's contact."""
+    try:
+        company = _company_of_mailbox(draft.email_account)
+        if company is None or not _has_active_integrations(company):
+            return
+        _get_agent(company).enqueue_inbox_reply(draft, to_email, subject, body)
+        _process_async(company)
+    except Exception:
+        logger.exception('CRM: could not queue reply %s', getattr(draft, 'pk', '?'))
+
+
+def _company_of_mailbox(account):
+    from core.logins import company_id_for
+    from core.models import Company
+    from core.modules import has_module
+    company_id = company_id_for(account.owner) if account is not None else None
+    company = Company.objects.filter(pk=company_id).first() if company_id else None
+    return company if company is not None and has_module(company, 'crm_sync_agent') else None
 
 
 def _company_from_lead(lead):
@@ -65,6 +111,68 @@ def on_sdr_lead_saved(sender, instance, created, **kwargs):
         _process_async(company)
     except Exception:
         logger.exception('CRM signal error on SDRLead save (lead=%s)', getattr(instance, 'pk', '?'))
+
+
+# ------------------------------------------------------------------ #
+# Frontline — its customers, and a note when a ticket opens and when it is resolved
+# ------------------------------------------------------------------ #
+
+def support_goes_to_crm(company) -> bool:
+    """True when this company's Frontline customers and tickets go to a CRM through CRM Sync. Frontline's own older
+    HubSpot link stands aside then, so nothing is sent twice (Frontline_agent/signals.py)."""
+    from core.modules import has_module
+    from crm_sync_agent.models import CRMIntegration
+    return bool(company) and has_module(company, 'crm_sync_agent') and CRMIntegration.objects.filter(
+        company=company, is_active=True, sync_support=True).exists()
+
+
+@receiver(post_save, sender='Frontline_agent.Contact')
+def on_frontline_contact_saved(sender, instance, created, **kwargs):
+    try:
+        if not support_goes_to_crm(instance.company):
+            return
+        _get_agent(instance.company).enqueue_support_contact(instance)
+        _process_async(instance.company)
+    except Exception:
+        logger.exception('CRM signal error on Frontline contact save (contact=%s)', getattr(instance, 'pk', '?'))
+
+
+@receiver(post_save, sender='Frontline_agent.Ticket')
+def on_frontline_ticket_saved(sender, instance, created, **kwargs):
+    try:
+        if instance.contact_id is None or not support_goes_to_crm(instance.company):
+            return
+        agent = _get_agent(instance.company)
+        agent.enqueue_support_contact(instance.contact)       # a customer from before the CRM was connected
+        agent.enqueue_support_ticket(instance)
+        _process_async(instance.company)
+    except Exception:
+        logger.exception('CRM signal error on Frontline ticket save (ticket=%s)', getattr(instance, 'pk', '?'))
+
+
+# ------------------------------------------------------------------ #
+# Marketing — a reply to a campaign, once the AI has read it (only with "Marketing replies" on)
+# ------------------------------------------------------------------ #
+
+def _company_of_owner(user):
+    from core.logins import company_id_for
+    from core.models import Company
+    from core.modules import has_module
+    company_id = company_id_for(user) if user is not None else None
+    company = Company.objects.filter(pk=company_id).first() if company_id else None
+    return company if company is not None and has_module(company, 'crm_sync_agent') else None
+
+
+@receiver(post_save, sender='marketing_agent.Reply')
+def on_marketing_reply_saved(sender, instance, created, **kwargs):
+    try:
+        company = _company_of_owner(instance.campaign.owner)
+        if company is None or not _has_active_integrations(company):
+            return
+        _get_agent(company).enqueue_marketing_reply(instance)
+        _process_async(company)
+    except Exception:
+        logger.exception('CRM signal error on Marketing reply save (reply=%s)', getattr(instance, 'pk', '?'))
 
 
 # ------------------------------------------------------------------ #
@@ -110,7 +218,8 @@ def log_meeting(meeting) -> None:
     a time the CRM was never told. `enqueue_meeting` sends each meeting once,
     so calling this again for the same meeting does nothing.
     """
-    if not meeting.scheduled_at or meeting.status not in ('scheduled', 'completed'):
+    # 'cancelled' too: one already in the CRM is marked cancelled there; one that never went is not sent (CO-275).
+    if not meeting.scheduled_at or meeting.status not in ('scheduled', 'completed', 'cancelled'):
         return
     lead = getattr(meeting, 'lead', None)
     if not lead or not lead.email:

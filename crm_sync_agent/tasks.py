@@ -138,11 +138,39 @@ def ping_crm_integrations():
         integration.save(update_fields=['last_ping_at', 'last_ping_ok'])
 
         if ok:
+            CRMSyncAgent.release_waiting(integration)      # the key works again (CO-159)
             results['ok'] += 1
         else:
             results['failed'] += 1
 
     logger.info('CRM integration ping: ok=%d failed=%d', results['ok'], results['failed'])
+    return results
+
+
+@shared_task(name='crm_sync_agent.tasks.pull_crm_changes')
+def pull_crm_changes():
+    """Every 15 minutes: for each CRM with "Changes from the CRM" on, copy corrected names, phones, job titles and
+    companies back to the records linked to its contacts. A refused key or a CRM that cannot be reached is logged
+    and tried next time; the time read from does not move on then."""
+    from core.modules import has_module
+    from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+    from crm_sync_agent.connectors.base import CRMError
+    from crm_sync_agent.models import CRMIntegration, CRMSyncLog
+    results = {'integrations': 0, 'updated': 0, 'failed': 0}
+    for integration in CRMIntegration.objects.filter(is_active=True, sync_back=True).select_related('company'):
+        if not has_module(integration.company, 'crm_sync_agent'):
+            continue
+        results['integrations'] += 1
+        try:
+            results['updated'] += CRMSyncAgent(integration.company).pull_changes(integration)['updated']
+        except CRMError as exc:
+            results['failed'] += 1
+            CRMSyncLog.objects.create(company=integration.company, integration=integration,
+                                      object_type=CRMSyncLog.TYPE_CONTACT, operation=CRMSyncLog.OP_PULL,
+                                      status=CRMSyncLog.STATUS_FAILED, error_message=str(exc)[:500])
+        except Exception:
+            results['failed'] += 1
+            logger.exception('CRM: reading changes back failed for integration %s', integration.pk)
     return results
 
 
@@ -167,13 +195,92 @@ def queue_everything(agent, company) -> dict:
     # This filtered on a `company` field leads do not have, so the job failed
     # on its first step every time and "Sync queued" never synced anything.
     each('leads', SDRLead.objects.filter(company_user__company=company), agent.enqueue_sdr_lead)
+    # Emails only: a LinkedIn step's 'sent' row is a reminder to the salesperson (CO-253).
     each('emails', SDROutreachLog.objects.filter(
-        status='sent', enrollment__lead__company_user__company=company,
+        status='sent', action_type='email', enrollment__lead__company_user__company=company,
     ).select_related('enrollment__lead'), agent.enqueue_email_sent)
     each('meetings', SDRMeeting.objects.filter(
         lead__company_user__company=company, scheduled_at__isnull=False,
         status__in=('scheduled', 'completed'),
     ).select_related('lead'), agent.enqueue_meeting)
+    counts.update(queue_inbox(agent, company))
+    counts.update(queue_support(agent, company))
+    counts.update(queue_marketing(agent, company))
+    return counts
+
+
+def queue_marketing(agent, company) -> dict:
+    """Marketing's part, for a CRM with "Marketing replies" on: the last month's replies to the company's
+    campaigns (not requests to unsubscribe), each with the person who sent it."""
+    from datetime import timedelta
+    from core.logins import company_user_ids
+    from marketing_agent.models import Reply
+    counts = {'marketing_replies': 0}
+    if not any(i.sync_marketing for i in agent._integrations):
+        return counts
+    since = timezone.now() - timedelta(days=INBOX_DAYS)
+    for reply in (Reply.objects.filter(campaign__owner_id__in=company_user_ids(company), replied_at__gte=since)
+                  .exclude(interest_level__in=('unsubscribe', 'not_analyzed')).select_related('lead', 'campaign')):
+        try:
+            agent.enqueue_marketing_reply(reply)
+            counts['marketing_replies'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue Marketing reply %s', reply.pk)
+    return counts
+
+
+#: How far back "Sync All" goes in Reply Draft's mail, and in Frontline's tickets.
+INBOX_DAYS = 30
+
+
+def queue_support(agent, company) -> dict:
+    """Frontline's part: its customers who have an address, and the last month's tickets about them (a note when
+    each was opened, and when it was resolved). Frontline sent its customers to HubSpot only, by a key of its own."""
+    from datetime import timedelta
+    from Frontline_agent.models import Contact, Ticket
+    counts = {'support_customers': 0, 'support_tickets': 0}
+    for contact in Contact.objects.filter(company=company).exclude(email=''):
+        try:
+            agent.enqueue_support_contact(contact)
+            counts['support_customers'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue Frontline customer %s', contact.pk)
+    since = timezone.now() - timedelta(days=INBOX_DAYS)
+    for ticket in Ticket.objects.filter(company=company, contact__isnull=False, created_at__gte=since).select_related('contact'):
+        try:
+            agent.enqueue_support_ticket(ticket)
+            counts['support_tickets'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue Frontline ticket %s', ticket.pk)
+    return counts
+
+
+def queue_inbox(agent, company) -> dict:
+    """Reply Draft's part (the AI Inbox Manager of the client's list): the last month's mail from customers and
+    leads, as the AI read it, and the replies sent. CRM Sync carried only the AI SDR's records (CO-207)."""
+    from datetime import timedelta
+    from core.logins import company_user_ids
+    from crm_sync_agent.agents.crm_sync_agent import INBOX_KINDS
+    from reply_draft_agent.models import InboxEmail, ReplyDraft
+
+    since = timezone.now() - timedelta(days=INBOX_DAYS)
+    owners = company_user_ids(company)
+    counts = {'inbox_emails': 0, 'inbox_replies': 0}
+    for email in InboxEmail.objects.filter(owner_id__in=owners, direction='in', category__in=INBOX_KINDS,
+                                           received_at__gte=since, email_account__is_reply_agent_account=True):
+        try:
+            agent.enqueue_inbox_email(email)
+            counts['inbox_emails'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue inbox email %s', email.pk)
+    for draft in (ReplyDraft.objects.filter(owner_id__in=owners, status='sent', sent_at__gte=since)
+                  .select_related('inbox_email')):
+        try:
+            agent.enqueue_inbox_reply(draft, draft.get_recipient_email(), draft.get_final_subject(),
+                                      draft.get_final_body())
+            counts['inbox_replies'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue reply %s', draft.pk)
     return counts
 
 

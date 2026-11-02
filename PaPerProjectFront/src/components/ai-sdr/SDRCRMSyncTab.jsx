@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw, Plus, Trash2, CheckCircle2, XCircle, Wifi, WifiOff,
   AlertCircle, Loader2, ChevronDown, ChevronUp, Users, Mail,
-  Calendar, FileText, Database, Zap,
+  Calendar, FileText, Database, Zap, KeyRound, LifeBuoy, Megaphone, Briefcase,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  listCrmIntegrations, createCrmIntegration, deleteCrmIntegration,
-  pingCrmIntegration, syncCrmLeads, getCrmQueueStatus, retryCrmFailed,
+  listCrmIntegrations, createCrmIntegration, updateCrmIntegration, deleteCrmIntegration,
+  pingCrmIntegration, syncCrmLeads, getCrmQueueStatus, retryCrmFailed, getCrmPipelines,
 } from '@/services/aiSdrService';
 
 // ---------------------------------------------------------------------------
@@ -132,20 +132,26 @@ const PROVIDERS = {
     color: '#ff7a59',
     bg: 'rgba(255,122,89,0.12)',
     logo: '🟠',
-    fields: [{ key: 'access_token', label: 'Access Token (Service Key)', placeholder: 'pat-na1-...' }],
+    // The keys were plain text boxes, so a key showed on screen (and in any screen share) while it was typed.
+    fields: [{ key: 'access_token', label: 'Access Token (Service Key)', placeholder: 'pat-na1-...', type: 'password',
+               hint: 'In HubSpot: Settings → Integrations → Service keys. Give it CRM contacts read and write, '
+                     + 'sales-email-read (for emails and calls), and deals read and write if you want deals.' }],
   },
   salesforce: {
     label: 'Salesforce',
     color: '#00a1e0',
     bg: 'rgba(0,161,224,0.12)',
     logo: '🔵',
+    // An External Client App's key and secret (the client credentials flow). Salesforce has switched off signing in
+    // with a username, password and security token in new accounts and is retiring it.
     fields: [
-      { key: 'client_id',      label: 'Client ID',       placeholder: '3MVG...' },
-      { key: 'client_secret',  label: 'Client Secret',   placeholder: '...',        type: 'password' },
-      { key: 'username',       label: 'Username',         placeholder: 'user@example.com' },
-      { key: 'password',       label: 'Password',         placeholder: '...',        type: 'password' },
-      { key: 'security_token', label: 'Security Token',   placeholder: '...',        type: 'password' },
-      { key: 'domain',         label: 'Domain',           placeholder: 'login (or test for sandbox)' },
+      { key: 'instance_url',  label: 'My Domain',       placeholder: 'yourcompany.my.salesforce.com',
+        hint: 'In Salesforce: Setup → My Domain → Current My Domain URL.' },
+      { key: 'client_id',     label: 'Consumer Key',    placeholder: '3MVG...', type: 'password' },
+      { key: 'client_secret', label: 'Consumer Secret', placeholder: '...',     type: 'password',
+        hint: 'Setup → External Client App Manager → New: tick Enable OAuth with the "api" scope and Enable Client '
+              + 'Credentials Flow; on its Policies tab set Run As to a user; then Consumer Key and Secret. Your '
+              + 'Salesforce plan needs API access (Enterprise and higher, or the API add-on).' },
     ],
   },
   pipedrive: {
@@ -153,33 +159,44 @@ const PROVIDERS = {
     color: '#27c16b',
     bg: 'rgba(39,193,107,0.12)',
     logo: '🟢',
-    fields: [{ key: 'api_token', label: 'API Token', placeholder: 'abc123...' }],
+    fields: [{ key: 'api_token', label: 'API Token', placeholder: 'abc123...', type: 'password',
+               hint: 'In Pipedrive: your name → Personal preferences → API.' }],
   },
 };
 
 // ---------------------------------------------------------------------------
 // Connect Modal
 // ---------------------------------------------------------------------------
-function ConnectModal({ provider, onClose, onSaved }) {
+// `integration` given: change the saved details. Fields left empty keep what is saved (the server keeps them), so a
+// new HubSpot key needs no Remove, which also dropped everything waiting in the queue.
+function ConnectModal({ provider, integration, onClose, onSaved }) {
   const cfg = PROVIDERS[provider];
+  const editing = !!integration;
   const [creds, setCreds] = useState({});
   const [loading, setLoading] = useState(false);
+  // Why the CRM refused, kept in the window until the details change: the toast alone was gone in seconds.
+  const [refused, setRefused] = useState('');
   const { toast } = useToast();
 
   const handleSave = async () => {
-    const missing = cfg.fields.find(f => !creds[f.key]);
-    if (missing) {
-      toast({ title: `${missing.label} is required`, variant: 'destructive' });
+    const filled = Object.fromEntries(Object.entries(creds).filter(([, v]) => v && v.trim()));
+    const missing = editing ? null : cfg.fields.find(f => !filled[f.key]);
+    if (missing || (editing && !Object.keys(filled).length)) {
+      toast({ title: missing ? `${missing.label} is required` : 'Type the new details first', variant: 'destructive' });
       return;
     }
     setLoading(true);
     try {
-      await createCrmIntegration({ provider, credentials: creds });
-      toast({ title: `${cfg.label} connected!`, description: 'Integration saved successfully.' });
+      // The server tries the details with the CRM first and refuses them, saying why, when the CRM does.
+      if (editing) await updateCrmIntegration(integration.id, { credentials: filled });
+      else await createCrmIntegration({ provider, credentials: filled });
+      toast({ title: editing ? `${cfg.label} details changed` : `${cfg.label} connected!`,
+              description: `${cfg.label} accepted them.` });
       onSaved();
       onClose();
     } catch (e) {
-      toast({ title: 'Connection failed', description: e?.message || 'Check your credentials.', variant: 'destructive' });
+      setRefused(e?.message || 'Check the details.');
+      toast({ title: `${cfg.label} did not accept them`, description: e?.message || 'Check the details.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -194,8 +211,10 @@ function ConnectModal({ provider, onClose, onSaved }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <span style={{ fontSize: 28 }}>{cfg.logo}</span>
           <div>
-            <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Connect {cfg.label}</div>
-            <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>Enter your {cfg.label} credentials</div>
+            <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>{editing ? `Change the ${cfg.label} details` : `Connect ${cfg.label}`}</div>
+            <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>
+              {editing ? 'Type only what changes; a field left empty keeps what is saved.' : `Enter your ${cfg.label} credentials`}
+            </div>
           </div>
         </div>
 
@@ -206,22 +225,138 @@ function ConnectModal({ provider, onClose, onSaved }) {
               <input
                 style={inputStyle}
                 type={f.type || 'text'}
-                placeholder={f.placeholder}
+                autoComplete={f.type === 'password' ? 'new-password' : 'off'}
+                data-testid={`crm-field-${f.key}`}
+                placeholder={editing ? (integration.credentials_preview?.[f.key] || 'Leave empty to keep it') : f.placeholder}
                 value={creds[f.key] || ''}
-                onChange={e => setCreds(p => ({ ...p, [f.key]: e.target.value }))}
+                onChange={e => { setRefused(''); setCreds(p => ({ ...p, [f.key]: e.target.value })); }}
               />
+              {f.hint && <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, marginTop: 6 }}>{f.hint}</div>}
             </div>
           ))}
         </div>
+
+        {refused && (
+          <div data-testid="crm-connect-refused" style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8, margin: '-8px 0 18px', padding: '10px 12px', borderRadius: 8,
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', color: 'hsl(var(--pt-d1d5db))', fontSize: 13,
+          }}>
+            <AlertCircle size={15} color="#ef4444" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{refused}</span>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button style={btnSecondary} onClick={onClose}>Cancel</button>
           <button style={btnPrimary} onClick={handleSave} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-            {loading ? 'Connecting...' : 'Connect'}
+            {loading ? 'Checking with the CRM...' : editing ? 'Save' : 'Connect'}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Deals: off until a pipeline and stage are picked from the company's own CRM. One deal per person, when an AI SDR
+// lead books a call or a Marketing reply is read as interested.
+// ---------------------------------------------------------------------------
+function DealsRow({ integration, label, onRefresh }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [pipelines, setPipelines] = useState(null);
+  const [problem, setProblem] = useState('');
+  const [pick, setPick] = useState({ pipeline_id: '', stage_id: '' });
+  const [saving, setSaving] = useState(false);
+  const settings = integration.deal_settings || {};
+  const word = label === 'Salesforce' ? 'opportunities' : 'deals';
+
+  const openPicker = async () => {
+    setOpen(true); setProblem(''); setPipelines(null);
+    try {
+      const res = await getCrmPipelines(integration.id);
+      const list = res?.pipelines || [];
+      setPipelines(list);
+      const first = list.find((p) => p.id === settings.pipeline_id) || list[0];
+      setPick({ pipeline_id: first?.id || '', stage_id: settings.stage_id || first?.stages?.[0]?.id || '' });
+    } catch (e) {
+      setProblem(e?.data?.message || e?.message || `${label} could not be asked just now.`);
+      setPipelines([]);
+    }
+  };
+
+  const save = async (on) => {
+    setSaving(true);
+    try {
+      await updateCrmIntegration(integration.id, on ? { deal_settings: pick, sync_deals: true } : { sync_deals: false });
+      toast({ title: on ? `New ${word} go to ${label}` : `${label} gets no new ${word}` });
+      setOpen(false);
+      onRefresh();
+    } catch (e) {
+      setProblem(e?.data?.message || e?.message || 'Not saved.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const stages = (pipelines || []).find((p) => p.id === pick.pipeline_id)?.stages || [];
+  const select = { background: 'hsl(var(--surface-invert) / 0.05)', color: '#fff', border: '1px solid hsl(var(--surface-invert) / 0.12)',
+    borderRadius: 8, padding: '6px 8px', fontSize: 12 };
+
+  return (
+    <div data-testid="crm-deals" style={{ fontSize: 12, color: 'hsl(var(--pt-d1d5db))' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: integration.sync_deals ? '#10b981' : '#6b7280' }}>
+          <Briefcase size={12} />
+          {integration.sync_deals
+            ? <>Deals go to <b>{settings.pipeline_label}</b> · <b>{settings.stage_label}</b></>
+            : 'Deals (off)'}
+        </span>
+        {!open && (
+          <button type="button" data-testid="crm-deals-setup" onClick={openPicker}
+            style={{ ...btnSecondary, padding: '3px 10px', fontSize: 12 }}>
+            {integration.sync_deals ? 'Change' : 'Set up'}
+          </button>
+        )}
+        {!open && integration.sync_deals && (
+          <button type="button" data-testid="crm-deals-off" onClick={() => save(false)} disabled={saving}
+            style={{ ...btnSecondary, padding: '3px 10px', fontSize: 12 }}>Turn off</button>
+        )}
+      </div>
+      {open && (
+        <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
+          <div style={{ marginBottom: 8, color: 'hsl(var(--pt-9ca3af))' }}>
+            One {word.slice(0, -1)} per person, when an AI SDR lead books a call or a Marketing reply is read as
+            interested, linked to their contact. Choose where new ones go:
+          </div>
+          {pipelines === null ? <Loader2 size={14} className="animate-spin" /> : (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {pipelines.length > 1 && (
+                <select data-testid="crm-deals-pipeline" style={select} value={pick.pipeline_id}
+                  onChange={(e) => {
+                    const p = pipelines.find((x) => x.id === e.target.value);
+                    setPick({ pipeline_id: e.target.value, stage_id: p?.stages?.[0]?.id || '' });
+                  }}>
+                  {pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              )}
+              {stages.length > 0 && (
+                <select data-testid="crm-deals-stage" style={select} value={pick.stage_id}
+                  onChange={(e) => setPick((x) => ({ ...x, stage_id: e.target.value }))}>
+                  {stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              )}
+              <button type="button" data-testid="crm-deals-save" onClick={() => save(true)}
+                disabled={saving || !pick.stage_id} style={{ ...btnSecondary, padding: '5px 12px' }}>
+                {saving ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
+              </button>
+              <button type="button" onClick={() => setOpen(false)} style={{ ...btnSecondary, padding: '5px 12px' }}>Cancel</button>
+            </div>
+          )}
+          {problem && <div data-testid="crm-deals-problem" style={{ marginTop: 8, color: '#f87171' }}>{problem}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -251,8 +386,9 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await syncCrmLeads(integration.id);
-      toast({ title: 'Sync queued!', description: 'All leads will sync to ' + cfg.label });
+      const res = await syncCrmLeads(integration.id);
+      toast({ title: 'Sync queued!', description: res?.message && res.status === 'done' ? res.message
+        : `AI SDR leads, emails and calls, Reply Draft's last month of customer mail${integration.sync_marketing ? ", Marketing's campaign replies" : ''} and Frontline's customers and tickets go to ${cfg.label} in the next minutes.` });
     } catch {
       toast({ title: 'Sync failed', variant: 'destructive' });
     } finally {
@@ -262,6 +398,21 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  // The four kinds were shown as switches but could not be switched.
+  const handleToggle = async (key, label) => {
+    try {
+      await updateCrmIntegration(integration.id, { [key]: !integration[key] });
+      // Changes back come from the CRM: "Changes from Pipedrive now go to Pipedrive" read backwards (found filming).
+      toast({ title: key === 'sync_back'
+        ? `Changes made in ${cfg.label} ${integration[key] ? 'no longer come back' : 'now come back to your agents every 15 minutes'}`
+        : `${label} ${integration[key] ? 'no longer go' : 'now go'} to ${cfg.label}` });
+      onRefresh();
+    } catch (e) {
+      toast({ title: 'Not changed', description: e?.message, variant: 'destructive' });
+    }
+  };
 
   const handleDeleteConfirmed = async () => {
     setDeleting(true);
@@ -283,6 +434,10 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
 
   return (
     <>
+      {editing && (
+        <ConnectModal provider={integration.provider} integration={integration}
+          onClose={() => setEditing(false)} onSaved={onRefresh} />
+      )}
       {showDeleteModal && (
         <ConfirmDeleteModal
           provider={integration.provider}
@@ -346,6 +501,34 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
         </div>
       )}
 
+      {/* The key refused: entries wait for it instead of failing for good (CO-159). */}
+      {integration.key_refused_at && (
+        <div data-testid="crm-key-refused" style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderRadius: 10,
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+        }}>
+          <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 13, lineHeight: 1.5, color: 'hsl(var(--pt-d1d5db))' }}>
+            <b style={{ color: '#ef4444' }}>{cfg.label} refused the key.</b>{' '}
+            {integration.waiting || 0} item(s) are waiting, not lost. Put in a new key with Change Key (or fix it in{' '}
+            {cfg.label} and press Test Connection): what waited goes out.
+          </div>
+        </div>
+      )}
+
+      {/* Something the CRM would not take for lack of a permission: skipped, not counted as sent (CO-162). */}
+      {integration.missing_permission && (
+        <div data-testid="crm-missing-permission" style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderRadius: 10,
+          background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)',
+        }}>
+          <AlertCircle size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 13, lineHeight: 1.5, color: 'hsl(var(--pt-d1d5db))' }}>
+            {integration.missing_permission} Add it to the key in {cfg.label}, then press Retry below the queue.
+          </div>
+        </div>
+      )}
+
       {/* Sync toggles */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {[
@@ -353,18 +536,31 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           { key: 'sync_emails',   icon: Mail,     label: 'Emails' },
           { key: 'sync_meetings', icon: Calendar, label: 'Meetings' },
           { key: 'sync_notes',    icon: FileText, label: 'Notes' },
-        ].map(({ key, icon: Icon, label }) => (
-          <div key={key} style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+          // Frontline's customers and a note per ticket (opened, resolved).
+          { key: 'sync_support',  icon: LifeBuoy, label: 'Support tickets' },
+          // Off until switched on: only people who reply to a campaign, with their reply, not every reader.
+          { key: 'sync_marketing', icon: Megaphone, label: 'Campaign replies' },
+          // The other way, off until switched on: corrections made in the CRM come back every 15 minutes.
+          { key: 'sync_back', icon: RefreshCw, label: `Changes from ${cfg.label}`,
+            title: integration.sync_back
+              ? `Names, phones, job titles and companies corrected in ${cfg.label} are copied to your agents every 15 minutes. Click to stop.`
+              : `Click to copy names, phones, job titles and companies corrected in ${cfg.label} back to your agents, every 15 minutes.` },
+        ].map(({ key, icon: Icon, label, title }) => (
+          <button key={key} type="button" data-testid={`crm-toggle-${key}`} onClick={() => handleToggle(key, label)}
+            title={title || (integration[key] ? `${label} go to ${cfg.label}. Click to stop.` : `Click to send ${label.toLowerCase()} to ${cfg.label}.`)}
+            style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', cursor: 'pointer',
             borderRadius: 20, fontSize: 12,
             background: integration[key] ? 'rgba(16,185,129,0.1)' : 'hsl(var(--surface-invert) / 0.04)',
             color: integration[key] ? '#10b981' : '#6b7280',
             border: `1px solid ${integration[key] ? 'rgba(16,185,129,0.2)' : 'hsl(var(--surface-invert) / 0.06)'}`,
           }}>
-            <Icon size={11} /> {label}
-          </div>
+            <Icon size={11} /> {label}{integration[key] ? '' : ' (off)'}
+          </button>
         ))}
       </div>
+
+      <DealsRow integration={integration} label={cfg.label} onRefresh={onRefresh} />
 
       {/* Actions */}
       <div style={{ display: 'flex', gap: 8 }}>
@@ -372,9 +568,12 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           {pinging ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
           Test Connection
         </button>
+        <button data-testid="crm-change-key" style={btnSecondary} onClick={() => setEditing(true)}>
+          <KeyRound size={13} /> {integration.provider === 'salesforce' ? 'Change Details' : 'Change Key'}
+        </button>
         <button style={btnSecondary} onClick={handleSync} disabled={syncing}>
           {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-          Sync All Leads
+          Sync Everything
         </button>
       </div>
     </div>
@@ -393,6 +592,8 @@ function QueueStats({ stats }) {
         { label: 'Pending', value: stats.pending, color: '#f59e0b' },
         { label: 'Done',    value: stats.done,    color: '#10b981' },
         { label: 'Failed',  value: stats.failed,  color: '#ef4444' },
+        ...(stats.waiting ? [{ label: 'Waiting for the key', value: stats.waiting, color: '#ef4444' }] : []),
+        ...(stats.skipped ? [{ label: 'Skipped', value: stats.skipped, color: '#9ca3af' }] : []),
         { label: 'Total',   value: stats.total,   color: '#a855f7' },
       ].map(s => (
         <div key={s.label} style={{
@@ -461,7 +662,10 @@ const SDRCRMSyncTab = () => {
             CRM & System Sync
           </h2>
           <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, margin: '6px 0 0' }}>
-            Automatically save leads, emails, and meetings to your CRM.
+            Automatically save to your CRM what the agents do: AI SDR leads, the emails sent to them, their calls
+            and replies; Reply Draft&apos;s mail from customers and leads, with the replies sent; Frontline&apos;s
+            customers and their tickets; and, when switched on, replies to Marketing campaigns, a deal per interested
+            person, and corrections made in the CRM coming back.
           </p>
         </div>
         <button style={btnPrimary} onClick={fetchAll} disabled={loading}>
@@ -477,10 +681,10 @@ const SDRCRMSyncTab = () => {
             <Database size={13} /> Sync Queue Status
           </div>
           <QueueStats stats={queueStats} />
-          {queueStats.failed > 0 && (
-            <button style={{ ...btnSecondary, marginTop: 10 }} onClick={handleRetry} disabled={retrying}>
+          {(queueStats.failed + (queueStats.waiting || 0) + (queueStats.skipped || 0)) > 0 && (
+            <button data-testid="crm-retry" style={{ ...btnSecondary, marginTop: 10 }} onClick={handleRetry} disabled={retrying}>
               {retrying ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-              Retry {queueStats.failed} Failed Items
+              Retry {queueStats.failed + (queueStats.waiting || 0) + (queueStats.skipped || 0)} Items Not Sent
             </button>
           )}
         </div>

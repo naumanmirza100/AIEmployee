@@ -10,9 +10,6 @@ from api.views import review
 from api.views import contact
 from api.views import consultation
 from api.views import agents
-from api.views import pricing
-from api.views import payment
-from api.views import referral
 from api.views import analytics
 from api.views import notification
 from api.views import company
@@ -25,7 +22,6 @@ from api.views import career
 from api.views import applicant
 from api.views import quiz
 from api.views import ai_predictor
-from api.views import chatbot
 from api.views import white_label
 from api.views import company_jobs
 from api.views import pm_agent
@@ -52,6 +48,7 @@ from api.views import crm_sync_agent as crm_api
 from api.views.health import health_check, ping, version
 from api.views import public_jobs
 from api.views import my_work
+from api.views import company_assistant
 from api.views import notification_settings
 from api.views import document_search
 from api.views import recruitment_workflows
@@ -75,7 +72,6 @@ urlpatterns = [
     re_path(r'^public/candidate/portal/(?P<token>[^/]+)/?$', public_jobs.candidate_portal_data, name='candidate_portal_data'),
     
     # Authentication endpoints
-    re_path(r'^auth/register/?$', auth.register, name='register'),
     re_path(r'^auth/login/?$', auth.login, name='login'),
     re_path(r'^auth/refresh/?$', auth.refresh_token, name='refresh_token'),
     re_path(r'^auth/logout/?$', auth.logout, name='logout'),
@@ -109,11 +105,6 @@ urlpatterns = [
     # Project endpoints
     re_path(r'^projects/?$', project.list_projects, name='list_projects'),
     re_path(r'^projects/(?P<id>\d+)/?$', project.get_project, name='get_project'),
-    re_path(r'^projects/create/?$', project.create_project, name='create_project'),
-    re_path(r'^projects/(?P<id>\d+)/update/?$', project.update_project, name='update_project'),
-    re_path(r'^projects/(?P<id>\d+)/delete/?$', project.delete_project, name='delete_project'),
-    re_path(r'^projects/(?P<id>\d+)/apply/?$', project.apply_to_project, name='apply_to_project'),
-    re_path(r'^projects/(?P<id>\d+)/applications/?$', project.get_project_applications, name='get_project_applications'),
     
     # Industry endpoints
     re_path(r'^industries/?$', industry.list_industries, name='list_industries'),
@@ -146,23 +137,9 @@ urlpatterns = [
     # Agent catalogue — source of truth for agent dropdowns/filters everywhere
     re_path(r'^agents/?$', agents.list_agents, name='list_agents'),
 
-    # Pricing endpoints
-    re_path(r'^pricing/plans/?$', pricing.list_pricing_plans, name='list_pricing_plans'),
-    re_path(r'^pricing/subscriptions/?$', pricing.list_subscriptions, name='list_subscriptions'),  # GET
-    re_path(r'^pricing/subscriptions/?$', pricing.create_subscription, name='create_subscription'),  # POST
-    
-    # Payment endpoints
-    re_path(r'^payments/?$', payment.process_payment, name='process_payment'),  # POST
-    re_path(r'^payments/list/?$', payment.list_payments, name='list_payments'),  # GET
-    re_path(r'^payments/invoices/?$', pricing.list_invoices, name='list_invoices'),  # GET (invoices)
-    re_path(r'^payments/methods/?$', payment.list_payment_methods, name='list_payment_methods'),  # GET
-    re_path(r'^payments/methods/?$', payment.add_payment_method, name='add_payment_method'),  # POST
-    
-    # Referral endpoints
-    re_path(r'^referrals/my-code/?$', referral.get_my_referral_code, name='get_my_referral_code'),
-    re_path(r'^referrals/use-code/?$', referral.use_referral_code, name='use_referral_code'),
-    re_path(r'^referrals/my-referrals/?$', referral.get_my_referrals, name='get_my_referrals'),
-    
+    # The old marketplace's pricing, payments and referrals are gone (CO-269): no screen used them,
+    # and one marked an invoice paid with no payment. Agents are bought through modules/ (Stripe).
+
     # Analytics endpoints
     re_path(r'^analytics/events/?$', analytics.log_analytics_event, name='log_analytics_event'),
     re_path(r'^analytics/page-views/?$', analytics.log_page_view, name='log_page_view'),
@@ -318,6 +295,11 @@ urlpatterns = [
     re_path(r'^company/notifications/read/?$', pm_agent.mark_notifications_read, name='company_mark_notifications_read'),
     # One list of what the caller has to do, across the agents (core/my_work.py).
     re_path(r'^company/my-work/?$', my_work.company_my_work, name='company_my_work'),  # GET
+    # The Company Assistant: one chat that asks across the agents (core/assistant, CO-18).
+    re_path(r'^company/assistant/?$', company_assistant.assistant_status, name='company_assistant'),  # GET
+    re_path(r'^company/assistant/ask/?$', company_assistant.assistant_ask, name='company_assistant_ask'),  # POST
+    re_path(r'^company/assistant/ask-stream/?$', company_assistant.assistant_ask_stream,
+            name='company_assistant_ask_stream'),  # POST, ndjson
     re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
     re_path(r'^company/notification-settings/chat-webhooks/?$', notification_settings.chat_webhooks,
@@ -362,9 +344,6 @@ urlpatterns = [
     re_path(r'^project-manager/notification-templates/(?P<template_id>\d+)/?$', pm_agent.pm_notification_template_detail, name='pm_notification_template_detail'),
 
     # Chatbot endpoints
-    re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST
-    re_path(r'^chatbot/messages/?$', chatbot.send_chatbot_message, name='send_chatbot_message'),  # POST
-    re_path(r'^chatbot/conversations/(?P<id>\d+)/messages/?$', chatbot.get_conversation_messages, name='get_conversation_messages'),
     
     # White Label endpoints
     re_path(r'^white-label/products/?$', white_label.list_white_label_products, name='list_white_label_products'),
@@ -742,6 +721,9 @@ urlpatterns = [
     re_path(r'^reply-draft/accounts/create/?$', reply_draft_api.create_reply_account, name='reply_draft_create_account'),
     re_path(r'^reply-draft/accounts/delete/?$', reply_draft_api.delete_reply_account, name='reply_draft_delete_account'),
     re_path(r'^reply-draft/analytics/?$', reply_draft_api.reply_analytics, name='reply_draft_analytics'),
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/summarize/?$', reply_draft_api.summarize_conversation, name='reply_draft_summarize_conversation'),  # POST
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/attachments/(?P<attachment_id>\d+)/summarize/?$', reply_draft_api.summarize_attachment, name='reply_draft_summarize_attachment'),  # POST
+    re_path(r'^reply-draft/ask/?$', reply_draft_api.ask_inbox, name='reply_draft_ask'),  # POST
 
     # Operations Notifications
     re_path(r'^operations/notifications/?$', operations_agent.list_notifications, name='operations_notifications_list'),  # GET
@@ -846,6 +828,7 @@ urlpatterns = [
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reset/?$', sdr_api.sdr_reset_enrollment, name='sdr_reset_enrollment'),  # POST
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/check-replies/?$', sdr_api.sdr_check_replies, name='sdr_check_replies'),  # POST
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/clear-leads/?$', sdr_api.sdr_clear_campaign_leads, name='sdr_clear_campaign_leads'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/retry-failed/?$', sdr_api.sdr_retry_failed, name='sdr_retry_failed'),  # POST
     # Answers the AI wrote to leads' replies, held for a person to check
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/reply-drafts/?$', sdr_api.sdr_reply_drafts, name='sdr_reply_drafts'),  # GET
     re_path(r'^sdr/reply-drafts/(?P<draft_id>\d+)/(?P<decision>send|discard)/?$', sdr_api.sdr_reply_draft_decide, name='sdr_reply_draft_decide'),  # POST
@@ -855,6 +838,8 @@ urlpatterns = [
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/send-reminder/?$', sdr_api.sdr_send_meeting_reminder, name='sdr_send_meeting_reminder'),  # POST
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/generate-prep/?$', sdr_api.sdr_generate_meeting_prep, name='sdr_generate_meeting_prep'),  # POST
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/resend-scheduling/?$', sdr_api.sdr_resend_scheduling_email, name='sdr_resend_scheduling_email'),  # POST
+    re_path(r'^sdr/email-assistant/write/?$', sdr_api.sdr_assistant_write, name='sdr_assistant_write'),  # POST
+    re_path(r'^sdr/email-assistant/read/?$', sdr_api.sdr_assistant_read, name='sdr_assistant_read'),  # POST
     re_path(r'^sdr/check-all-replies/?$', sdr_api.sdr_check_all_replies, name='sdr_check_all_replies'),  # POST
     re_path(r'^sdr/settings/?$', sdr_api.sdr_agent_settings, name='sdr_agent_settings'),  # GET, POST
     # Google Calendar OAuth (one-time setup)
@@ -994,6 +979,7 @@ urlpatterns = [
     re_path(r'^crm-sync/integrations/?$', crm_api.integrations_list, name='crm_integrations_list'),  # GET, POST
     re_path(r'^crm-sync/integrations/(?P<integration_id>\d+)/?$', crm_api.integration_detail, name='crm_integration_detail'),  # GET, PUT, DELETE
     re_path(r'^crm-sync/integrations/(?P<integration_id>\d+)/ping/?$', crm_api.integration_ping, name='crm_integration_ping'),  # POST
+    re_path(r'^crm-sync/integrations/(?P<integration_id>\d+)/pipelines/?$', crm_api.integration_pipelines, name='crm_integration_pipelines'),  # GET: deal pipelines and stages
     re_path(r'^crm-sync/integrations/(?P<integration_id>\d+)/sync-leads/?$', crm_api.integration_sync_leads, name='crm_integration_sync_leads'),  # POST
     re_path(r'^crm-sync/logs/?$', crm_api.sync_logs, name='crm_sync_logs'),  # GET
     re_path(r'^crm-sync/queue/?$', crm_api.queue_status, name='crm_queue_status'),  # GET

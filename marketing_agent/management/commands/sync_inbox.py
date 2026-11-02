@@ -526,7 +526,12 @@ class Command(BaseCommand):
             return
 
         now = timezone.now()
-        base = InboxEmail.objects.filter(email_account_id=account.id)
+        # An email with a draft stays: deleting it deleted the draft, its attachments and the record of the sent
+        # reply with it, about ten days later on a busy mailbox (CO-154). The stored count may pass the cap a little.
+        from reply_draft_agent.models import ReplyDraft
+        drafted = (ReplyDraft.objects.filter(inbox_email__isnull=False, inbox_email__email_account_id=account.id)
+                   .values('inbox_email_id'))
+        base = InboxEmail.objects.filter(email_account_id=account.id).exclude(id__in=drafted)
         removed = 0
 
         # 1. Anything outside the retention window goes, whatever the count.
@@ -889,6 +894,25 @@ class Command(BaseCommand):
                 result[m.group(1)] = bytes(payload)
         return result
 
+    @staticmethod
+    def _known_thread_key(account, references, in_reply_to):
+        """The conversation of an email this one answers, when the mailbox already has it. The first email of a
+        conversation has no References, so its key comes from its subject, while every answer's comes from that first
+        email's id: an answer to a customer's question never joined it, and "Summarise the conversation" saw one
+        email (the Reply Draft clean run, 30 Oct)."""
+        ids = [t.strip().strip('<>') for t in (references or '').split()]
+        ids += [(in_reply_to or '').strip().strip('<>')]
+        ids = [i for i in dict.fromkeys(ids) if i]
+        if not ids:
+            return ''
+        found = dict(InboxEmail.objects.filter(email_account=account, message_id__in=ids + [f'<{i}>' for i in ids])
+                     .exclude(thread_key='').values_list('message_id', 'thread_key'))
+        for i in ids:                                       # the root first, as compute_thread_key prefers it
+            key = found.get(i) or found.get(f'<{i}>')
+            if key:
+                return key
+        return ''
+
     def _build_inbox_email(self, msg, account, from_email, *, to_email=None, direction='in'):
         """Construct (but do not save) an InboxEmail instance from a parsed message.
 
@@ -927,6 +951,11 @@ class Command(BaseCommand):
 
         subject = self.decode_header(msg.get('Subject', ''))[:500]
         body, body_html = self.get_email_body(msg)
+        # Where an answer goes when it is not the sender: web forms and ticket systems send from a system address
+        # with the customer in Reply-To (CO-205). Kept only when it is another, well-formed address.
+        reply_to = (self._first_address(msg.get('Reply-To', '') or '') or '').lower()
+        if reply_to == (from_email or '').lower() or not self._well_formed(reply_to):
+            reply_to = ''
         in_reply_to = (msg.get('In-Reply-To', '') or '').strip()[:500]
         references = (msg.get('References', '') or '').strip()
 
@@ -934,13 +963,14 @@ class Command(BaseCommand):
         if to_email is None:
             to_email = (account.email or '')
 
-        thread_key = InboxEmail.compute_thread_key(
-            references=references,
-            in_reply_to=in_reply_to,
-            subject=subject,
-            from_email=from_email,
-            to_email=to_email,
-        )
+        thread_key = (self._known_thread_key(account, references, in_reply_to)
+                      or InboxEmail.compute_thread_key(
+                          references=references,
+                          in_reply_to=in_reply_to,
+                          subject=subject,
+                          from_email=from_email,
+                          to_email=to_email,
+                      ))
 
         return InboxEmail(
             owner=account.owner,
@@ -950,6 +980,7 @@ class Command(BaseCommand):
             references=references,
             from_email=from_email,
             from_name=from_name[:255],
+            reply_to=reply_to[:254],
             subject=subject,
             body=body,
             body_html=body_html,
@@ -1613,9 +1644,15 @@ class Command(BaseCommand):
                 logger.warning(f'Error decoding body: {str(e)}')
 
         # Make sure plain is always populated. Tag-strip HTML when it's
-        # the only thing the message had.
+        # the only thing the message had: style, script and head blocks go first, or their contents (whole style
+        # sheets) became the text the AI read (CO-249).
         if html and not plain:
-            plain = re.sub(r'<[^>]+>', '', html)
+            import html as _html_lib
+            text = re.sub(r'(?is)<(style|script|head)\b.*?</\1\s*>', ' ', html)
+            text = re.sub(r'(?i)<br\s*/?>|</(p|div|tr|li|h[1-6])\s*>', '\n', text)
+            text = _html_lib.unescape(re.sub(r'<[^>]+>', '', text))
+            text = '\n'.join(line.strip() for line in re.sub(r'[ \t\r\f\v]+', ' ', text).split('\n'))
+            plain = re.sub(r'\n{3,}', '\n\n', text).strip()
 
         return plain, html
 

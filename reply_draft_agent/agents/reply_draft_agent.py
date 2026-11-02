@@ -96,6 +96,7 @@ from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
 from marketing_agent.models import Reply, EmailAccount, EmailSendHistory
 from marketing_agent.services.email_service import email_service
 from ..models import ReplyDraft, InboxEmail
+from ..text import for_ai
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,8 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "1. Match the formality of the sender. A casual inbound gets a warm reply; "
         "a formal inbound gets a professional one.\n"
         "2. Stay grounded in the original email and the user's instructions. Do not "
-        "invent product details, pricing, or commitments that are not provided.\n"
+        "invent product details, pricing, or commitments that are not provided. When the email asks for a fact "
+        "the instructions do not give, do not answer yes or no: say you will confirm it and come back to them.\n"
         "3. Respect the detected interest level:\n"
         "   - positive: momentum-building, propose a clear next step.\n"
         "   - requested_info: directly address what they asked for.\n"
@@ -129,7 +131,11 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "   - negative / unsubscribe: brief, respectful, offer an easy opt-out.\n"
         "   - neutral: warm, re-engage with a soft question.\n"
         "4. Honor the length guidance the user provided in the prompt.\n"
-        "5. End with either a clear question or a specific next step.\n\n"
+        "5. End with either a clear question or a specific next step.\n"
+        "6. Sign with the signature given in the prompt, as written. Never write placeholders in brackets such as "
+        "[Your Name] or [Company]: leave out what you do not know.\n"
+        "7. Write in the language and script the sender wrote in, unless the user's instructions ask for another. "
+        "In Urdu or Roman Urdu write as the company ('hum'), so the verbs do not guess the writer's gender.\n\n"
         "Output strict JSON only, with exactly these keys: "
         '{"subject": "...", "body": "...", "reasoning": "..."}'
     )
@@ -144,7 +150,9 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "Step 2 — draft the reply with these rules:\n"
         "1. Match the formality of the sender.\n"
         "2. Stay grounded in what the sender actually wrote and the user's instructions. "
-        "Do not invent product details, pricing, or commitments.\n"
+        "Do not invent product details, pricing, or commitments. When the email asks for a fact the instructions "
+        "do not give (a price, whether something is possible, a date), do not answer yes or no and do not call it "
+        "'competitive': say you will confirm it and come back to them.\n"
         "3. Respect the interest level you just classified:\n"
         "   - positive: momentum-building, propose a clear next step.\n"
         "   - requested_info: directly address what they asked for.\n"
@@ -152,16 +160,36 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "   - negative / unsubscribe: brief, respectful, offer an easy opt-out.\n"
         "   - neutral: warm, re-engage with a soft question.\n"
         "4. Honor the length guidance the user provided in the prompt.\n"
-        "5. End with a clear question or a specific next step.\n\n"
+        "5. End with a clear question or a specific next step.\n"
+        "6. Sign with the signature given in the prompt, as written. Never write placeholders in brackets such as "
+        "[Your Name] or [Company]: leave out what you do not know.\n"
+        "7. Write in the language and script the sender wrote in (Roman Urdu stays Roman Urdu, Urdu script stays "
+        "Urdu script), unless the user's instructions ask for another. In Urdu or Roman Urdu write as the company "
+        "('hum'), so the verbs do not guess the writer's gender.\n"
+        "8. Greet the person by the name they sign the email with; only when there is none, by the sender name.\n\n"
         "Output strict JSON only, with exactly these keys: "
         '{"interest_level": "...", "analysis": "...", "subject": "...", "body": "...", "reasoning": "..."}'
     )
 
-    def __init__(self, user=None, company_id=None, **kwargs):
+    def __init__(self, user=None, company_id=None, owner_ids=None, **kwargs):
         super().__init__(**kwargs)
         self.user = user
         self.company_id = company_id
+        # The user records of every login of the company. A colleague saw the company's inbox and drafts but got
+        # "Draft not found" on Approve & Send (CO-204): drafts and mail are now the company's, not one login's.
+        self.owner_ids = list(owner_ids) if owner_ids else None
         self.agent_key_name = 'reply_draft_agent'
+
+    SENDING_STALE_MINUTES = 10
+
+    def _owner_ids(self):
+        if self.owner_ids:
+            return self.owner_ids
+        return [self.user.id] if self.user is not None else []
+
+    def _draft(self, draft_id, *related):
+        qs = ReplyDraft.objects.select_related(*related) if related else ReplyDraft.objects
+        return qs.filter(id=draft_id, owner_id__in=self._owner_ids()).first()
 
     def process(self, action, **kwargs):
         if action == 'generate_draft':
@@ -226,7 +254,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
         except Reply.DoesNotExist:
             return {'success': False, 'error': f'Incoming email {original_email_id} not found'}
 
-        if self.user is not None and reply.lead and reply.lead.owner_id != self.user.id:
+        if self.user is not None and reply.lead and reply.lead.owner_id not in self._owner_ids():
             return {'success': False, 'error': 'Not authorized for this reply'}
 
         account = self._resolve_email_account(email_account_id, reply)
@@ -246,9 +274,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
         if not body:
             return {'success': False, 'error': 'AI failed to produce a draft. Try regenerating.'}
 
-        parent = None
-        if parent_draft_id:
-            parent = ReplyDraft.objects.filter(id=parent_draft_id, owner=self.user).first()
+        parent = self._draft(parent_draft_id) if parent_draft_id else None
 
         draft = ReplyDraft.objects.create(
             owner=self.user,
@@ -287,10 +313,12 @@ class ReplyDraftAgent(MarketingBaseAgent):
         except InboxEmail.DoesNotExist:
             return {'success': False, 'error': f'Inbox email {inbox_email_id} not found'}
 
-        if self.user is not None and msg.owner_id != self.user.id:
+        if self.user is not None and msg.owner_id not in self._owner_ids():
             return {'success': False, 'error': 'Not authorized for this email'}
 
-        account = self._resolve_email_account(email_account_id, None) or msg.email_account
+        # The answer goes out from the mailbox the email came to. Looking it up through the caller's own login
+        # picked a colleague's other account, or none (CO-204).
+        account = msg.email_account
 
         user_prompt = self._build_inbox_prompt(msg, user_context, tone, length)
         max_tokens = 1500 if length == 'long' else 900
@@ -319,9 +347,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             update_fields.append('updated_at')
             msg.save(update_fields=update_fields)
 
-        parent = None
-        if parent_draft_id:
-            parent = ReplyDraft.objects.filter(id=parent_draft_id, owner=self.user).first()
+        parent = self._draft(parent_draft_id) if parent_draft_id else None
 
         draft = ReplyDraft.objects.create(
             owner=self.user,
@@ -372,11 +398,10 @@ class ReplyDraftAgent(MarketingBaseAgent):
         `_REGEN_CONTEXT_MAX_CHARS` so repeated regenerations don't bloat
         the prompt with stacked, contradictory guidance.
         """
-        try:
-            existing = ReplyDraft.objects.get(id=draft_id, owner=self.user)
-        except ReplyDraft.DoesNotExist:
+        existing = self._draft(draft_id)
+        if existing is None:
             return {'success': False, 'error': 'Draft not found'}
-        if existing.status == 'sent':
+        if existing.status in ('sent', 'sending'):
             return {'success': False, 'error': 'Cannot regenerate a draft that was already sent'}
 
         # Walk back to the root draft of this regen chain so we keep the
@@ -431,14 +456,14 @@ class ReplyDraftAgent(MarketingBaseAgent):
 
     def approve_draft(self, draft_id, edited_subject=None, edited_body=None):
         """User approves a draft, optionally with inline edits. Send happens separately."""
-        try:
-            draft = ReplyDraft.objects.get(id=draft_id, owner=self.user)
-        except ReplyDraft.DoesNotExist:
+        draft = self._draft(draft_id)
+        if draft is None:
             return {'success': False, 'error': 'Draft not found'}
-        if draft.status == 'sent':
+        if draft.status in ('sent', 'sending'):
             return {'success': False, 'error': 'Already sent'}
 
-        update_fields = ['status', 'updated_at']
+        update_fields = ['status', 'approved_by', 'updated_at']
+        draft.approved_by = self.user
         if edited_subject is not None:
             draft.edited_subject = edited_subject
             update_fields.append('edited_subject')
@@ -457,19 +482,30 @@ class ReplyDraftAgent(MarketingBaseAgent):
         review step exists deliberately and bypassing it here defeated it.
         Failed drafts are allowed to retry.
         """
-        try:
-            draft = ReplyDraft.objects.select_related(
-                'lead', 'email_account', 'original_email', 'original_email__triggering_email',
-                'inbox_email',
-            ).get(id=draft_id, owner=self.user)
-        except ReplyDraft.DoesNotExist:
+        draft = self._draft(draft_id, 'lead', 'email_account', 'original_email',
+                            'original_email__triggering_email', 'inbox_email')
+        if draft is None:
             return {'success': False, 'error': 'Draft not found'}
-        if draft.status not in ('approved', 'failed'):
+        if draft.status not in ('approved', 'failed', 'sending'):
             return {'success': False, 'error': f'Draft must be approved before sending (currently "{draft.status}")'}
 
         recipient_email = draft.get_recipient_email()
         if not recipient_email:
             return {'success': False, 'error': 'Draft has no recipient email'}
+
+        # Claimed by one conditional update before anything goes out: a second tab or a retry passed the status
+        # check during the seconds a send takes and sent the same answer twice (CO-156). A claim older than
+        # SENDING_STALE_MINUTES is a send that died half way, and may be tried again.
+        from datetime import timedelta
+        from django.db.models import Q
+        now = timezone.now()
+        claimed = ReplyDraft.objects.filter(id=draft.id).filter(
+            Q(status__in=('approved', 'failed'))
+            | Q(status='sending', updated_at__lt=now - timedelta(minutes=self.SENDING_STALE_MINUTES))
+        ).update(status='sending', sent_by=self.user, updated_at=now)
+        if not claimed:
+            return {'success': False, 'error': 'This draft is already being sent.'}
+        draft.status = 'sending'
 
         in_reply_to = self._resolve_in_reply_to(draft)
         references = self._resolve_references(draft, in_reply_to)
@@ -559,20 +595,25 @@ class ReplyDraftAgent(MarketingBaseAgent):
             # the Sent tab once.
             logger.warning('send_approved: could not persist attempted_message_ids on draft %s', draft.id)
 
-        result = email_service.send_raw_email(
-            to_email=recipient_email,
-            subject=outgoing_subject,
-            body=plain_body,
-            email_account=draft.email_account,
-            owner=self.user,
-            in_reply_to=in_reply_to,
-            references=references,
-            campaign=draft.original_email.campaign if draft.original_email_id else None,
-            lead=draft.lead,
-            html_body=body_html or None,
-            attachments=attachments_payload or None,
-            message_id=attempted_mid,
-        )
+        try:
+            result = email_service.send_raw_email(
+                to_email=recipient_email,
+                subject=outgoing_subject,
+                body=plain_body,
+                email_account=draft.email_account,
+                owner=self.user,
+                in_reply_to=in_reply_to,
+                references=references,
+                campaign=draft.original_email.campaign if draft.original_email_id else None,
+                lead=draft.lead,
+                html_body=body_html or None,
+                attachments=attachments_payload or None,
+                message_id=attempted_mid,
+            )
+        except Exception as exc:
+            # The claim must end in sent or failed, never stay 'sending'.
+            logger.exception('send_approved: the send raised for draft %s', draft.id)
+            result = {'success': False, 'error': str(exc)}
 
         if result.get('success'):
             sent_history = None
@@ -581,6 +622,10 @@ class ReplyDraftAgent(MarketingBaseAgent):
                 sent_history = EmailSendHistory.objects.filter(id=sh_id).first()
             draft.mark_sent(sent_history)
             self.log_action('sent_draft', {'draft_id': draft.id, 'to': recipient_email})
+            # To the company's CRM, on the recipient's contact, when it has CRM Sync (the client's list puts CRM &
+            # System Sync in the Inbox Manager too).
+            from crm_sync_agent.signals import queue_inbox_reply
+            queue_inbox_reply(draft, recipient_email, outgoing_subject, plain_body)
 
             # Mirror the outgoing message into our InboxEmail/InboxAttachment
             # tables so:
@@ -614,28 +659,9 @@ class ReplyDraftAgent(MarketingBaseAgent):
                     'send_approved: failed to mirror sent message into InboxEmail '
                     '— Sent tab will still pick it up via the next IMAP sync'
                 )
-            
-            # NEW: Also append to IMAP Sent folder so the email appears on the
-            # actual mail server. Some SMTP providers (Hostinger/cPanel) don't
-            # auto-save SMTP submissions to Sent — we fix that here.
-            try:
-                self._append_to_imap_sent(
-                    draft=draft,
-                    recipient_email=recipient_email,
-                    in_reply_to=in_reply_to,
-                    references=references,
-                    message_id=result.get('message_id') or attempted_mid,
-                    outgoing_subject=outgoing_subject,
-                    body_html=body_html,
-                    plain_body=plain_body,
-                    attachments=attachments_payload,
-                )
-            except Exception:
-                logger.exception(
-                    'send_approved: failed to append to IMAP Sent folder — '
-                    'email will not appear in your mail server Sent folder, '
-                    'but is still visible in app Sent tab'
-                )
+
+            # The shared email service already puts the exact sent message in the mailbox's Sent folder; a copy
+            # of our own made two (CO-247).
         else:
             draft.mark_failed(result.get('error', 'unknown error'))
             self.log_action('send_failed', {'draft_id': draft.id, 'error': result.get('error')})
@@ -663,8 +689,10 @@ class ReplyDraftAgent(MarketingBaseAgent):
             f"Sender: {sender_name} <{lead.email if lead else ''}> "
             f"at {lead.company or 'n/a'}\n\n"
             f"INCOMING SUBJECT: {reply.reply_subject}\n"
-            f"INCOMING BODY:\n{reply.reply_content}\n\n"
+            f"INCOMING BODY:\n{for_ai(reply.reply_content)}\n\n"
             f"User instructions: {user_context or '(none)'}\n\n"
+            f"Signature:\n{self._signature()}\n\n"
+            f"{self.WE_IN_URDU}"
             "Draft the reply now, returning the JSON object described in the system prompt."
         )
 
@@ -703,9 +731,13 @@ class ReplyDraftAgent(MarketingBaseAgent):
             f"Received: {msg.received_at.isoformat() if msg.received_at else 'unknown'}\n\n"
             f"{thread_block}"
             f"INCOMING SUBJECT: {msg.subject or '(no subject)'}\n"
-            f"INCOMING BODY:\n{msg.body or '(empty body)'}\n\n"
+            f"INCOMING BODY (the sender's own words; earlier messages are above):\n"
+            f"{for_ai(msg.body) or '(empty body)'}\n\n"
             f"{attachments_block}"
             f"User instructions: {user_context or '(none)'}\n\n"
+            f"Signature:\n{self._signature()}\n\n"
+            f"{self.WE_IN_URDU}"
+            f"{self.GREETING}"
             "First classify the sender's interest_level, write a short analysis, "
             "then draft the reply. Return the JSON object described in the system prompt."
         )
@@ -750,6 +782,52 @@ class ReplyDraftAgent(MarketingBaseAgent):
         lines.append('--- end of prior messages ---\n')
         return '\n'.join(lines) + '\n'
 
+    # Said in the request as well as the rules: with the rules alone, a Roman Urdu draft signed by Nadia wrote "jaanch
+    # kar rahi hoon … de dungi", guessing the writer's gender from the name.
+    WE_IN_URDU = ("Language: write the reply in the language of the INCOMING BODY above; an email in English gets a "
+                  "reply in English. Only when that email is in Urdu or Roman Urdu: write as the company, with 'hum' "
+                  "and plural verbs ('hum check kar rahe hain'), never 'main' with a he or she verb.\n\n")
+
+    # On live, an email sent from one person's account and signed "Tariq Mehmood" got "Hi M. Abdullah Mughal" with the
+    # rule only in the system prompt.
+    GREETING = ("Greeting: greet the person by the name they sign the email with at its end; the sender name above "
+                "is the account's and may be someone else's. Use it only when the email is not signed.\n\n")
+
+    def _signature(self):
+        """Who signs the reply: the person drafting and the company, or the company's team when the login is the
+        company itself. On live a draft ended "[Your Name] [Your Position] [Your Company] [Your Contact
+        Information]"."""
+        from core.models import Company, CompanyUser
+        company = ''
+        if self.company_id:
+            company = (Company.objects.filter(pk=self.company_id).values_list('name', flat=True).first() or '').strip()
+        name = ''
+        if self.user is not None:
+            name = (CompanyUser.objects.filter(login_user=self.user).values_list('full_name', flat=True).first()
+                    or '').strip()
+        if name and company and name.lower() != company.lower():
+            return f'{name}\n{company}'
+        return f'The {company} team' if company else name
+
+    # "[Your Name]", "[Company Name]", "[Your Contact Information]": what the AI writes where it lacks a fact.
+    _PLACEHOLDER = re.compile(r'\[(?:your|company|recipient|sender|name|position|title|contact|phone|email|date)'
+                              r'[^\]\n]{0,40}\]', re.IGNORECASE)
+
+    def _without_placeholders(self, body):
+        """The draft without bracketed placeholders, and signed when that left its sign-off empty."""
+        if not self._PLACEHOLDER.search(body or ''):
+            return body
+        lines = [self._PLACEHOLDER.sub('', line).rstrip() for line in body.splitlines()]
+        kept = []
+        for line, original in zip(lines, body.splitlines()):
+            if line.strip() or not original.strip():
+                kept.append(line)
+        text = re.sub(r'\n{3,}', '\n\n', '\n'.join(kept)).strip()
+        last = text.splitlines()[-1].strip() if text else ''
+        if re.fullmatch(r'(best|kind|warm)?\s*regards,?|thanks,?|thank you,?|sincerely,?|best,?', last, re.IGNORECASE):
+            text = f'{text}\n{self._signature()}'.strip()
+        return text
+
     _VALID_INTEREST_LEVELS = {
         'positive', 'negative', 'neutral', 'requested_info',
         'objection', 'unsubscribe', 'not_analyzed',
@@ -762,7 +840,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             return self._re_prefix(fallback_subject), (raw or '').strip(), ''
 
         subject = (data.get('subject') or fallback_subject or '').strip()
-        body = (data.get('body') or '').strip()
+        body = self._without_placeholders((data.get('body') or '').strip())
         reasoning = (data.get('reasoning') or '').strip()
         return self._re_prefix(subject), body, reasoning
 
@@ -773,7 +851,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             return self._re_prefix(fallback_subject), (raw or '').strip(), '', '', ''
 
         subject = (data.get('subject') or fallback_subject or '').strip()
-        body = (data.get('body') or '').strip()
+        body = self._without_placeholders((data.get('body') or '').strip())
         reasoning = (data.get('reasoning') or '').strip()
         interest_level = (data.get('interest_level') or '').strip().lower()
         if interest_level not in self._VALID_INTEREST_LEVELS:
@@ -981,7 +1059,9 @@ class ReplyDraftAgent(MarketingBaseAgent):
         Idempotent on (account, message_id) — the unique constraint on
         InboxEmail makes this safe to call alongside the later IMAP sync.
         """
-        from .models import InboxEmail, InboxAttachment
+        # The models are one level up: '.models' failed on every send, so a reply reached the Sent tab only with
+        # the next mailbox read, and never where the Sent folder has another name (CO-246).
+        from ..models import InboxEmail, InboxAttachment
 
         if not draft.email_account or not message_id:
             return
@@ -1088,161 +1168,4 @@ class ReplyDraftAgent(MarketingBaseAgent):
                     'mirror_sent: failed to attach source file %r onto sent inbox row %s',
                     src_att.filename, row.id,
                 )
-
-    def _append_to_imap_sent(self, *, draft, recipient_email, in_reply_to, references,
-                             message_id, outgoing_subject, body_html='', plain_body=None,
-                             attachments=None):
-        """Append the sent email to IMAP Sent folder on the mail server.
-
-        Why: Many SMTP providers (Hostinger, cPanel, generic IMAP+SMTP) don't
-        automatically copy SMTP submissions into the Sent IMAP folder. This
-        means the user won't see their sent email on the actual mail server
-        unless we manually append it.
-
-        This builds an RFC 2822 email message and appends it to the IMAP
-        Sent folder using IMAP APPEND. Idempotent on message_id dedupe.
-
-        Args:
-            draft, recipient_email, in_reply_to, references, message_id,
-            outgoing_subject: Same as _mirror_sent_to_inbox
-            body_html: HTML version of the body
-            plain_body: Plain text version of the body
-            attachments: List of (filename, bytes, content_type) tuples
-        """
-        if not draft.email_account:
-            return
-
-        # Build RFC 2822 message
-        import email
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
-        from email.mime.base import MIMEBase
-        from email.encoders import encode_base64
-
-        msg = MIMEMultipart('alternative')
-        msg['Message-ID'] = f'<{message_id.strip().strip("<>")}>'
-        msg['From'] = draft.email_account.email or 'noreply@localhost'
-        msg['To'] = recipient_email
-        msg['Subject'] = outgoing_subject or 'No Subject'
-        msg['Date'] = email.utils.formatdate(localtime=True)
-
-        # Thread headers
-        if in_reply_to:
-            msg['In-Reply-To'] = f'<{in_reply_to.strip().strip("<>")}>'
-        if references:
-            msg['References'] = references.strip()
-
-        # Body: text/plain first, then text/html alternative
-        if plain_body:
-            msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
-        if body_html:
-            msg.attach(MIMEText(body_html, 'html', 'utf-8'))
-
-        # Attachments
-        if attachments:
-            for filename, raw_bytes, content_type in attachments:
-                if not raw_bytes:
-                    continue
-                try:
-                    maintype, subtype = (content_type or 'application/octet-stream').split('/', 1)
-                except ValueError:
-                    maintype, subtype = 'application', 'octet-stream'
-
-                att = MIMEBase(maintype, subtype)
-                att.set_payload(raw_bytes)
-                encode_base64(att)
-                att.add_header(
-                    'Content-Disposition', 'attachment',
-                    filename=filename if not isinstance(filename, str) else filename.encode('utf-8', errors='ignore').decode('utf-8')
-                )
-                msg.attach(att)
-
-        # Connect to IMAP and append
-        import imaplib
-        try:
-            mail = imaplib.IMAP4_SSL(
-                draft.email_account.imap_host,
-                draft.email_account.imap_port or 993,
-                timeout=10,
-            )
-            mail.login(
-                draft.email_account.imap_username,
-                draft.email_account.imap_password,
-            )
-
-            # Find Sent folder
-            sent_folder = self._find_sent_folder(mail)
-            if not sent_folder:
-                logger.warning(
-                    'append_to_imap_sent: Could not find Sent folder for %s. '
-                    'Email will not appear on mail server.',
-                    draft.email_account.email,
-                )
-                return
-
-            # Append the message
-            mail.append(
-                sent_folder,
-                '\\Seen',  # Mark as seen/read
-                None,
-                msg.as_bytes(),
-            )
-            logger.info(
-                'append_to_imap_sent: Successfully appended email to %s Sent folder '
-                '(message_id=%s, to=%s)',
-                draft.email_account.email, message_id, recipient_email,
-            )
-            mail.close()
-            mail.logout()
-
-        except Exception as e:
-            logger.warning(
-                'append_to_imap_sent: Failed to append to IMAP Sent for %s: %s. '
-                'Email will appear in app Sent tab but not on mail server.',
-                draft.email_account.email, str(e),
-            )
-
-    @staticmethod
-    def _find_sent_folder(mail):
-        """Locate IMAP Sent folder by probing common folder names.
-
-        Each mail server uses a different folder name. This tries common
-        variants and returns the first one that exists.
-        """
-        SENT_FOLDER_NAMES = [
-            '[Gmail]/Sent Mail',      # Gmail English
-            'Sent',                   # Generic IMAP / Hostinger
-            'INBOX.Sent',            # Some servers
-            'Sent Items',             # Outlook
-            'Sent Messages',          # Apple/iCloud
-            'Sent Mail',              # Older format
-            '[Gmail]/Sent',           # Gmail variant
-        ]
-
-        for folder_name in SENT_FOLDER_NAMES:
-            try:
-                status, mailboxes = mail.list(pattern=folder_name)
-                if status == 'OK' and mailboxes:
-                    return folder_name
-            except Exception:
-                continue
-
-        # If probing failed, try getting all folders and look for Sent-like names
-        try:
-            status, all_mailboxes = mail.list()
-            if status == 'OK':
-                for mailbox_line in all_mailboxes:
-                    if mailbox_line and isinstance(mailbox_line, bytes):
-                        mailbox_str = mailbox_line.decode('utf-8', errors='ignore')
-                        for sent_variant in SENT_FOLDER_NAMES:
-                            if sent_variant.lower() in mailbox_str.lower():
-                                # Extract folder name from the mailbox listing
-                                parts = mailbox_str.split('"')
-                                if len(parts) >= 2:
-                                    return parts[-2] or sent_variant
-                                return sent_variant
-        except Exception:
-            pass
-
-        return None
 

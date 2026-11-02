@@ -81,7 +81,9 @@ export const SettingsModal = ({ open, account, onClose, onEdit, onDeleted }) => 
             </div>
             {confirmDelete && (
               <div className="rounded-md border border-rose-200 bg-rose-500/5 p-3 text-xs text-rose-700 dark:text-rose-400 dark:border-rose-800">
-                Disconnecting deletes this account <strong>and all its synced inbox mail + drafts</strong>. This cannot be undone.{' '}
+                {/* It said "deletes this account and all its synced inbox mail": read as deleting the mail in Gmail. */}
+                Disconnecting removes this mailbox from the Reply Draft Agent, <strong>with the copies of its mail and the drafts kept here</strong>.
+                Nothing is deleted in the mailbox itself, and another agent that uses it (Marketing) keeps it. This cannot be undone.{' '}
                 <button type="button" onClick={() => setConfirmDelete(false)} className="underline">
                   Cancel
                 </button>

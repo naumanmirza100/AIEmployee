@@ -6937,6 +6937,19 @@ def hubspot_update_config(request):
     data = request.data or {}
     cfg = dict(company.hubspot_config or {})
 
+    # New connections are made in CRM Sync, which carries Frontline's customers and tickets to HubSpot, Pipedrive
+    # or Salesforce and leaves what the CRM already holds alone. This older HubSpot-only link can still be switched
+    # off or cleared; it is no longer switched on or given a new key here (2 Nov 2026).
+    turning_on = bool(data.get('enabled')) and not cfg.get('enabled')
+    new_key = data.get('access_token') not in (None, '') if 'access_token' in data else False
+    if turning_on or new_key:
+        return Response(
+            {'status': 'error',
+             'message': "Connect your CRM in CRM Sync instead: it sends Frontline's customers and tickets to "
+                        'HubSpot, Pipedrive or Salesforce.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     if 'access_token' in data:
         raw = data.get('access_token')
         if raw is None:

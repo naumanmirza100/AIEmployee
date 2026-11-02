@@ -6,6 +6,8 @@ from rest_framework.permissions import AllowAny
 from django.db import connection
 from django.utils import timezone
 
+logger = logging.getLogger(__name__)
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -51,10 +53,10 @@ def health_check(request):
             'timestamp': timezone.now().isoformat(),
         }, status=200)
     except Exception as e:
+        logger.exception('health_check failed')
         return Response({
             'status': 'error',
             'message': 'Server error',
             'database': 'disconnected',
-            'error': str(e),
         }, status=500)
 

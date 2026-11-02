@@ -20,6 +20,8 @@ import { Loader2, Megaphone, Send, Upload, CheckCircle, Sparkles, Mail, AlertTri
 import marketingAgentService from '@/services/marketingAgentService';
 import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 import AddEmailAccountModal from './AddEmailAccountModal';
+import { hasSeenTutorial } from '@/components/frontline/FrontlineTutorial';
+import { MARKETING_HOWITWORKS_KEY } from './marketingTourSteps';
 import { CampaignAIPreviewModal } from './CampaignAIPreviewModal';
 
 const ACTIONS = [
@@ -479,7 +481,10 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       const list = res?.status === 'success' && res?.data ? res.data : [];
       setEmailAccounts(list);
       if (list.length === 0) {
-        setNoEmailAccountDialogOpen(true);
+        // On a first visit the "How it works" intro is open over this tab. Opened together, this notice locked the
+        // page and the intro could not be closed (found in the live run of 29 Oct 2026), so it waits for the intro.
+        if (hasSeenTutorial(MARKETING_HOWITWORKS_KEY)) setNoEmailAccountDialogOpen(true);
+        else window.addEventListener('marketing-howitworks-closed', () => setNoEmailAccountDialogOpen(true), { once: true });
       } else {
         const def = list.find((a) => a.is_default) || list[0];
         setEmailAccountId(String(def.id));

@@ -17,6 +17,26 @@ INTEREST_LEVEL_CHOICES = [
     ('not_analyzed', 'Not Analyzed'),
 ]
 
+# Triage: what kind of email it is and how soon it needs someone, read by the AI as mail arrives
+# (reply_draft_agent/triage.py).
+CATEGORY_CHOICES = [
+    ('customer', 'Customer question'),
+    ('sales', 'Sales lead'),
+    ('support', 'Support or complaint'),
+    ('billing', 'Invoice or payment'),
+    ('meeting', 'Meeting or scheduling'),
+    ('internal', 'From a colleague'),
+    ('newsletter', 'Newsletter or notification'),
+    ('personal', 'Personal'),
+    ('other', 'Other'),
+]
+PRIORITY_CHOICES = [
+    ('urgent', 'Urgent'),
+    ('high', 'High'),
+    ('normal', 'Normal'),
+    ('low', 'Low'),
+]
+
 
 class InboxEmail(models.Model):
     """Generic inbound email stored for the Reply Draft Agent.
@@ -38,6 +58,9 @@ class InboxEmail(models.Model):
 
     from_email = models.EmailField(db_index=True)
     from_name = models.CharField(max_length=255, blank=True)
+    # Who an answer goes to when it is not the sender: web forms, shops and ticket systems send from a system
+    # address with the customer in Reply-To, and answers went to the no-reply address (CO-205).
+    reply_to = models.EmailField(blank=True, default='')
     subject = models.CharField(max_length=500, blank=True)
     body = models.TextField(blank=True, default='',
                             help_text='Plain-text body. Used for AI analysis and search; preferred over HTML when both are present in the source.')
@@ -55,6 +78,21 @@ class InboxEmail(models.Model):
     # AI analysis (populated lazily when a draft is generated)
     interest_level = models.CharField(max_length=20, choices=INTEREST_LEVEL_CHOICES, default='not_analyzed')
     analysis = models.TextField(blank=True)
+
+    # Triage, by the AI as mail arrives (triage_inbox_task): empty until then. A mail was read only when someone
+    # asked for a draft, with no priority or category (the AI Employee list's Email Assistant, 30 Oct).
+    category = models.CharField(max_length=20, blank=True, default='', choices=CATEGORY_CHOICES)
+    priority = models.CharField(max_length=10, blank=True, default='', choices=PRIORITY_CHOICES)
+    ai_summary = models.CharField(max_length=500, blank=True, default='',
+                                  help_text='One sentence on what the email says, written by the AI.')
+    needs_reply = models.BooleanField(null=True, blank=True)
+    triaged_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    alerted_at = models.DateTimeField(null=True, blank=True,
+                                      help_text='When the mailbox owner was told about this urgent email.')
+    # The conversation's summary, made on request; thread_summary_count is how many messages it covered, so a
+    # newer message makes it stale.
+    thread_summary = models.TextField(blank=True, default='')
+    thread_summary_count = models.IntegerField(default=0)
 
     # Recipient + direction. Mirrors columns added by migration
     # 0003_inboxemail_direction_to_email — kept in the model so inserts
@@ -193,6 +231,9 @@ class InboxAttachment(models.Model):
     content_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
     is_inline = models.BooleanField(default=False,
                                     help_text='True for cid: parts referenced inside body_html (e.g. inline images).')
+    # The AI's summary of a PDF, Word or text attachment, made on request.
+    summary = models.TextField(blank=True, default='')
+    summarized_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -213,6 +254,8 @@ class ReplyDraft(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending Review'),
         ('approved', 'Approved'),
+        # Claimed by one send, so a second tab or a retry cannot send it again (CO-156).
+        ('sending', 'Sending'),
         ('sent', 'Sent'),
         ('rejected', 'Rejected'),
         ('failed', 'Send Failed'),
@@ -276,6 +319,9 @@ class ReplyDraft(models.Model):
     generation_prompt = models.TextField(blank=True, help_text='Extra instructions the user provided')
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    # Any login of the company may approve and send a colleague's draft (CO-204); these say who did.
+    approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    sent_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
 
     sent_at = models.DateTimeField(null=True, blank=True)
     sent_email = models.ForeignKey(
@@ -342,7 +388,7 @@ class ReplyDraft(models.Model):
         if self.lead_id and self.lead and self.lead.email:
             return self.lead.email
         if self.inbox_email_id and self.inbox_email:
-            return self.inbox_email.from_email
+            return self.inbox_email.reply_to or self.inbox_email.from_email
         # Fresh-compose draft: the user typed the recipient directly into
         # the To: field; no lead or source email is involved.
         if self.compose_to_email:

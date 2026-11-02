@@ -8,15 +8,53 @@ from typing import Optional
 class CRMError(Exception):
     """Normalized CRM error. `retriable=False` means do not retry (bad token, bad payload)."""
 
-    def __init__(self, message: str, retriable: bool = True, status_code: Optional[int] = None):
+    def __init__(self, message: str, retriable: bool = True, status_code: Optional[int] = None,
+                 reason: Optional[str] = None):
         super().__init__(message)
         self.retriable = retriable
         self.status_code = status_code
+        # What to tell the person, when the connector knows better than the status code (Salesforce says which
+        # part of its set-up is missing). Never the CRM's raw answer.
+        self.reason = reason
 
 
 def is_blank(value) -> bool:
     """Nothing in this CRM field: missing, empty, or only spaces."""
     return value is None or not str(value).strip()
+
+
+def network_error(provider: str, exc: Exception) -> 'CRMError':
+    """A CRM that could not be reached, said without the request. The library's own message names the address,
+    and Pipedrive's address carried the key, which then sat in the sync log every login can read (CO-158)."""
+    return CRMError(f'{provider} could not be reached ({type(exc).__name__}). It is tried again.', retriable=True)
+
+
+def refusal(label: str, exc: CRMError) -> str:
+    """Why a CRM would not take the credentials, in words for the person connecting it. Never the CRM's raw answer,
+    which can name the request."""
+    if getattr(exc, 'reason', None):
+        return exc.reason
+    code = getattr(exc, 'status_code', None)
+    what = 'sign-in details' if label == 'Salesforce' else 'key'
+    if code is None:
+        return f'{label} could not be reached just now. Try again in a minute.'
+    if code == 401 or (code == 400 and 'auth' in str(exc).lower()):
+        return f'{label} refused the {what}. Check that it was copied whole, or make a new one.'
+    if code == 403:
+        return (f'{label} took the {what} but would not show contacts. Give it permission to read and write '
+                f'contacts, then try again.')
+    if code == 429:
+        return f'{label} is busy (too many requests). Try again in a minute.'
+    return f'{label} refused the connection ({code}). Check the {what} and try again.'
+
+
+class PermissionMissing(CRMError):
+    """The CRM refused one kind of record for lack of a permission (the key, or the plan). Recorded as skipped and
+    said on the card; it used to be recorded as sent (CO-162)."""
+
+    def __init__(self, what: str, message: str):
+        super().__init__(message, retriable=False, status_code=403)
+        self.what = what
 
 
 class BaseCRMConnector(ABC):
@@ -56,9 +94,29 @@ class BaseCRMConnector(ABC):
     def create_contact(self, email: str, properties: dict) -> str:
         """Create a new contact and return its id. Never called for one that exists."""
 
+    #: The CRM's name as people know it, for what the page says.
+    label = 'The CRM'
+
     @abstractmethod
+    def _ping(self) -> bool:
+        """One cheap read that needs the credentials: True when it answered as expected. Raises CRMError when the
+        CRM refuses or cannot be reached."""
+
     def ping(self) -> bool:
         """Return True if credentials are valid and the API is reachable."""
+        return self.check() is None
+
+    def check(self) -> Optional[str]:
+        """None when the CRM takes these credentials, otherwise what to tell the person.
+
+        Connect saved a wrong key and said "connected", and Test Connection said only "Ping failed" (found in the
+        live run, 31 Oct): each connector's ping swallowed the reason."""
+        try:
+            if self._ping():
+                return None
+            return f'{self.label} answered, but not as expected. Check the details and try again.'
+        except CRMError as exc:
+            return refusal(self.label, exc)
 
     @abstractmethod
     def find_contact_by_email(self, email: str) -> Optional[dict]:
@@ -107,3 +165,26 @@ class BaseCRMConnector(ABC):
     @abstractmethod
     def log_note(self, crm_contact_id: str, body: str) -> Optional[str]:
         """Attach a plain-text note to a contact. Returns the CRM note ID or None."""
+
+    def update_meeting(self, crm_meeting_id: str, title: str, start_time, end_time=None, notes: str = '',
+                       cancelled: bool = False) -> None:
+        """Move a meeting already in the CRM, or mark it cancelled there (CO-275)."""
+        raise CRMError('This CRM cannot update a meeting.', retriable=False)
+
+    # Deals (2 Nov 2026): off until the company switches them on and picks where new deals go.
+
+    def list_pipelines(self) -> list:
+        """The company's deal pipelines and their stages, in the CRM's order:
+        [{"id": "...", "label": "...", "stages": [{"id": "...", "label": "..."}]}]."""
+        raise CRMError('This CRM has no deals here.', retriable=False)
+
+    def create_deal(self, crm_contact_id: str, name: str, pipeline_id: str, stage_id: str) -> Optional[str]:
+        """A deal in the chosen pipeline and stage, linked to the contact. Returns its id."""
+        raise CRMError('This CRM has no deals here.', retriable=False)
+
+    # Changes made in the CRM, read back (2 Nov 2026): off until switched on.
+
+    def changed_contacts(self, since) -> list:
+        """Contacts changed in the CRM since `since` (an aware datetime), oldest first:
+        [{"id", "email", "first_name", "last_name", "phone", "job_title", "company"}], blanks as ''."""
+        raise CRMError('This CRM cannot say what changed.', retriable=False)

@@ -21,9 +21,18 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
-from api.permissions import IsCompanyUserOnly
+from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
+from core.google_calendar import seal_refresh_token
 
 logger = logging.getLogger(__name__)
+
+# Connecting and disconnecting the company's calendar is for an owner or admin (CO-97), like the AI
+# keys and CRM connections; any login could do it. Everyone may still see whether it is connected.
+NOT_AN_ADMIN = 'Only an owner or admin can connect or disconnect Google Calendar.'
+
+
+def _may_manage(company_user):
+    return company_user.role in IsCompanyAdmin.ADMIN_ROLES
 
 GOOGLE_AUTH_URI = 'https://accounts.google.com/o/oauth2/v2/auth'
 GOOGLE_TOKEN_URI = 'https://oauth2.googleapis.com/token'
@@ -56,6 +65,7 @@ def google_calendar_status(request):
             'calendarId': cfg.get('calendar_id') or 'primary',
             'configured': _oauth_configured(),  # is the platform OAuth app set up?
             'lastError': cfg.get('last_error') or '',
+            'mayManage': _may_manage(request.user),
         },
     }, status=status.HTTP_200_OK)
 
@@ -68,6 +78,8 @@ def google_calendar_connect(request):
     company = request.user.company
     if not company:
         return Response({'status': 'error', 'message': 'No company on this account.'}, status=status.HTTP_404_NOT_FOUND)
+    if not _may_manage(request.user):
+        return Response({'status': 'error', 'message': NOT_AN_ADMIN}, status=status.HTTP_403_FORBIDDEN)
     if not _oauth_configured():
         return Response({
             'status': 'error',
@@ -185,7 +197,7 @@ def google_calendar_callback(request):
 
         company.google_calendar_config = {
             'connected': True,
-            'refresh_token': refresh_token,
+            'refresh_token': seal_refresh_token(refresh_token),
             'google_email': google_email,
             'calendar_id': 'primary',
             'last_error': '',
@@ -206,6 +218,8 @@ def google_calendar_disconnect(request):
     company = request.user.company
     if not company:
         return Response({'status': 'error', 'message': 'No company on this account.'}, status=status.HTTP_404_NOT_FOUND)
+    if not _may_manage(request.user):
+        return Response({'status': 'error', 'message': NOT_AN_ADMIN}, status=status.HTTP_403_FORBIDDEN)
     company.google_calendar_config = {}
     company.save(update_fields=['google_calendar_config'])
     return Response({'status': 'success', 'message': 'Google Calendar disconnected.'}, status=status.HTTP_200_OK)

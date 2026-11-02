@@ -32,9 +32,11 @@ def should_start_scheduler(argv=None, environ=None):
     own copy as well, because the only test was "not runserver".
 
     ``SDR_SCHEDULER_ENABLED`` overrides the detection: ``false`` never starts
-    it (e.g. a developer not working on SDR), ``true`` starts it in any
-    process that isn't Celery or a one-off management command (e.g. a
-    dedicated scheduler process, or a WSGI host the detection doesn't know).
+    it, ``true`` starts it in any process that isn't Celery or a one-off
+    management command (e.g. a dedicated scheduler process, or a WSGI host the
+    detection doesn't know). The dev server needs ``true``: a laptop running it
+    against the shared database used to win the job lock and send that
+    database's campaign emails with links to localhost (CO-141).
     """
     argv = list(sys.argv if argv is None else argv)
     environ = os.environ if environ is None else environ
@@ -47,7 +49,7 @@ def should_start_scheduler(argv=None, environ=None):
     program = os.path.basename(str(argv[0])).lower() if argv else ''
     if program in ('manage.py', 'manage', 'django-admin', 'django-admin.py'):
         command = argv[1] if len(argv) > 1 else ''
-        if command not in _SERVER_COMMANDS:
+        if command not in _SERVER_COMMANDS or flag not in _TRUE:
             return False
         # The dev server runs two processes: the autoreload watcher (RUN_MAIN
         # unset) and the worker that serves requests (RUN_MAIN=true).
@@ -65,13 +67,39 @@ def should_start_scheduler(argv=None, environ=None):
     return not program.startswith(('jupyter', 'ipykernel'))
 
 
+_LOCAL_HOSTS = ('localhost', '127.0.0.1', '0.0.0.0', '::1')
+
+
+def links_would_point_at_localhost():
+    """Email links built here would say localhost while the database is a shared, remote one (CO-141)."""
+    from django.conf import settings
+    from ai_sdr_agent.agents.meeting_scheduling_agent import _backend_base
+    db = settings.DATABASES.get('default', {})
+    db_host = str(db.get('HOST') or '').strip().lower()
+    remote_db = 'sqlite' not in str(db.get('ENGINE', '')) and db_host not in ('',) + _LOCAL_HOSTS
+    return remote_db and any(h in _backend_base().lower() for h in _LOCAL_HOSTS)
+
+
+def scheduler_may_run():
+    """The scheduler, and the Apify research thread with it, run in this process."""
+    if not should_start_scheduler():
+        return False
+    if links_would_point_at_localhost():
+        import logging
+        logging.getLogger(__name__).error(
+            "SDR scheduler not started: email links would point at localhost while the database is remote. "
+            "Set SITE_URL (or BACKEND_URL) to this server's public address.")
+        return False
+    return True
+
+
 class AiSdrAgentConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'ai_sdr_agent'
     verbose_name = 'AI SDR Agent'
 
     def ready(self):
-        if not should_start_scheduler():
+        if not scheduler_may_run():
             return
 
         # ── Start the scheduler ──────────────────────────────────────────────
