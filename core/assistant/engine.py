@@ -252,17 +252,24 @@ Write the answer as a helpful colleague would, plainly:
   own screens have it. Never say the agent is inactive, empty or unused.
 - With no facts at all, say what you can answer instead: people, who is free or away, tasks and projects, leave,
   support tickets.
-- You read only: you cannot assign, book, email, approve or change anything. When the asker wants that done, say
-  where it is done (the agent and its screen).
+- You read only: you cannot assign, book, email, approve or change anything. When the asker wants something done,
+  say so in one sentence ("I can't assign tasks: I only read.") and where it is done, by name: tasks in Project
+  Manager, Tasks; leave in HR, Leave; HR, Project Manager or Executive meetings under that agent's Meetings; customer
+  mail in Reply Draft, Emails; tickets in Frontline, Tickets; candidates and interviews in Recruitment; campaigns in
+  Marketing; leads and sales calls in AI SDR; a CRM in CRM Sync. Never say "no information" or "no facts" for it.
 - Under 120 words. No heading.
 """
 
 
-def write(ai, ctx: Context, question, history, facts, readout) -> str:
+def write_prompt(ctx: Context, question, history, facts, readout) -> str:
     me = ctx.directory.me(ctx.company_user)
     from core.answer_language import line as language_line
     numbered = '\n'.join(f'[{i}] ({f.source}) {f.text}' for i, f in enumerate(facts, 1)) or '(none)'
-    needs = [n for n in readout.get('needs') or [] if isinstance(n, str)]
+    # Only agents it truly can't read: the plan listed HR as "needed" for a leave policy (which the documents lookup
+    # reads), and the answer said "I cannot read the HR agent yet" (found filming, 2 Nov 2026).
+    readable = {AGENT_NAMES[m].lower() for m in READS if m in ctx.modules}
+    needs = [n for n in readout.get('needs') or [] if isinstance(n, str) and n.strip()
+             and n.strip().lower() not in readable]
     prompt = _WRITE.format(
         company=ctx.company.name, today=f'{ctx.today:%A} {ctx.today.isoformat()}', tz=ctx.tz,
         asker=(me.describe() if me else ctx.company_user.full_name),
@@ -270,8 +277,15 @@ def write(ai, ctx: Context, question, history, facts, readout) -> str:
         history=_history_lines(history), question=str(question)[:2000], facts=numbered,
         needs=(f'\nThe question also needs these, which you can\'t read: {", ".join(needs)}. (The company has these '
                f'agents you can\'t read yet: {", ".join(unread(ctx)) or "none"}.)\n' if needs else ''))
-    return (ai._call_llm(prompt=prompt, system_prompt='You answer only from the facts given.', temperature=0.2,
-                         max_tokens=600) or '').strip()
+    return prompt
+
+
+WRITE_SYSTEM = 'You answer only from the facts given.'
+
+
+def write(ai, ctx: Context, question, history, facts, readout) -> str:
+    prompt = write_prompt(ctx, question, history, facts, readout)
+    return (ai._call_llm(prompt=prompt, system_prompt=WRITE_SYSTEM, temperature=0.2, max_tokens=600) or '').strip()
 
 
 _NUMBER = re.compile(r'\d+(?:[.,:]\d+)?')
@@ -311,8 +325,8 @@ def _sources(answer, facts) -> list[dict]:
 
 # ---- the whole question --------------------------------------------------------------------------------------------
 
-def ask(company_user, question, history=None, *, ai=None) -> dict:
-    """{'answer', 'sources', 'asked_back', 'lookups', 'flagged'}. Key and quota errors (KeyServiceError) propagate."""
+def _prepare(company_user, question, history, ai):
+    """Plan and fetch. (ctx, ai, readout, facts, lookup names, the question back or None)."""
     ctx = context_for(company_user)
     ai = ai or AssistantAI(company_user.company_id)
     readout = plan(ai, ctx, question, history)
@@ -327,11 +341,14 @@ def ask(company_user, question, history=None, *, ai=None) -> dict:
                    for p in people]
         text = (f'Which "{first.name}" do you mean: ' + ', '.join(options[:-1]) + f' or {options[-1]}?'
                 if len(options) > 1 else f'Which "{first.name}" do you mean?')
-        return {'answer': text, 'sources': [], 'asked_back': True, 'lookups': names, 'flagged': []}
+        return ctx, ai, readout, facts, names, text
     if readout['ask_back'] and not readout['calls']:
-        return {'answer': str(readout['ask_back'])[:400], 'sources': [], 'asked_back': True, 'lookups': [],
-                'flagged': []}
-    answer = write(ai, ctx, question, history, facts, readout)
+        return ctx, ai, readout, facts, [], str(readout['ask_back'])[:400]
+    return ctx, ai, readout, facts, names, None
+
+
+def _finish(answer, facts, question, ctx, names) -> dict:
+    """The number check, and the sources the answer cites."""
     flagged = unchecked_numbers(answer, facts, question, ctx.today)
     if flagged:
         logger.warning('assistant: numbers not in the facts: %s', flagged)
@@ -339,3 +356,37 @@ def ask(company_user, question, history=None, *, ai=None) -> dict:
                    ') were not found in the records read; check them in the sources._')
     return {'answer': answer, 'sources': _sources(answer, facts), 'asked_back': False, 'lookups': names,
             'flagged': flagged}
+
+
+def ask(company_user, question, history=None, *, ai=None) -> dict:
+    """{'answer', 'sources', 'asked_back', 'lookups', 'flagged'}. Key and quota errors (KeyServiceError) propagate."""
+    ctx, ai, readout, facts, names, asked_back = _prepare(company_user, question, history, ai)
+    if asked_back:
+        return {'answer': asked_back, 'sources': [], 'asked_back': True, 'lookups': names, 'flagged': []}
+    return _finish(write(ai, ctx, question, history, facts, readout), facts, question, ctx, names)
+
+
+def ask_stream(company_user, question, history=None, *, ai=None):
+    """The same answer, as events while it is written (api.streaming's ndjson):
+    {'type': 'meta', 'lookups'} once the facts are read, {'type': 'token', 'value'} for each piece, then
+    {'type': 'done', **the answer as `ask` gives it}; {'type': 'error', 'message'} if it cannot be written.
+    Key and quota errors raised before the answer starts propagate, as with `ask`."""
+    ctx, ai, readout, facts, names, asked_back = _prepare(company_user, question, history, ai)
+    yield {'type': 'meta', 'lookups': names}
+    if asked_back:
+        yield {'type': 'token', 'value': asked_back}
+        yield {'type': 'done', 'answer': asked_back, 'sources': [], 'asked_back': True, 'lookups': names,
+               'flagged': []}
+        return
+    prompt = write_prompt(ctx, question, history, facts, readout)
+    parts = []
+    for event in ai._call_llm_stream(prompt=prompt, system_prompt=WRITE_SYSTEM, temperature=0.2, max_tokens=600):
+        kind = event.get('type')
+        if kind == 'token' and event.get('value'):
+            parts.append(event['value'])
+            yield {'type': 'token', 'value': event['value']}
+        elif kind == 'error':
+            logger.warning('assistant: the answer stream failed: %s', event.get('message'))
+            yield {'type': 'error', 'message': 'The assistant could not finish the answer. Please try again.'}
+            return
+    yield {'type': 'done', **_finish(''.join(parts).strip(), facts, question, ctx, names)}
