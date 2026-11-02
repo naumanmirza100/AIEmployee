@@ -262,7 +262,11 @@ def write_prompt(ctx: Context, question, history, facts, readout) -> str:
     me = ctx.directory.me(ctx.company_user)
     from core.answer_language import line as language_line
     numbered = '\n'.join(f'[{i}] ({f.source}) {f.text}' for i, f in enumerate(facts, 1)) or '(none)'
-    needs = [n for n in readout.get('needs') or [] if isinstance(n, str)]
+    # Only agents it truly can't read: the plan listed HR as "needed" for a leave policy (which the documents lookup
+    # reads), and the answer said "I cannot read the HR agent yet" (found filming, 2 Nov 2026).
+    readable = {AGENT_NAMES[m].lower() for m in READS if m in ctx.modules}
+    needs = [n for n in readout.get('needs') or [] if isinstance(n, str) and n.strip()
+             and n.strip().lower() not in readable]
     prompt = _WRITE.format(
         company=ctx.company.name, today=f'{ctx.today:%A} {ctx.today.isoformat()}', tz=ctx.tz,
         asker=(me.describe() if me else ctx.company_user.full_name),

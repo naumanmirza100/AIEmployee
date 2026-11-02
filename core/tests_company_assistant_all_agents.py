@@ -119,6 +119,14 @@ class WhatTheyRead(AllAgentsTestCase):
         self.assertEqual(hr.call_args.kwargs['asker_role'], 'employee')      # HR's own rule for a plain login
         self.assertEqual(fl.call_args.kwargs['company_user_id'], self.member.pk)
 
+    def test_an_agent_it_reads_is_never_called_one_it_cannot(self):
+        # Filming, a leave-policy question had HR in the plan's "needs", and the answer said it couldn't read HR.
+        ctx = self.ctx(self.admin)
+        prompt = engine.write_prompt(ctx, 'What does the leave policy say?', [], [],
+                                     {'needs': ['HR', 'Payroll'], 'english': '', 'language': 'english'})
+        self.assertIn("which you can't read: Payroll.", prompt)
+        self.assertNotIn('read: HR', prompt)
+
     def test_the_week_never_looks_into_the_future(self):
         # Live on a Monday, "this week" came as today to Sunday: the answer was one morning's work.
         ctx = self.ctx(self.admin)
