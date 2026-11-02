@@ -305,7 +305,11 @@ def ask(company_user, question, history=None, *, ai=None) -> dict:
     names = [str(c.get('lookup')) for c in readout['calls']]
     if unsure:
         first = unsure[0]
-        options = [p.describe() for p in first.people[:6]]
+        people = first.people[:6]
+        # Two people with the same name (two HR records, live on Margalla) read the same: add their addresses.
+        same = len({p.name.lower() for p in people}) < len(people)
+        options = [p.describe() + (f' <{p.email}>' if same and p.email and p.email not in p.describe() else '')
+                   for p in people]
         text = (f'Which "{first.name}" do you mean: ' + ', '.join(options[:-1]) + f' or {options[-1]}?'
                 if len(options) > 1 else f'Which "{first.name}" do you mean?')
         return {'answer': text, 'sources': [], 'asked_back': True, 'lookups': names, 'flagged': []}

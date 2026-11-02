@@ -369,7 +369,8 @@ def tickets(ctx, args):
     from api.views.frontline_agent import SYSTEM_TICKET_ACCOUNTS, _tickets_of
     from django.contrib.auth import get_user_model
     from Frontline_agent.models import Ticket
-    me = get_user_model().objects.filter(pk=ctx.company_user.login_user_id).first()         if ctx.company_user.login_user_id else None
+    login_id = ctx.company_user.login_user_id
+    me = get_user_model().objects.filter(pk=login_id).first() if login_id else None
     if me is not None:
         qs = _tickets_of(ctx.company_user, me)
     else:   # no login user yet: only the customers' tickets nobody holds (never "created by nobody")
@@ -390,16 +391,29 @@ def tickets(ctx, args):
     total = qs.count()
     by_priority = {r['priority']: r['n'] for r in qs.values('priority').annotate(n=Count('id'))}
     by_category = {r['category']: r['n'] for r in qs.values('category').annotate(n=Count('id'))}
+
+    # A ticket held by the chat widget's or the inbox's system account is held by no person yet. Live on Margalla
+    # the bot's name came through as a holder, and "who has the most open tickets?" was answered with it.
+    def holder_of(user_id, username):
+        if not user_id or username in SYSTEM_TICKET_ACCOUNTS:
+            return 'nobody yet (waiting for someone to take it)'
+        return ctx.name_of_user(user_id)
+    by_holder = {}
+    for r in qs.values('assigned_to_id', 'assigned_to__username').annotate(n=Count('id')):
+        name = holder_of(r['assigned_to_id'], r['assigned_to__username'])
+        by_holder[name] = by_holder.get(name, 0) + r['n']
     link = '/frontline/dashboard?tab=tickets'
     scope = ('open ' if (args.get('status') or 'open') == 'open' else '') + 'ticket(s)'
     head = (f'{total} {scope}' + (f' assigned to {who.name}' if who else '') + ' that you can see in Frontline'
             + (f'; by priority: ' + ', '.join(f'{k} {v}' for k, v in sorted(by_priority.items())) if by_priority else '')
             + (f'; by category: ' + ', '.join(f'{k} {v}' for k, v in sorted(by_category.items())) if by_category else '')
+            + (f'; held by: ' + ', '.join(f'{k} {v}' for k, v in sorted(by_holder.items(), key=lambda kv: -kv[1]))
+               if by_holder else '')
             + '.')
     facts = [Fact(head, 'Frontline', link)]
-    for t in qs.select_related('contact').order_by('-created_at')[:ROWS]:
+    for t in qs.select_related('contact', 'assigned_to').order_by('-created_at')[:ROWS]:
         customer = (t.contact.name or t.contact.email) if t.contact_id else 'no customer'
-        holder = ctx.name_of_user(t.assigned_to_id) if t.assigned_to_id else 'nobody'
+        holder = holder_of(t.assigned_to_id, t.assigned_to.username if t.assigned_to_id else '')
         facts.append(Fact(f'Ticket #{t.id} "{t.title}" — {t.get_status_display()}, {t.get_priority_display()} '
                           f'priority, {t.get_category_display()}, customer {customer}, held by {holder}, '
                           f'opened {_when(ctx, t.created_at)}', 'Frontline', link))

@@ -123,7 +123,31 @@ class People(AssistantTestCase):
         self.assertEqual(len(ai.prompts), 1)          # the plan only: no answer is written about a guess
 
 
+    def test_two_records_with_the_same_name_are_told_apart_by_address(self):
+        # Live on Margalla, two HR records were both "Hira Siddiqui"; the question back read the same twice.
+        from hr_agent.models import Employee
+        Employee.objects.create(company=self.company, full_name='Hira Siddiqui', work_email='hira@acme.test',
+                                job_title='Engineer', employment_status='active')
+        Employee.objects.create(company=self.company, full_name='Hira Siddiqui', work_email='hira.s@acme.test',
+                                job_title='Engineer', employment_status='active')
+        out = self.ask(self.admin, FakeAI(calls=[{'lookup': 'person', 'args': {'person': 'Hira'}}]), 'Who is Hira?')
+        self.assertTrue(out['asked_back'])
+        self.assertIn('<hira@acme.test>', out['answer'])
+        self.assertIn('<hira.s@acme.test>', out['answer'])
+
+
 class WhatEachLoginSees(AssistantTestCase):
+
+    def test_a_ticket_nobody_has_taken_is_held_by_nobody_not_the_system_account(self):
+        from django.contrib.auth import get_user_model
+        from Frontline_agent.models import Ticket
+        self.buy_module(self.company, 'frontline_agent')
+        bot = get_user_model().objects.create_user(username='frontline_handoff_bot', password='x')
+        Ticket.objects.create(company=self.company, title='Order form broken', description='x', created_by=bot,
+                              assigned_to=bot, status='open', priority='urgent')
+        text = ' '.join(f.text for f in L.tickets(self.ctx(self.admin), {}))
+        self.assertIn('held by: nobody yet (waiting for someone to take it) 1', text)
+        self.assertNotIn('frontline_handoff_bot', text)
 
     def test_tasks_are_the_askers_company_only(self):
         Task.objects.create(title='Homepage copy', project=self.project, assignee=self.ali.user, status='todo',
