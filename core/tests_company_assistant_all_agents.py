@@ -119,6 +119,14 @@ class WhatTheyRead(AllAgentsTestCase):
         self.assertEqual(hr.call_args.kwargs['asker_role'], 'employee')      # HR's own rule for a plain login
         self.assertEqual(fl.call_args.kwargs['company_user_id'], self.member.pk)
 
+    def test_the_week_never_looks_into_the_future(self):
+        # Live on a Monday, "this week" came as today to Sunday: the answer was one morning's work.
+        ctx = self.ctx(self.admin)
+        today = ctx.today
+        head = M.week(ctx, {'start': today.isoformat(), 'end': (today + timedelta(days=6)).isoformat()})[0].text
+        self.assertIn(f'{(today - timedelta(days=6)).day} ', head)
+        self.assertTrue(head.rstrip(':').endswith(f'{today.year}, agent by agent'))
+
     def test_the_week_has_a_line_for_each_agent_the_company_has(self):
         lines = text(M.week(self.ctx(self.admin), {}))
         for agent in ('Project Manager:', 'Frontline:', 'HR:', 'Recruitment:', 'Executive Meeting:', 'Marketing:',

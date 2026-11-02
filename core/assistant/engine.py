@@ -161,7 +161,8 @@ Rules:
 - "Free"/"available" questions use the calendar lookups; questions about taking on more work combine tasks, leave
   and the calendar.
 - What a policy, handbook, contract or other document says: "documents", its query restated in English.
-- "What happened this week?" or a catch-up across the company: "week" (with dates for another period).
+- "What happened this week?" or a catch-up across the company: "week" with no dates (the last 7 days); dates only
+  for another past period ("last month").
 - Hiring and candidates: jobs, candidates, interviews. Sales: sdr_leads, sdr_calls, sdr_waiting. Campaigns:
   campaigns, campaign_replies. Customer mail: inbox. Executive meetings and their tasks: exec_meetings, exec_tasks.
 - A follow-up ("and the week after?", "what about Ali?") repeats the conversation's lookups with the new arguments.
