@@ -42,7 +42,8 @@ class FakeCRM:
     def __call__(self, method, url, **kwargs):
         self.calls.append((method, url, kwargs.get('json'), kwargs.get('params')))
         for scripted_method, fragment, body in self.script:
-            if scripted_method == method and fragment in url:
+            # Salesforce asks every question at one address: the question itself (its SOQL) can be matched too.
+            if scripted_method == method and (fragment in url or fragment in str((kwargs.get('params') or {}).get('q', ''))):
                 return Answer(body)
         return Answer({})
 
@@ -131,29 +132,55 @@ class SalesforceTests(SimpleTestCase):
     def existing(self, **fields):
         return ('GET', '/query', {'records': [dict({'Id': '003X'}, **fields)]})
 
+    # A contact's company is the Account it belongs to; one with no Account is private to whoever made it (2 Nov).
+    ACCOUNT = ('GET', 'FROM Account', {'records': [{'Id': '001A'}]})
+
     def test_a_contact_with_every_field_filled_is_not_written_to_at_all(self):
-        fake, connector = self.crm(self.existing(FirstName='Bill', LastName='A.', Phone='021', Title='MD'))
+        fake, connector = self.crm(self.existing(FirstName='Bill', LastName='A.', Phone='021', Title='MD',
+                                                 AccountId='001OWN'))
         self.assertEqual(connector.upsert_contact('bilal@customer.test', OURS), '003X')
         self.assertEqual(fake.writes(), [])
+        self.assertFalse(any('FROM Account' in str(call[3]) for call in fake.calls))
 
-    def test_only_the_empty_fields_are_filled_and_never_the_description_or_the_account(self):
-        fake, connector = self.crm(self.existing(FirstName='Bill', LastName='A.', Phone=None, Title=''))
+    def test_only_the_empty_fields_are_filled_and_a_missing_account_linked_never_the_description(self):
+        fake, connector = self.crm(self.ACCOUNT, self.existing(FirstName='Bill', LastName='A.', Phone=None, Title=''))
         connector.upsert_contact('bilal@customer.test', OURS)
         [(method, where, sent)] = fake.writes()
         self.assertEqual((method, where), ('PATCH', 'Contact/003X'))
-        self.assertEqual(sent, {'Phone': '0300 1112233', 'Title': 'Owner'})
+        self.assertEqual(sent, {'Phone': '0300 1112233', 'Title': 'Owner', 'AccountId': '001A'})
 
     def test_the_lookup_asks_for_the_title_too(self):
         fake, connector = self.crm()
         connector.find_contact_by_email('bilal@customer.test')
         self.assertIn('Title', fake.calls[0][3]['q'])
 
-    def test_a_new_contact_carries_no_company_or_account_field(self):
-        fake, connector = self.crm(('POST', '/sobjects/Contact', {'id': '003NEW'}))
+    def test_a_new_contact_belongs_to_a_new_account_named_after_its_company(self):
+        fake, connector = self.crm(('POST', '/sobjects/Account', {'id': '001NEW'}), ('POST', '/sobjects/Contact', {'id': '003NEW'}))
         self.assertEqual(connector.upsert_contact('bilal@customer.test', OURS), '003NEW')
-        sent = fake.writes()[0][2]
-        self.assertEqual(sent, {'Email': 'bilal@customer.test', 'FirstName': 'Bilal', 'LastName': 'Ahmed',
-                                'Phone': '0300 1112233', 'Title': 'Owner', 'Description': 'Lead score: 82'})
+        [account, contact] = fake.writes()
+        self.assertEqual((account[1], account[2]), ('sobjects/Account', {'Name': 'Ahmed Traders'}))
+        self.assertEqual(contact[2], {'Email': 'bilal@customer.test', 'FirstName': 'Bilal', 'LastName': 'Ahmed',
+                                      'Phone': '0300 1112233', 'Title': 'Owner', 'Description': 'Lead score: 82',
+                                      'AccountId': '001NEW'})
+
+    def test_an_account_already_there_is_used_not_made_again(self):
+        fake, connector = self.crm(self.ACCOUNT, ('POST', '/sobjects/Contact', {'id': '003NEW'}))
+        connector.upsert_contact('bilal@customer.test', OURS)
+        [(method, where, sent)] = fake.writes()
+        self.assertEqual((where, sent['AccountId']), ('sobjects/Contact', '001A'))
+
+    def test_without_a_company_no_account_is_asked_for_and_none_is_sent(self):
+        fake, connector = self.crm(('POST', '/sobjects/Contact', {'id': '003NEW'}))
+        connector.upsert_contact('bilal@customer.test', dict(OURS, company=''))
+        [(method, where, sent)] = fake.writes()
+        self.assertNotIn('AccountId', sent)
+        self.assertFalse(any('FROM Account' in str(call[3]) for call in fake.calls))
+
+    def test_a_company_name_with_a_quote_cannot_break_the_question(self):
+        fake, connector = self.crm(('POST', '/sobjects/Contact', {'id': '003NEW'}))
+        connector.upsert_contact('bilal@customer.test', dict(OURS, company="O'Brien & Sons"))
+        asked = [call[3]['q'] for call in fake.calls if 'FROM Account' in str(call[3])]
+        self.assertEqual(asked, [r"SELECT Id FROM Account WHERE Name = 'O\'Brien & Sons' LIMIT 1"])
 
     def test_filing_an_email_never_renames_a_contact_that_exists(self):
         fake, connector = self.crm(self.existing(FirstName='Bill', LastName='A.'))

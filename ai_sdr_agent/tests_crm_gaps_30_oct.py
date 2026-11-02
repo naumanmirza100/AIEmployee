@@ -77,6 +77,17 @@ class QueueTests(base.CRMBase):
         dead.refresh_from_db()
         self.assertEqual((dead.status, dead.attempts), (CRMSyncQueue.STATUS_PENDING, 0))
 
+    def test_an_entry_tried_again_by_itself_counts_as_pending_not_failed(self):
+        # A Salesforce email not reached once showed as "Failed" with a Retry button, then went by itself.
+        item = self.entry()
+        with mock.patch.object(CRMSyncAgent, '_dispatch', side_effect=CRMError('not reached', retriable=True)):
+            CRMSyncAgent(self.company).process_pending()
+        item.refresh_from_db()
+        self.assertEqual((item.status, item.attempts), (CRMSyncQueue.STATUS_FAILED, 1))
+        self.entry(source_id=2, status=CRMSyncQueue.STATUS_FAILED, attempts=3)
+        code, body = self.call(views.queue_status, self.cu, method='get')
+        self.assertEqual((code, body['pending'], body['failed'], body['total']), (200, 1, 1, 2))
+
     def test_a_full_account_spends_no_attempt(self):
         item = self.entry()
         with mock.patch.object(CRMSyncAgent, '_dispatch', side_effect=CRMError('limit', retriable=False,

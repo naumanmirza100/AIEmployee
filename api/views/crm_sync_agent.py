@@ -415,10 +415,16 @@ def queue_status(request):
         .order_by('status', 'object_type')
     )
 
+    # An entry the CRM could not take just now (not reached, busy, full) is marked failed but tried again by itself
+    # until its attempts run out: it counts as pending, not failed. The page showed "Failed 2" and a Retry button
+    # for two emails that went by themselves two minutes later (found filming, 2 Nov 2026).
+    from django.db.models import F, Q
+    retrying = Q(status=CRMSyncQueue.STATUS_FAILED, attempts__lt=F('max_attempts'))
     return Response({
         'total': CRMSyncQueue.objects.filter(company=company).count(),
-        'pending': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_PENDING).count(),
-        'failed': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_FAILED).count(),
+        'pending': CRMSyncQueue.objects.filter(Q(status=CRMSyncQueue.STATUS_PENDING) | retrying, company=company).count(),
+        'failed': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_FAILED,
+                                              attempts__gte=F('max_attempts')).count(),
         'done': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_DONE).count(),
         'waiting': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_WAITING).count(),
         'skipped': CRMSyncQueue.objects.filter(company=company, status=CRMSyncQueue.STATUS_SKIPPED).count(),
