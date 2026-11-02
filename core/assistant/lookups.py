@@ -170,7 +170,13 @@ def calendar(ctx, args):
                               (f', {args.get("from_time")}–{args.get("to_time")}' if args.get('from_time') else '') +
                               ' (no meetings, interviews, sales calls, leave or holidays).', 'Calendar'))
             continue
-        facts.append(Fact(f'{p.name} has {len(clashes)} busy time(s) {span}.', 'Calendar'))
+        # The period is the one looked at, not how long they are busy: "1 busy time(s) Mon 9 Nov to Fri 13 Nov" was
+        # answered "busy the whole week" (2 Nov 2026).
+        within = ('On ' if start == end else 'In the period ') + span + (
+            f', {args.get("from_time")}–{args.get("to_time")}' if args.get('from_time') else '')
+        more = f' The first {ROWS} follow.' if len(clashes) > ROWS else ' Each one follows.'
+        facts.append(Fact(f'{within}, {p.name} has {len(clashes)} busy time(s); outside them nothing is booked.{more}',
+                          'Calendar'))
         for c in clashes[:ROWS]:
             label, link = CALENDAR_LINKS.get(c.source, ('Calendar', ''))
             facts.append(Fact(c.describe(ctx.tz), label, link))
