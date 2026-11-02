@@ -97,6 +97,10 @@ class CRMIntegration(models.Model):
     sync_deals = models.BooleanField(default=False)
     #: {"pipeline_id", "pipeline_label", "stage_id", "stage_label"}, as the CRM named them when picked.
     deal_settings = models.JSONField(default=dict, blank=True)
+    # Changes made in the CRM come back: names, phone, job title and company that someone corrects there are copied
+    # to the agents' own records every 15 minutes. Off until switched on (2 Nov 2026).
+    sync_back = models.BooleanField(default=False)
+    last_pulled_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
     last_ping_at = models.DateTimeField(null=True, blank=True)
@@ -187,9 +191,11 @@ class CRMSyncLog(models.Model):
 
     OP_CREATE = 'create'
     OP_UPDATE = 'update'
+    OP_PULL = 'pull'
     OPERATIONS = [
         (OP_CREATE, 'Create'),
         (OP_UPDATE, 'Update'),
+        (OP_PULL, 'From the CRM'),
     ]
 
     STATUS_SUCCESS = 'success'

@@ -286,6 +286,69 @@ class CRMSyncAgent:
                 defaults={'crm_contact_id': contact, 'crm_deal_id': deal, 'company': self.company})
         return deal
 
+    # ------------------------------------------------------------------ #
+    # Changes made in the CRM, copied back (off until switched on)
+    # ------------------------------------------------------------------ #
+
+    #: For each kind of record CRM Sync links to a CRM contact: its model and our field for each CRM field.
+    #: The name of a Frontline customer is one field, made from the first and last name.
+    PULLED = {
+        CRMContactMapping.SOURCE_SDR_LEAD: ('ai_sdr_agent.SDRLead', {
+            'first_name': 'first_name', 'last_name': 'last_name', 'phone': 'phone', 'job_title': 'job_title',
+            'company': 'company_name'}),
+        CRMContactMapping.SOURCE_MARKETING_LEAD: ('marketing_agent.Lead', {
+            'first_name': 'first_name', 'last_name': 'last_name', 'phone': 'phone', 'job_title': 'job_title',
+            'company': 'company'}),
+        CRMContactMapping.SOURCE_FRONTLINE: ('Frontline_agent.Contact', {'phone': 'phone'}),
+    }
+    #: Read again a little before the last run, so a change saved while that run read is not missed.
+    PULL_OVERLAP = timedelta(minutes=2)
+
+    def pull_changes(self, integration: CRMIntegration) -> dict:
+        """Names, phone, job title and company corrected in the CRM, copied to the records CRM Sync linked to those
+        contacts. The CRM's value wins where it has one; a field it has empty never empties ours. Written with
+        update(), so nothing is sent back to the CRM for it (and the CRM, which is only ever filled where blank,
+        keeps its own values either way)."""
+        from django.apps import apps
+        started = timezone.now()
+        since = (integration.last_pulled_at or integration.created_at) - self.PULL_OVERLAP
+        rows = self._get_connector(integration).changed_contacts(since)
+        by_id = {str(r['id']): r for r in rows if r.get('id')}
+        counts = {'read': len(rows), 'updated': 0}
+        for mapping in CRMContactMapping.objects.filter(integration=integration, company=self.company,
+                                                        crm_contact_id__in=list(by_id)):
+            kind = self.PULLED.get(mapping.source_type)
+            if kind is None:
+                continue
+            model_label, fields = kind
+            model = apps.get_model(model_label)
+            record = model._base_manager.filter(pk=mapping.source_id).first()
+            if record is None:
+                continue
+            row = by_id[mapping.crm_contact_id]
+            changes = {}
+            for theirs, ours in fields.items():
+                value = (row.get(theirs) or '').strip()
+                if value and value != (getattr(record, ours, '') or ''):
+                    changes[ours] = value[:model._meta.get_field(ours).max_length or None]
+            if mapping.source_type == CRMContactMapping.SOURCE_FRONTLINE:
+                name = f"{(row.get('first_name') or '').strip()} {(row.get('last_name') or '').strip()}".strip()
+                if name and name != (record.name or ''):
+                    changes['name'] = name[:255]
+            elif mapping.source_type == CRMContactMapping.SOURCE_SDR_LEAD and ({'first_name', 'last_name'} & set(changes)):
+                changes['full_name'] = f"{changes.get('first_name', record.first_name)} {changes.get('last_name', record.last_name)}".strip()[:255]
+            if not changes:
+                continue
+            model._base_manager.filter(pk=record.pk).update(**changes)
+            counts['updated'] += 1
+            CRMSyncLog.objects.create(company=self.company, integration=integration,
+                                      object_type=CRMSyncLog.TYPE_CONTACT, object_id=f'{mapping.source_type}:{record.pk}',
+                                      crm_object_id=mapping.crm_contact_id, operation=CRMSyncLog.OP_PULL,
+                                      status=CRMSyncLog.STATUS_SUCCESS, payload={'changed': sorted(changes)})
+        CRMIntegration.objects.filter(pk=integration.pk).update(last_pulled_at=started)
+        integration.last_pulled_at = started
+        return counts
+
     @staticmethod
     def _last_sent_meeting(integration, meeting_id):
         """The meeting as the CRM last had it from us: the payload of the newest entry that went."""

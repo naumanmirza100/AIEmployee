@@ -227,6 +227,16 @@ class SalesforceConnector(BaseCRMConnector):
                        json={'OpportunityId': opp, 'ContactId': crm_contact_id, 'IsPrimary': True})
         return opp or None
 
+    def changed_contacts(self, since) -> list:
+        """Contacts with LastModifiedDate after `since`, oldest first, at most 2,000 a run."""
+        self._ensure_token()
+        q = ('SELECT Id, Email, FirstName, LastName, Phone, Title, Account.Name FROM Contact '
+             f'WHERE LastModifiedDate > {_sf_datetime(since)} ORDER BY LastModifiedDate LIMIT 2000')
+        records = (self._get(f'/services/data/{SF_API_VERSION}/query', params={'q': q}).json() or {}).get('records') or []
+        return [{'id': r.get('Id'), 'email': r.get('Email') or '', 'first_name': r.get('FirstName') or '',
+                 'last_name': r.get('LastName') or '', 'phone': r.get('Phone') or '', 'job_title': r.get('Title') or '',
+                 'company': ((r.get('Account') or {}).get('Name') or '')} for r in records]
+
     # ------------------------------------------------------------------ #
     # Auth
     # ------------------------------------------------------------------ #

@@ -256,6 +256,28 @@ class HubSpotConnector(BaseCRMConnector):
             raise
         return str((resp.json() or {}).get('id', '')) or None
 
+    def changed_contacts(self, since) -> list:
+        """HubSpot's contact search on lastmodifieddate, 100 a page, at most 2,000 a run (the rest come next run:
+        the oldest go first and the time moves on only past what was read)."""
+        out, after = [], None
+        for _ in range(20):
+            body = {'filterGroups': [{'filters': [{'propertyName': 'lastmodifieddate', 'operator': 'GTE',
+                                                   'value': str(_to_hs_timestamp(since))}]}],
+                    'properties': ['email', 'firstname', 'lastname', 'phone', 'jobtitle', 'company'],
+                    'sorts': [{'propertyName': 'lastmodifieddate', 'direction': 'ASCENDING'}], 'limit': 100}
+            if after:
+                body['after'] = after
+            data = self._post('/crm/v3/objects/contacts/search', json=body).json() or {}
+            for r in data.get('results') or []:
+                p = r.get('properties') or {}
+                out.append({'id': str(r.get('id')), 'email': p.get('email') or '', 'first_name': p.get('firstname') or '',
+                            'last_name': p.get('lastname') or '', 'phone': p.get('phone') or '',
+                            'job_title': p.get('jobtitle') or '', 'company': p.get('company') or ''})
+            after = ((data.get('paging') or {}).get('next') or {}).get('after')
+            if not after:
+                break
+        return out
+
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #

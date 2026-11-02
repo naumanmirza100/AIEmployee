@@ -537,9 +537,14 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           { key: 'sync_support',  icon: LifeBuoy, label: 'Support tickets' },
           // Off until switched on: only people who reply to a campaign, with their reply, not every reader.
           { key: 'sync_marketing', icon: Megaphone, label: 'Campaign replies' },
-        ].map(({ key, icon: Icon, label }) => (
+          // The other way, off until switched on: corrections made in the CRM come back every 15 minutes.
+          { key: 'sync_back', icon: RefreshCw, label: `Changes from ${cfg.label}`,
+            title: integration.sync_back
+              ? `Names, phones, job titles and companies corrected in ${cfg.label} are copied to your agents every 15 minutes. Click to stop.`
+              : `Click to copy names, phones, job titles and companies corrected in ${cfg.label} back to your agents, every 15 minutes.` },
+        ].map(({ key, icon: Icon, label, title }) => (
           <button key={key} type="button" data-testid={`crm-toggle-${key}`} onClick={() => handleToggle(key, label)}
-            title={integration[key] ? `${label} go to ${cfg.label}. Click to stop.` : `Click to send ${label.toLowerCase()} to ${cfg.label}.`}
+            title={title || (integration[key] ? `${label} go to ${cfg.label}. Click to stop.` : `Click to send ${label.toLowerCase()} to ${cfg.label}.`)}
             style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', cursor: 'pointer',
             borderRadius: 20, fontSize: 12,

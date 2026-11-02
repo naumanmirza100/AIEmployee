@@ -181,3 +181,10 @@ class BaseCRMConnector(ABC):
     def create_deal(self, crm_contact_id: str, name: str, pipeline_id: str, stage_id: str) -> Optional[str]:
         """A deal in the chosen pipeline and stage, linked to the contact. Returns its id."""
         raise CRMError('This CRM has no deals here.', retriable=False)
+
+    # Changes made in the CRM, read back (2 Nov 2026): off until switched on.
+
+    def changed_contacts(self, since) -> list:
+        """Contacts changed in the CRM since `since` (an aware datetime), oldest first:
+        [{"id", "email", "first_name", "last_name", "phone", "job_title", "company"}], blanks as ''."""
+        raise CRMError('This CRM cannot say what changed.', retriable=False)

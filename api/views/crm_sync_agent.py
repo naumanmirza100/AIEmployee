@@ -74,6 +74,8 @@ def _serialize_integration(integration: CRMIntegration, request=None) -> dict:
         'sync_marketing': integration.sync_marketing,
         'sync_deals': integration.sync_deals,
         'deal_settings': integration.deal_settings or {},
+        'sync_back': integration.sync_back,
+        'last_pulled_at': integration.last_pulled_at,
         'is_active': integration.is_active,
         'last_ping_at': integration.last_ping_at,
         'last_ping_ok': integration.last_ping_ok,
@@ -228,7 +230,7 @@ def integration_detail(request, integration_id: int):
     if 'field_mappings' in data:
         integration.field_mappings = data['field_mappings']
     for flag in ('sync_contacts', 'sync_emails', 'sync_meetings', 'sync_notes', 'sync_support', 'sync_marketing',
-                 'is_active'):
+                 'sync_back', 'is_active'):
         if flag in data:
             setattr(integration, flag, bool(data[flag]))
     if 'deal_settings' in data or 'sync_deals' in data:

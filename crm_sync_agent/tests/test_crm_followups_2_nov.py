@@ -394,3 +394,99 @@ class DealsWhenSwitchedOn(base.CRMBase):
             with self.assertRaises(PermissionMissing) as caught:
                 HubSpotConnector('synthetic').create_deal('301', 'Bob', 'default', 'appt')
         self.assertIn('crm.objects.deals.write', str(caught.exception))
+
+
+class ChangesFromTheCRM(SupportBase):
+    """#4: corrections made in the CRM come back to the linked records. Off until switched on."""
+
+    def setUp(self):
+        super().setUp()
+        CRMContactMapping.objects.create(company=self.company, integration=self.crm, crm_contact_id='901',
+                                         source_type=CRMContactMapping.SOURCE_SDR_LEAD, source_id=self.lead.pk)
+        CRMContactMapping.objects.create(company=self.company, integration=self.crm, crm_contact_id='902',
+                                         source_type=CRMContactMapping.SOURCE_FRONTLINE, source_id=self.customer.pk)
+        CRMIntegration.objects.filter(pk=self.crm.pk).update(sync_back=True)
+        self.crm.refresh_from_db()
+
+    def pull(self, rows):
+        with mock.patch('crm_sync_agent.connectors.hubspot.HubSpotConnector.changed_contacts', return_value=rows) as asked:
+            counts = CRMSyncAgent(self.company).pull_changes(self.crm)
+        return counts, asked
+
+    def test_a_correction_in_the_crm_reaches_the_lead_and_the_customer(self):
+        counts, _ = self.pull([
+            {'id': '901', 'email': 'bob@acme.com', 'first_name': 'Robert', 'last_name': 'Khan', 'phone': '+92 333 1234567',
+             'job_title': 'CTO', 'company': 'Acme Ltd'},
+            {'id': '902', 'email': 'kiran.shah@shahtraders.test', 'first_name': 'Kiran', 'last_name': 'Shah-Ali',
+             'phone': '', 'job_title': '', 'company': ''},
+            {'id': '999', 'email': 'stranger@x.test', 'first_name': 'Not', 'last_name': 'Ours', 'phone': '',
+             'job_title': '', 'company': ''},
+        ])
+        self.assertEqual(counts, {'read': 3, 'updated': 2})
+        self.lead.refresh_from_db()
+        self.assertEqual((self.lead.first_name, self.lead.last_name, self.lead.full_name, self.lead.phone,
+                          self.lead.job_title, self.lead.company_name),
+                         ('Robert', 'Khan', 'Robert Khan', '+92 333 1234567', 'CTO', 'Acme Ltd'))
+        self.customer.refresh_from_db()
+        # A field the CRM has empty never empties ours.
+        self.assertEqual((self.customer.name, self.customer.phone), ('Kiran Shah-Ali', '+92 300 1112233'))
+
+    def test_copying_back_sends_nothing_to_the_crm(self):
+        CRMSyncQueue.objects.all().delete()
+        self.pull([{'id': '901', 'email': 'bob@acme.com', 'first_name': 'Robert', 'last_name': '', 'phone': '',
+                    'job_title': '', 'company': ''}])
+        self.assertEqual(list(CRMSyncQueue.objects.all()), [])
+
+    def test_it_reads_from_a_little_before_the_last_run_and_moves_on(self):
+        from django.utils import timezone
+        last = timezone.now() - timedelta(minutes=15)
+        CRMIntegration.objects.filter(pk=self.crm.pk).update(last_pulled_at=last)
+        self.crm.refresh_from_db()
+        _, asked = self.pull([])
+        self.assertEqual(asked.call_args[0][0], last - CRMSyncAgent.PULL_OVERLAP)
+        self.crm.refresh_from_db()
+        self.assertGreater(self.crm.last_pulled_at, last)
+
+    def test_the_job_runs_only_for_crms_with_it_on(self):
+        from crm_sync_agent.tasks import pull_crm_changes
+        with mock.patch('crm_sync_agent.connectors.hubspot.HubSpotConnector.changed_contacts', return_value=[]) as asked:
+            self.assertEqual(pull_crm_changes()['integrations'], 1)
+            CRMIntegration.objects.filter(pk=self.crm.pk).update(sync_back=False)
+            self.assertEqual(pull_crm_changes()['integrations'], 0)
+        self.assertEqual(asked.call_count, 1)
+
+    def test_a_refused_key_is_logged_and_the_time_does_not_move(self):
+        from crm_sync_agent.models import CRMSyncLog
+        from crm_sync_agent.tasks import pull_crm_changes
+        with mock.patch('crm_sync_agent.connectors.hubspot.HubSpotConnector.changed_contacts',
+                        side_effect=CRMError('HubSpot auth failed (401)', retriable=False, status_code=401)):
+            self.assertEqual(pull_crm_changes()['failed'], 1)
+        self.crm.refresh_from_db()
+        self.assertIsNone(self.crm.last_pulled_at)
+        self.assertTrue(CRMSyncLog.objects.filter(operation=CRMSyncLog.OP_PULL, status=CRMSyncLog.STATUS_FAILED).exists())
+
+    def test_hubspot_is_asked_by_last_change_oldest_first(self):
+        from crm_sync_agent.connectors.hubspot import HubSpotConnector
+        page = answer(200, {'results': [{'id': '7', 'properties': {
+            'email': 'a@b.test', 'firstname': 'Ali', 'lastname': 'Raza', 'phone': None, 'jobtitle': 'Owner',
+            'company': 'Raza Co'}}]})
+        with mock.patch('crm_sync_agent.connectors.hubspot.requests.request', return_value=page) as req:
+            rows = HubSpotConnector('synthetic').changed_contacts(datetime(2026, 11, 2, 10, 0, tzinfo=dt_timezone.utc))
+        body = req.call_args[1]['json']
+        self.assertEqual(body['filterGroups'][0]['filters'][0]['propertyName'], 'lastmodifieddate')
+        self.assertEqual(body['sorts'][0]['direction'], 'ASCENDING')
+        self.assertEqual(rows, [{'id': '7', 'email': 'a@b.test', 'first_name': 'Ali', 'last_name': 'Raza', 'phone': '',
+                                 'job_title': 'Owner', 'company': 'Raza Co'}])
+
+    def test_pipedrive_takes_the_primary_email_and_phone(self):
+        page = answer(200, {'data': [{'item': 'person', 'id': 5, 'data': {
+            'id': 5, 'first_name': 'Sana', 'last_name': 'Malik', 'org_name': 'Malik and Sons', 'job_title': '',
+            'email': [{'value': 'old@x.test', 'primary': False}, {'value': 'sana@malik.test', 'primary': True}],
+            'phone': [{'value': '+92 300 7654321', 'primary': True}]}}],
+            'additional_data': {'pagination': {'more_items_in_collection': False}}})
+        with mock.patch('crm_sync_agent.connectors.pipedrive.requests.request', return_value=page) as req:
+            rows = PipedriveConnector('synthetic').changed_contacts(
+                datetime(2026, 11, 2, 15, 0, tzinfo=ZoneInfo('Asia/Karachi')))
+        self.assertEqual(req.call_args[1]['params']['since_timestamp'], '2026-11-02 10:00:00')
+        self.assertEqual((rows[0]['email'], rows[0]['phone'], rows[0]['company']),
+                         ('sana@malik.test', '+92 300 7654321', 'Malik and Sons'))

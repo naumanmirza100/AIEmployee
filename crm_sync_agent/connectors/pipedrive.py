@@ -39,6 +39,13 @@ def _pd_time(dt) -> str:
     return _utc(dt).strftime('%H:%M')
 
 
+def _primary(items) -> str:
+    """The primary value of a Pipedrive email or phone list, else the first one with a value."""
+    values = [i for i in (items or []) if isinstance(i, dict) and i.get('value')]
+    chosen = next((i for i in values if i.get('primary')), values[0] if values else None)
+    return str(chosen.get('value')) if chosen else ''
+
+
 class PipedriveConnector(BaseCRMConnector):
     """Pipedrive REST API v1 connector."""
 
@@ -184,6 +191,27 @@ class PipedriveConnector(BaseCRMConnector):
         resp = self._post('/deals', json={'title': (name or 'New deal')[:255], 'person_id': int(crm_contact_id),
                                           'pipeline_id': int(pipeline_id), 'stage_id': int(stage_id)})
         return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
+
+    def changed_contacts(self, since) -> list:
+        """Pipedrive's Recents for people, since a UTC time, 500 a page, at most 2,000 a run."""
+        out, start = [], 0
+        stamp = _utc(since).strftime('%Y-%m-%d %H:%M:%S')
+        for _ in range(4):
+            body = self._get('/recents', params={'since_timestamp': stamp, 'items': 'person', 'start': start,
+                                                 'limit': 500}).json() or {}
+            for row in body.get('data') or []:
+                person = row.get('data') or {}
+                if row.get('item') != 'person' or not person or person.get('active_flag') is False:
+                    continue
+                out.append({'id': str(person.get('id') or row.get('id')), 'email': _primary(person.get('email')),
+                            'first_name': person.get('first_name') or '', 'last_name': person.get('last_name') or '',
+                            'phone': _primary(person.get('phone')), 'job_title': person.get('job_title') or '',
+                            'company': person.get('org_name') or ''})
+            more = ((body.get('additional_data') or {}).get('pagination') or {}).get('more_items_in_collection')
+            if not more:
+                break
+            start += 500
+        return out
 
     # ------------------------------------------------------------------ #
     # Internal helpers

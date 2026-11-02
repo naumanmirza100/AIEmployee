@@ -147,6 +147,33 @@ def ping_crm_integrations():
     return results
 
 
+@shared_task(name='crm_sync_agent.tasks.pull_crm_changes')
+def pull_crm_changes():
+    """Every 15 minutes: for each CRM with "Changes from the CRM" on, copy corrected names, phones, job titles and
+    companies back to the records linked to its contacts. A refused key or a CRM that cannot be reached is logged
+    and tried next time; the time read from does not move on then."""
+    from core.modules import has_module
+    from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+    from crm_sync_agent.connectors.base import CRMError
+    from crm_sync_agent.models import CRMIntegration, CRMSyncLog
+    results = {'integrations': 0, 'updated': 0, 'failed': 0}
+    for integration in CRMIntegration.objects.filter(is_active=True, sync_back=True).select_related('company'):
+        if not has_module(integration.company, 'crm_sync_agent'):
+            continue
+        results['integrations'] += 1
+        try:
+            results['updated'] += CRMSyncAgent(integration.company).pull_changes(integration)['updated']
+        except CRMError as exc:
+            results['failed'] += 1
+            CRMSyncLog.objects.create(company=integration.company, integration=integration,
+                                      object_type=CRMSyncLog.TYPE_CONTACT, operation=CRMSyncLog.OP_PULL,
+                                      status=CRMSyncLog.STATUS_FAILED, error_message=str(exc)[:500])
+        except Exception:
+            results['failed'] += 1
+            logger.exception('CRM: reading changes back failed for integration %s', integration.pk)
+    return results
+
+
 def queue_everything(agent, company) -> dict:
     """Queue all of a company's AI SDR leads, sent emails and timed meetings
     for its CRM. Used by "Sync All Leads", from the queue and directly.

@@ -1368,6 +1368,13 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 3600.0,
         'options': {'expires': 7200},
     },
+    # Changes made in the CRM (names, phones, job titles, companies), copied back for the CRMs that have it on —
+    # every 15 minutes.
+    'crm-pull-changes': {
+        'task': 'crm_sync_agent.tasks.pull_crm_changes',
+        'schedule': 900.0,
+        'options': {'expires': 1800},
+    },
     # Audit log retention — weekly purge of rows older than the configured
     # window (default 730 days). Prevents unbounded growth.
     'hr-purge-audit-log': {
