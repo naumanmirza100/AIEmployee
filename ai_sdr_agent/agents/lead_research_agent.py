@@ -457,9 +457,9 @@ class LeadResearchAgent:
                 )
             return dedupe_leads(self._search_apollo(icp_profile, count))
         if source in ('ai', 'ai_generated'):
-            raise ValueError(
+            raise NoLeadSource(
                 'AI-generated leads are no longer available: they were invented people, not real prospects. '
-                'Add an Apollo.io key or an Apify token in SDR Agent → Settings.'
+                + NO_SOURCE_MESSAGE
             )
 
         # auto priority — each provider gets its turn, so one provider's outage doesn't end the search
@@ -467,18 +467,10 @@ class LeadResearchAgent:
         if self.apollo_api_key:
             providers.append(('Apollo.io', self._search_apollo))
         if self.apify_token and self.apify_actor:
-            return self._search_apify(icp_profile, count)
-        raise NoLeadSource(NO_SOURCE_MESSAGE)
-
-    def _apify_headers(self) -> dict:
-        """The token goes in a header: in the web address it was written into the log, the research record and the
-        message on the customer's screen by any failed request (CO-142)."""
-        return {'Authorization': f'Bearer {self.apify_token}'}
             providers.append(('Apify', self._search_apify))
         if not providers:
-            raise ValueError(
-                'No lead source available. Add an Apollo.io key or an Apify token in SDR Agent → Settings.'
-            )
+            # NoLeadSource (a ValueError) is what the view turns into "add a key, or import a file".
+            raise NoLeadSource(NO_SOURCE_MESSAGE)
 
         failures = []
         for name, search in providers:
@@ -508,8 +500,6 @@ class LeadResearchAgent:
     @property
     def available_sources(self) -> list[str]:
         sources = []
-        if self.apify_token:
-            sources.insert(0, 'apify')
         if self.apollo_api_key:
             sources.append('apollo')
         if self.apify_token:

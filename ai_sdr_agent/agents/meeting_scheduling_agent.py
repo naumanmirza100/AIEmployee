@@ -612,6 +612,18 @@ def _build_approval_request_html(first_name, sender, sender_title, sender_compan
     if sender_company:
         sender_block += f'<br/><span style="color:#6b7280;font-size:13px;">{sender_company}</span>'
 
+    # Built here, not inside the f-string below (Python before 3.12 cannot nest it). It was replaced by {notes_html}
+    # without being defined, so every call proposal to a lead failed (found reviewing PR 365, 3 Nov 2026).
+    notes_html = ''
+    if notes and notes.strip():
+        notes_html = (
+            '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fff7ed;'
+            'border:1px solid #fed7aa;border-radius:10px;margin-bottom:24px;"><tr><td style="padding:16px 20px;">'
+            '<p style="margin:0 0 6px;color:#92400e;font-size:12px;font-weight:700;text-transform:uppercase;'
+            'letter-spacing:0.05em;">Additional Notes</p><p style="margin:0;color:#374151;font-size:14px;'
+            'line-height:1.7;">' + notes.replace('\n', '<br/>') + '</p></td></tr></table>'
+        )
+
     body_html = f"""
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>

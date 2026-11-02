@@ -423,6 +423,14 @@ class EmailHtmlEscapeTests(TestCase):
         self.assertIn('&lt;script&gt;', out)
         self.assertIn('A&amp;B', out)
 
+    def test_a_call_proposal_is_built_with_and_without_notes(self):
+        # PR 365 put {notes_html} in it without defining it, so every call proposal to a lead failed (3 Nov 2026).
+        args = ('Kiran', 'Nadia', 'CEO', 'Margalla', 'Intro call', 'Thu 5 Nov, 15:00', 'https://y.test', 'https://s.test')
+        self.assertNotIn('Additional Notes', msa._build_approval_request_html(*args))
+        out = msa._build_approval_request_html(*args, notes='Bring the <b>list</b>\nSecond line')
+        self.assertIn('Additional Notes', out)
+        self.assertIn('Bring the &lt;b&gt;list&lt;/b&gt;<br/>Second line', out)
+
 
 class JobLockTests(TestCase):
     def test_only_one_process_can_hold_a_job(self):
