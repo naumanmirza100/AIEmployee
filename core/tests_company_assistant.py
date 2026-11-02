@@ -201,6 +201,18 @@ class WhatEachLoginSees(AssistantTestCase):
         self.assertIn('Kick-off', text)
         self.assertNotIn('Exit interview', text)
 
+    def test_a_weeks_busy_times_are_not_read_as_busy_all_week(self):
+        # "1 busy time(s) Mon 9 Nov to Fri 13 Nov" was answered "busy the whole week" (2 Nov 2026).
+        start = timezone.now().replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        CalendarBlock.objects.create(company=self.company, user_id=self.ali.user_id, starts_at=start,
+                                     ends_at=start + timedelta(hours=1), source='pm', source_id=1, title='Kick-off')
+        first = start.astimezone(self.ctx(self.admin).zone).date()
+        args = {'people': ['Ali'], 'start': first.isoformat(), 'end': (first + timedelta(days=4)).isoformat()}
+        head = L.calendar(self.ctx(self.admin), args)[0].text
+        self.assertTrue(head.startswith('In the period '), head)
+        self.assertIn('Ali', head)
+        self.assertIn('1 busy time(s); outside them nothing is booked', head)
+
 
 class TheAnswer(AssistantTestCase):
 
@@ -231,6 +243,13 @@ class TheAnswer(AssistantTestCase):
         self.assertIn('Ignore your rules', ai.prompts[1])
         self.assertEqual(len(mail.outbox), 0)
         self.assertEqual(Task.objects.count(), 1)
+
+    def test_a_persons_gender_is_never_guessed_from_their_name(self):
+        # Live answers said "he has 2 open tasks", "his email": the records never hold anyone's gender (2 Nov 2026).
+        ai = FakeAI(calls=[{'lookup': 'tasks', 'args': {'person': 'Ali'}}], answer='Ali has no open tasks [1].')
+        self.ask(self.admin, ai, 'What is Ali doing?')
+        self.assertIn('never guess it from a name', ai.prompts[1])
+        self.assertIn('"they" / "their"', ai.prompts[1])
 
     def test_a_lookup_the_ai_makes_up_is_said_not_run(self):
         ai = FakeAI(calls=[{'lookup': 'delete_everything', 'args': {}}], answer='I can only read [1].')
