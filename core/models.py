@@ -1905,7 +1905,8 @@ class QuickChat(models.Model):
 
     `client_id` is the id the browser gave it; the browser saves the whole
     conversation each time, as it did locally."""
-    AGENT_CHOICES = [('pm', 'Project Manager'), ('hr', 'HR'), ('frontline', 'Frontline')]
+    AGENT_CHOICES = [('pm', 'Project Manager'), ('hr', 'HR'), ('frontline', 'Frontline'),
+                     ('assistant', 'Company Assistant')]
 
     company_user = models.ForeignKey('CompanyUser', on_delete=models.CASCADE, related_name='quick_chats')
     agent = models.CharField(max_length=20, choices=AGENT_CHOICES)
@@ -2291,6 +2292,7 @@ MODULE_DISPLAY_NAMES = {
     'ai_sdr_agent': 'AI SDR Agent',
     'crm_sync_agent': 'CRM & System Sync Agent',
     'exec_meeting_agent': 'AI Executive Meeting Assistant',
+    'company_assistant': 'Company Assistant',
 }
 
 

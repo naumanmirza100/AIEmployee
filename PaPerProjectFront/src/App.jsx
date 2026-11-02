@@ -70,6 +70,7 @@ import HRView from '@/pages/me/HRView';
 import NotificationsView from '@/pages/me/NotificationsView';
 import WorkView from '@/pages/me/WorkView';
 import MyWorkPage from '@/pages/MyWorkPage';
+import CompanyAssistantPage from '@/pages/CompanyAssistantPage';
 import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
 import { ReturnToTracker } from '@/utils/returnTo';
 import DoNotEmailPage from '@/pages/DoNotEmailPage';
@@ -182,6 +183,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/notifications" element={<NotificationsPage />} />
             {/* Everything waiting for a dashboard login, across the agents */}
             <Route path="/my-work" element={<MyWorkPage />} />
+            <Route path="/company/assistant" element={<CompanyAssistantPage />} />
             <Route path="/company/profile" element={<CompanyProfilePage />} />
             <Route path="/company/profile/:tab" element={<CompanyProfilePage />} />
             

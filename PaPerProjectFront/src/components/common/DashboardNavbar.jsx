@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LogOut, Bell, Key, User, Menu, ListChecks, Settings } from 'lucide-react';
+import { LogOut, Bell, Key, User, Menu, ListChecks, Settings, Sparkles } from 'lucide-react';
 import AgentSidebar, { EXPANDED_W, COLLAPSED_W } from '@/components/common/AgentSidebar';
 import ThemeToggle from '@/components/common/ThemeToggle';
 import {
@@ -226,6 +226,17 @@ const DashboardNavbar = ({
             </div>
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <ThemeToggle />
+              {usesCompanyFeed && (
+                <button
+                  onClick={() => navigate('/company/assistant')}
+                  className="h-8 w-8 sm:h-9 sm:w-9 rounded-full flex items-center justify-center text-muted-foreground hover:text-violet-400 hover:bg-accent transition-colors"
+                  title="Company Assistant: ask across your agents"
+                  aria-label="Company Assistant"
+                  data-testid="open-company-assistant"
+                >
+                  <Sparkles className="h-4 w-4" />
+                </button>
+              )}
               {usesCompanyFeed && (
                 <button
                   onClick={() => navigate('/my-work')}

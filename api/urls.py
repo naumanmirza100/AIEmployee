@@ -48,6 +48,7 @@ from api.views import crm_sync_agent as crm_api
 from api.views.health import health_check, ping, version
 from api.views import public_jobs
 from api.views import my_work
+from api.views import company_assistant
 from api.views import notification_settings
 from api.views import document_search
 from api.views import recruitment_workflows
@@ -294,6 +295,9 @@ urlpatterns = [
     re_path(r'^company/notifications/read/?$', pm_agent.mark_notifications_read, name='company_mark_notifications_read'),
     # One list of what the caller has to do, across the agents (core/my_work.py).
     re_path(r'^company/my-work/?$', my_work.company_my_work, name='company_my_work'),  # GET
+    # The Company Assistant: one chat that asks across the agents (core/assistant, CO-18).
+    re_path(r'^company/assistant/?$', company_assistant.assistant_status, name='company_assistant'),  # GET
+    re_path(r'^company/assistant/ask/?$', company_assistant.assistant_ask, name='company_assistant_ask'),  # POST
     re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
     re_path(r'^company/notification-settings/chat-webhooks/?$', notification_settings.chat_webhooks,
