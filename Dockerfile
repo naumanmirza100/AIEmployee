@@ -6,6 +6,7 @@ FROM python:3.12-slim
 #     pkg-config is required by mysqlclient's build; without it pip fails with
 #     "Can not find valid pkg-config name".
 #   * cairo/gobject               -> PDF + chart rendering
+#   * tesseract-ocr/poppler-utils -> reading scanned PDFs (Frontline's OCR, through pytesseract + pdf2image)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl gnupg2 apt-transport-https ca-certificates \
     && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
@@ -14,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc-dev gcc \
     default-libmysqlclient-dev pkg-config \
     libcairo2-dev libgirepository1.0-dev gir1.2-pango-1.0 \
+    tesseract-ocr poppler-utils \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

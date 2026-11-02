@@ -37,6 +37,11 @@ Pillow>=10.0.0 --prefer-binary
 markdown==3.5.0
 pandas==2.1.1 --prefer-binary
 openpyxl==3.1.2
+# Frontline's documents: web pages without their tags, and scanned PDFs read by OCR (with Tesseract and
+# Poppler from the Dockerfile). Missing here, live HTML was stored tags and all and scanned PDFs as nothing.
+beautifulsoup4==4.14.3
+pdf2image==1.17.0
+pytesseract==0.3.13
 
 # Database / ORM
 SQLAlchemy==2.0.46
