@@ -80,8 +80,27 @@ class PipedriveConnector(BaseCRMConnector):
         return None
 
     def create_contact(self, email: str, properties: dict) -> str:
-        resp = self._post('/persons', json=self._build_person_payload(email, properties))
+        payload = self._build_person_payload(email, properties)
+        org = self._organization(properties.get('company'))
+        if org:
+            payload['org_id'] = org
+        resp = self._post('/persons', json=payload)
         return str(((resp.json() or {}).get('data') or {}).get('id', ''))
+
+    def _organization(self, company) -> Optional[int]:
+        """The Pipedrive Organization for a company name: found by exact name, or made. A person's company is an
+        Organization linked to them; it went nowhere, so contacts reached Pipedrive without their company (found
+        in the live check, 2 Nov 2026)."""
+        name = str(company or '').strip()
+        if not name:
+            return None
+        found = self._get('/organizations/search', params={'term': name, 'fields': 'name', 'exact_match': 'true',
+                                                           'limit': 1}).json() or {}
+        items = (found.get('data') or {}).get('items') or []
+        if items and (items[0].get('item') or {}).get('id'):
+            return int(items[0]['item']['id'])
+        made = self._post('/organizations', json={'name': name[:255]}).json() or {}
+        return (made.get('data') or {}).get('id')
 
     def upsert_contact(self, email: str, properties: dict) -> str:
         existing = self.find_contact_by_email(email)
@@ -91,10 +110,11 @@ class PipedriveConnector(BaseCRMConnector):
         pid = existing['id']
         # A person who is already there keeps their name and every email and phone
         # they have. This used to PUT one name, a one-item email list and a one-item
-        # phone list, and a PUT replaces the lists whole. Only a phone or job title
-        # the person does not have at all is added, and for that the full record is
-        # read first: the search result does not say.
-        wanted = {key: properties.get(key) for key in ('phone', 'job_title') if not is_blank(properties.get(key))}
+        # phone list, and a PUT replaces the lists whole. Only a phone or a company
+        # (Organization) the person does not have at all is added, and for that the
+        # full record is read first: the search result does not say. Pipedrive has no
+        # job title on a person, so none is sent.
+        wanted = {key: properties.get(key) for key in ('phone', 'company') if not is_blank(properties.get(key))}
         if wanted:
             person = ((self._get(f'/persons/{pid}').json() or {}).get('data') or {})
             blanks = {}
@@ -102,8 +122,10 @@ class PipedriveConnector(BaseCRMConnector):
                             for p in (person.get('phone') or []))
             if 'phone' in wanted and not has_phone:
                 blanks['phone'] = [{'value': str(wanted['phone']), 'primary': True}]
-            if 'job_title' in wanted and is_blank(person.get('job_title')):
-                blanks['job_title'] = str(wanted['job_title'])[:255]
+            if 'company' in wanted and not person.get('org_id'):
+                org = self._organization(wanted['company'])
+                if org:
+                    blanks['org_id'] = org
             if blanks:
                 self._put(f'/persons/{pid}', json=blanks)
         return pid
@@ -233,8 +255,6 @@ class PipedriveConnector(BaseCRMConnector):
         }
         if props.get('phone'):
             out['phone'] = [{'value': str(props['phone']), 'primary': True}]
-        if props.get('job_title'):
-            out['job_title'] = str(props['job_title'])[:255]
         return out
 
     def _get(self, path: str, params=None):

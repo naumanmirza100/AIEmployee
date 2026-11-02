@@ -134,8 +134,8 @@ const PROVIDERS = {
     logo: '🟠',
     // The keys were plain text boxes, so a key showed on screen (and in any screen share) while it was typed.
     fields: [{ key: 'access_token', label: 'Access Token (Service Key)', placeholder: 'pat-na1-...', type: 'password',
-               hint: 'In HubSpot: Settings → Integrations → Service keys. Give it CRM contacts read and write, and '
-                     + 'sales-email-read (for emails and calls).' }],
+               hint: 'In HubSpot: Settings → Integrations → Service keys. Give it CRM contacts read and write, '
+                     + 'sales-email-read (for emails and calls), and deals read and write if you want deals.' }],
   },
   salesforce: {
     label: 'Salesforce',
