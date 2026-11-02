@@ -93,6 +93,11 @@ def mirror_contact_to_hubspot(sender, instance, created, **kwargs):
         cfg = getattr(company, 'hubspot_config', None) or {}
         if not cfg.get('enabled') or not cfg.get('access_token'):
             return
+        # With CRM Sync connected, customers and their tickets go through it, to whichever CRM it uses; this
+        # older HubSpot-only link stands aside so nothing is sent twice (2 Nov 2026).
+        from crm_sync_agent.signals import support_goes_to_crm
+        if support_goes_to_crm(company):
+            return
         # Avoid recursion: the sync task itself saves `external_id`/`external_synced_at`
         # on the Contact, which fires this signal again. Detect that case by
         # checking `update_fields` — the sync only updates those three fields plus updated_at.

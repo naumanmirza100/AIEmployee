@@ -64,28 +64,35 @@ class AdminOnlyEndpointTests(FrontlineTestCase):
         code, _ = self.send(self.http(self.member), 'get', '/api/frontline/tickets/')
         self.assertEqual(code, 200)
 
+    # Since 2 Nov 2026 a key is no longer given to Frontline's older HubSpot link: CRM Sync carries Frontline's
+    # customers and tickets. A key saved before stays encrypted and is never shown in full.
+    def _old_key(self):
+        from Frontline_agent.crm.hubspot import encrypt_access_token
+        self.company.hubspot_config = {'enabled': True, 'access_token': encrypt_access_token('pat-test-0123456789abcdef')}
+        self.company.save(update_fields=['hubspot_config'])
+
     def test_hubspot_token_is_never_returned_in_full(self):
-        client = self.http(self.admin)
-        code, _ = self.send(client, 'patch', '/api/frontline/crm/hubspot/config/',
-                            {'access_token': 'pat-test-0123456789abcdef'})
-        self.assertEqual(code, 200)
-        code, body = self.send(client, 'get', '/api/frontline/crm/hubspot/status/')
+        self._old_key()
+        code, body = self.send(self.http(self.admin), 'get', '/api/frontline/crm/hubspot/status/')
         self.assertEqual(code, 200)
         self.assertTrue(body['data']['has_token'])
         self.assertNotIn('pat-test-0123456789abcdef', str(body))
 
     def test_hubspot_token_is_encrypted_at_rest(self):
         """FL-SEC-5 — the raw token must not sit in the database."""
-        code, _ = self.send(self.http(self.admin), 'patch',
-                            '/api/frontline/crm/hubspot/config/',
-                            {'access_token': 'pat-test-0123456789abcdef'})
-        self.assertEqual(code, 200)
+        self._old_key()
         self.company.refresh_from_db()
         stored = self.company.hubspot_config.get('access_token')
         self.assertTrue(stored)
         self.assertNotEqual(stored, 'pat-test-0123456789abcdef')
         from Frontline_agent.crm.hubspot import decrypt_access_token
         self.assertEqual(decrypt_access_token(stored), 'pat-test-0123456789abcdef')
+
+    def test_a_new_key_goes_to_crm_sync_not_here(self):
+        code, body = self.send(self.http(self.admin), 'patch', '/api/frontline/crm/hubspot/config/',
+                               {'access_token': 'pat-test-0123456789abcdef'})
+        self.assertEqual(code, 400)
+        self.assertIn('CRM Sync', body['message'])
 
 
 class ThrottleWiringTests(FrontlineTestCase):

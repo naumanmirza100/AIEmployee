@@ -42,9 +42,9 @@ export default function CrmSyncPage() {
   }
 
   const bought = purchasedModules.includes('crm_sync_agent');
-  // What it carries comes from AI SDR and Reply Draft; with neither, a connected CRM stayed empty and nothing said
-  // why (CO-207).
-  const feeders = ['ai_sdr_agent', 'reply_draft_agent'].filter((m) => purchasedModules.includes(m));
+  // What it carries comes from AI SDR, Reply Draft and Frontline; with none of them, a connected CRM stayed empty and
+  // nothing said why (CO-207).
+  const feeders = ['ai_sdr_agent', 'reply_draft_agent', 'frontline_agent'].filter((m) => purchasedModules.includes(m));
   // Had it and lost it (a failed card, or it ended): say which, not "not part of your plan".
   const lapsed = allPurchases.find((p) => p.module_name === 'crm_sync_agent')?.status;
 
@@ -66,8 +66,9 @@ export default function CrmSyncPage() {
         <div className="container mx-auto px-4 sm:px-10 py-6 max-w-full">
           {bought && feeders.length === 0 && (
             <div data-testid="crm-needs-agent" className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-              CRM Sync sends your CRM what the <b>AI SDR</b> and <b>Reply Draft</b> agents do: leads, emails, calls,
-              replies and customer mail. Your company has neither yet, so there is nothing to send.{' '}
+              CRM Sync sends your CRM what the <b>AI SDR</b>, <b>Reply Draft</b> and <b>Frontline</b> agents do:
+              leads, emails, calls, replies, customer mail, and support customers and tickets. Your company has none
+              of them yet, so there is nothing to send.{' '}
               <button type="button" className="underline" onClick={() => navigate('/company/dashboard/ai-agents')}>
                 See AI agents
               </button>

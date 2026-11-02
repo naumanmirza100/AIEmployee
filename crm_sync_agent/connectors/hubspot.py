@@ -221,6 +221,64 @@ class HubSpotConnector(BaseCRMConnector):
         self._patch(f'/crm/v3/objects/meetings/{crm_meeting_id}', json={'properties': props})
 
     # ------------------------------------------------------------------ #
+    # Deals
+    # ------------------------------------------------------------------ #
+
+    #: HubSpot's own association type: a deal to its contact.
+    DEAL_TO_CONTACT = 3
+
+    def list_pipelines(self) -> list:
+        try:
+            resp = self._get('/crm/v3/pipelines/deals')
+        except CRMError as e:
+            if e.status_code == 403:
+                raise CRMError(str(e), retriable=False, status_code=403,
+                               reason='HubSpot would not show your deal pipelines. Give the key the deals '
+                                      'permissions (crm.objects.deals.read and write), then try again.') from e
+            raise
+        pipelines = []
+        for p in (resp.json() or {}).get('results') or []:
+            stages = sorted(p.get('stages') or [], key=lambda s: s.get('displayOrder', 0))
+            pipelines.append({'id': str(p.get('id')), 'label': p.get('label') or str(p.get('id')),
+                              'stages': [{'id': str(s.get('id')), 'label': s.get('label') or str(s.get('id'))}
+                                         for s in stages if not s.get('archived')]})
+        return pipelines
+
+    def create_deal(self, crm_contact_id: str, name: str, pipeline_id: str, stage_id: str) -> Optional[str]:
+        body = {'properties': {'dealname': (name or 'New deal')[:255], 'pipeline': pipeline_id, 'dealstage': stage_id},
+                'associations': self._contact_association(crm_contact_id, self.DEAL_TO_CONTACT)}
+        try:
+            resp = self._post('/crm/v3/objects/deals', json=body)
+        except CRMError as e:
+            if e.status_code == 403:
+                raise PermissionMissing('deals', 'HubSpot refused the deals: the key lacks a permission '
+                                                 '(crm.objects.deals.write).') from e
+            raise
+        return str((resp.json() or {}).get('id', '')) or None
+
+    def changed_contacts(self, since) -> list:
+        """HubSpot's contact search on lastmodifieddate, 100 a page, at most 2,000 a run (the rest come next run:
+        the oldest go first and the time moves on only past what was read)."""
+        out, after = [], None
+        for _ in range(20):
+            body = {'filterGroups': [{'filters': [{'propertyName': 'lastmodifieddate', 'operator': 'GTE',
+                                                   'value': str(_to_hs_timestamp(since))}]}],
+                    'properties': ['email', 'firstname', 'lastname', 'phone', 'jobtitle', 'company'],
+                    'sorts': [{'propertyName': 'lastmodifieddate', 'direction': 'ASCENDING'}], 'limit': 100}
+            if after:
+                body['after'] = after
+            data = self._post('/crm/v3/objects/contacts/search', json=body).json() or {}
+            for r in data.get('results') or []:
+                p = r.get('properties') or {}
+                out.append({'id': str(r.get('id')), 'email': p.get('email') or '', 'first_name': p.get('firstname') or '',
+                            'last_name': p.get('lastname') or '', 'phone': p.get('phone') or '',
+                            'job_title': p.get('jobtitle') or '', 'company': p.get('company') or ''})
+            after = ((data.get('paging') or {}).get('next') or {}).get('after')
+            if not after:
+                break
+        return out
+
+    # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
 

@@ -147,6 +147,33 @@ def ping_crm_integrations():
     return results
 
 
+@shared_task(name='crm_sync_agent.tasks.pull_crm_changes')
+def pull_crm_changes():
+    """Every 15 minutes: for each CRM with "Changes from the CRM" on, copy corrected names, phones, job titles and
+    companies back to the records linked to its contacts. A refused key or a CRM that cannot be reached is logged
+    and tried next time; the time read from does not move on then."""
+    from core.modules import has_module
+    from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
+    from crm_sync_agent.connectors.base import CRMError
+    from crm_sync_agent.models import CRMIntegration, CRMSyncLog
+    results = {'integrations': 0, 'updated': 0, 'failed': 0}
+    for integration in CRMIntegration.objects.filter(is_active=True, sync_back=True).select_related('company'):
+        if not has_module(integration.company, 'crm_sync_agent'):
+            continue
+        results['integrations'] += 1
+        try:
+            results['updated'] += CRMSyncAgent(integration.company).pull_changes(integration)['updated']
+        except CRMError as exc:
+            results['failed'] += 1
+            CRMSyncLog.objects.create(company=integration.company, integration=integration,
+                                      object_type=CRMSyncLog.TYPE_CONTACT, operation=CRMSyncLog.OP_PULL,
+                                      status=CRMSyncLog.STATUS_FAILED, error_message=str(exc)[:500])
+        except Exception:
+            results['failed'] += 1
+            logger.exception('CRM: reading changes back failed for integration %s', integration.pk)
+    return results
+
+
 def queue_everything(agent, company) -> dict:
     """Queue all of a company's AI SDR leads, sent emails and timed meetings
     for its CRM. Used by "Sync All Leads", from the queue and directly.
@@ -177,11 +204,55 @@ def queue_everything(agent, company) -> dict:
         status__in=('scheduled', 'completed'),
     ).select_related('lead'), agent.enqueue_meeting)
     counts.update(queue_inbox(agent, company))
+    counts.update(queue_support(agent, company))
+    counts.update(queue_marketing(agent, company))
     return counts
 
 
-#: How far back "Sync All" goes in Reply Draft's mail.
+def queue_marketing(agent, company) -> dict:
+    """Marketing's part, for a CRM with "Marketing replies" on: the last month's replies to the company's
+    campaigns (not requests to unsubscribe), each with the person who sent it."""
+    from datetime import timedelta
+    from core.logins import company_user_ids
+    from marketing_agent.models import Reply
+    counts = {'marketing_replies': 0}
+    if not any(i.sync_marketing for i in agent._integrations):
+        return counts
+    since = timezone.now() - timedelta(days=INBOX_DAYS)
+    for reply in (Reply.objects.filter(campaign__owner_id__in=company_user_ids(company), replied_at__gte=since)
+                  .exclude(interest_level__in=('unsubscribe', 'not_analyzed')).select_related('lead', 'campaign')):
+        try:
+            agent.enqueue_marketing_reply(reply)
+            counts['marketing_replies'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue Marketing reply %s', reply.pk)
+    return counts
+
+
+#: How far back "Sync All" goes in Reply Draft's mail, and in Frontline's tickets.
 INBOX_DAYS = 30
+
+
+def queue_support(agent, company) -> dict:
+    """Frontline's part: its customers who have an address, and the last month's tickets about them (a note when
+    each was opened, and when it was resolved). Frontline sent its customers to HubSpot only, by a key of its own."""
+    from datetime import timedelta
+    from Frontline_agent.models import Contact, Ticket
+    counts = {'support_customers': 0, 'support_tickets': 0}
+    for contact in Contact.objects.filter(company=company).exclude(email=''):
+        try:
+            agent.enqueue_support_contact(contact)
+            counts['support_customers'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue Frontline customer %s', contact.pk)
+    since = timezone.now() - timedelta(days=INBOX_DAYS)
+    for ticket in Ticket.objects.filter(company=company, contact__isnull=False, created_at__gte=since).select_related('contact'):
+        try:
+            agent.enqueue_support_ticket(ticket)
+            counts['support_tickets'] += 1
+        except Exception:
+            logger.exception('CRM full sync: could not queue Frontline ticket %s', ticket.pk)
+    return counts
 
 
 def queue_inbox(agent, company) -> dict:
