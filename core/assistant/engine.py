@@ -30,14 +30,17 @@ from project_manager_agent.ai_agents.base_agent import BaseAgent
 logger = logging.getLogger(__name__)
 
 AGENT_KEY = 'company_assistant'
-MAX_CALLS = 8
+MAX_CALLS = 10
 MAX_FACTS = 120
 AGENT_NAMES = {'project_manager_agent': 'Project Manager', 'hr_agent': 'HR', 'frontline_agent': 'Frontline',
                'recruitment_agent': 'Recruitment', 'exec_meeting_agent': 'Executive Meeting',
                'operations_agent': 'Operations', 'marketing_agent': 'Marketing', 'ai_sdr_agent': 'AI SDR',
                'reply_draft_agent': 'Reply Draft', 'crm_sync_agent': 'CRM Sync'}
 #: The agents version 1 reads. The others' questions are answered with what they need, plainly.
-READS = ('project_manager_agent', 'hr_agent', 'frontline_agent')
+#: The agents the lookups read: all of them since phase 2 (2 Nov 2026). An agent added later and not here is said
+#: plainly to be one the assistant can't read yet.
+READS = ('project_manager_agent', 'hr_agent', 'frontline_agent', 'recruitment_agent', 'exec_meeting_agent',
+         'operations_agent', 'marketing_agent', 'ai_sdr_agent', 'reply_draft_agent', 'crm_sync_agent')
 
 
 class AssistantAI(BaseAgent):
@@ -117,9 +120,16 @@ def suggestions(ctx: Context) -> list[str]:
         out += ['Who is away next week?']
     if 'frontline_agent' in ctx.modules:
         out += ['Which customers are waiting for a person?']
+    if 'recruitment_agent' in ctx.modules:
+        out += ['Which interviews are coming up this week?']
+    if 'reply_draft_agent' in ctx.modules:
+        out += ['Which customer emails still need an answer?']
+    if 'marketing_agent' in ctx.modules:
+        out += ['How are my campaigns doing?']
     if {'project_manager_agent', 'hr_agent'} <= ctx.modules:
         out.insert(0, 'Can I give someone a new task next week, or are they away?')
-    return out[:5]
+    out.insert(1, 'What happened this week?')
+    return out[:6]
 
 
 # ---- 1. plan ------------------------------------------------------------------------------------------------------
@@ -128,8 +138,8 @@ _PLAN = """You plan how to answer one question asked inside a company's business
 
 Today is {today} in the company's time zone ({tz}). The asker is {asker}.
 The company has these agents: {agents}.
-The lookups can't read these agents yet: {unread}. A question about them (hiring, interviews, campaigns, leads,
-inbox mail, executive meetings, documents) gets no lookup for that part: name the agent in "needs".
+The lookups can't read these agents yet: {unread}. A question about one of those gets no lookup for that part:
+name the agent in "needs".
 
 Lookups you may use (name — what it returns — arguments):
 {lookups}
@@ -150,6 +160,10 @@ Rules:
   week; "tomorrow", "kal" (Roman Urdu, here: tomorrow), "parson" (the day after tomorrow).
 - "Free"/"available" questions use the calendar lookups; questions about taking on more work combine tasks, leave
   and the calendar.
+- What a policy, handbook, contract or other document says: "documents", its query restated in English.
+- "What happened this week?" or a catch-up across the company: "week" (with dates for another period).
+- Hiring and candidates: jobs, candidates, interviews. Sales: sdr_leads, sdr_calls, sdr_waiting. Campaigns:
+  campaigns, campaign_replies. Customer mail: inbox. Executive meetings and their tasks: exec_meetings, exec_tasks.
 - A follow-up ("and the week after?", "what about Ali?") repeats the conversation's lookups with the new arguments.
 - "ask_back": one short question back, only when the question can't be looked up at all without it.
 - "needs": the agent names (e.g. "Recruitment", "Marketing") a question needs that are NOT among the lookups.
@@ -286,7 +300,7 @@ def _sources(answer, facts) -> list[dict]:
     chosen = [facts[i - 1] for i in sorted(cited) if 0 < i <= len(facts)] or facts
     out, seen = [], set()
     for f in chosen:
-        key = (f.source, f.link)
+        key = f.source            # one chip per agent: five "Recruitment" chips (one per candidate) said nothing more
         if f.source == 'Assistant' or key in seen:
             continue
         seen.add(key)
