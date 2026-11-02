@@ -70,6 +70,7 @@ import HRView from '@/pages/me/HRView';
 import NotificationsView from '@/pages/me/NotificationsView';
 import WorkView from '@/pages/me/WorkView';
 import MyWorkPage from '@/pages/MyWorkPage';
+import CompanyAssistantPage from '@/pages/CompanyAssistantPage';
 import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
 import { ReturnToTracker } from '@/utils/returnTo';
 import DoNotEmailPage from '@/pages/DoNotEmailPage';
@@ -182,6 +183,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/notifications" element={<NotificationsPage />} />
             {/* Everything waiting for a dashboard login, across the agents */}
             <Route path="/my-work" element={<MyWorkPage />} />
+            <Route path="/company/assistant" element={<CompanyAssistantPage />} />
             <Route path="/company/profile" element={<CompanyProfilePage />} />
             <Route path="/company/profile/:tab" element={<CompanyProfilePage />} />
             
@@ -220,7 +222,8 @@ import { useTranslation } from 'react-i18next';
               <Route path="/recruitment/cvprocessing" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/analytics" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/ai-graphs" element={<RecruitmentDashboard />} />
-              <Route path="/recruitment/api-tester" element={<RecruitmentDashboard />} />
+              {/* The API Tester was a developer tool (raw JSON of the CV steps); old links land on the jobs. */}
+              <Route path="/recruitment/api-tester" element={<Navigate to="/recruitment/job-descriptions" replace />} />
               <Route path="/recruitment/ai-interview-questions" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/saved-prompts" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/job-descriptions" element={<RecruitmentDashboard />} />

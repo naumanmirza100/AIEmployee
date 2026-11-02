@@ -1,4 +1,4 @@
-"""Floating Quick Chat history, kept on the server (core.models.QuickChat).
+"""Floating Quick Chat history, and the Company Assistant's, kept on the server (core.models.QuickChat).
 
   GET    /quick-chats?agent=pm&mode=pilot    the login's newest conversations
   PUT    /quick-chats/<id>                   save one whole: {agent, mode, title, messages}
@@ -17,7 +17,7 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import QuickChat
 
-MODES = {'pm': ('pilot', 'qa'), 'hr': ('',), 'frontline': ('',)}
+MODES = {'pm': ('pilot', 'qa'), 'hr': ('',), 'frontline': ('',), 'assistant': ('',)}
 KEEP = 30                     # newest conversations kept per agent and mode
 MAX_MESSAGES = 400
 MAX_BYTES = 1_000_000

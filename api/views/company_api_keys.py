@@ -17,6 +17,7 @@ from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
+from core.modules import INCLUDED_WITH, has_module
 from core.models import (
     AGENT_CHOICES,
     AGENT_DEFAULT_PROVIDER,
@@ -158,6 +159,13 @@ def _ai_calls_by_agent(company, days=30):
     return {r['agent']: {'calls': r['calls'], 'failed': r['failed'], 'tokens': r['tokens'] or 0} for r in rows}
 
 
+def _has_agent(company, agent_name) -> bool:
+    """Bought, or included (`core.modules.INCLUDED_WITH`)."""
+    if agent_name in INCLUDED_WITH:
+        return has_module(company, agent_name)
+    return CompanyModulePurchase.objects.filter(company=company, module_name=agent_name, status='active').exists()
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -176,6 +184,8 @@ def list_agent_keys(request):
         .values_list('module_name', flat=True)
     )
     purchased = set(purchases)
+    # Agents that come included (the Company Assistant, with two agents or more) have tokens like any other.
+    purchased |= {name for name in INCLUDED_WITH if has_module(company, name)}
 
     keys_by_agent = {}
     # Active keys first — these always win
@@ -262,9 +272,7 @@ def upsert_byok_key(request):
         return Response({'status': 'error', 'message': 'API key contains invalid characters. Please paste only the plain key text.'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    has_purchase = CompanyModulePurchase.objects.filter(
-        company=company, module_name=agent_name, status='active'
-    ).exists()
+    has_purchase = _has_agent(company, agent_name)
     if not has_purchase:
         return Response(
             {'status': 'error', 'message': 'You must purchase this agent before adding a BYOK key.'},
@@ -515,9 +523,7 @@ def create_key_request(request):
                              'message': unsupported_provider_message(agent_name, provider)},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        has_purchase = CompanyModulePurchase.objects.filter(
-            company=company, module_name=agent_name, status='active'
-        ).exists()
+        has_purchase = _has_agent(company, agent_name)
         if not has_purchase:
             return Response(
                 {'status': 'error', 'message': 'Purchase this agent before requesting a key.'},

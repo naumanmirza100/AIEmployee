@@ -17,7 +17,6 @@ import {
   HelpCircle,
   Calendar,
   Star,
-  FlaskConical,
   Settings,
   FileText,
   MessageSquareText,
@@ -125,7 +124,6 @@ const ALL_AGENTS = [
       { label: 'Interviews',       icon: Calendar,        path: '/recruitment/interviews' },
       { label: 'Workflows',        icon: Workflow,        path: '/recruitment/workflows' },
       { label: 'Saved Prompts',    icon: Star,            path: '/recruitment/saved-prompts' },
-      { label: 'API Tester',       icon: FlaskConical,    path: '/recruitment/api-tester' },
       {
         label: 'Settings', icon: Settings, path: '/recruitment/settings/email',
         basePath: '/recruitment/settings',

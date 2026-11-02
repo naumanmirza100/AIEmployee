@@ -19,15 +19,34 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+#: Agents that are not bought on their own: a company has one while it has at least this many agents it bought.
+#: The Company Assistant (CO-18) asks across the agents, so it means something from the second one on.
+INCLUDED_WITH = {'company_assistant': 2}
+
+
 def has_module(company, module_name) -> bool:
-    """True when `company` (an instance or an id) has an active purchase of `module_name`."""
+    """True when `company` (an instance or an id) has an active purchase of `module_name`, or has enough agents for
+    one that comes included (`INCLUDED_WITH`)."""
     from core.models import CompanyModulePurchase
 
     company_id = getattr(company, 'pk', company)
     if not company_id:
         return False
+    if module_name in INCLUDED_WITH:
+        return len(active_modules(company_id)) >= INCLUDED_WITH[module_name]
     purchase = CompanyModulePurchase.objects.filter(company_id=company_id, module_name=module_name).first()
     return bool(purchase and purchase.is_active())
+
+
+def active_modules(company) -> set:
+    """The agents `company` (an instance or an id) has bought and may use now."""
+    from core.models import CompanyModulePurchase
+
+    company_id = getattr(company, 'pk', company)
+    if not company_id:
+        return set()
+    return {p.module_name for p in CompanyModulePurchase.objects.filter(company_id=company_id)
+            if p.is_active() and p.module_name not in INCLUDED_WITH}
 
 
 def active_company_ids(*module_names) -> frozenset:

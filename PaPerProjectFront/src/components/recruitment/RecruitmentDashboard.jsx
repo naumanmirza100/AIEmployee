@@ -25,12 +25,11 @@ import RecruitmentWorkflows from './RecruitmentWorkflows';
 import CVRecords from './CVRecords';
 import RecruiterSettings from './RecruiterSettings';
 import RecruitmentAnalytics from './RecruitmentAnalytics';
-import RecruitmentApiTester from './RecruitmentApiTester';
 import AiInterviewQuestions from './AiInterviewQuestions';
 // import AIGraphGenerator from './AIGraphGenerator';
 import SavedPrompts from './SavedPrompts';
 import { renderChart } from '@/components/common/ChartRenderer';
-import { FlaskConical, HelpCircle, Sparkles, Workflow } from 'lucide-react';
+import { HelpCircle, Sparkles, Workflow } from 'lucide-react';
 
 // Tab items configuration
 const TAB_ITEMS = [
@@ -43,7 +42,6 @@ const TAB_ITEMS = [
   { value: 'interviews', label: 'Interviews', icon: Calendar },
   { value: 'workflows', label: 'Workflows', icon: Workflow },
   { value: 'saved-prompts', label: 'Saved Prompts', icon: Star },
-  { value: 'api-tester', label: 'API Tester', icon: FlaskConical },
   { value: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -52,7 +50,6 @@ const PATH_TO_TAB = {
   cvprocessing: 'cv-processing',
   analytics: 'analytics',
   // 'ai-graphs': 'ai-graphs',
-  'api-tester': 'api-tester',
   'ai-interview-questions': 'ai-interview-questions',
   'saved-prompts': 'saved-prompts',
   'job-descriptions': 'jobs',
@@ -66,7 +63,6 @@ const TAB_TO_PATH = {
   'cv-processing': 'cvprocessing',
   'analytics': 'analytics',
   // 'ai-graphs': 'ai-graphs',
-  'api-tester': 'api-tester',
   'ai-interview-questions': 'ai-interview-questions',
   'saved-prompts': 'saved-prompts',
   'jobs': 'job-descriptions',
@@ -458,10 +454,6 @@ const RecruitmentDashboard = () => {
                 onProcessComplete={fetchStats}
                 onGoToSettings={(jobId) => { setPendingSettingsJobId(jobId || null); navigate('/recruitment/settings/interview'); }}
               />
-        </TabsContent>
-
-        <TabsContent value="api-tester" id="REC-dashboard-tab-api-tester" data-testid="REC-dashboard-tab-api-tester">
-          <RecruitmentApiTester />
         </TabsContent>
 
         <TabsContent value="ai-interview-questions" id="REC-dashboard-tab-ai-interview-questions" data-testid="REC-dashboard-tab-ai-interview-questions">
