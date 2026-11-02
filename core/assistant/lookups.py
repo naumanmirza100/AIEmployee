@@ -21,7 +21,10 @@ OPEN_TASK = ('todo', 'in_progress', 'review', 'blocked')
 OPEN_TICKET = ('new', 'open', 'in_progress')
 
 LABELS = {'people': 'People', 'calendar': 'Calendar', 'project_manager_agent': 'Project Manager',
-          'hr_agent': 'HR', 'frontline_agent': 'Frontline'}
+          'hr_agent': 'HR', 'frontline_agent': 'Frontline', 'recruitment_agent': 'Recruitment',
+          'exec_meeting_agent': 'Executive Meeting', 'operations_agent': 'Operations', 'marketing_agent': 'Marketing',
+          'ai_sdr_agent': 'AI SDR', 'reply_draft_agent': 'Reply Draft', 'crm_sync_agent': 'CRM Sync',
+          'documents': 'Documents', 'week': 'This week'}
 CALENDAR_LINKS = {
     'pm': ('Project Manager meetings', '/project-manager/dashboard?tab=meetings'),
     'hr': ('HR meetings', '/hr/dashboard?tab=meetings'),
@@ -469,6 +472,18 @@ LOOKUPS = {lk.name: lk for lk in (
 )}
 
 
+from core.assistant.more_lookups import DOCUMENT_MODULES, MORE  # noqa: E402  (they use the helpers above)
+
+LOOKUPS.update({lk.name: lk for lk in MORE})
+
+
 def available(modules) -> list[Lookup]:
-    """The lookups a company with these agents may use."""
-    return [lk for lk in LOOKUPS.values() if lk.module in ('people', 'calendar') or lk.module in modules]
+    """The lookups a company with these agents may use. People, the calendar and the week are everyone's; the
+    documents lookup needs an agent that keeps documents."""
+    def usable(lk):
+        if lk.module in ('people', 'calendar', 'week'):
+            return True
+        if lk.module == 'documents':
+            return any(m in modules for m in DOCUMENT_MODULES)
+        return lk.module in modules
+    return [lk for lk in LOOKUPS.values() if usable(lk)]
