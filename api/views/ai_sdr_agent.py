@@ -37,6 +37,7 @@ from ai_sdr_agent.agents.lead_research_agent import (
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
 from ai_sdr_agent.agents.email_assistant_agent import strip_quoted_reply
 from ai_sdr_agent.reply_actions import apply_reply_action as _apply_reply_action, handle_inbox_reply, read_inbox
+from ai_sdr_agent.agents.lead_validator import normalize_linkedin_url
 from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
 from contextlib import contextmanager
@@ -194,7 +195,23 @@ def _validate_mail_settings(d, campaign=None):
 # Serialisers
 # --------------------------------------------------------------------------
 
+def _normalize_lead_list(val) -> list:
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str) and val.strip():
+        try:
+            import json
+            parsed = json.loads(val)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+        return [item.strip() for item in val.split(',') if item.strip()]
+    return []
+
+
 def _serialize_lead(lead: SDRLead) -> dict:
+    raw = lead.raw_data if isinstance(lead.raw_data, dict) else {}
     return {
         'id': lead.id,
         'full_name': lead.display_name,
@@ -211,25 +228,30 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'company_size': lead.company_size,
         'company_size_range': lead.company_size_range,
         'company_location': lead.company_location,
-        'company_technologies': lead.company_technologies,
+        'company_technologies': _normalize_lead_list(lead.company_technologies),
         'linkedin_url': lead.linkedin_url,
         'company_linkedin_url': lead.company_linkedin_url,
         'company_website': lead.company_website,
-        'recent_news': lead.recent_news,
-        'buying_signals': lead.buying_signals,
+        'recent_news': lead.recent_news if isinstance(lead.recent_news, list) else [],
+        'buying_signals': _normalize_lead_list(lead.buying_signals),
         'score': lead.score,
         'temperature': lead.temperature,
         'score_breakdown': lead.score_breakdown,
         'qualification_reasoning': lead.qualification_reasoning,
-        'key_strengths': lead.key_strengths if hasattr(lead, 'key_strengths') else [],
-        'concerns': lead.concerns if hasattr(lead, 'concerns') else [],
+        'key_strengths': _normalize_lead_list(getattr(lead, 'key_strengths', [])),
+        'concerns': _normalize_lead_list(getattr(lead, 'concerns', [])),
         'outreach_strategy': lead.outreach_strategy if hasattr(lead, 'outreach_strategy') else '',
         'confidence_score': lead.confidence_score if hasattr(lead, 'confidence_score') else None,
-        'data_quality_flags': lead.data_quality_flags if hasattr(lead, 'data_quality_flags') else [],
+        'data_quality_flags': _normalize_lead_list(getattr(lead, 'data_quality_flags', [])),
         'email_bounced': lead.email_bounced,
         'status': lead.status,
         'qualification_status': lead.qualification_status,
         'source': lead.source,
+        'research_status': raw.get('research_status', 'none'),
+        'research_profile': raw.get('research_profile'),
+        'enrichment_status': (raw.get('enrichment') or {}).get('status', 'none') if isinstance(raw.get('enrichment'), dict) else 'none',
+        'enrichment_contract': raw.get('enrichment') if isinstance(raw.get('enrichment'), dict) else None,
+        'personal_email': (raw.get('enrichment') or {}).get('personal_email', '') if isinstance(raw.get('enrichment'), dict) else '',
         'qualified_at': lead.qualified_at.isoformat() if lead.qualified_at else None,
         'created_at': lead.created_at.isoformat(),
         'updated_at': lead.updated_at.isoformat(),
@@ -649,9 +671,7 @@ def research_leads(request):
             existing_linkedin = set()
             existing_names = set()
 
-            def _norm_li(url):
-                u = (url or '').strip().lower().rstrip('/')
-                return u.split('?')[0] if u else ''
+            _norm_li = normalize_linkedin_url
 
             for em, fn, cn, li in existing_leads_qs:
                 if em:
@@ -807,6 +827,180 @@ def research_leads(request):
         return Response({'status': 'error', 'message': str(exc)}, status=500)
 
 
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_lead_endpoint(request, lead_id):
+    """
+    POST: Run independent research workflow on an existing lead.
+    GET: Retrieve existing research profile and status for a lead.
+    """
+    company_user = request.user
+    lead = SDRLead.all_objects.filter(company_user=company_user, pk=lead_id).first()
+    if not lead:
+        return Response({'status': 'error', 'message': f'Lead {lead_id} not found.'}, status=404)
+
+    if request.method == 'GET':
+        raw_data = lead.raw_data if isinstance(lead.raw_data, dict) else {}
+        profile = raw_data.get('research_profile')
+        status = raw_data.get('research_status', 'none')
+        return Response({
+            'status': 'success',
+            'lead_id': lead.id,
+            'research_status': status,
+            'research_profile': profile,
+            'recent_news': lead.recent_news,
+            'buying_signals': lead.buying_signals,
+        })
+
+    # POST: Trigger research. Runs through the same claim as the background task, so a double click or a second
+    # tab returns the finished profile or a "running" answer instead of paying for the research twice.
+    from ai_sdr_agent.tasks import research_lead_impl
+    campaign_id = request.data.get('campaign_id')
+    result = research_lead_impl(lead.id, campaign_id=campaign_id, force=bool(request.data.get('force', False)))
+    if result['status'] == 'already_running':
+        return Response({'status': 'error', 'message': 'Research is already running for this lead.'}, status=409)
+    if result['status'] not in ('success', 'already_completed'):
+        logger.error("Error researching lead %s: %s", lead_id, result.get('error'))
+        return Response({'status': 'error', 'message': result.get('error', 'Research failed.')}, status=500)
+    profile = result.get('profile') or {}
+    return Response({
+        'status': 'success',
+        'lead_id': lead.id,
+        'research_status': profile.get('research_status', 'completed'),
+        'research_profile': profile,
+        'cached': result['status'] == 'already_completed',
+    })
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_leads_batch_endpoint(request):
+    """
+    POST: Run independent research on multiple existing leads.
+    Expects JSON: {'lead_ids': [1, 2, ...], 'campaign_id': Optional[int], 'force': bool}
+    """
+    company_user = request.user
+    lead_ids = request.data.get('lead_ids', [])
+    if not lead_ids or not isinstance(lead_ids, list):
+        return Response({'status': 'error', 'message': 'lead_ids must be a non-empty list of IDs.'}, status=400)
+
+    # Restrict to leads belonging to this user (capped at 50 per batch)
+    owned_ids = list(SDRLead.all_objects.filter(company_user=company_user, pk__in=lead_ids[:50]).values_list('pk', flat=True))
+    if not owned_ids:
+        return Response({'status': 'error', 'message': 'No matching leads found.'}, status=404)
+
+    from ai_sdr_agent.tasks import research_leads_batch_impl
+    batch = research_leads_batch_impl(
+        owned_ids,
+        campaign_id=request.data.get('campaign_id'),
+        force=bool(request.data.get('force', False)),
+    )
+    return Response({'status': 'success', **batch})
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def enrich_lead_endpoint(request, lead_id):
+    """
+    POST: Run independent lead enrichment workflow on an existing lead.
+    GET: Retrieve existing enrichment contract, verification status, and provenance.
+    """
+    company_user = request.user
+    lead = SDRLead.all_objects.filter(company_user=company_user, pk=lead_id).first()
+    if not lead:
+        return Response({'status': 'error', 'message': f'Lead {lead_id} not found.'}, status=404)
+
+    if request.method == 'GET':
+        raw_data = lead.raw_data if isinstance(lead.raw_data, dict) else {}
+        enrichment_blob = raw_data.get('enrichment') or {}
+        return Response({
+            'status': 'success',
+            'lead_id': lead.id,
+            'enrichment_status': enrichment_blob.get('status', 'none'),
+            'enrichment_contract': enrichment_blob,
+            'email': lead.email,
+            'phone': lead.phone,
+            'job_title': lead.job_title,
+            'company_domain': lead.company_domain,
+            'company_website': lead.company_website,
+            'linkedin_url': lead.linkedin_url,
+            'confidence_score': lead.confidence_score,
+            'data_quality_flags': lead.data_quality_flags,
+        })
+
+    # POST: Trigger enrichment
+    is_async = bool(request.data.get('async', False))
+    force = bool(request.data.get('force', False))
+
+    if is_async:
+        from ai_sdr_agent.tasks import enrich_lead_task
+        task = enrich_lead_task.delay(lead.id, force=force)
+        return Response({
+            'status': 'queued',
+            'lead_id': lead.id,
+            'task_id': task.id,
+            'message': 'Enrichment job queued in background.',
+        })
+
+    from ai_sdr_agent.tasks import enrich_lead_impl
+    result = enrich_lead_impl(lead.id, force=force)
+    if result.get('status') == 'already_running':
+        return Response({'status': 'error', 'message': 'Enrichment is already running for this lead.'}, status=409)
+    if result.get('status') not in ('success', 'already_completed'):
+        logger.error('Error enriching lead %s: %s', lead_id, result.get('error'))
+        return Response({'status': 'error', 'message': result.get('error', 'Enrichment failed.')}, status=500)
+
+    contract = result.get('contract') or {}
+    return Response({
+        'status': 'success',
+        'lead_id': lead.id,
+        'enrichment_status': contract.get('status', 'completed'),
+        'changes': result.get('changes', {}),
+        'summary': result.get('summary', {}),
+        'contract': contract,
+        'cached': result.get('status') == 'already_completed',
+    })
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def enrich_leads_batch_endpoint(request):
+    """
+    POST: Run independent enrichment on multiple existing leads.
+    Expects JSON: {'lead_ids': [1, 2, ...], 'force': bool, 'async': bool}
+    """
+    company_user = request.user
+    lead_ids = request.data.get('lead_ids', [])
+    if not lead_ids or not isinstance(lead_ids, list):
+        return Response({'status': 'error', 'message': 'lead_ids must be a non-empty list of IDs.'}, status=400)
+
+    owned_ids = list(SDRLead.all_objects.filter(company_user=company_user, pk__in=lead_ids[:50]).values_list('pk', flat=True))
+    if not owned_ids:
+        return Response({'status': 'error', 'message': 'No matching leads found.'}, status=404)
+
+    is_async = bool(request.data.get('async', False))
+    force = bool(request.data.get('force', False))
+
+    if is_async:
+        from ai_sdr_agent.tasks import enrich_leads_batch_task
+        task = enrich_leads_batch_task.delay(owned_ids, force=force)
+        return Response({
+            'status': 'queued',
+            'lead_count': len(owned_ids),
+            'task_id': task.id,
+            'message': f'{len(owned_ids)} leads queued for background enrichment.',
+        })
+
+    from ai_sdr_agent.tasks import enrich_leads_batch_impl
+    batch = enrich_leads_batch_impl(owned_ids, force=force)
+    return Response({'status': 'success', **batch})
+
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -839,9 +1033,7 @@ def fetch_apify_leads(request):
             'email', 'full_name', 'company_name', 'linkedin_url'
         )
 
-        def _norm_li(url):
-            u = (url or '').strip().lower().rstrip('/')
-            return u.split('?')[0] if u else ''
+        _norm_li = normalize_linkedin_url
 
         seen_email, seen_nc, seen_li, seen_name = set(), set(), set(), set()
         for em, fn, cn, li in existing_qs:

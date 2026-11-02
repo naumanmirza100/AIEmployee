@@ -173,6 +173,61 @@ export const qualifyAllLeads = async () => {
 };
 
 // --------------------------------------------------------------------------
+// Lead Research Workflow (Agent 1 Intelligence)
+export const researchLead = async (leadId, data = {}) => {
+  try {
+    return await companyApi.post(`/sdr/leads/${leadId}/research/`, data);
+  } catch (error) {
+    console.error('Research lead error:', error);
+    throw error;
+  }
+};
+
+export const getLeadResearch = async (leadId) => {
+  try {
+    return await companyApi.get(`/sdr/leads/${leadId}/research/`);
+  } catch (error) {
+    console.error('Get lead research error:', error);
+    throw error;
+  }
+};
+
+export const enrichLead = async (leadId, data = {}) => {
+  try {
+    return await companyApi.post(`/sdr/leads/${leadId}/enrich/`, data);
+  } catch (error) {
+    console.error('Enrich lead error:', error);
+    throw error;
+  }
+};
+
+export const getLeadEnrichment = async (leadId) => {
+  try {
+    return await companyApi.get(`/sdr/leads/${leadId}/enrich/`);
+  } catch (error) {
+    console.error('Get lead enrichment error:', error);
+    throw error;
+  }
+};
+
+export const enrichLeadsBatch = async (leadIds, data = {}) => {
+  try {
+    return await companyApi.post('/sdr/leads/enrich-batch/', { lead_ids: leadIds, ...data });
+  } catch (error) {
+    console.error('Batch enrich leads error:', error);
+    throw error;
+  }
+};
+
+export const researchLeadsBatch = async (leadIds, data = {}) => {
+  try {
+    return await companyApi.post('/sdr/leads/research-batch/', { lead_ids: leadIds, ...data });
+  } catch (error) {
+    console.error('Batch research leads error:', error);
+    throw error;
+  }
+};
+
 // Research (Apollo.io or AI generation)
 // --------------------------------------------------------------------------
 export const researchLeads = async ({ count = 20, source = 'auto' } = {}) => {

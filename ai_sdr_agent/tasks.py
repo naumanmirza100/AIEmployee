@@ -10,6 +10,7 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -668,6 +669,196 @@ def auto_research_leads_impl(leads_per_run: int = 10):
 @shared_task(bind=True, name='ai_sdr_agent.tasks.auto_research_leads_task', max_retries=1)
 def auto_research_leads_task(self):
     return auto_research_leads_impl()
+
+
+# ---------------------------------------------------------------------------
+# Independent Lead Research Tasks
+# ---------------------------------------------------------------------------
+
+def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = False) -> dict:
+    """
+    Executes independent research on an existing lead.
+    Safe against concurrent runs and respects subscription access.
+    """
+    from ai_sdr_agent.models import SDRAgentSettings, SDRLead, SDRCampaign
+    from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+
+    company_lookup = SDRLead.all_objects.filter(pk=lead_id).select_related('company_user__company').first()
+    if not company_lookup:
+        return {'status': 'error', 'error': f'Lead {lead_id} not found', 'lead_id': lead_id}
+
+    company_user = company_lookup.company_user
+    company = company_user.company
+    if not _has_sdr_access(company, {}):
+        return {'status': 'error', 'error': 'No active AI SDR subscription', 'lead_id': lead_id}
+
+    # Claimed under a row lock, so two simultaneous requests cannot both start (and pay for) the same research.
+    with transaction.atomic():
+        lead = SDRLead.all_objects.select_for_update().get(pk=lead_id)
+        if not isinstance(lead.raw_data, dict):
+            lead.raw_data = {}
+
+        current_status = lead.raw_data.get('research_status')
+        if current_status == 'running':
+            # Check if stuck (running for > 15 mins)
+            updated_at = lead.updated_at or timezone.now()
+            if (timezone.now() - updated_at) < timedelta(minutes=15):
+                return {'status': 'already_running', 'lead_id': lead_id}
+        if not force and current_status == 'completed':
+            return {
+                'status': 'already_completed',
+                'lead_id': lead_id,
+                'profile': lead.raw_data.get('research_profile'),
+            }
+        lead.raw_data['research_status'] = 'running'
+        lead.save(update_fields=['raw_data', 'updated_at'])
+
+    campaign = None
+    if campaign_id:
+        campaign = SDRCampaign.objects.filter(pk=campaign_id, company_user=company_user).first()
+
+    try:
+        # The keys the user saved in Settings, as the rest of the SDR agent uses
+        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+        agent = LeadResearchAgent(
+            company=company,
+            apollo_api_key=(sdr_settings.apollo_api_key or None) if sdr_settings else None,
+            apify_token=(sdr_settings.apify_api_token or None) if sdr_settings else None,
+            apify_actor=(sdr_settings.apify_actor_id or None) if sdr_settings else None,
+        )
+        profile = agent.research_lead(lead, campaign=campaign)
+        return {'status': 'success', 'lead_id': lead_id, 'profile': profile}
+    except Exception as exc:
+        logger.error("research_lead_impl failed for lead=%d: %s", lead_id, exc)
+        return {'status': 'failed', 'lead_id': lead_id, 'error': str(exc)}
+
+
+def research_leads_batch_impl(lead_ids: list[int], campaign_id: int = None, force: bool = False) -> dict:
+    """
+    Executes independent research on a batch of existing leads.
+    """
+    results = []
+    completed_count = 0
+    failed_count = 0
+
+    for lid in dict.fromkeys(lead_ids):
+        res = research_lead_impl(lid, campaign_id=campaign_id, force=force)
+        results.append(res)
+        if res.get('status') in ('success', 'already_completed'):
+            completed_count += 1
+        elif res.get('status') == 'failed':
+            failed_count += 1
+
+    return {
+        'total': len(lead_ids),
+        'completed': completed_count,
+        'failed': failed_count,
+        'results': results,
+    }
+
+
+@shared_task(bind=True, name='ai_sdr_agent.tasks.research_lead_task', max_retries=1)
+def research_lead_task(self, lead_id: int, campaign_id: int = None, force: bool = False):
+    return research_lead_impl(lead_id, campaign_id=campaign_id, force=force)
+
+
+@shared_task(bind=True, name='ai_sdr_agent.tasks.research_leads_batch_task', max_retries=1)
+def research_leads_batch_task(self, lead_ids: list[int], campaign_id: int = None, force: bool = False):
+    return research_leads_batch_impl(lead_ids, campaign_id=campaign_id, force=force)
+
+
+# ---------------------------------------------------------------------------
+# Lead Enrichment — independent, multi-provider waterfall with compliant web discovery
+# ---------------------------------------------------------------------------
+
+def enrich_lead_impl(lead_id: int, force: bool = False) -> dict:
+    """
+    Executes independent lead enrichment on an existing lead.
+    Safe against concurrent duplicate runs and respects SDR access.
+    """
+    from ai_sdr_agent.models import SDRAgentSettings, SDRLead
+    from ai_sdr_agent.agents.enrichment_agent import EnrichmentAgent
+
+    company_lookup = SDRLead.all_objects.filter(pk=lead_id).select_related('company_user__company').first()
+    if not company_lookup:
+        return {'status': 'error', 'error': f'Lead {lead_id} not found', 'lead_id': lead_id}
+
+    company_user = company_lookup.company_user
+    company = company_user.company
+    if not _has_sdr_access(company, {}):
+        return {'status': 'error', 'error': 'No active AI SDR subscription', 'lead_id': lead_id}
+
+    # Concurrency control under row lock
+    with transaction.atomic():
+        lead = SDRLead.all_objects.select_for_update().get(pk=lead_id)
+        if not isinstance(lead.raw_data, dict):
+            lead.raw_data = {}
+
+        enrichment_blob = lead.raw_data.get('enrichment') or {}
+        current_status = enrichment_blob.get('status')
+        if current_status == 'running':
+            updated_at = lead.updated_at or timezone.now()
+            if (timezone.now() - updated_at) < timedelta(minutes=15):
+                return {'status': 'already_running', 'lead_id': lead_id}
+        if not force and current_status in ('completed', 'partial'):
+            return {
+                'status': 'already_completed',
+                'lead_id': lead_id,
+                'contract': enrichment_blob,
+            }
+        enrichment_blob['status'] = 'running'
+        lead.raw_data['enrichment'] = enrichment_blob
+        lead.save(update_fields=['raw_data', 'updated_at'])
+
+    try:
+        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+        apollo_key = (sdr_settings.apollo_api_key or None) if sdr_settings else None
+        agent = EnrichmentAgent(
+            company=company,
+            company_user=company_user,
+            apollo_api_key=apollo_key,
+        )
+        res = agent.enrich_lead(lead, force=force)
+
+        return res
+    except Exception as exc:
+        logger.error("enrich_lead_impl failed for lead=%d: %s", lead_id, exc, exc_info=True)
+        return {'status': 'failed', 'lead_id': lead_id, 'error': str(exc)}
+
+
+def enrich_leads_batch_impl(lead_ids: list[int], force: bool = False) -> dict:
+    """
+    Executes independent enrichment on a batch of existing leads.
+    """
+    results = []
+    completed_count = 0
+    failed_count = 0
+
+    for lid in dict.fromkeys(lead_ids):
+        res = enrich_lead_impl(lid, force=force)
+        results.append(res)
+        if res.get('status') in ('success', 'already_completed'):
+            completed_count += 1
+        elif res.get('status') == 'failed':
+            failed_count += 1
+
+    return {
+        'total': len(lead_ids),
+        'completed': completed_count,
+        'failed': failed_count,
+        'results': results,
+    }
+
+
+@shared_task(bind=True, name='ai_sdr_agent.tasks.enrich_lead_task', max_retries=1)
+def enrich_lead_task(self, lead_id: int, force: bool = False):
+    return enrich_lead_impl(lead_id, force=force)
+
+
+@shared_task(bind=True, name='ai_sdr_agent.tasks.enrich_leads_batch_task', max_retries=1)
+def enrich_leads_batch_task(self, lead_ids: list[int], force: bool = False):
+    return enrich_leads_batch_impl(lead_ids, force=force)
+
 
 
 # ---------------------------------------------------------------------------

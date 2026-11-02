@@ -7,8 +7,8 @@ Sources (in priority order):
   1. Apollo.io REST API  — if APOLLO_API_KEY is set
   2. Apify              — if APIFY_API_TOKEN is set
 
-With neither key there is no search. The AI used to make leads up instead (invented people, emails at
-real-looking company domains, invented news), which a campaign could then send to; that was removed on 29 Oct 2026.
+There is deliberately no AI source. Leads must be real people: an LLM asked for leads invents names, emails
+and LinkedIn URLs that look genuine, and outreach would then go to them. With no provider, search fails loudly.
 """
 
 import logging
@@ -18,11 +18,16 @@ import time
 
 import requests
 from django.conf import settings
+from ai_sdr_agent.agents.lead_research_verification import host_of, role_keys
+from ai_sdr_agent.agents.lead_validator import dedupe_leads, normalize_linkedin_url
 
 logger = logging.getLogger(__name__)
 
-APOLLO_SEARCH_URL = "https://api.apollo.io/v1/people/search"
+# People API Search. It costs no credits, and by design returns no emails or phone numbers and only part of the
+# surname; contact details need Apollo's enrichment endpoints. https://docs.apollo.io/reference/people-api-search
+APOLLO_SEARCH_URL = "https://api.apollo.io/api/v1/mixed_people/api_search"
 APIFY_BASE = "https://api.apify.com/v2"
+APIFY_POLL_ATTEMPTS = 60  # 5 seconds apart
 
 
 def _is_error_item(item) -> bool:
@@ -34,6 +39,11 @@ def _is_error_item(item) -> bool:
     return isinstance(item, dict) and bool(item.get('error')) and not any(
         item.get(k) for k in ('email', 'name', 'fullName', 'full_name', 'first_name', 'firstName', 'linkedin')
     )
+
+
+def _apify_headers(token: str) -> dict:
+    # In a header, not ?token=: requests puts the URL in its exceptions, and those messages reach the API response.
+    return {'Authorization': f'Bearer {token}'}
 
 
 def _raise_for_error_items(items, actor: str):
@@ -207,7 +217,42 @@ APOLLO_SIZE_BUCKETS = [
     (501, 1000, "501,1000"),
     (1001, 5000, "1001,5000"),
     (5001, 10000, "5001,10000"),
+    (10001, 999_999, "10001,1000000"),
 ]
+
+
+def _title_words(title: str) -> set:
+    text = re.sub(r'\bvice president\b', 'vp', (title or '').lower())
+    return set(re.findall(r'[a-z0-9]+', text)) - {'of', 'and', 'the', 'for', 'at', 'in', 'senior', 'sr'}
+
+
+def title_matches_icp(title: str, wanted: list) -> bool:
+    """Does this job title fit the ICP? Search engines match any page that mentions a title anywhere, which
+    returns people who only list it in past experience."""
+    if not wanted or not title:
+        return True
+    roles, words = role_keys(title), _title_words(title)
+    for candidate in wanted:
+        if role_keys(candidate) & roles:
+            return True
+        wanted_words = _title_words(candidate)
+        if wanted_words and wanted_words <= words:
+            return True
+    return False
+
+
+def _title_query(title: str) -> str:
+    """A quoted title for Google. "VP Sales" alone misses most people, who write "VP of Sales" or spell it out."""
+    vp = re.match(r'(?:vp|vice president)\s+(?:of\s+)?(.+)', title.strip(), re.IGNORECASE)
+    if not vp:
+        return f'"{title}"'
+    area = vp.group(1)
+    return f'("VP {area}" OR "VP of {area}" OR "Vice President of {area}")'
+
+
+def _clean_truncated(text: str) -> str:
+    """Google cuts long titles with an ellipsis; "Head of AI & ..." is not a job title."""
+    return re.sub(r'[\s&,|/-]*(\.\.\.|\u2026)\s*$', '', text or '').strip()
 
 
 class LeadResearchAgent:
@@ -235,12 +280,165 @@ class LeadResearchAgent:
             or os.environ.get('APIFY_ACTOR_ID', '')
             or DEFAULT_APIFY_ACTOR
         ).strip()
-        # `company` is kept for the callers; search uses no AI key since the made-up leads were removed.
-        self.company = company
+
+        # Groq LLM key — resolved per-company through platform key service
+        self._key_ctx = None
+        self.groq_client = None
+
+        if company is not None:
+            from ai_sdr_agent.agents.sdr_key_resolver import resolve_sdr_groq_client
+            try:
+                self.groq_client, self._key_ctx = resolve_sdr_groq_client(company)
+            except Exception as exc:
+                logger.warning(
+                    "LeadResearchAgent: key resolution failed for company %s (%s) — using deterministic extraction.",
+                    company, exc
+                )
+                self.groq_client = None
+                self._key_ctx = None
+        else:
+            logger.warning(
+                "LeadResearchAgent initialised without a company — no LLM key resolved."
+            )
+
+        self.model = getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
+
+        from ai_sdr_agent.agents.lead_research_workflow import LeadResearchWorkflow
+        self.workflow = LeadResearchWorkflow(
+            groq_client=self.groq_client,
+            model=self.model,
+            key_ctx=self._key_ctx,
+            apify_token=self.apify_token,
+        )
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def research_lead(self, lead_or_id, campaign=None) -> dict:
+        """
+        Research an existing lead (independent of its discovery origin).
+        Accepts an SDRLead instance, an integer ID, or a lead dict.
+        Updates lead record non-destructively and returns structured profile.
+        """
+        from ai_sdr_agent.models import SDRLead
+        lead_obj = None
+        if isinstance(lead_or_id, (int, str)) and str(lead_or_id).isdigit():
+            lead_obj = SDRLead.all_objects.filter(pk=int(lead_or_id)).first()
+            if not lead_obj:
+                raise ValueError(f"Lead with id {lead_or_id} not found.")
+            lead = lead_obj
+        elif hasattr(lead_or_id, 'pk'):
+            lead_obj = lead_or_id
+            lead = lead_obj
+        else:
+            lead = lead_or_id
+
+        # Mark running status in lead record if model instance
+        if lead_obj:
+            if not isinstance(lead_obj.raw_data, dict):
+                lead_obj.raw_data = {}
+            lead_obj.raw_data['research_status'] = 'running'
+            lead_obj.save(update_fields=['raw_data', 'updated_at'])
+
+        try:
+            profile = self.workflow.execute_research(lead, campaign=campaign)
+
+            if lead_obj:
+                update_fields = ['raw_data', 'updated_at']
+                lead_obj.raw_data['research_profile'] = profile
+                lead_obj.raw_data['research_status'] = profile.get('research_status', 'completed')
+
+                # Only what research established goes on the lead. Other agents read these fields as fact.
+                comp_res = profile.get('company_research', {})
+                if not lead_obj.company_industry and comp_res.get('industry') and comp_res.get('industry').lower() != 'unknown':
+                    lead_obj.company_industry = comp_res['industry'][:255]
+                    update_fields.append('company_industry')
+
+                verification = profile.get('verification') or {}
+                site = verification.get('website') or {}
+                if site.get('status') == 'verified' and site.get('url'):
+                    if not lead_obj.company_website:
+                        lead_obj.company_website = site['url'].rstrip('/')
+                        update_fields.append('company_website')
+                    if not lead_obj.company_domain:
+                        lead_obj.company_domain = host_of(site['url'])
+                        update_fields.append('company_domain')
+
+                prospect_res = profile.get('prospect_research', {})
+                if not lead_obj.seniority_level and prospect_res.get('seniority') and prospect_res.get('seniority').lower() != 'unknown':
+                    lead_obj.seniority_level = prospect_res['seniority'][:100]
+                    update_fields.append('seniority_level')
+                if not lead_obj.department and prospect_res.get('department') and prospect_res.get('department').lower() != 'unknown':
+                    lead_obj.department = prospect_res['department'][:100]
+                    update_fields.append('department')
+
+                prospect_check = verification.get('prospect') or {}
+                flags = [f for f in (lead_obj.data_quality_flags or []) if not f.startswith('Research: ')]
+                has_linkedin = bool(lead_obj.linkedin_url and 'linkedin.com/in/' in lead_obj.linkedin_url.lower())
+                # Only penalize genuinely conflicting or outdated roles, or not_found if no LinkedIn profile exists
+                if prospect_check.get('status') in ('conflict', 'outdated'):
+                    flags.append(f"Research: {prospect_check.get('reason')}")
+                elif prospect_check.get('status') == 'not_found' and not has_linkedin and lead_obj.source not in ('apollo', 'apify'):
+                    flags.append(f"Research: {prospect_check.get('reason')}")
+                lead_obj.data_quality_flags = flags
+                update_fields.append('data_quality_flags')
+
+                signals = profile.get('company_signals', [])
+                if signals:
+                    existing_signals = list(lead_obj.buying_signals or [])
+                    new_signals = [s.get('description', '') for s in signals if s.get('description')]
+                    combined_signals = list(dict.fromkeys(new_signals + existing_signals))
+                    lead_obj.buying_signals = combined_signals[:10]
+                    update_fields.append('buying_signals')
+
+                    new_news = [
+                        {
+                            'title': s.get('description', '')[:120],
+                            'date': s.get('published_at', ''),
+                            'summary': s.get('description', ''),
+                            'url': s.get('source_url', ''),
+                        }
+                        for s in signals if s.get('description')
+                    ]
+                    new_urls = {n['url'] for n in new_news}
+                    # Newest first, or re-research never gets past the cap; replaced by URL so nothing repeats
+                    kept_news = [n for n in (lead_obj.recent_news or [])
+                                 if not (isinstance(n, dict) and n.get('url') in new_urls)]
+                    lead_obj.recent_news = (new_news + kept_news)[:10]
+                    update_fields.append('recent_news')
+
+                lead_obj.save(update_fields=list(set(update_fields)))
+
+            return profile
+
+        except Exception as exc:
+            logger.error("LeadResearchAgent.research_lead failed for lead %s: %s", lead_or_id, exc, exc_info=True)
+            if lead_obj:
+                lead_obj.raw_data['research_status'] = 'failed'
+                lead_obj.raw_data['research_error'] = str(exc)
+                lead_obj.save(update_fields=['raw_data', 'updated_at'])
+            raise
+
+    def research_leads_batch(self, leads, campaign=None) -> list[dict]:
+        """
+        Research multiple existing leads in a batch.
+        Isolates failures so one failing lead does not abort the batch.
+        """
+        results = []
+        for item in leads:
+            try:
+                profile = self.research_lead(item, campaign=campaign)
+                results.append(profile)
+            except Exception as exc:
+                lead_id = str(getattr(item, 'id', '') or (item.get('id') if isinstance(item, dict) else item))
+                logger.warning("Batch research failed for lead %s: %s", lead_id, exc)
+                results.append({
+                    'lead_id': lead_id,
+                    'research_status': 'failed',
+                    'error': str(exc),
+                })
+        return results
 
     def search_leads(self, icp_profile, count: int = 20, source: str = 'auto') -> list[dict]:
         """Return a list of raw lead dicts for the given ICP profile."""
@@ -250,17 +448,24 @@ class LeadResearchAgent:
                     'Apify API token not configured. '
                     'Go to SDR Agent → Settings and enter your Apify API token.'
                 )
-            return self._search_apify(icp_profile, count)
+            return dedupe_leads(self._search_apify(icp_profile, count))
         if source == 'apollo':
             if not self.apollo_api_key:
                 raise NoLeadSource(
                     'Apollo API key not configured. '
                     'Go to SDR Agent → Settings and enter your Apollo.io API key.'
                 )
-            return self._search_apollo(icp_profile, count)
-        # auto priority — apify only if both token AND actor are set
+            return dedupe_leads(self._search_apollo(icp_profile, count))
+        if source in ('ai', 'ai_generated'):
+            raise ValueError(
+                'AI-generated leads are no longer available: they were invented people, not real prospects. '
+                'Add an Apollo.io key or an Apify token in SDR Agent → Settings.'
+            )
+
+        # auto priority — each provider gets its turn, so one provider's outage doesn't end the search
+        providers = []
         if self.apollo_api_key:
-            return self._search_apollo(icp_profile, count)
+            providers.append(('Apollo.io', self._search_apollo))
         if self.apify_token and self.apify_actor:
             return self._search_apify(icp_profile, count)
         raise NoLeadSource(NO_SOURCE_MESSAGE)
@@ -269,6 +474,28 @@ class LeadResearchAgent:
         """The token goes in a header: in the web address it was written into the log, the research record and the
         message on the customer's screen by any failed request (CO-142)."""
         return {'Authorization': f'Bearer {self.apify_token}'}
+            providers.append(('Apify', self._search_apify))
+        if not providers:
+            raise ValueError(
+                'No lead source available. Add an Apollo.io key or an Apify token in SDR Agent → Settings.'
+            )
+
+        failures = []
+        for name, search in providers:
+            try:
+                leads = dedupe_leads(search(icp_profile, count))
+            except ApifyApprovalRequired:
+                raise  # Only the user can fix this, and the UI shows them the link
+            except ValueError as exc:
+                logger.warning("Lead search: %s failed, trying the next source: %s", name, exc)
+                failures.append(f"{name}: {exc}")
+                continue
+            if leads:
+                return leads
+            logger.info("Lead search: %s returned no leads", name)
+        if failures:
+            raise ValueError(' | '.join(failures))
+        return []
 
     @property
     def source_label(self) -> str:
@@ -276,11 +503,13 @@ class LeadResearchAgent:
             return 'apollo'
         if self.apify_token:
             return 'apify'
-        return ''
+        return 'none'
 
     @property
     def available_sources(self) -> list[str]:
         sources = []
+        if self.apify_token:
+            sources.insert(0, 'apify')
         if self.apollo_api_key:
             sources.append('apollo')
         if self.apify_token:
@@ -293,47 +522,46 @@ class LeadResearchAgent:
 
     def _search_apollo(self, icp, count: int) -> list[dict]:
         headers = {
-            "Content-Type": "application/json",
             "Cache-Control": "no-cache",
             "X-Api-Key": self.apollo_api_key,
         }
-        payload = {
+        # This endpoint takes its filters in the query string, with [] on list parameters.
+        params = {
             "page": 1,
-            "per_page": min(count, 25),
+            "per_page": min(count, 100),
         }
 
         if icp.job_titles:
-            payload["person_titles"] = icp.job_titles[:10]
+            params["person_titles[]"] = icp.job_titles[:10]
 
         if icp.locations:
-            payload["person_locations"] = icp.locations[:5]
+            params["person_locations[]"] = icp.locations[:5]
 
         size_min = icp.company_size_min or 0
         size_max = icp.company_size_max or 999_999
         if icp.company_size_min or icp.company_size_max:
-            payload["organization_num_employees_ranges"] = [
+            params["organization_num_employees_ranges[]"] = [
                 label for lo, hi, label in APOLLO_SIZE_BUCKETS
                 if lo <= size_max and hi >= size_min
-            ] or ["11,50", "51,200"]
+            ]
 
         if icp.keywords:
-            payload["q_keywords"] = " ".join(icp.keywords[:5])
+            params["q_keywords"] = " ".join(icp.keywords[:5])
 
         if icp.industries:
-            payload["organization_industry_tag_ids"] = []
-            payload["q_organization_keyword_tags"] = icp.industries[:5]
+            params["organization_industries[]"] = icp.industries[:5]
 
-        logger.info("Apollo search payload: %s", payload)
+        logger.info("Apollo search params: %s", params)
         try:
-            resp = requests.post(
-                APOLLO_SEARCH_URL,
-                json=payload,
-                headers=headers,
-                timeout=30,
-            )
+            resp = requests.post(APOLLO_SEARCH_URL, params=params, headers=headers, timeout=30)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                time.sleep(2)
+                resp = requests.post(APOLLO_SEARCH_URL, params=params, headers=headers, timeout=30)
+            if resp.status_code == 401:
+                raise ValueError("Apollo.io rejected the API key (401). Check it in SDR Agent → Settings.")
             if resp.status_code == 403:
                 raise ValueError(
-                    "Apollo.io API access denied (403). Your plan may not include People Search. "
+                    "Apollo.io API access denied (403). Your plan or key may not include People Search. "
                     "Use Apify instead, or upgrade your Apollo plan at apollo.io."
                 )
             if resp.status_code == 422:
@@ -341,9 +569,11 @@ class LeadResearchAgent:
                 raise ValueError(
                     f"Apollo.io rejected the request (422). Check your API key and plan. Response: {resp.text[:200]}"
                 )
+            if resp.status_code == 429:
+                raise ValueError("Apollo.io rate limit reached (429). Try again in a few minutes.")
             resp.raise_for_status()
             data = resp.json()
-            people = data.get('people', [])
+            people = data.get('people') or []
             logger.info("Apollo returned %d people", len(people))
             return [self._parse_apollo_person(p) for p in people]
         except requests.RequestException as exc:
@@ -352,28 +582,41 @@ class LeadResearchAgent:
 
     def _parse_apollo_person(self, person: dict) -> dict:
         org = person.get('organization') or {}
-        full_name = person.get('name', '')
-        parts = full_name.split(' ', 1)
+        first = (person.get('first_name') or '').strip()
+        # The search endpoint masks surnames in last_name_obfuscated ("Hu***n"). That is not a name, so it stays out.
+        last = (person.get('last_name') or '').strip()
+        full_name = (person.get('name') or f"{first} {last}").strip()
+        if not first and full_name:
+            first, _, last = full_name.partition(' ')
+
+        # Apollo stands in email_not_unlocked@domain.com for an email the plan may not see; that is no address.
+        email = (person.get('email') or '').strip()
+        if 'not_unlocked' in email.lower():
+            email = ''
+        numbers = person.get('phone_numbers') or []
+        phone = person.get('phone') or (numbers[0].get('sanitized_number') or numbers[0].get('raw_number') or ''
+                                        if numbers and isinstance(numbers[0], dict) else '')
         return {
             'apollo_id': person.get('id', ''),
-            'first_name': parts[0] if parts else '',
-            'last_name': parts[1] if len(parts) > 1 else '',
+            'first_name': first,
+            'last_name': last,
             'full_name': full_name,
-            'email': person.get('email', ''),
-            'phone': person.get('phone', ''),
-            'job_title': person.get('title', ''),
-            'seniority_level': person.get('seniority', ''),
+            'email': email,
+            'phone': phone,
+            'job_title': person.get('title') or '',
+            'seniority_level': person.get('seniority') or '',
             'department': (person.get('departments') or [''])[0],
-            'company_name': org.get('name', ''),
-            'company_domain': org.get('primary_domain', ''),
-            'company_industry': org.get('industry', ''),
+            'company_name': org.get('name') or '',
+            'company_domain': org.get('primary_domain') or '',
+            'company_industry': org.get('industry') or '',
             'company_size': org.get('estimated_num_employees') or None,
             'company_size_range': '',
-            'company_location': person.get('city', ''),
+            # Apollo's city is the person's. Their company can be somewhere else entirely.
+            'company_location': ', '.join(p for p in (org.get('city'), org.get('country')) if p),
             'company_technologies': (org.get('current_technologies') or [])[:10],
-            'linkedin_url': person.get('linkedin_url', ''),
-            'company_linkedin_url': org.get('linkedin_url', ''),
-            'company_website': org.get('website_url', ''),
+            'linkedin_url': person.get('linkedin_url') or '',
+            'company_linkedin_url': org.get('linkedin_url') or '',
+            'company_website': org.get('website_url') or '',
             'recent_news': [],
             'buying_signals': [],
             'source': 'apollo',
@@ -401,7 +644,7 @@ class LeadResearchAgent:
                 run_resp = requests.post(
                     f"{APIFY_BASE}/acts/{actor_id}/runs",
                     json=actor_input,
-                    headers=self._apify_headers(),
+                    headers=_apify_headers(self.apify_token),
                     timeout=30,
                 )
                 if run_resp.status_code != 400:
@@ -437,14 +680,16 @@ class LeadResearchAgent:
 
             logger.info("Apify: run started id=%s — polling for completion", run_id)
 
-            # Step 2: Poll until finished (max 120s)
-            for _ in range(24):
+            # Step 2: Poll until finished (max 300s)
+            for _ in range(APIFY_POLL_ATTEMPTS):
                 time.sleep(5)
                 status_resp = requests.get(
                     f"{APIFY_BASE}/actor-runs/{run_id}",
-                    headers=self._apify_headers(),
+                    headers=_apify_headers(self.apify_token),
                     timeout=15,
                 )
+                if status_resp.status_code == 429 or status_resp.status_code >= 500:
+                    continue  # A failed poll says nothing about the run; ask again
                 status_resp.raise_for_status()
                 run_data = status_resp.json().get('data', {})
                 status = run_data.get('status', '')
@@ -452,15 +697,20 @@ class LeadResearchAgent:
                 if status == 'SUCCEEDED':
                     break
                 if status in ('FAILED', 'ABORTED', 'TIMED-OUT'):
-                    raise ValueError(f"Apify run failed with status: {status}")
+                    detail = run_data.get('statusMessage') or ''
+                    raise ValueError(f"Apify run failed with status: {status}. {detail}".strip())
             else:
-                raise ValueError("Apify run timed out after 120s")
+                # An abandoned run keeps spending the user's credit
+                requests.post(f"{APIFY_BASE}/actor-runs/{run_id}/abort",
+                              headers=_apify_headers(self.apify_token), timeout=10)
+                raise ValueError("Apify run timed out after 300s")
 
             # Step 3: Fetch dataset items
             dataset_id = run_data.get('defaultDatasetId')
             items_resp = requests.get(
                 f"{APIFY_BASE}/datasets/{dataset_id}/items",
-                params={'limit': count, 'clean': 'true'}, headers=self._apify_headers(),
+                params={'limit': count, 'clean': 'true'},
+                headers=_apify_headers(self.apify_token),
                 timeout=30,
             )
             items_resp.raise_for_status()
@@ -482,7 +732,8 @@ class LeadResearchAgent:
             if isinstance(item, dict) and 'organicResults' in item:
                 for r in item.get('organicResults', []):
                     lead = self._parse_google_result(r)
-                    if lead:
+                    # Actors filter by title themselves; Google only matches text somewhere on the page
+                    if lead and title_matches_icp(lead['job_title'], icp.job_titles):
                         leads.append(lead)
             else:
                 lead = self._parse_apify_item(item)
@@ -508,7 +759,8 @@ class LeadResearchAgent:
         # List recent runs (newest first). This read works on the free plan.
         runs_resp = requests.get(
             f"{APIFY_BASE}/acts/{actor_id}/runs",
-            params={'desc': '1', 'limit': 10}, headers=self._apify_headers(),
+            params={'desc': '1', 'limit': 10},
+            headers=_apify_headers(self.apify_token),
             timeout=25,
         )
         if runs_resp.status_code == 404:
@@ -531,7 +783,8 @@ class LeadResearchAgent:
             try:
                 items_resp = requests.get(
                     f"{APIFY_BASE}/datasets/{ds}/items",
-                    params={'clean': 'true', 'limit': max_leads}, headers=self._apify_headers(),
+                    params={'clean': 'true', 'limit': max_leads},
+                    headers=_apify_headers(self.apify_token),
                     timeout=30,
                 )
                 items_resp.raise_for_status()
@@ -551,7 +804,7 @@ class LeadResearchAgent:
                 for lead in parsed_list:
                     if not lead:
                         continue
-                    key = (lead.get('email') or '').lower() or (lead.get('linkedin_url') or '').lower() or lead.get('full_name', '')
+                    key = (lead.get('email') or '').lower() or normalize_linkedin_url(lead.get('linkedin_url')) or lead.get('full_name', '')
                     if key and key in seen:
                         continue
                     if key:
@@ -568,6 +821,10 @@ class LeadResearchAgent:
         we branch on the actor id."""
         actor = (self.apify_actor or '').lower()
 
+        # evascrape/b2b-leads-finder — Apollo-style scraper with filters or Apollo URL
+        if 'evascrape' in actor:
+            return self._build_evascrape_input(icp, count)
+
         # code_crafter/leads-finder — an Apollo-style people-search actor that
         # returns real contact data (name + email + company). Its input maps
         # 1:1 to the ICP fields. https://apify.com/code_crafter/leads-finder
@@ -578,13 +835,20 @@ class LeadResearchAgent:
         # Google (name/title/company only, no email). We run one query per title
         # (up to 5) and pull several pages so a single run yields many more
         # profiles than the old 3-query × 10-result cap.
-        titles = icp.job_titles[:5] if icp.job_titles else ['CEO', 'CTO', 'VP Sales']
-        industries = icp.industries[:2] if icp.industries else ['SaaS', 'Technology']
+        titles = icp.job_titles[:5]
+        industries = icp.industries[:2]
         location = (icp.locations or [''])[0]
+        if not titles and not industries:
+            # Filling these in with defaults would return people the user never asked for
+            raise ValueError('Add job titles or industries to your ICP before searching.')
 
         query_lines = []
-        for title in titles:
-            q = f'site:linkedin.com/in "{title}" {" ".join(industries[:2])}'
+        for title in titles or ['']:
+            q = 'site:linkedin.com/in'
+            if title:
+                q += f' {_title_query(title)}'
+            if industries:
+                q += f' {" ".join(industries)}'
             if location:
                 q += f' "{location}"'
             query_lines.append(q)
@@ -593,12 +857,42 @@ class LeadResearchAgent:
         pages = max(2, min(5, (int(count or 20) // (len(query_lines) * 10)) + 2))
         return {
             'queries': '\n'.join(query_lines),
-            'resultsPerPage': 100,
             'maxPagesPerQuery': pages,
             'mobileResults': False,
             'saveHtml': False,
             'includeUnfilteredResults': False,
         }
+
+    def _build_evascrape_input(self, icp, count: int) -> dict:
+        """Map the ICP profile to evascrape/b2b-leads-finder's input schema.
+        Supports direct filter search and Apollo-style criteria.
+        """
+        data = {
+            'searchMode': 'filters',
+            'maxResults': max(10, min(int(count or 10), 100)),  # The actor rejects anything under 10
+            'includeUnverifiedEmails': False,
+            'verifyEmails': False,
+        }
+        # Only the user's filters. The actor refuses an empty search, which is better than guessing one.
+        if icp.job_titles:
+            data['jobTitles'] = icp.job_titles[:20]
+        if icp.locations:
+            data['locations'] = [_norm_location(v) for v in icp.locations[:20]]
+        if icp.industries:
+            data['industries'] = [_norm(v) for v in icp.industries[:20]]
+
+        size_bands = _employee_bands(
+            getattr(icp, 'company_size_min', None),
+            getattr(icp, 'company_size_max', None),
+        )
+        if size_bands:
+            data['companySizes'] = size_bands
+
+        keywords = getattr(icp, 'keywords', None) or []
+        if keywords:
+            data['companyKeywords'] = [_norm(v) for v in keywords[:20]]
+
+        return data
 
     def _build_leads_finder_input(self, icp, count: int) -> dict:
         """Map the ICP profile to code_crafter/leads-finder's input schema.
@@ -654,19 +948,31 @@ class LeadResearchAgent:
             last = parts[1] if len(parts) > 1 else ''
 
         # leads-finder splits location into city/state/country.
+        # The company's address when the actor gives one: its city/state/country are the person's.
         location = (
-            item.get('location') or item.get('city')
+            ', '.join([p for p in (item.get('company_city'), item.get('company_country')) if p])
+            or item.get('location')
             or ', '.join([p for p in (item.get('city'), item.get('state'), item.get('country')) if p])
         )
         size_raw = item.get('companySize') or item.get('company_size')
+
+        # Personal numbers only: a switchboard saved as the lead's phone would get dialled as if it were theirs.
+        phone = item.get('phone') or item.get('phoneNumber') or item.get('mobile_number') or item.get('mobileNumber') or ''
+        tech_raw = item.get('technologies') or item.get('company_technologies') or item.get('companyTechnologies') or []
+        if isinstance(tech_raw, str):
+            tech_list = [t.strip() for t in tech_raw.split(',') if t.strip()]
+        else:
+            tech_list = list(tech_raw) if isinstance(tech_raw, (list, tuple)) else []
+
+        comp_li = item.get('company_linkedin') or item.get('companyLinkedinUrl') or ''
 
         return {
             'apollo_id': '',
             'first_name': first,
             'last_name': last,
             'full_name': name or f"{first} {last}".strip(),
-            'email': item.get('email') or item.get('emailAddress') or '',
-            'phone': item.get('phone') or item.get('phoneNumber') or item.get('mobile_number') or '',
+            'email': item.get('email') or item.get('emailAddress') or item.get('corporate_email') or '',
+            'phone': phone,
             'job_title': item.get('jobTitle') or item.get('title') or item.get('job_title') or item.get('headline') or '',
             'seniority_level': item.get('seniority') or item.get('seniority_level') or '',
             'department': item.get('department') or item.get('functional_level') or '',
@@ -676,10 +982,11 @@ class LeadResearchAgent:
             'company_size': _size_to_int(size_raw),
             'company_size_range': size_raw if isinstance(size_raw, str) else '',
             'company_location': location or '',
-            'company_technologies': item.get('technologies') or item.get('company_technologies') or [],
+            'company_technologies': tech_list,
             'linkedin_url': item.get('linkedinUrl') or item.get('linkedin_url') or item.get('linkedin') or item.get('profileUrl') or '',
-            'company_linkedin_url': item.get('company_linkedin') or '',
+            'company_linkedin_url': comp_li,
             'company_website': item.get('companyWebsite') or item.get('company_website') or item.get('website') or '',
+            'company_description': item.get('company_description') or item.get('companyDescription') or '',
             'recent_news': [],
             'buying_signals': [],
             'source': 'apify',
@@ -690,26 +997,35 @@ class LeadResearchAgent:
         """Parse a single Google organic result into a lead. Works for LinkedIn URLs."""
         url = result.get('url', '')
         title = result.get('title', '')
-        description = result.get('description', '') or result.get('snippet', '')
 
         if 'linkedin.com/in/' not in url and 'linkedin.com/pub/' not in url:
             return {}
 
         # Extract name from title: "John Doe - CEO at TechCorp | LinkedIn"
-        name = ''
+        parts = re.split(r'\s+[-\u2013\u2014|]\s+', re.sub(r'\s*[-|]\s*LinkedIn\s*$', '', title).strip())
+        name = parts[0].strip()
+        if len(name.split()) < 2 or re.search(r'\d', name):
+            return {}  # A company page or a listing, not a person
+
         job_title = ''
         company = ''
-        parts = title.replace(' | LinkedIn', '').replace(' - LinkedIn', '').split(' - ', 1)
-        if parts:
-            name = parts[0].strip()
-            if len(parts) > 1:
-                role_part = parts[1].strip()
-                if ' at ' in role_part:
-                    job_title, _, company = role_part.partition(' at ')
-                elif ' @ ' in role_part:
-                    job_title, _, company = role_part.partition(' @ ')
-                else:
-                    job_title = role_part
+        if len(parts) > 1:
+            role_part = parts[1].strip()
+            if ' at ' in role_part:
+                job_title, _, company = role_part.partition(' at ')
+            elif ' @ ' in role_part:
+                job_title, _, company = role_part.partition(' @ ')
+            else:
+                job_title = role_part
+                if len(parts) > 2 and not role_keys(parts[2]) and _clean_truncated(parts[2]) == parts[2]:
+                    company = parts[2]
+
+        # Google's structured profile data is the current role; the page title is often a years-old headline.
+        info = result.get('personalInfo') if isinstance(result.get('personalInfo'), dict) else {}
+        job_title = _clean_truncated(info.get('jobTitle') or job_title)
+        company = _clean_truncated(info.get('companyName') or company)
+        if re.match(r'\s*(former|ex[- ]|retired)\b', job_title, re.IGNORECASE):
+            return {}
 
         first, _, last = name.partition(' ')
         return {
@@ -727,13 +1043,14 @@ class LeadResearchAgent:
             'company_industry': '',
             'company_size': None,
             'company_size_range': '',
-            'company_location': '',
+            'company_location': info.get('location') or '',
             'company_technologies': [],
             'linkedin_url': url,
             'company_linkedin_url': '',
             'company_website': '',
             'recent_news': [],
-            'buying_signals': [description[:100]] if description else [],
+            # The profile blurb stays in raw_data: a bio is not a buying signal.
+            'buying_signals': [],
             'source': 'apify',
             'raw_data': result,
         }
