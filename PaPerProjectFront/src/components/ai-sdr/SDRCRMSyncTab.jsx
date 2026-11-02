@@ -660,7 +660,9 @@ const SDRCRMSyncTab = () => {
           </h2>
           <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, margin: '6px 0 0' }}>
             Automatically save to your CRM what the agents do: AI SDR leads, the emails sent to them, their calls
-            and replies; and Reply Draft&apos;s mail from customers and leads, with the replies sent.
+            and replies; Reply Draft&apos;s mail from customers and leads, with the replies sent; Frontline&apos;s
+            customers and their tickets; and, when switched on, replies to Marketing campaigns, a deal per interested
+            person, and corrections made in the CRM coming back.
           </p>
         </div>
         <button style={btnPrimary} onClick={fetchAll} disabled={loading}>
