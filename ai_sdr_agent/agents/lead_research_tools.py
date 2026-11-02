@@ -218,7 +218,8 @@ class WebpageExtractor:
 
                 # requests assumes ISO-8859-1 for text/* with no charset; nearly every such page is UTF-8.
                 encoding = resp.encoding if 'charset' in content_type else 'utf-8'
-                parsed = self.parse_html(content_bytes.decode(encoding or 'utf-8', errors='replace'))
+                raw_html = content_bytes.decode(encoding or 'utf-8', errors='replace')
+                parsed = self.parse_html(raw_html)
                 page_state = classify_page(parsed['title'], parsed['content'])
 
                 return {
@@ -226,19 +227,58 @@ class WebpageExtractor:
                     'content': parsed['content'],
                     'title': parsed['title'],
                     'meta_description': parsed['meta_description'],
+                    'raw_html': raw_html,
                     'success': page_state == 'ok',
                     'status_code': status_code,
                     'page_state': page_state,
                 }
 
         except requests.RequestException as exc:
+            curl_res = self._curl_fallback(url)
+            if curl_res:
+                return curl_res
             logger.warning("WebpageExtractor failed to fetch %s: %s", url, exc)
             return {'url': url, 'content': '', 'success': False, 'status_code': 0, 'error': str(exc),
                     'page_state': 'unreachable'}
         except Exception as exc:
+            curl_res = self._curl_fallback(url)
+            if curl_res:
+                return curl_res
             logger.warning("WebpageExtractor unexpected error for %s: %s", url, exc)
             return {'url': url, 'content': '', 'success': False, 'status_code': 0, 'error': str(exc),
                     'page_state': 'unreachable'}
+
+    def _curl_fallback(self, url: str) -> Optional[dict]:
+        """Subprocess curl fallback for anti-bot / TLS-fingerprint protected sites (e.g. SiteGround, Cloudflare)."""
+        try:
+            parsed = urlparse(url)
+            if not parsed.hostname or not is_public_host(parsed.hostname):
+                return None
+            import subprocess
+            proc = subprocess.run(
+                ['curl.exe', '-s', '-k', '-L', '--max-redirs', '5', '--max-time', '10', url],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
+            )
+            if proc.returncode == 0 and proc.stdout and len(proc.stdout) > 200:
+                html = proc.stdout
+                parsed_html = self.parse_html(html)
+                page_state = classify_page(parsed_html['title'], parsed_html['content'])
+                return {
+                    'url': url,
+                    'content': parsed_html['content'],
+                    'title': parsed_html['title'],
+                    'meta_description': parsed_html['meta_description'],
+                    'raw_html': html,
+                    'success': page_state != 'blocked',
+                    'status_code': 200,
+                    'page_state': page_state,
+                }
+        except Exception as exc:
+            logger.debug("WebpageExtractor curl fallback error for %s: %s", url, exc)
+        return None
 
     def extract_company_site(self, base_url_or_domain: str) -> list[dict]:
         """

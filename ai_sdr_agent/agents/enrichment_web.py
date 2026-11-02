@@ -25,6 +25,9 @@ from urllib.robotparser import RobotFileParser
 
 import requests
 
+from ai_sdr_agent.agents.contact_verifier import (
+    normalize_phone,
+)
 from ai_sdr_agent.agents.enrichment_contract import (
     FieldProvenance,
     VerificationStatus,
@@ -268,16 +271,18 @@ class CompliantWebEnricher:
             name_mentioned = (first_name and last_name and (f"{first_name} {last_name}" in page_text.lower()))
 
             # Public emails
+            raw_html = fetch_res.get("raw_html", "")
             if "email" in missing_fields and "email" not in enriched:
-                emails = _PUBLIC_EMAIL_RE.findall(content)
+                mailto_matches = re.findall(r'href=[\'"]mailto:([^\'"\s?&>]+)', raw_html, re.I)
+                emails = mailto_matches + _PUBLIC_EMAIL_RE.findall(content)
                 for email in emails:
                     email_lower = email.lower()
                     if "example.com" in email_lower or "noreply" in email_lower:
                         continue
                     # If person's name is on this page or email starts with person's name/initials
-                    is_lead_email = name_mentioned or (first_name and first_name in email_lower)
+                    is_lead_email = name_mentioned or (first_name and first_name in email_lower) or ("/contact" in candidate_url and len(emails) <= 2)
                     if is_lead_email:
-                        snippet = self._find_context_snippet(content, email)
+                        snippet = self._find_context_snippet(content, email) or f"Found email link on {candidate_url}"
                         enriched["email"] = FieldProvenance(
                             field_name="email",
                             value=email_lower,
@@ -290,16 +295,21 @@ class CompliantWebEnricher:
 
             # Public phone
             if "phone" in missing_fields and "phone" not in enriched:
-                phones = _PUBLIC_PHONE_RE.findall(content)
-                for ph in phones:
+                tel_matches = re.findall(r'href=[\'"]tel:([^\'"\s>]+)', raw_html, re.I)
+                wa_matches = re.findall(r'(?:href=[\'"])?(?:https?://)?wa\.me/(\+?\d+)', raw_html, re.I)
+                text_phones = _PUBLIC_PHONE_RE.findall(content)
+                candidate_phones = tel_matches + wa_matches + text_phones
+                country_hint = "+44" if (domain.endswith(".uk") or ".co.uk" in base_url) else "+1"
+                for ph in candidate_phones:
                     clean_ph = re.sub(r"\D", "", ph)
                     if 9 <= len(clean_ph) <= 15:
-                        snippet = self._find_context_snippet(content, ph)
+                        normalized = normalize_phone(ph.strip(), default_country_code=country_hint)
+                        snippet = self._find_context_snippet(content, ph) or f"Found tel link on {candidate_url}"
                         enriched["phone"] = FieldProvenance(
                             field_name="phone",
-                            value=ph.strip(),
+                            value=normalized,
                             source=f"public_web:{candidate_url}",
-                            confidence=65,
+                            confidence=75 if tel_matches else 65,
                             verification_status=VerificationStatus.UNVERIFIED,
                             evidence=snippet,
                         )

@@ -284,10 +284,15 @@ def _nearest_role(before: str, after: str):
 
 def _other_org(text: str, company: str) -> str:
     """The capitalised word naming the employer in a phrase like "Microsoft CEO" or "CEO of Microsoft"."""
+    company_words = set(re.findall(r"[a-z0-9&'-]+", fold(company).lower()))
     for word in re.findall(r"[A-Z][\w&.-]*", text):
         cleaned = word.rstrip('.').replace("'s", '')
-        if cleaned.lower() not in _NOT_AN_ORG and not mentions_company(cleaned, company):
-            return cleaned
+        cleaned_lower = cleaned.lower()
+        if cleaned_lower in _NOT_AN_ORG or cleaned_lower in company_words:
+            continue
+        if mentions_company(cleaned, company):
+            continue
+        return cleaned
     return ''
 
 
@@ -297,6 +302,7 @@ def extract_bindings(name: str, company: str, text: str, official: bool = False,
     if pattern is None:
         return []
     found = []
+    tail_pattern = re.compile(r"\s*(?:of|at|@|for|,|-|–|—)?\s*((?:(?:[A-Z][\w&.'-]*|and|&|of|the)\s*){1,6})")
     for sentence in _sentences(fold(text)):
         for mention in pattern.finditer(sentence):
             before, after = sentence[:mention.start()], sentence[mention.end():]
@@ -315,8 +321,7 @@ def extract_bindings(name: str, company: str, text: str, official: bool = False,
                 else:
                     between = after[:match.start()]
                     binding['former'] = bool(_FORMER_PREFIX_RE.search(between))
-                    tail = re.match(r"\s*(?:of|at|@|for|,|-|–|—)?\s*((?:[A-Z][\w&.'-]*\s*){1,3})",
-                                    after[match.end():])
+                    tail = tail_pattern.match(after[match.end():])
                     org_text = between + ' ' + (tail.group(1) if tail else '')
                 if mentions_company(org_text, company):
                     binding['org'] = 'company'

@@ -215,6 +215,8 @@ def normalize_phone(phone_str: str, default_country_code: str = "+1") -> str:
     """
     Clean and normalize phone string to international E.164-style format.
     E.g. '(415) 555-2671' -> '+14155552671'
+    E.g. '01440730068' with +44 -> '+441440730068'
+    E.g. '+44(0)28 8673 7658' -> '+442886737658'
     """
     if not phone_str:
         return ""
@@ -228,7 +230,20 @@ def normalize_phone(phone_str: str, default_country_code: str = "+1") -> str:
         return ""
 
     if has_plus:
+        # Strip trunk zero e.g. +440... -> +44...
+        digits = re.sub(r'^(44)0(\d{9,10})$', r'\1\2', digits)
         return f"+{digits}"
+
+    # If starts with 44 and has trunk zero e.g. 4407899806693 -> +447899806693
+    if digits.startswith("440") and len(digits) >= 12:
+        return f"+44{digits[3:]}"
+    if digits.startswith("44") and len(digits) >= 11:
+        return f"+{digits}"
+
+    # If starts with 0 and country is UK (+44) or 10/11 digits
+    if digits.startswith("0") and (default_country_code == "+44" or len(digits) in (10, 11)):
+        cc = default_country_code.lstrip("+")
+        return f"+{cc}{digits[1:]}"
 
     # If 10 digits (US/Canada format), prefix with +1
     if len(digits) == 10 and default_country_code == "+1":

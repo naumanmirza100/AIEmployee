@@ -322,7 +322,7 @@ class PublicWebEnrichmentProvider(BaseEnrichmentProvider):
         lead_data: Dict[str, Any],
         missing_fields: Set[str],
     ) -> Dict[str, FieldProvenance]:
-        domain = lead_data.get("company_domain") or lead_data.get("company_website")
+        domain = lead_data.get("company_website") or lead_data.get("company_domain")
         if not domain:
             return {}
 
