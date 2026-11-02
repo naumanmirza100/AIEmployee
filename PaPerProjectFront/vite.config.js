@@ -242,6 +242,9 @@ export default defineConfig({
 	],
 	server: {
 		cors: true,
+		watch: {
+			ignored: ['**/dist/**', '**/.git/**'],
+		},
 		// NOTE: do not reintroduce `Cross-Origin-Embedder-Policy` here.
 		//
 		// COEP (including 'credentialless') requires every cross-origin iframe to send

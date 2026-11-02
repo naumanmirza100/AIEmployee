@@ -65,19 +65,16 @@ def ensure_columns(app_label, model_name, field_names):
     def _forward(apps, schema_editor):
         model = apps.get_model(app_label, model_name)
         table = model._meta.db_table
-        try:
-            present = _existing_columns(schema_editor, table)
-        except Exception:
-            # Table missing entirely is not our problem to solve here — let a
-            # later operation surface it with a clearer error.
-            return
         for name in field_names:
+            try:
+                present = _existing_columns(schema_editor, table)
+            except Exception:
+                return
             field = model._meta.get_field(name)
-            # `column` differs from `name` for FKs (linked_key -> linked_key_id).
+            # column differs from name for FKs
             if field.column in present:
                 continue
             schema_editor.add_field(model, field)
-
     return migrations.RunPython(_forward, migrations.RunPython.noop, atomic=False)
 
 
