@@ -220,7 +220,8 @@ import { useTranslation } from 'react-i18next';
               <Route path="/recruitment/cvprocessing" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/analytics" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/ai-graphs" element={<RecruitmentDashboard />} />
-              <Route path="/recruitment/api-tester" element={<RecruitmentDashboard />} />
+              {/* The API Tester was a developer tool (raw JSON of the CV steps); old links land on the jobs. */}
+              <Route path="/recruitment/api-tester" element={<Navigate to="/recruitment/job-descriptions" replace />} />
               <Route path="/recruitment/ai-interview-questions" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/saved-prompts" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/job-descriptions" element={<RecruitmentDashboard />} />
