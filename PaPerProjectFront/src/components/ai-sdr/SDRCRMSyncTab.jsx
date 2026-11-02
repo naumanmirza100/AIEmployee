@@ -388,7 +388,7 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
     try {
       const res = await syncCrmLeads(integration.id);
       toast({ title: 'Sync queued!', description: res?.message && res.status === 'done' ? res.message
-        : `AI SDR leads, emails and calls, Reply Draft's last month of customer mail and Frontline's customers and tickets go to ${cfg.label} in the next minutes.` });
+        : `AI SDR leads, emails and calls, Reply Draft's last month of customer mail${integration.sync_marketing ? ", Marketing's campaign replies" : ''} and Frontline's customers and tickets go to ${cfg.label} in the next minutes.` });
     } catch {
       toast({ title: 'Sync failed', variant: 'destructive' });
     } finally {
@@ -404,7 +404,10 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
   const handleToggle = async (key, label) => {
     try {
       await updateCrmIntegration(integration.id, { [key]: !integration[key] });
-      toast({ title: `${label} ${integration[key] ? 'no longer go' : 'now go'} to ${cfg.label}` });
+      // Changes back come from the CRM: "Changes from Pipedrive now go to Pipedrive" read backwards (found filming).
+      toast({ title: key === 'sync_back'
+        ? `Changes made in ${cfg.label} ${integration[key] ? 'no longer come back' : 'now come back to your agents every 15 minutes'}`
+        : `${label} ${integration[key] ? 'no longer go' : 'now go'} to ${cfg.label}` });
       onRefresh();
     } catch (e) {
       toast({ title: 'Not changed', description: e?.message, variant: 'destructive' });

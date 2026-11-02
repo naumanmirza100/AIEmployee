@@ -101,7 +101,7 @@ class SalesforceConnector(BaseCRMConnector):
 
     def find_contact_by_email(self, email: str) -> Optional[dict]:
         self._ensure_token()
-        q = f"SELECT Id, FirstName, LastName, Email, Phone, Title FROM Contact WHERE Email = '{email.replace(chr(39), '')}' LIMIT 1"
+        q = f"SELECT Id, FirstName, LastName, Email, Phone, Title, AccountId FROM Contact WHERE Email = '{email.replace(chr(39), '')}' LIMIT 1"
         resp = self._get(f'/services/data/{SF_API_VERSION}/query', params={'q': q})
         records = (resp.json() or {}).get('records') or []
         if records:
@@ -111,9 +111,28 @@ class SalesforceConnector(BaseCRMConnector):
 
     def create_contact(self, email: str, properties: dict) -> str:
         self._ensure_token()
-        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Contact/',
-                          json=self._build_contact_payload(email, properties))
+        payload = self._build_contact_payload(email, properties)
+        account = self._account(properties.get('company'))
+        if account:
+            payload['AccountId'] = account
+        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Contact/', json=payload)
         return str((resp.json() or {}).get('id', ''))
+
+    def _account(self, company) -> Optional[str]:
+        """The Salesforce Account for a company name: found by exact name, or made. A contact's company is the
+        Account it belongs to; none was sent, so contacts reached Salesforce without their company, and a contact
+        with no Account is private to the user who made it (found filming, 2 Nov 2026)."""
+        name = str(company or '').strip()
+        if not name:
+            return None
+        literal = name.replace('\\', '\\\\').replace("'", "\\'")
+        found = self._get(f'/services/data/{SF_API_VERSION}/query',
+                          params={'q': f"SELECT Id FROM Account WHERE Name = '{literal}' LIMIT 1"})
+        records = (found.json() or {}).get('records') or []
+        if records and records[0].get('Id'):
+            return records[0]['Id']
+        made = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Account/', json={'Name': name[:255]})
+        return (made.json() or {}).get('id') or None
 
     def upsert_contact(self, email: str, properties: dict) -> str:
         self._ensure_token()
@@ -123,6 +142,11 @@ class SalesforceConnector(BaseCRMConnector):
 
         sf_id = existing['id']
         blanks = self._blanks_to_fill(existing.get('properties') or {}, properties)
+        # A contact with no Account gets the one for its company; one that has an Account keeps it.
+        if not is_blank(properties.get('company')) and is_blank((existing.get('properties') or {}).get('AccountId')):
+            account = self._account(properties['company'])
+            if account:
+                blanks['AccountId'] = account
         if blanks:
             self._patch(f'/services/data/{SF_API_VERSION}/sobjects/Contact/{sf_id}', json=blanks)
         return sf_id
@@ -311,8 +335,8 @@ class SalesforceConnector(BaseCRMConnector):
             out['LastName'] = (parts[-1] if parts else 'Unknown')[:80]
         if props.get('phone'):
             out['Phone'] = str(props['phone'])[:40]
-        # The company name is not sent. A Contact has no 'Company' field, and the
-        # 'AccountId': None that used to go with it would, on an update, have cut an
+        # A Contact has no 'Company' field: the company is its Account, found or made in
+        # create_contact. 'AccountId': None is never sent: on an update it would cut an
         # existing contact loose from its account.
         if props.get('job_title'):
             out['Title'] = str(props['job_title'])[:128]

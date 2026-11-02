@@ -238,7 +238,7 @@ const ModuleCardsSection = () => {
     {
       title: 'CRM Sync',
       moduleName: 'crm_sync_agent',
-      description: 'Keeps your CRM up to date with what AI SDR and Reply Draft do: leads, emails, calls, replies and customer mail, in HubSpot, Pipedrive or Salesforce.',
+      description: 'Keeps your CRM up to date with what AI SDR, Reply Draft, Frontline and Marketing do: leads, emails, calls, replies, customer mail and support tickets, in HubSpot, Pipedrive or Salesforce.',
       icon: RefreshCw,
       iconColor: 'text-teal-500',
       gradientFrom: gradientColors['emerald-500'],
@@ -250,7 +250,8 @@ const ModuleCardsSection = () => {
         'AI SDR leads as contacts, never overwriting yours',
         "Emails, calls and replies on each contact's timeline",
         'Moved and cancelled calls updated in the CRM',
-        'Reply Draft: customer mail and the replies sent',
+        'Reply Draft customer mail and Frontline support tickets',
+        'Campaign replies, deals and CRM corrections, when switched on',
         'A queue that retries and says what the CRM refused'
       ],
       highlight: false,

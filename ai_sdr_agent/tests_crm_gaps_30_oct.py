@@ -77,6 +77,17 @@ class QueueTests(base.CRMBase):
         dead.refresh_from_db()
         self.assertEqual((dead.status, dead.attempts), (CRMSyncQueue.STATUS_PENDING, 0))
 
+    def test_an_entry_tried_again_by_itself_counts_as_pending_not_failed(self):
+        # A Salesforce email not reached once showed as "Failed" with a Retry button, then went by itself.
+        item = self.entry()
+        with mock.patch.object(CRMSyncAgent, '_dispatch', side_effect=CRMError('not reached', retriable=True)):
+            CRMSyncAgent(self.company).process_pending()
+        item.refresh_from_db()
+        self.assertEqual((item.status, item.attempts), (CRMSyncQueue.STATUS_FAILED, 1))
+        self.entry(source_id=2, status=CRMSyncQueue.STATUS_FAILED, attempts=3)
+        code, body = self.call(views.queue_status, self.cu, method='get')
+        self.assertEqual((code, body['pending'], body['failed'], body['total']), (200, 1, 1, 2))
+
     def test_a_full_account_spends_no_attempt(self):
         item = self.entry()
         with mock.patch.object(CRMSyncAgent, '_dispatch', side_effect=CRMError('limit', retriable=False,
@@ -217,6 +228,14 @@ class InboxTests(base.CRMBase):
         self.assertEqual(contact.call_args.args[1]['first_name'], 'Kiran')
         self.assertTrue(contact.call_args.kwargs['create'])
         self.assertEqual(logged.call_args.kwargs['direction'], 'INBOUND')
+
+    def test_mail_from_someone_who_asked_to_be_left_alone_does_not_go(self):
+        # Found filming, 2 Nov 2026: a campaign's "remove me" reply reached the inbox and made the person a CRM contact.
+        from core.do_not_email import block
+        from crm_sync_agent.signals import queue_inbox_email
+        block(self.company, 'kiran@clinic.test', source='marketing')
+        queue_inbox_email(self.mail(subject='Please remove me', body='Stop emailing us.'))
+        self.assertEqual(self.queued(CRMSyncQueue.TYPE_EMAIL), [])
 
     def test_a_reply_sent_goes_on_the_recipients_contact_once(self):
         from crm_sync_agent.signals import queue_inbox_reply
