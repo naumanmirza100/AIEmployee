@@ -35,6 +35,12 @@ class FakeAI:
             return json.dumps({'calls': self.calls, 'ask_back': None, 'needs': [], 'english': '', 'language': 'english'})
         return self.answer
 
+    def _call_llm_stream(self, prompt, system_prompt=None, temperature=0.3, max_tokens=400):
+        self.prompts.append(prompt)
+        for word in self.answer.split(' '):
+            yield {'type': 'token', 'value': word + ' '}
+        yield {'type': 'done', 'text': self.answer}
+
 
 class AssistantTestCase(HRTestCase):
 
@@ -230,3 +236,51 @@ class TheAnswer(AssistantTestCase):
         ai = FakeAI(calls=[{'lookup': 'delete_everything', 'args': {}}], answer='I can only read [1].')
         self.ask(self.admin, ai, 'Delete all tasks')
         self.assertIn('no lookup called "delete_everything"', ai.prompts[1])
+
+
+class AnswersAsTheyAreWritten(AssistantTestCase):
+
+    def events(self, ai, question='How busy is Ali?'):
+        return list(engine.ask_stream(self.admin, question, [], ai=ai))
+
+    def test_the_answer_comes_piece_by_piece_then_the_whole_with_its_sources(self):
+        Task.objects.create(title='Homepage copy', project=self.project, assignee=self.ali.user, status='todo')
+        events = self.events(FakeAI(calls=[{'lookup': 'tasks', 'args': {'person': 'Ali'}}],
+                                    answer='Ali has 1 open task [1].'))
+        self.assertEqual(events[0], {'type': 'meta', 'lookups': ['tasks']})
+        tokens = [e['value'] for e in events if e['type'] == 'token']
+        self.assertGreater(len(tokens), 2)
+        done = events[-1]
+        self.assertEqual(done['type'], 'done')
+        self.assertEqual(done['answer'], 'Ali has 1 open task [1].')
+        self.assertEqual(done['sources'][0]['label'], 'Project Manager')
+        self.assertEqual(done['flagged'], [])
+
+    def test_a_number_not_in_the_records_is_flagged_at_the_end(self):
+        events = self.events(FakeAI(calls=[{'lookup': 'tasks', 'args': {'person': 'Ali'}}],
+                                    answer='Ali has 9 open tasks [1].'))
+        self.assertEqual(events[-1]['flagged'], ['9'])
+        self.assertIn('were not found in the records', events[-1]['answer'])
+
+    def test_a_question_back_is_streamed_too(self):
+        self.employee_with_login('sara1', 'Sara Malik', self.company, self.admin)
+        self.employee_with_login('sara2', 'Sara Khan', self.company, self.admin)
+        events = self.events(FakeAI(calls=[{'lookup': 'tasks', 'args': {'person': 'Sara'}}]), 'What is Sara doing?')
+        self.assertTrue(events[-1]['asked_back'])
+        self.assertIn('Sara Khan', ''.join(e['value'] for e in events if e['type'] == 'token'))
+
+    def test_the_address_sends_lines_and_refuses_plainly_before_it_starts(self):
+        from unittest import mock
+        with mock.patch.object(engine, 'AssistantAI', return_value=FakeAI(calls=[], answer='I can answer people [1].')):
+            request = self.factory.post('/', {'question': 'hello'}, format='json')
+            from rest_framework.test import force_authenticate
+            force_authenticate(request, user=self.admin)
+            response = views.assistant_ask_stream(request)
+            lines = [json.loads(l) for l in b''.join(response.streaming_content).decode().splitlines() if l]
+        self.assertEqual(response['Content-Type'], 'application/x-ndjson')
+        self.assertEqual([lines[0]['type'], lines[-1]['type']], ['meta', 'done'])
+        with mock.patch.object(engine, 'AssistantAI', return_value=FakeAI(error=QuotaExhausted('company_assistant', 10))):
+            code, body = self.call(views.assistant_ask_stream, self.admin, {'question': 'hello'})
+        self.assertEqual(code, 402)
+        code, body = self.call(views.assistant_ask_stream, self.rival_admin, {'question': 'hello'})
+        self.assertEqual(code, 403)

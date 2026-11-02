@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import useQuickChatHistory from '@/hooks/useQuickChatHistory';
 import { companyApi, getCompanyUser, logoutCompany } from '@/services/companyAuthService';
+import { postNdjson } from '@/utils/ndjsonStream';
 import { getAgentNavItems } from '@/utils/agentNavItems';
 
 /**
@@ -54,20 +55,35 @@ export default function CompanyAssistantPage() {
     const asked = { ...chat, title: chat.title || q.slice(0, 60), messages: [...chat.messages, { role: 'user', content: q }] };
     setChat(asked);
     setBusy(true);
-    let reply;
+    // The answer appears as it is written (company/assistant/ask-stream): its pieces go into the last message,
+    // and the finished answer, with its sources and any flagged figure, replaces them at the end.
+    const show = (reply) => setChat({ ...asked, messages: [...asked.messages, reply] });
+    let reply = { role: 'assistant', content: '', streaming: true };
     try {
-      const res = await companyApi.post('/company/assistant/ask', { question: q, history: turns.slice(-8) });
-      const data = res?.data || {};
-      reply = { role: 'assistant', content: data.answer || '(no answer)', sources: data.sources || [],
-        askedBack: !!data.asked_back };
+      await postNdjson('/company/assistant/ask-stream', { question: q, history: turns.slice(-8) }, {
+        onEvent: (event) => {
+          if (event.type === 'token') {
+            reply = { ...reply, content: reply.content + event.value };
+            show(reply);
+          } else if (event.type === 'done') {
+            reply = { role: 'assistant', content: event.answer || reply.content || '(no answer)',
+              sources: event.sources || [], askedBack: !!event.asked_back };
+          } else if (event.type === 'error') {
+            reply = { role: 'assistant', content: event.message || 'The assistant could not answer just now.', error: true };
+          }
+        },
+      });
+      if (reply.streaming) reply = { ...reply, streaming: false, content: reply.content || '(no answer)' };
     } catch (e) {
-      reply = { role: 'assistant', content: e?.data?.message || e?.message || 'The assistant could not answer just now.', error: true };
+      reply = { role: 'assistant', content: e?.message || 'The assistant could not answer just now.', error: true };
     }
     const done = { ...asked, messages: [...asked.messages, reply] };
     setChat(done);
     setBusy(false);
     save(done);
   };
+
+  const writing = busy && chat.messages[chat.messages.length - 1]?.streaming;
 
   const open = (c) => setChat({ id: c.id, title: c.title, messages: c.messages || [] });
   const startNew = () => setChat({ id: newId(), title: '', messages: [] });
@@ -172,7 +188,7 @@ export default function CompanyAssistantPage() {
                       )}
                     </div>
                   ))}
-                  {busy && (
+                  {busy && !writing && (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Looking it up…</div>
                   )}
                   <div ref={endRef} />

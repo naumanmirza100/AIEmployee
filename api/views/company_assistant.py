@@ -2,6 +2,7 @@
 
   GET  company/assistant          may this login use it, and what it reads (for the screen's note and suggestions)
   POST company/assistant/ask      {question, history}: {answer, sources, asked_back}
+  POST company/assistant/ask-stream   the same, sent as it is written (ndjson: meta, token..., done)
 
 For dashboard logins of a company with two agents or more. It is not under an agent's prefix, so the agents' own
 gates don't apply; `has_module(company, 'company_assistant')` is its gate, as for an agent. Its chats are kept with
@@ -79,3 +80,46 @@ def assistant_ask(request):
         return Response({'status': 'error', 'message': 'The assistant could not answer just now. Please try again.'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     return Response({'status': 'success', 'data': result})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([AssistantThrottle])
+def assistant_ask_stream(request):
+    """`assistant_ask`, with the answer sent as it is written (one JSON object per line; see api.streaming).
+
+    A refusal (not included, no question, out of tokens before the answer starts) is an ordinary error response,
+    so the screen shows it as it does for `ask`; once the answer has started, a problem is an 'error' event."""
+    refused = _not_included(request)
+    if refused:
+        return refused
+    data = request.data if isinstance(request.data, dict) else {}
+    question = str(data.get('question') or '').strip()
+    if not question:
+        return Response({'status': 'error', 'message': 'Type a question.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(question) > MAX_QUESTION:
+        return Response({'status': 'error', 'message': f'Keep the question under {MAX_QUESTION} characters.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    history = data.get('history') if isinstance(data.get('history'), list) else []
+    from api.streaming import error_event, ndjson_response
+    from core.api_key_service import KeyServiceError
+    events = engine.ask_stream(request.user, question, history)
+    try:
+        first = next(events)            # planning and the lookups run here, so their refusals can still be a 402
+    except KeyServiceError as exc:
+        return Response({'status': 'error', 'code': exc.reason, 'message': exc.user_message},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+    except Exception:
+        logger.exception('assistant_ask_stream failed before the answer')
+        return Response({'status': 'error', 'message': 'The assistant could not answer just now. Please try again.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def stream():
+        yield first
+        try:
+            yield from events
+        except Exception as exc:          # a key error once writing has begun, or anything else
+            logger.exception('assistant_ask_stream failed while writing')
+            yield error_event(exc)
+    return ndjson_response(stream())

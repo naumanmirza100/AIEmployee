@@ -298,6 +298,8 @@ urlpatterns = [
     # The Company Assistant: one chat that asks across the agents (core/assistant, CO-18).
     re_path(r'^company/assistant/?$', company_assistant.assistant_status, name='company_assistant'),  # GET
     re_path(r'^company/assistant/ask/?$', company_assistant.assistant_ask, name='company_assistant_ask'),  # POST
+    re_path(r'^company/assistant/ask-stream/?$', company_assistant.assistant_ask_stream,
+            name='company_assistant_ask_stream'),  # POST, ndjson
     re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
     re_path(r'^company/notification-settings/chat-webhooks/?$', notification_settings.chat_webhooks,
