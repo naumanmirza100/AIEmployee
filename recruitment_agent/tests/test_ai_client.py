@@ -113,7 +113,7 @@ class ClientTests(TestCase):
         with self.charged() as record, self.assertRaises(GroqClientError) as caught:
             self.ai_client(sdk).send_prompt('Return JSON.', 'x')
         self.assertTrue(caught.exception.is_rate_limit)
-        self.assertEqual([c['model'] for c in sdk.calls], ['openai/gpt-oss-20b', 'llama-3.3-70b-versatile'])
+        self.assertEqual([c['model'] for c in sdk.calls], ['openai/gpt-oss-20b', settings.GROQ_FALLBACK_MODEL])
         self.assertEqual(LLMUsage.objects.filter(success=False).count(), 2)
         record.assert_not_called()
 
