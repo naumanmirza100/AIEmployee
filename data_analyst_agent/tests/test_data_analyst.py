@@ -232,6 +232,20 @@ class AFileAskedEndToEnd(AnalystCase):
         self.assertIn('extra_39', fake.prompts[0])
         self.assertNotIn('extra_39', fake.prompts[1])
 
+    def test_a_very_big_database_is_listed_within_the_budget_with_every_table(self):
+        # Like RNAcentral on the live site: 294 tables with 25 columns each asked Groq for 11,536 tokens (3 Nov 2026).
+        source = self.source()
+        source.tables = source.tables + [{'name': f'rnc_table_{i}', 'schema': 'rnacen', 'kind': 'table',
+                                          'columns': [{'name': f'some_long_column_{c}', 'type': 'TEXT'} for c in range(25)],
+                                          'fks': []} for i in range(294)]
+        source.save()
+        fake = FakeAI({'tables': ['orders']}, {'sql': 'SELECT count(*) AS n FROM orders'}, '4 orders.')
+        code, body = self.ask(self.admin, source, 'How many orders?', fake)
+        self.assertEqual(body['data']['status'], 'answered')
+        self.assertLess(len(fake.prompts[0]), 21000)
+        self.assertIn('rnacen.rnc_table_293', fake.prompts[0])        # fewer columns, never fewer tables
+        self.assertIn('some_long_column_0', fake.prompts[0])
+
 
 class AfterwardsAndWhoSeesWhat(AnalystCase):
 
