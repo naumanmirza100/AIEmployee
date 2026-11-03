@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { fetchMyWork, urgentCount } from '@/utils/myWork';
+import { pageLogin } from '@/utils/pageLogin';
 
 const DashboardNavbar = ({
   icon: Icon,
@@ -68,20 +69,24 @@ const DashboardNavbar = ({
     };
   }, [hasSidebar, collapsed]);
 
-  // Fetch notifications for project users (Django User auth)
-  // Determine which auth token and notification endpoint to use
-  const isCompanyUser = !!localStorage.getItem('company_auth_token');
-  const authToken = localStorage.getItem('auth_token') || localStorage.getItem('company_auth_token');
+  // Which login this page is for. With two in the browser (the company's and an employee's,
+  // a project user's or the admin's) the page's area decides, never the mere presence of the
+  // other token: that hid the company's buttons and showed the other account's bell (utils/pageLogin).
+  const login = pageLogin();
+  const isCompanyUser = login.kind === 'company';
+  const authToken = login.token;
   // A company login reads the company feed: every agent's alerts for that
   // login, not only Project Manager's, despite the endpoint's name.
-  const usesCompanyFeed = isCompanyUser && !localStorage.getItem('auth_token');
+  const usesCompanyFeed = isCompanyUser;
+  const path = typeof window !== 'undefined' ? window.location.pathname : '';
   // An employee (My Space) login. Its alerts live on /me/notifications; the
   // general Notifications page is the company's and the platform admin's, and
   // showed an employee the admin menu. A platform admin has no profile block
   // passed in with a role, so the page they are on tells them apart.
-  const isEmployeeLogin = !isCompanyUser && !!localStorage.getItem('auth_token')
-    && typeof window !== 'undefined' && /^\/(me|user)(\/|$)/.test(window.location.pathname);
-  const allNotificationsPath = isEmployeeLogin ? '/me/notifications' : '/notifications';
+  const isEmployeeLogin = login.kind === 'other' && /^\/(me|user)(\/|$)/.test(path);
+  // The admin's own copy of the page, so a company login in the same browser can't take it over.
+  const allNotificationsPath = isEmployeeLogin ? '/me/notifications'
+    : (login.kind === 'other' && path.startsWith('/admin') ? '/admin/notifications' : '/notifications');
   const notifEndpoint = usesCompanyFeed
     ? `${API_BASE_URL}/company/notifications`
     : `${API_BASE_URL}/notifications`;
@@ -132,7 +137,7 @@ const DashboardNavbar = ({
 
   const markAsRead = async (id) => {
     try {
-      if (isCompanyUser && !localStorage.getItem('auth_token')) {
+      if (usesCompanyFeed) {
         // PMNotifications use a different mark-read endpoint
         await fetch(`${API_BASE_URL}/company/notifications/read`, {
           method: 'POST',
@@ -152,7 +157,7 @@ const DashboardNavbar = ({
 
   const markAllRead = async () => {
     try {
-      if (isCompanyUser && !localStorage.getItem('auth_token')) {
+      if (usesCompanyFeed) {
         const allIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
         if (allIds.length) {
           await fetch(`${API_BASE_URL}/company/notifications/read`, {

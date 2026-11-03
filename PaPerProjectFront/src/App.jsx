@@ -127,6 +127,15 @@ import { useTranslation } from 'react-i18next';
                 </ProtectedRoute>
               }
             />
+            {/* The admin's notifications under /admin, so a company login in the same browser can't take the page over */}
+            <Route
+              path="/admin/notifications"
+              element={
+                <ProtectedRoute requireAdmin={true}>
+                  <NotificationsPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* /user/dashboard now sends users into the new employee shell.
                 Every employee lands on /me/home, project managers included.

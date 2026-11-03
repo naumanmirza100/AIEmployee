@@ -69,8 +69,9 @@ export const getAdminNavItems = (navigate, { pendingRequests = 0 } = {}) => [
     label: 'Notifications',
     icon: Bell,
     section: 'admin-notifications',
-    basePath: '/notifications',
-    onClick: () => navigate('/notifications'),
+    // Under /admin, so a company login in the same browser can't take the page over (utils/pageLogin).
+    basePath: '/admin/notifications',
+    onClick: () => navigate('/admin/notifications'),
   },
 ];
 

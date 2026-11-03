@@ -1,17 +1,18 @@
 import { API_BASE_URL } from '@/config/apiConfig';
+import { pageLogin } from '@/utils/pageLogin';
 
 /**
  * "My work": one list of what the logged-in person has to do, across the
  * agents (backend: core/my_work.py).
  *
  * A dashboard login and an employee login authenticate different endpoints,
- * so pick the one for whichever is signed in — the same rule the bell uses.
+ * so pick the one this page is for: the same rule the bell uses (utils/pageLogin).
+ * With both in the browser it took the employee's, so a company page showed someone else's work.
  */
 export function myWorkLogin() {
-  const company = localStorage.getItem('company_auth_token');
-  const employee = localStorage.getItem('auth_token');
-  if (company && !employee) return { token: company, url: `${API_BASE_URL}/company/my-work`, page: '/my-work' };
-  if (employee) return { token: employee, url: `${API_BASE_URL}/user/my-work`, page: '/me/work' };
+  const login = pageLogin();
+  if (login.kind === 'company') return { token: login.token, url: `${API_BASE_URL}/company/my-work`, page: '/my-work' };
+  if (login.kind === 'other') return { token: login.token, url: `${API_BASE_URL}/user/my-work`, page: '/me/work' };
   return null;
 }
 
