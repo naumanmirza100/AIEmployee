@@ -13,6 +13,21 @@
 
 ---
 
+## 0. Resolved since initial audit (2026-11-03)
+
+Found and fixed after the initial audit. All changes verified; the `ai_sdr_agent` suite remains green at **420/420** (0 failures, 0 errors).
+
+| Item | What was done | Verification |
+|---|---|---|
+| ✅ **P0-1 — ICP save fails** (`NOT NULL constraint … seniority_weights`) | Reconciled the DB to the shipping code: dropped the orphan `seniority_weights` column + its stale `django_migrations` record, and applied the pending `0031_campaign_inbox_error` migration (which also fixes a latent `no such column: sdr_campaign.inbox_error` crash on inbox-read failure). Backup at `db.sqlite3.bak-audit-2026-11-03`. | Live `update_or_create` INSERT succeeds; `migrate --check` clean; suite 420/420. |
+| ✅ **Lead-generate endpoint was synchronous** (blocked large runs) | Converted `research_leads` (POST `/sdr/leads/research/`) to an **async background job**: returns `job_id` immediately, runs discovery in a daemon thread writing progress to `SDRLeadResearchJob`, polled via new `GET /sdr/leads/research/jobs/<id>/`. Frontend polls with a live progress counter and handles failed/approval states. A synchronous pre-flight keeps "no API key" an instant error. | Routes resolve; async-contract tests updated; suite 420/420. |
+| ✅ **Frontend dropped `icp_id`** on generate (§2.1) | `researchLeads()` now forwards `icp_id`, so a non-active ICP selection is honored. | Code-reviewed; wired through the generate modal. |
+| ✅ **Lead-generate slider cap** 50 → 1500 | Raised the frontend slider max and the backend `count` cap (`api/views/ai_sdr_agent.py:636`). | — |
+
+**Still open (not touched this session):** P1-1 (Apify free-plan discovery), P1-2 (Celery topology), **P1-3** (the **per-lead** `research_lead_endpoint` / `research_leads_batch_endpoint` at `:858–894` are still synchronous — the same async pattern now used in `research_leads` can be applied), and all P2/P3 items. See §5.
+
+---
+
 ## 1. Executive Summary
 
 The platform is **architecturally complete and genuinely substantial**. All seven agents exist as real implementations wired to real external services — SMTP (`smtplib`), IMAP (`imaplib`), Groq LLM, Apollo/Apify/Hunter, HubSpot/Salesforce/Pipedrive REST APIs, and Google Calendar/Meet. It has strong cross-process locking (`SDRJobLock`), consistent per-company data isolation, Fernet-encrypted credentials, honest (non-faked) analytics, and an extensive **495-method test suite that I ran to a 100% pass (420 SDR + 75 CRM, 0 failures)** — though those tests mock all external boundaries.
@@ -63,7 +78,7 @@ Files: `ai_sdr_agent/agents/lead_research_agent.py`, `lead_research_workflow.py`
 | Email domain verification | Partially Functional | `contact_verifier.py:61-89` | uses A-record (`getaddrinfo`) not MX → valid MX-only domains marked INVALID and email dropped (`enrichment_validator.py:206`) | query MX, or treat A-absence as RISKY |
 | robots.txt compliance | Partially Functional | `enrichment_web.py:107-136` | fails **open** on fetch error (`:124-126`) | fail closed / cap to homepage |
 | Auto-research → qualification hand-off | **Broken** | `tasks.py:624-646` vs `:896-900` | auto-created leads get `qualification_status='none'`; queue only picks `pending/failed/processing` → never scored | set `pending` + `queued_at` on create |
-| Research endpoints async | **Broken** (reliability) | `api/views/ai_sdr_agent.py:858-860,894-899` | synchronous; batch 50 leads in one request | add async task path (enrich already has one) |
+| Research endpoints async | ⚠️ **Partially resolved** | `api/views/ai_sdr_agent.py:858-860,894-899` | discovery/generate (`research_leads`) now async (§0); **per-lead** research/enrich batch endpoints still synchronous | apply the same background-job pattern to the per-lead endpoints |
 | Re-qualify after research/enrich | Missing | (no caller) | new signals/contacts don't re-score existing leads | enqueue re-qualification on change |
 
 **Placeholders/mocks:** `MockEnrichmentProvider` shipped in a prod module (`enrichment_providers.py:340-379`); placeholder bot-info URL (`enrichment_web.py:45`); hardcoded Groq model & default Apify actor; Hunter score fallback `or 60`; Apollo-enrich 429 swallowed and mis-reported as `not_found`; several silent `except…pass`.
@@ -284,7 +299,7 @@ The SDR/CRM test suites are large and mostly hermetic (mock LLM/IMAP/SMTP/CRM at
 |---|---|---|---|---|---|
 | P1-1 | **Automated prospecting non-functional** in delivered config | Research | Apify free plan forbids API runs; actor timeouts/approval | §4 A-7; `lead_research_agent.py:620-733` | Require paid Apify plan or make UI-run-import the primary path; surface a clear setup state |
 | P1-2 | **Async topology split** — CRM/marketing/reply-draft need Celery worker+beat that SDR disclaims | CRM, Outreach, Email | two schedulers | §4 A-8; `scheduler.py:278-288`, `settings.py` beat | Run & monitor Celery worker+beat in prod, or add a CRM-drain job to the embedded scheduler |
-| P1-3 | **Synchronous research endpoints** (batch 50 inline) → timeouts/worker starvation | Research | no `.delay` | `api/views/ai_sdr_agent.py:858-860,894-899` | Move to async task like enrichment |
+| P1-3 | **Synchronous research endpoints** (batch inline) → timeouts/worker starvation. ⚠️ **Partially resolved** — the discovery/generate endpoint `research_leads` is now async (§0); the **per-lead** `research_lead_endpoint` / `research_leads_batch_endpoint` remain synchronous. | Research | no `.delay` | `api/views/ai_sdr_agent.py:858-860,894-899` | Apply the same background-job pattern now used in `research_leads` |
 
 ### P2 — Medium
 
