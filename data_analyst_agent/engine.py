@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 AGENT_KEY = 'data_analyst_agent'
 TABLES_WITHOUT_CHOOSING = 30   # a database with more tables first has the question's tables chosen
 TABLES_CHOSEN = 12
+# The table list for choosing stays under about 6,000 tokens: fewer columns a table first, then names only. All 294
+# tables of a real database with 25 columns each came to 11,536 tokens, more than a Groq key allows a minute (3 Nov 2026).
+CHOOSE_LIST_CHARS = 20000
 ROWS_TO_AI = 100
 ROWS_TO_SCREEN = 200
 HISTORY_TURNS = 6
@@ -64,9 +67,10 @@ def _table_key(t) -> str:
     return f"{t['schema']}.{t['name']}" if t.get('schema') else t['name']
 
 
-def _table_text(t, full=True) -> str:
+def _table_text(t, full=True, columns=25) -> str:
     if not full:
-        return f"- {_table_key(t)} ({', '.join(c['name'] for c in t['columns'][:25])})"
+        names = ', '.join(c['name'] for c in t['columns'][:columns])
+        return f"- {_table_key(t)} ({names})" if names else f"- {_table_key(t)}"
     cols = ', '.join(f"{c['name']} {c['type']}{' PK' if c.get('pk') else ''}" for c in t['columns'])
     fks = ''.join(f"; {', '.join(fk['columns'])} -> {fk['references']}" for fk in t.get('fks') or [])
     return f"- {_table_key(t)}{' (view)' if t.get('kind') == 'view' else ''}: {cols}{fks}"
@@ -141,13 +145,21 @@ Write the answer plainly, in the language of the question:
 - Don't explain the SQL. Under 120 words. No heading."""
 
 
+def _choose_list(tables) -> str:
+    """The tables to choose from, each with as many of its columns as the size budget allows."""
+    for columns in (25, 15, 10, 6, 4, 2, 0):
+        text = '\n'.join(_table_text(t, full=False, columns=columns) for t in tables)
+        if len(text) <= CHOOSE_LIST_CHARS:
+            return text
+    return text[:CHOOSE_LIST_CHARS]
+
+
 def _choose_tables(ai, source, question, history) -> list:
     tables = source.tables or []
     if len(tables) <= TABLES_WITHOUT_CHOOSING:
         return tables
     raw = ai._call_llm(prompt=_CHOOSE.format(dialect=DIALECT_NAMES[source.kind], history=history, question=question,
-                                             tables='\n'.join(_table_text(t, full=False) for t in tables),
-                                             limit=TABLES_CHOSEN),
+                                             tables=_choose_list(tables), limit=TABLES_CHOSEN),
                        system_prompt='You choose tables. Output only one JSON object.', temperature=0,
                        max_tokens=600, json_mode=True)
     wanted = {str(n).strip().lower() for n in _json(raw).get('tables') or []}
