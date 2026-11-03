@@ -808,6 +808,7 @@ urlpatterns = [
     re_path(r'^sdr/leads/research/jobs/(?P<job_id>\d+)/?$', sdr_api.research_job_status, name='sdr_research_job_status'),  # GET
     re_path(r'^sdr/leads/fetch-apify/?$', sdr_api.fetch_apify_leads, name='sdr_fetch_apify_leads'),  # POST
     re_path(r'^sdr/leads/import/?$', sdr_api.import_leads_csv, name='sdr_import_leads_csv'),  # POST
+    re_path(r'^sdr/leads/export/?$', sdr_api.sdr_leads_export, name='sdr_leads_export'),  # GET (all leads, CSV)
     re_path(r'^sdr/leads/qualify-all/?$', sdr_api.qualify_all_leads, name='sdr_qualify_all_leads'),  # POST
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/restore/?$', sdr_api.restore_lead, name='sdr_restore_lead'),  # POST
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/?$', sdr_api.lead_detail, name='sdr_lead_detail'),  # GET, PUT, DELETE

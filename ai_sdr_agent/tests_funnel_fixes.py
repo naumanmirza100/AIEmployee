@@ -145,3 +145,75 @@ class EnrichmentReportsUpdatedFieldsTests(SDRBase):
         self.assertEqual(sorted(res['fields_updated']), sorted(res['changes'].keys()))
         lead.refresh_from_db()
         self.assertEqual(lead.phone, '+1-555-0100')
+
+
+class AutoEnrichmentQueueTests(SDRBase):
+    """New leads are auto-enriched in the background (enrichment_status queue),
+    mirroring auto-qualification."""
+
+    def test_enrich_queue_drains_pending_and_marks_done(self):
+        from ai_sdr_agent.tasks import enrich_queue_impl
+        # A brand-new lead as the create paths make it: queued for BOTH.
+        lead = self.make_lead('toenrich@acme.com',
+                              enrichment_status='pending', enrichment_queued_at=timezone.now(),
+                              qualification_status='pending', qualification_queued_at=timezone.now())
+        with mock.patch('ai_sdr_agent.agents.enrichment_agent.EnrichmentAgent') as EA:
+            EA.return_value.enrich_lead.return_value = {'status': 'success', 'changes': {'phone': {}}}
+            r = enrich_queue_impl()
+        lead.refresh_from_db()
+        self.assertEqual(lead.enrichment_status, 'done')
+        self.assertGreaterEqual(r['enriched'], 1)
+        # A new (unscored) lead is NOT double-queued — its one pending
+        # qualification still handles it.
+        self.assertEqual(lead.qualification_status, 'pending')
+
+    def test_enrich_queue_marks_failed_and_increments_attempts(self):
+        from ai_sdr_agent.tasks import enrich_queue_impl
+        lead = self.make_lead('failenrich@acme.com', enrichment_status='pending',
+                              enrichment_queued_at=timezone.now())
+        with mock.patch('ai_sdr_agent.agents.enrichment_agent.EnrichmentAgent') as EA:
+            EA.return_value.enrich_lead.return_value = {'status': 'failed'}
+            enrich_queue_impl()
+        lead.refresh_from_db()
+        self.assertEqual(lead.enrichment_status, 'failed')
+        self.assertEqual(lead.enrichment_attempts, 1)
+
+    def test_done_leads_are_not_repicked(self):
+        from ai_sdr_agent.tasks import enrich_queue_impl
+        self.make_lead('alreadydone@acme.com', enrichment_status='done')
+        with mock.patch('ai_sdr_agent.agents.enrichment_agent.EnrichmentAgent') as EA:
+            r = enrich_queue_impl()
+            EA.assert_not_called()
+        self.assertEqual(r['processed'], 0)
+
+
+class LeadsExportAllTests(SDRBase):
+    """Export ALL leads (every page) as CSV, respecting filters + company scope."""
+
+    def _csv(self, params):
+        req = APIRequestFactory().get('/x', params)
+        force_authenticate(req, user=self.cu)
+        resp = views.sdr_leads_export(req)
+        self.assertIn('text/csv', resp['Content-Type'])
+        self.assertIn('attachment', resp['Content-Disposition'])
+        return b''.join(resp.streaming_content).decode('utf-8')
+
+    def test_export_streams_all_and_respects_filters(self):
+        self.make_lead('hot1@acme.com', temperature='hot', score=90, status='qualified')
+        self.make_lead('cold1@acme.com', temperature='cold', score=10, status='qualified')
+        body = self._csv({'temperature': 'hot'})
+        self.assertIn('hot1@acme.com', body)
+        self.assertNotIn('cold1@acme.com', body)   # filter applied, not just current page
+        self.assertTrue(body.splitlines()[0].startswith('Name,Email,Phone'))
+
+    def test_export_is_company_scoped(self):
+        from core.models import Company, CompanyUser
+        other_co = Company.objects.create(name='Other', email='o@test.local')
+        other_cu = CompanyUser.objects.create(
+            company=other_co, email='o@cu.local', full_name='O',
+            role='admin', password_hash='x', is_active=True)
+        SDRLead.objects.create(company_user=other_cu, email='leak@other.com', full_name='Leak')
+        self.make_lead('mine@acme.com', temperature='hot', score=90)
+        body = self._csv({})
+        self.assertIn('mine@acme.com', body)
+        self.assertNotIn('leak@other.com', body)    # no cross-company leak

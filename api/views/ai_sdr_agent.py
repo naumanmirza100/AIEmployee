@@ -353,6 +353,94 @@ def icp_profile(request):
 # Leads — list / create
 # ==========================================================================
 
+# Sort options shared by the list and the "export all" endpoints.
+_LEAD_SORT_MAP = {
+    'score_desc':   ['-score', '-created_at'],
+    'score_asc':    ['score',  '-created_at'],
+    'name_asc':     ['full_name'],
+    'name_desc':    ['-full_name'],
+    'created_desc': ['-created_at'],
+    'created_asc':  ['created_at'],
+    'company_asc':  ['company_name'],
+}
+
+
+def _apply_lead_filters(qs, request):
+    """Apply the leads-list filters (search / temperature / status / source /
+    sort) to a queryset. Shared by the paginated list and the CSV export so the
+    export respects whatever the user is currently looking at."""
+    search = request.GET.get('search', '').strip()
+    if search:
+        qs = qs.filter(
+            Q(full_name__icontains=search)
+            | Q(first_name__icontains=search)
+            | Q(last_name__icontains=search)
+            | Q(company_name__icontains=search)
+            | Q(email__icontains=search)
+            | Q(job_title__icontains=search)
+            | Q(company_location__icontains=search)
+            | Q(company_industry__icontains=search)
+        )
+    temp = request.GET.get('temperature', '').strip()
+    if temp:
+        qs = qs.filter(temperature=temp)
+    status_f = request.GET.get('status', '').strip()
+    if status_f:
+        qs = qs.filter(status=status_f)
+    source_f = request.GET.get('source', '').strip()
+    if source_f:
+        qs = qs.filter(source=source_f)
+    sort_by = request.GET.get('sort', 'score_desc')
+    return qs.order_by(*_LEAD_SORT_MAP.get(sort_by, ['-score', '-created_at']))
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_leads_export(request):
+    """Stream EVERY lead matching the current filters (no pagination) as CSV, so
+    the whole list — 1000s of leads — can be exported at once. Company-scoped
+    and memory-safe via a streaming response + queryset iterator."""
+    from django.http import StreamingHttpResponse
+
+    company_user = request.user
+    qs = _apply_lead_filters(SDRLead.objects.filter(company_user=company_user), request)
+
+    columns = [
+        ('full_name', 'Name'), ('email', 'Email'), ('phone', 'Phone'),
+        ('job_title', 'Title'), ('seniority_level', 'Seniority'),
+        ('company_name', 'Company'), ('company_industry', 'Industry'),
+        ('company_size', 'Company Size'), ('company_location', 'Location'),
+        ('company_website', 'Website'), ('linkedin_url', 'LinkedIn'),
+        ('score', 'Score'), ('temperature', 'Temperature'),
+        ('status', 'Status'), ('source', 'Source'), ('created_at', 'Created'),
+    ]
+
+    class _Echo:
+        """A write-only file-like object that returns what it's handed (Django
+        streaming-CSV pattern)."""
+        def write(self, value):
+            return value
+
+    writer = csv.writer(_Echo())
+
+    def _val(v):
+        if v is None:
+            return ''
+        if hasattr(v, 'isoformat'):
+            return v.isoformat()
+        return str(v)
+
+    def _rows():
+        yield writer.writerow([header for _, header in columns])
+        for lead in qs.iterator(chunk_size=1000):
+            yield writer.writerow([_val(getattr(lead, field, '')) for field, _ in columns])
+
+    resp = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = 'attachment; filename="sdr-leads-export.csv"'
+    return resp
+
+
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])

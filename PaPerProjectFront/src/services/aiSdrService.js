@@ -88,6 +88,21 @@ export const listLeads = async ({
   }
 };
 
+/**
+ * Export ALL leads matching the current filters as a CSV blob (server-side, no
+ * pagination) so thousands of leads can be exported in one download.
+ */
+export const exportAllLeadsCsv = async ({ search = '', temperature = '', status = '', source = '', sort = 'score_desc' } = {}) => {
+  const params = {};
+  if (search)      params.search = search;
+  if (temperature) params.temperature = temperature;
+  if (status)      params.status = status;
+  if (source)      params.source = source;
+  if (sort)        params.sort = sort;
+  const resp = await companyApi.get('/sdr/leads/export/', { params, responseType: 'blob' });
+  return resp?.data ?? resp;
+};
+
 export const createLead = async (data) => {
   try {
     return await companyApi.post('/sdr/leads/', data);

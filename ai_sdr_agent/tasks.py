@@ -840,14 +840,15 @@ def enrich_lead_impl(lead_id: int, force: bool = False) -> dict:
             )
             return res
 
-        # Enriched (success / already_completed): mark done. Fresh contact/company
-        # data can change the score, so re-queue qualification (skip when nothing
-        # actually ran this time).
-        updates = {'enrichment_status': 'done'}
+        # Enriched (success / already_completed): mark done.
+        SDRLead.all_objects.filter(pk=lead_id).update(enrichment_status='done')
         if status != 'already_completed':
-            updates['qualification_status'] = 'pending'
-            updates['qualification_queued_at'] = timezone.now()
-        SDRLead.all_objects.filter(pk=lead_id).update(**updates)
+            # Re-score only a lead that was ALREADY scored — new contact/company
+            # data may change its score. A brand-new lead is still queued for its
+            # first qualification, so don't double-score it here (and burn LLM
+            # tokens / hit rate limits on big imports).
+            SDRLead.all_objects.filter(pk=lead_id, score__isnull=False).update(
+                qualification_status='pending', qualification_queued_at=timezone.now())
         return res
     except Exception as exc:
         logger.error("enrich_lead_impl failed for lead=%d: %s", lead_id, exc, exc_info=True)

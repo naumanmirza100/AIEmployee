@@ -17,7 +17,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
-  listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
+  listLeads, exportAllLeadsCsv, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
   researchLead, getLeadResearch, researchLeads, getResearchJob, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads,
@@ -343,7 +343,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
 // --------------------------------------------------------------------------
 // Export Dropdown
 // --------------------------------------------------------------------------
-const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage }) => {
+const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage, totalCount = 0, exportParams = {} }) => {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(null);
   const ref = useRef(null);
@@ -369,6 +369,27 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage }) => {
       toast({ title: `Exported ${exportTarget.length} leads as ${format.toUpperCase()}` });
     } catch (e) {
       toast({ title: 'Export failed', description: e.message, variant: 'destructive' });
+    } finally { setExporting(null); }
+  };
+
+  // Export EVERY lead matching the current filters (all pages), streamed as CSV
+  // from the server — so 1000s of leads export in one download.
+  const doExportAll = async () => {
+    setExporting('all');
+    setOpen(false);
+    try {
+      const blob = await exportAllLeadsCsv(exportParams);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sdr-leads-all-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast({ title: `Exported all ${totalCount ? totalCount.toLocaleString() + ' ' : ''}leads as CSV` });
+    } catch (e) {
+      toast({ title: 'Export failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
     } finally { setExporting(null); }
   };
 
@@ -404,6 +425,17 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage }) => {
               <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>{opt.label}</span>
             </button>
           ))}
+          {/* Export ALL matching leads (every page) as CSV, streamed from the server. */}
+          <button onClick={doExportAll}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 16px', border: 'none', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)', cursor: 'pointer', background: 'rgba(168,85,247,0.06)', transition: 'background 0.1s' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.14)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.06)'; }}
+          >
+            <Download size={15} style={{ color: '#a855f7', flexShrink: 0 }} />
+            <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>
+              Export ALL{totalCount ? ` ${totalCount.toLocaleString()}` : ''} leads (CSV)
+            </span>
+          </button>
         </div>
       )}
     </div>
@@ -1144,7 +1176,9 @@ const SDRLeadsTab = () => {
           </Button>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
           <div style={{ marginLeft: 'auto' }}>
-            <ExportDropdown leads={leads} selectedLeads={selectedIds} allLeadsOnPage={leads} />
+            <ExportDropdown leads={leads} selectedLeads={selectedIds} allLeadsOnPage={leads}
+              totalCount={pagination.total_count}
+              exportParams={{ search, temperature: filterTemp, status: filterStatus, source: filterSource, sort: sortBy }} />
           </div>
         </div>
       </div>
@@ -1600,6 +1634,30 @@ const SDRLeadsTab = () => {
               );
             })()}
 
+            {/* Enriched Data — what the enrichment agent found, with its source */}
+            {selectedLead.enrichment_contract?.fields
+              && Object.values(selectedLead.enrichment_contract.fields).some(f => f && f.value) && (
+              <div style={{ marginBottom: 20, padding: '12px 14px', borderRadius: 10, background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Sparkles size={13} style={{ color: '#10b981' }} />
+                  <h4 style={{ color: '#10b981', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Enriched Data</h4>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {Object.entries(selectedLead.enrichment_contract.fields)
+                    .filter(([, f]) => f && f.value)
+                    .map(([key, f]) => (
+                      <div key={key} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, textTransform: 'capitalize', flexShrink: 0 }}>{key.replace(/_/g, ' ')}</span>
+                        <span style={{ color: 'var(--text-soft)', fontSize: 12.5, textAlign: 'right', wordBreak: 'break-word' }}>
+                          {String(f.value)}
+                          {f.source && <span style={{ marginLeft: 6, color: '#6b7280', fontSize: 10 }}>({f.source})</span>}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
             {/* Contact */}
             <div style={{ marginBottom: 20 }}>
               <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Contact</h4>
@@ -1777,9 +1835,11 @@ const SDRLeadsTab = () => {
                   gap: 6,
                 }}
               >
-                {enrichingId === selectedLead.id ? <Loader2 size={13} className="animate-spin flex-shrink-0" /> : <Sparkles size={13} className="flex-shrink-0" />}
+                {(enrichingId === selectedLead.id || ['pending', 'processing'].includes(selectedLead.enrichment_status)) ? <Loader2 size={13} className="animate-spin flex-shrink-0" /> : <Sparkles size={13} className="flex-shrink-0" />}
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {selectedLead.enrichment_status === 'completed' ? 'Re-enrich' : 'Enrich Lead'}
+                  {(enrichingId === selectedLead.id || selectedLead.enrichment_status === 'pending' || selectedLead.enrichment_status === 'processing')
+                    ? 'Enriching…'
+                    : (['done', 'completed', 'partial'].includes(selectedLead.enrichment_status) ? 'Re-enrich' : 'Enrich Lead')}
                 </span>
               </Button>
 
