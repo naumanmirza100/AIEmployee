@@ -316,7 +316,13 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
   // Each routes to /company/dashboard/<tab>; "Ticket Tasks" only appears when
   // the Frontline agent is purchased (mirrors the on-page tab bar), and
   // "API Keys" jumps to the settings route like its tab does.
+  // The Company Assistant comes with two agents or more (core.modules.INCLUDED_WITH). It had only the top
+  // bar's button, which a second login in the browser hid, and no entry here (3 Nov 2026).
+  const agentsBought = ALL_AGENTS.filter((a) => purchasedModules.includes(a.key)).length;
   const dashboardChildren = [
+    ...(agentsBought >= 2
+      ? [{ label: 'Company Assistant', icon: Sparkles, path: '/company/assistant' }]
+      : []),
     { label: 'My Jobs',         icon: Briefcase,    path: '/company/dashboard/jobs' },
     { label: 'Projects',        icon: FolderKanban, path: '/company/dashboard/projects' },
     { label: 'Applications',    icon: Users,        path: '/company/dashboard/applications' },
@@ -341,7 +347,7 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
       // notifications page) still belong to this group. Without extraPaths the
       // sidebar could only match on `section`, so opening one of them collapsed
       // the whole Dashboard group.
-      extraPaths: ['/company/settings', '/notifications'],
+      extraPaths: ['/company/settings', '/notifications', '/company/assistant'],
       children: dashboardChildren,
       onClick: () => navigate('/company/dashboard'),
     },
