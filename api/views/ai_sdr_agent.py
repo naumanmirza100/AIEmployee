@@ -633,7 +633,7 @@ def research_leads(request):
     """
     company_user = request.user
     try:
-        count = min(int(request.data.get('count', 20)), 50)
+        count = min(int(request.data.get('count', 20)), 1500)
         source = request.data.get('source', 'auto')
         icp_id = request.data.get('icp_id')
         if icp_id:
