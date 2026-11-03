@@ -158,8 +158,11 @@ Rules:
 - Names exactly as the asker wrote them; "me" for the asker ("my", "I", "mera", "mujhe"). Never make a name up.
 - Dates as YYYY-MM-DD worked out from today: "this week" is today to Sunday; "next week" Monday to Friday of next
   week; "tomorrow", "kal" (Roman Urdu, here: tomorrow), "parson" (the day after tomorrow).
-- "Free"/"available" questions use the calendar lookups; questions about taking on more work combine tasks, leave
-  and the calendar.
+- "Free"/"available" questions use the calendar lookups. Over several days ("next week", "this month") use
+  who_is_free with start and end, not one date.
+- Taking on more work ("can I give someone a task?", "who should I give a task, and what task?", "who has room?")
+  combines workload, leave and who_is_free for the period, and unassigned_tasks when a task is to be picked. These
+  questions name nobody: use no person argument then.
 - What a policy, handbook, contract or other document says: "documents", its query restated in English.
 - "What happened this week?" or a catch-up across the company: "week" with no dates (the last 7 days); dates only
   for another past period ("last month").
@@ -169,6 +172,18 @@ Rules:
 - "ask_back": one short question back, only when the question can't be looked up at all without it.
 - "needs": the agent names (e.g. "Recruitment", "Marketing") a question needs that are NOT among the lookups.
 """
+
+
+def _asker_said(name, question, history) -> bool:
+    """Did the asker type this name (any word of it: "Hira" for "Hira Siddiqui"), in this question or an earlier
+    one of theirs?"""
+    words = [w for w in re.findall(r'\w+', str(name or '').lower()) if len(w) > 2]
+    if not words:
+        return False
+    theirs = [str(question)] + [str(t.get('content') or '') for t in (history or [])[-8:]
+                                if isinstance(t, dict) and t.get('role') == 'user']
+    typed = set(re.findall(r'\w+', ' '.join(theirs).lower()))
+    return any(w in typed for w in words)
 
 
 def _history_lines(history):
@@ -200,8 +215,24 @@ def plan(ai, ctx: Context, question, history) -> dict:
     if not isinstance(out, dict):
         out = {}
     calls = [c for c in (out.get('calls') or []) if isinstance(c, dict) and c.get('lookup')][:MAX_CALLS]
+    english = str(out.get('english') or '').strip()
+    calls = _sure_calls(calls, f'{question} {english}', {lk.name for lk in usable})
     return {'calls': calls, 'ask_back': (out.get('ask_back') or None), 'needs': out.get('needs') or [],
-            'english': str(out.get('english') or '').strip(), 'language': out.get('language')}
+            'english': english, 'language': out.get('language')}
+
+
+_GIVE_WORK = re.compile(r'\b(give|assign|hand)\b.*\b(task|work)\b|\b(take|get)\b.*\b(new|more)\s+(task|work)\b'
+                        r'|\bwho\b.*\b(room|capacity|overloaded)\b', re.I)
+_PICK_TASK = re.compile(r'\b(what|which)\s+(task|work)\b|\bunassigned\b|\btasks?\s+(nobody|no one)\b', re.I)
+
+
+def _sure_calls(calls, text, usable) -> list:
+    """Questions about giving out work always read the workload, and "what task" the tasks nobody holds. The plan
+    left them out about one time in two, and the answer then said the records named no task (3 Nov 2026)."""
+    have = {c.get('lookup') for c in calls}
+    extra = [{'lookup': name, 'args': {}} for name, wanted in (('workload', _GIVE_WORK), ('unassigned_tasks', _PICK_TASK))
+             if wanted.search(text) and name in usable and name not in have]
+    return calls[:MAX_CALLS - len(extra)] + extra
 
 
 # ---- 2. fetch -----------------------------------------------------------------------------------------------------
@@ -251,11 +282,16 @@ Write the answer as a helpful colleague would, plainly:
 - The records never say a person's gender, so never guess it from a name: call a person by their name again, or
   "they" / "their"; never "he", "she", "his" or "her" (nor a gendered word in another language), unless the
   asker used that word for that person.
+- Asked whom to give work, or which task: suggest from the facts, as a suggestion the asker decides. Name the
+  people with the fewest open and late tasks who are neither away nor busy, and a task nobody is on yet, if the
+  facts have one. Never say one person is free for days the facts don't cover.
 - A question about an agent you can't read yet: say in one line that you can't read that agent yet, and that its
   own screens have it. Never say the agent is inactive, empty or unused.
 - With no facts at all, say what you can answer instead: people, who is free or away, tasks and projects, leave,
   support tickets.
-- You read only: you cannot assign, book, email, approve or change anything. When the asker wants something done,
+- You read only: you cannot assign, book, email, approve or change anything. A question about whether or to whom
+  ("can I give someone a task?", "who should get it?") is not a request: answer it, without saying you can't act.
+  When the asker wants something done,
   say so in one sentence ("I can't assign tasks: I only read.") and where it is done, by name: tasks in Project
   Manager, Tasks; leave in HR, Leave; HR, Project Manager or Executive meetings under that agent's Meetings; customer
   mail in Reply Draft, Emails; tickets in Frontline, Tickets; candidates and interviews in Recruitment; campaigns in
@@ -335,6 +371,13 @@ def _prepare(company_user, question, history, ai):
     readout = plan(ai, ctx, question, history)
     facts, unsure = fetch(ctx, readout['calls'])
     names = [str(c.get('lookup')) for c in readout['calls']]
+    # Ask "which one?" only about a name the asker typed. "Who should I give a task?" was answered with
+    # 'Which "Hira Siddiqui" do you mean', a name the plan had taken from the last answer (3 Nov 2026).
+    said = [u for u in unsure if _asker_said(u.name, question, history)]
+    for u in unsure:
+        if u not in said:
+            facts.append(L.Fact(f'Not read: {u}', 'Assistant'))
+    unsure = said
     if unsure:
         first = unsure[0]
         people = first.people[:6]

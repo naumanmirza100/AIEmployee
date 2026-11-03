@@ -142,6 +142,98 @@ class People(AssistantTestCase):
         self.assertIn('<hira.s@acme.test>', out['answer'])
 
 
+class WhoCanTakeATask(AssistantTestCase):
+    """Live on Margalla, 3 Nov 2026: "Can I give someone a new task next week?" was read from Monday alone and
+    answered "free the whole time"; then "who do you suggest I give a task, and what task?" asked 'Which "Hira
+    Siddiqui" do you mean', a name the asker never typed, because a hire who hadn't started shared it."""
+
+    def _weekdays_from_next_monday(self):
+        today = self.ctx(self.admin).today
+        monday = today + timedelta(days=7 - today.weekday())
+        return monday, monday + timedelta(days=4)
+
+    def test_who_is_free_over_a_week_reads_every_weekday_and_names_the_busy_days(self):
+        monday, friday = self._weekdays_from_next_monday()
+        zone = self.ctx(self.admin).zone
+        from datetime import datetime, time
+        wed = datetime.combine(monday + timedelta(days=2), time(10), tzinfo=zone)
+        CalendarBlock.objects.create(company=self.company, user_id=self.ali.user_id, starts_at=wed,
+                                     ends_at=wed + timedelta(hours=1), source='pm', source_id=1, title='Review')
+        facts = L.who_is_free(self.ctx(self.admin), {'start': monday.isoformat(), 'end': friday.isoformat()})
+        text = '\n'.join(f.text for f in facts)
+        self.assertIn('on each of its 5 weekdays', text)
+        self.assertIn('Ali Staff is busy for part or all of 09:00–18:00 on Wed', text)
+        self.assertIn('(1 of 5 weekdays)', text)
+        self.assertNotIn('Free the whole time', text)
+
+    def test_one_day_still_says_which_day(self):
+        monday, _ = self._weekdays_from_next_monday()
+        text = '\n'.join(f.text for f in L.who_is_free(self.ctx(self.admin), {'date': monday.isoformat()}))
+        self.assertIn(f'Free for all of {L._date(monday)}', text)
+
+    def test_a_name_the_asker_never_typed_is_not_asked_back(self):
+        self.employee_with_login('sara1', 'Sara Malik', self.company, self.admin)
+        self.employee_with_login('sara2', 'Sara Khan', self.company, self.admin)
+        ai = FakeAI(calls=[{'lookup': 'tasks', 'args': {'person': 'Sara'}}], answer='Ali has no open tasks [1].')
+        out = self.ask(self.admin, ai, 'Who should I give a task to?')
+        self.assertFalse(out['asked_back'])
+        self.assertEqual(len(ai.prompts), 2)                     # the plan, then the answer
+        self.assertIn('Not read: "Sara" could be', ai.prompts[1])
+
+    def test_a_name_the_asker_typed_is_still_asked_back(self):
+        self.employee_with_login('sara1', 'Sara Malik', self.company, self.admin)
+        self.employee_with_login('sara2', 'Sara Khan', self.company, self.admin)
+        ai = FakeAI(calls=[{'lookup': 'tasks', 'args': {'person': 'Sara'}}])
+        self.assertTrue(self.ask(self.admin, ai, 'What is sara doing?')['asked_back'])
+
+    def test_one_unclear_name_among_several_keeps_the_others_calendars(self):
+        self.employee_with_login('sara1', 'Sara Malik', self.company, self.admin)
+        self.employee_with_login('sara2', 'Sara Khan', self.company, self.admin)
+        monday, friday = self._weekdays_from_next_monday()
+        facts = L.calendar(self.ctx(self.admin), {'people': ['Sara', 'Ali'], 'start': monday.isoformat(),
+                                                  'end': friday.isoformat()})
+        text = '\n'.join(f.text for f in facts)
+        self.assertIn('Not read: "Sara" could be', text)
+        self.assertIn('Ali Staff has nothing booked', text)
+
+    def test_a_hire_who_has_not_started_gives_way_to_the_colleague_of_the_same_name(self):
+        from hr_agent.models import Employee
+        Employee.objects.create(company=self.company, full_name='Ali Staff', work_email='ali.new@acme.test',
+                                job_title='Senior Engineer', employment_status='candidate',
+                                start_date=timezone.localdate() + timedelta(days=8))
+        ctx = self.ctx(self.admin)
+        self.assertEqual([p.user_ids for p in ctx.directory.find('Ali Staff')], [{self.ali.user_id}])
+        both = ctx.directory.find('Ali Staff', current_only=False)
+        self.assertEqual(len(both), 2)
+        self.assertTrue(any('starts ' in p.describe() for p in both))
+
+    def test_giving_out_work_always_reads_the_workload_and_what_task_the_unassigned_ones(self):
+        ai = FakeAI(calls=[{'lookup': 'leave', 'args': {}}], answer='Ali has room [1].')
+        out = self.ask(self.admin, ai, 'who do you suggest i give a task, and what task?')
+        self.assertIn('workload', out['lookups'])
+        self.assertIn('unassigned_tasks', out['lookups'])
+        out = self.ask(self.admin, FakeAI(calls=[{'lookup': 'leave', 'args': {}}], answer='x [1].'), 'Who is away?')
+        self.assertNotIn('workload', out['lookups'])
+
+    def test_the_workload_names_people_with_no_open_tasks(self):
+        Task.objects.create(title='Fix the login bug', project=self.project, status='todo', assignee=self.ali.user)
+        self.employee_with_login('dana', 'Dana Idle', self.company, self.admin)
+        text = '\n'.join(f.text for f in L.workload(self.ctx(self.admin), {}))
+        self.assertIn('Ali Staff: 1 open', text)
+        self.assertIn('No open tasks: ', text)
+        self.assertIn('Dana Idle', text.split('No open tasks: ')[1])
+
+    def test_open_tasks_nobody_holds_are_listed_and_held_ones_are_not(self):
+        Task.objects.create(title='Write the FAQ page', project=self.project, status='todo')
+        Task.objects.create(title='Fix the login bug', project=self.project, status='todo', assignee=self.ali.user)
+        Task.objects.create(title='Old banner', project=self.project, status='done')
+        text = '\n'.join(f.text for f in L.unassigned_tasks(self.ctx(self.admin), {}))
+        self.assertIn('1 open task(s) with nobody on them yet', text)
+        self.assertIn('Write the FAQ page', text)
+        self.assertNotIn('Fix the login bug', text)
+        self.assertNotIn('Old banner', text)
+
+
 class WhatEachLoginSees(AssistantTestCase):
 
     def test_a_ticket_nobody_has_taken_is_held_by_nobody_not_the_system_account(self):

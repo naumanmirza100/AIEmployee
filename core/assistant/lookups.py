@@ -101,11 +101,12 @@ def _date(d) -> str:
     return f'{d:%a} {d.day} {d:%b} {d.year}'
 
 
-def _one(ctx, name):
-    """The person `name` means, or Refused: none found, or more than one (the engine asks back)."""
+def _one(ctx, name, *, current_only=True):
+    """The person `name` means, or Refused: none found, or more than one (the engine asks back).
+    `current_only`: a hire who hasn't started counts only when nobody working matches (people.find)."""
     if not str(name or '').strip():
         raise Refused('Say whose.')
-    found = ctx.directory.find(name, asker=ctx.company_user)
+    found = ctx.directory.find(name, asker=ctx.company_user, current_only=current_only)
     if not found:
         raise Refused(f'Nobody called "{name}" was found in this company.')
     if len(found) > 1:
@@ -122,7 +123,7 @@ class Ambiguous(Refused):
 # ---- people ----------------------------------------------------------------------------------------------------
 
 def person(ctx, args):
-    p = _one(ctx, args.get('person'))
+    p = _one(ctx, args.get('person'), current_only=False)   # who someone is: a new hire too
     bits = [f'{k.replace("_", " ")}: {v}' for k, v in p.facts().items() if k != 'name']
     link = '/hr/dashboard?tab=employees' if p.employee is not None and 'hr_agent' in ctx.modules else ''
     return [Fact(f'{p.name}' + (f' — {"; ".join(bits)}' if bits else ''), 'People', link)]
@@ -159,7 +160,14 @@ def calendar(ctx, args):
     begins, ends = _window(ctx, args, start, end)
     facts = []
     for name in names[:8]:
-        p = _one(ctx, name)
+        try:
+            p = _one(ctx, name)
+        except Ambiguous as exc:
+            if len(names) == 1:
+                raise                      # the engine asks which one, if the asker named them
+            # One unclear name among several no longer loses everyone else's calendar (3 Nov 2026).
+            facts.append(Fact(f'Not read: {exc}', 'Calendar'))
+            continue
         if not p.user_ids:
             facts.append(Fact(f'{p.name} has no login, so has no calendar.', 'Calendar'))
             continue
@@ -183,25 +191,56 @@ def calendar(ctx, args):
     return facts
 
 
+MAX_FREE_DAYS = 10   # working days one "who is free" reads
+
+
 def who_is_free(ctx, args):
+    """Who is free for a time window on one day, or on every weekday of a period.
+
+    It read one day only, and "next week" was answered from Monday alone as "free the whole time"
+    (3 Nov 2026): a period is now read day by day, and each fact names the days it covers."""
     from core.scheduling.conflicts import busy_intervals, overlaps
-    day = _day(args.get('date') or ctx.today)
-    begins = datetime.combine(day, _clock(args.get('from_time'), time(9)), tzinfo=ctx.zone)
-    ends = datetime.combine(day, _clock(args.get('to_time'), time(18)), tzinfo=ctx.zone)
-    if ends <= begins:
+    if args.get('start') or args.get('end'):
+        start, end = _range(ctx, args)
+        days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+        days = [d for d in days if d.weekday() < 5][:MAX_FREE_DAYS] or [start]
+    else:
+        days = [_day(args.get('date') or ctx.today)]
+    from_t, to_t = _clock(args.get('from_time'), time(9)), _clock(args.get('to_time'), time(18))
+    if to_t <= from_t:
         raise Refused('The end time must be after the start.')
     dept = str(args.get('department') or '').strip().lower()
-    free, busy = [], []
+    free, busy = [], []                 # busy: (person, the days they are busy)
     for p in ctx.directory.people:
-        if not p.user_ids or (dept and dept not in (p.department or '').lower()):
+        if not p.current or not p.user_ids or (dept and dept not in (p.department or '').lower()):
             continue
-        (busy if overlaps(busy_intervals(p.user_ids, begins, ends, tz_name=ctx.tz), begins, ends) else free).append(p)
-    window = f'{_date(day)}, {begins:%H:%M}–{ends:%H:%M}'
-    facts = [Fact(f'{window}: {len(free)} free, {len(busy)} busy (of the people with a login).', 'Calendar')]
+        busy_days = []
+        for day in days:
+            begins = datetime.combine(day, from_t, tzinfo=ctx.zone)
+            ends = datetime.combine(day, to_t, tzinfo=ctx.zone)
+            if overlaps(busy_intervals(p.user_ids, begins, ends, tz_name=ctx.tz), begins, ends):
+                busy_days.append(day)
+        (busy.append((p, busy_days)) if busy_days else free.append(p))
+    hours = f'{from_t:%H:%M}–{to_t:%H:%M}'
+    if len(days) == 1:
+        window = f'{_date(days[0])}, {hours}'
+        facts = [Fact(f'{window}: {len(free)} free, {len(busy)} busy (of the people with a login).', 'Calendar')]
+        if free:
+            facts.append(Fact(f'Free for all of {window}: ' + ', '.join(p.name for p in free[:40]), 'Calendar'))
+        if busy:
+            facts.append(Fact(f'Busy for part or all of {window}: ' + ', '.join(p.name for p, _ in busy[:40]),
+                              'Calendar'))
+        return facts
+    span = f'{_date(days[0])} to {_date(days[-1])}, {hours} on each of its {len(days)} weekdays'
+    facts = [Fact(f'{span}: {len(free)} free on every one of those days, {len(busy)} busy on some '
+                  '(of the people with a login).', 'Calendar')]
     if free:
-        facts.append(Fact('Free the whole time: ' + ', '.join(p.name for p in free[:40]), 'Calendar'))
-    if busy:
-        facts.append(Fact('Busy for part or all of it: ' + ', '.join(p.name for p in busy[:40]), 'Calendar'))
+        facts.append(Fact(f'Free on every weekday from {_date(days[0])} to {_date(days[-1])}: '
+                          + ', '.join(p.name for p in free[:40]), 'Calendar'))
+    for p, busy_days in busy[:40]:
+        facts.append(Fact(f'{p.name} is busy for part or all of {hours} on '
+                          + ', '.join(_date(d) for d in busy_days)
+                          + f' ({len(busy_days)} of {len(days)} weekdays)', 'Calendar'))
     return facts
 
 
@@ -298,12 +337,32 @@ def workload(ctx, args):
                                             late=Count('id', filter=Q(due_date__lt=timezone.now())))
             .order_by('-n'))
     link = '/project-manager/dashboard?tab=tasks'
+    rows = list(rows)
     facts = [Fact('Open Project Manager tasks per person (late in brackets):', 'Project Manager', link)]
     for row in rows[:40]:
         facts.append(Fact(f'{ctx.name_of_user(row["assignee_id"])}: {row["n"]} open ({row["late"]} late)',
                           'Project Manager', link))
     if len(facts) == 1:
         facts.append(Fact('Nobody has open tasks.', 'Project Manager', link))
+    # People with none were simply missing, and the answer said their counts "are not specified" (3 Nov 2026).
+    holders = {row['assignee_id'] for row in rows}
+    idle = [p.name for p in ctx.directory.people if p.current and p.user_ids and not (p.user_ids & holders)]
+    if idle and rows:
+        facts.append(Fact('No open tasks: ' + ', '.join(idle[:40]), 'Project Manager', link))
+    return facts
+
+
+def unassigned_tasks(ctx, args):
+    """Open tasks nobody holds yet, in the projects the asker can see: what a task could be given.
+    "Who should I give a task, and what task?" had people to suggest but no task (3 Nov 2026)."""
+    qs = (_tasks_seen(ctx).filter(status__in=OPEN_TASK, assignee__isnull=True)
+          .select_related('project').order_by(F('due_date').asc(nulls_last=True), '-id'))
+    link = '/project-manager/dashboard?tab=tasks'
+    total = qs.count()
+    if not total:
+        return [Fact('Every open Project Manager task has someone on it: none is unassigned.', 'Project Manager', link)]
+    facts = [Fact(f'{total} open task(s) with nobody on them yet:', 'Project Manager', link)]
+    facts += [Fact(_task_line(ctx, t), 'Project Manager', link) for t in qs[:ROWS]]
     return facts
 
 
@@ -455,8 +514,10 @@ LOOKUPS = {lk.name: lk for lk in (
            'interviews, sales calls, approved leave and company holidays.',
            {'people': 'list of names or "me"', 'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD',
             'from_time': 'HH:MM, optional', 'to_time': 'HH:MM, optional'}, calendar),
-    Lookup('who_is_free', 'calendar', 'Who in the company is free for the whole of one time window on one day.',
-           {'date': 'YYYY-MM-DD', 'from_time': 'HH:MM', 'to_time': 'HH:MM', 'department': 'optional'}, who_is_free),
+    Lookup('who_is_free', 'calendar', 'Who in the company is free for a time window on one day (date), or on '
+           'every weekday of a period (start and end), and who is busy on which days.',
+           {'date': 'YYYY-MM-DD, one day', 'start': 'YYYY-MM-DD, a period', 'end': 'YYYY-MM-DD, a period',
+            'from_time': 'HH:MM', 'to_time': 'HH:MM', 'department': 'optional'}, who_is_free),
     Lookup('tasks', 'project_manager_agent', "A person's open Project Manager tasks: project, status, priority, "
            'due date, late or not.', {'person': 'a name, or "me"', 'due_by': 'YYYY-MM-DD, optional'}, tasks),
     Lookup('project', 'project_manager_agent', "One project's status: tasks done and not done, late tasks, who has "
@@ -464,6 +525,8 @@ LOOKUPS = {lk.name: lk for lk in (
     Lookup('projects', 'project_manager_agent', 'All projects with their status and tasks done.', {}, projects),
     Lookup('workload', 'project_manager_agent', 'Open and late tasks per person, to see who is overloaded.', {},
            workload),
+    Lookup('unassigned_tasks', 'project_manager_agent', 'Open Project Manager tasks nobody is on yet: the tasks '
+           'that could be given to someone.', {}, unassigned_tasks),
     Lookup('leave', 'hr_agent', 'Who is on leave in a date range (approved, and requests waiting where the asker may '
            'see them), or one person.', {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD', 'person': 'optional'}, leave),
     Lookup('leave_balance', 'hr_agent', 'How many leave days a person has left, by kind.',
