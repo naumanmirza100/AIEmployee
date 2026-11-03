@@ -1,13 +1,11 @@
-"""Regression tests for the Phase-1 funnel hand-off fixes (remediation plan):
+"""Regression tests for the lead research / enrichment work owned in
+`feature/lead-gen` (status doc §4.1 R-items + the auto-enrichment and
+export-all features).
 
-- P2-2 / I-3: a completed meeting converts its lead (funnel's terminal stage).
-- P2-1 / I-2: the public booking-page confirm tells the CRM about the meeting.
-- P2-3 / I-4: auto-researched (Apify) leads are queued for qualification.
-- P2-16:      a successful enrichment re-queues the lead for (re-)scoring.
+NOTE: booking→CRM (S1), meeting→converted (S2) and re-score-after-enrichment
+(§5) belong to the other developer's area and are intentionally NOT changed or
+tested here.
 """
-import contextlib
-import uuid
-from datetime import timedelta
 from unittest import mock
 
 from django.test import override_settings
@@ -16,69 +14,13 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from api.views import ai_sdr_agent as views
 from ai_sdr_agent import tasks
-from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRMeeting
+from ai_sdr_agent.models import SDRIcpProfile, SDRLead
 from ai_sdr_agent.tests import SDRBase
 
 
-class MeetingCompletedConvertsLeadTests(SDRBase):
-    def test_completing_a_meeting_sets_lead_converted(self):
-        lead = self.make_lead('won@acme.com', status='meeting_scheduled')
-        meeting = SDRMeeting.objects.create(
-            company_user=self.cu, lead=lead, status='scheduled',
-            scheduled_at=timezone.now() - timedelta(hours=1), duration_minutes=30,
-        )
-        rf = APIRequestFactory()
-        req = rf.put('/x', {'status': 'completed'}, format='json')
-        force_authenticate(req, user=self.cu)
-        resp = views.sdr_meeting_detail(req, meeting_id=meeting.id)
-        self.assertIn(resp.status_code, (200, 201))
-        lead.refresh_from_db()
-        self.assertEqual(lead.status, 'converted')
-
-    def test_non_completed_transition_does_not_convert(self):
-        lead = self.make_lead('pending@acme.com', status='meeting_scheduled')
-        meeting = SDRMeeting.objects.create(
-            company_user=self.cu, lead=lead, status='scheduled',
-            scheduled_at=timezone.now() + timedelta(days=1), duration_minutes=30,
-        )
-        rf = APIRequestFactory()
-        req = rf.put('/x', {'status': 'no_show'}, format='json')
-        force_authenticate(req, user=self.cu)
-        views.sdr_meeting_detail(req, meeting_id=meeting.id)
-        lead.refresh_from_db()
-        self.assertNotEqual(lead.status, 'converted')
-
-
-class BookingConfirmSyncsToCrmTests(SDRBase):
-    def test_public_booking_confirm_notifies_crm(self):
-        lead = self.make_lead('lead@acme.com')
-        meeting = SDRMeeting.objects.create(
-            company_user=self.cu, lead=lead, status='pending',
-            duration_minutes=30, booking_token=uuid.uuid4(),
-        )
-        future = (timezone.now() + timedelta(days=3)).replace(
-            hour=14, minute=0, second=0, microsecond=0)
-        rf = APIRequestFactory()
-        req = rf.post('/x', {'scheduled_at': future.isoformat()}, format='json')
-
-        # Isolate the slot/work-hour gating + side effects so the test asserts
-        # only the new behavior: a successful confirm calls log_meeting.
-        with mock.patch.object(views, '_in_work_hours', return_value=True), \
-                mock.patch.object(views, '_host_booking', return_value=contextlib.nullcontext()), \
-                mock.patch.object(views, '_give_call_a_link', return_value='https://meet.example/x'), \
-                mock.patch('core.scheduling.sync.safe_sync_id'), \
-                mock.patch('ai_sdr_agent.alerts.call_booked'), \
-                mock.patch('crm_sync_agent.signals.log_meeting') as log_m:
-            resp = views.sdr_booking_confirm(req, token=str(meeting.booking_token))
-
-        meeting.refresh_from_db()
-        self.assertEqual(meeting.status, 'scheduled')
-        log_m.assert_called_once()
-        # The meeting handed to the CRM is the one that was just booked.
-        self.assertEqual(log_m.call_args.args[0].id, meeting.id)
-
-
 class AutoResearchQueuesQualificationTests(SDRBase):
+    """R2: auto-researched (Apify) leads are queued for qualification."""
+
     @override_settings(APIFY_API_TOKEN='tok')
     def test_auto_researched_leads_are_queued_for_qualification(self):
         SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
@@ -98,31 +40,11 @@ class AutoResearchQueuesQualificationTests(SDRBase):
         self.assertIsNotNone(lead.qualification_queued_at)
 
 
-class EnrichRequeuesQualificationTests(SDRBase):
-    def test_successful_enrichment_requeues_for_scoring(self):
-        lead = self.make_lead('scored@acme.com', score=60, temperature='warm',
-                              qualification_status='done')
-        with mock.patch('ai_sdr_agent.agents.enrichment_agent.EnrichmentAgent') as EA:
-            EA.return_value.enrich_lead.return_value = {'status': 'success'}
-            tasks.enrich_lead_impl(lead.id)
-        lead.refresh_from_db()
-        self.assertEqual(lead.qualification_status, 'pending')
-        self.assertIsNotNone(lead.qualification_queued_at)
-
-    def test_failed_enrichment_does_not_requeue(self):
-        lead = self.make_lead('stay@acme.com', score=60, temperature='warm',
-                              qualification_status='done')
-        with mock.patch('ai_sdr_agent.agents.enrichment_agent.EnrichmentAgent') as EA:
-            EA.return_value.enrich_lead.return_value = {'status': 'failed'}
-            tasks.enrich_lead_impl(lead.id)
-        lead.refresh_from_db()
-        self.assertEqual(lead.qualification_status, 'done')
-
-
 class EnrichmentReportsUpdatedFieldsTests(SDRBase):
     """The UI decides 'Enrichment Complete' vs 'No New Data' from the result's
-    top-level `fields_updated`. It was only ever on the run history, so the UI
-    always saw none. Guard that the result exposes it alongside `changes`."""
+    top-level `fields_updated`. Guard that the result exposes it alongside
+    `changes` (it was only on the run history before, so the UI always saw
+    none)."""
 
     def test_enrich_result_lists_fields_it_updated(self):
         from ai_sdr_agent.agents.enrichment_agent import EnrichmentAgent
@@ -141,7 +63,6 @@ class EnrichmentReportsUpdatedFieldsTests(SDRBase):
 
         self.assertIn('fields_updated', res)
         self.assertIn('phone', res['fields_updated'])
-        # The flat list must match the keys of `changes` (the UI's fallback).
         self.assertEqual(sorted(res['fields_updated']), sorted(res['changes'].keys()))
         lead.refresh_from_db()
         self.assertEqual(lead.phone, '+1-555-0100')
@@ -149,11 +70,10 @@ class EnrichmentReportsUpdatedFieldsTests(SDRBase):
 
 class AutoEnrichmentQueueTests(SDRBase):
     """New leads are auto-enriched in the background (enrichment_status queue),
-    mirroring auto-qualification."""
+    mirroring auto-qualification. Enrichment does NOT re-score the lead."""
 
     def test_enrich_queue_drains_pending_and_marks_done(self):
         from ai_sdr_agent.tasks import enrich_queue_impl
-        # A brand-new lead as the create paths make it: queued for BOTH.
         lead = self.make_lead('toenrich@acme.com',
                               enrichment_status='pending', enrichment_queued_at=timezone.now(),
                               qualification_status='pending', qualification_queued_at=timezone.now())
@@ -163,8 +83,7 @@ class AutoEnrichmentQueueTests(SDRBase):
         lead.refresh_from_db()
         self.assertEqual(lead.enrichment_status, 'done')
         self.assertGreaterEqual(r['enriched'], 1)
-        # A new (unscored) lead is NOT double-queued — its one pending
-        # qualification still handles it.
+        # Enrichment must not touch qualification (that stays the other dev's call).
         self.assertEqual(lead.qualification_status, 'pending')
 
     def test_enrich_queue_marks_failed_and_increments_attempts(self):

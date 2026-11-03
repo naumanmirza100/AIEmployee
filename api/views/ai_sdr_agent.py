@@ -2999,12 +2999,6 @@ def sdr_meeting_detail(request, meeting_id):
             new_status = meeting.status
             # Send completion thank-you email when status changes to completed
             if old_status != 'completed' and new_status == 'completed':
-                # Meeting done → the lead has converted. This is the funnel's
-                # terminal stage (read by the analytics funnel); nothing else
-                # writes it, so without this the "Converted" count stays 0.
-                if meeting.lead and meeting.lead.status != 'converted':
-                    meeting.lead.status = 'converted'
-                    meeting.lead.save(update_fields=['status'])
                 try:
                     if meeting.enrollment and meeting.enrollment.campaign:
                         from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
@@ -4061,16 +4055,6 @@ def sdr_booking_confirm(request, token):
     lead = meeting.lead
     lead.status = 'meeting_scheduled'
     lead.save(update_fields=['status'])
-
-    # This is the primary (self-serve) booking path. It claims the slot with
-    # .update() (no post_save signal), so — unlike the dashboard-confirm path —
-    # the CRM sync signal never fires. Tell the CRM explicitly, exactly as the
-    # email-approval path does. log_meeting is idempotent and its guards pass.
-    try:
-        from crm_sync_agent.signals import log_meeting
-        log_meeting(meeting)
-    except Exception as crm_exc:
-        logger.warning("CRM sync of booked meeting %s failed: %s", meeting.id, crm_exc)
 
     # Send confirmation email (calendar_link is already included in the email body)
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
