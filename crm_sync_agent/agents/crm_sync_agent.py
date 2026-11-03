@@ -303,6 +303,8 @@ class CRMSyncAgent:
     }
     #: Read again a little before the last run, so a change saved while that run read is not missed.
     PULL_OVERLAP = timedelta(minutes=2)
+    #: The newest linked contacts asked about per run (HubSpot: 100 a request, so 50 requests at most).
+    PULL_MAX_CONTACTS = 5000
 
     def pull_changes(self, integration: CRMIntegration) -> dict:
         """Names, phone, job title and company corrected in the CRM, copied to the records CRM Sync linked to those
@@ -312,8 +314,14 @@ class CRMSyncAgent:
         from django.apps import apps
         started = timezone.now()
         since = (integration.last_pulled_at or integration.created_at) - self.PULL_OVERLAP
-        rows = self._get_connector(integration).changed_contacts(since)
-        by_id = {str(r['id']): r for r in rows if r.get('id')}
+        # Only the CRM contacts CRM Sync made or linked are asked about. It read every contact changed in the CRM,
+        # the company's own too, and kept ours (3 Nov 2026). With none linked, the CRM isn't asked at all.
+        ours = list(CRMContactMapping.objects.filter(integration=integration, company=self.company,
+                                                     source_type__in=list(self.PULLED))
+                    .order_by('-id').values_list('crm_contact_id', flat=True)[:self.PULL_MAX_CONTACTS])
+        rows = self._get_connector(integration).changed_contacts(since, ours) if ours else []
+        mine = set(ours)
+        by_id = {str(r['id']): r for r in rows if r.get('id') and str(r['id']) in mine}
         counts = {'read': len(rows), 'updated': 0}
         for mapping in CRMContactMapping.objects.filter(integration=integration, company=self.company,
                                                         crm_contact_id__in=list(by_id)):

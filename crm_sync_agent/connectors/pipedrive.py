@@ -16,6 +16,8 @@ from .base import BaseCRMConnector, CRMError, is_blank, network_error
 logger = logging.getLogger(__name__)
 
 PIPEDRIVE_BASE = 'https://api.pipedrive.com/v1'
+# v2's people list is the one that takes ids and updated_since (changed_contacts).
+PIPEDRIVE_V2 = 'https://api.pipedrive.com/api/v2'
 DEFAULT_TIMEOUT = 12
 
 
@@ -214,25 +216,26 @@ class PipedriveConnector(BaseCRMConnector):
                                           'pipeline_id': int(pipeline_id), 'stage_id': int(stage_id)})
         return str(((resp.json() or {}).get('data') or {}).get('id', '')) or None
 
-    def changed_contacts(self, since) -> list:
-        """Pipedrive's Recents for people, since a UTC time, 500 a page, at most 2,000 a run."""
-        out, start = [], 0
-        stamp = _utc(since).strftime('%Y-%m-%d %H:%M:%S')
-        for _ in range(4):
-            body = self._get('/recents', params={'since_timestamp': stamp, 'items': 'person', 'start': start,
-                                                 'limit': 500}).json() or {}
-            for row in body.get('data') or []:
-                person = row.get('data') or {}
-                if row.get('item') != 'person' or not person or person.get('active_flag') is False:
-                    continue
-                out.append({'id': str(person.get('id') or row.get('id')), 'email': _primary(person.get('email')),
-                            'first_name': person.get('first_name') or '', 'last_name': person.get('last_name') or '',
-                            'phone': _primary(person.get('phone')), 'job_title': person.get('job_title') or '',
-                            'company': person.get('org_name') or ''})
-            more = ((body.get('additional_data') or {}).get('pagination') or {}).get('more_items_in_collection')
-            if not more:
-                break
-            start += 500
+    def changed_contacts(self, since, ids) -> list:
+        """Which of our people changed since `since` (Pipedrive's v2 people list takes ids, 100 at a time, and
+        updated_since), then each of those read whole from v1, as before. Tried on a real account, 3 Nov 2026."""
+        ids = [str(i) for i in ids if str(i).isdigit()]
+        stamp = _utc(since).strftime('%Y-%m-%dT%H:%M:%SZ')
+        changed = []
+        for chunk in (ids[i:i + 100] for i in range(0, len(ids), 100)):
+            body = self._get(f'{PIPEDRIVE_V2}/persons', params={'ids': ','.join(chunk), 'updated_since': stamp,
+                                                                'limit': 100}).json() or {}
+            changed += [str(p.get('id')) for p in body.get('data') or [] if p.get('id')]
+        out = []
+        for pid in changed:
+            person = (self._get(f'/persons/{pid}').json() or {}).get('data') or {}
+            if not person or person.get('active_flag') is False:
+                continue
+            org = person.get('org_id')
+            out.append({'id': str(person.get('id') or pid), 'email': _primary(person.get('email')),
+                        'first_name': person.get('first_name') or '', 'last_name': person.get('last_name') or '',
+                        'phone': _primary(person.get('phone')), 'job_title': person.get('job_title') or '',
+                        'company': person.get('org_name') or (org.get('name') if isinstance(org, dict) else '') or ''})
         return out
 
     # ------------------------------------------------------------------ #
@@ -269,7 +272,7 @@ class PipedriveConnector(BaseCRMConnector):
     def _request(self, method: str, path: str, params=None, json=None):
         """The key goes in the x-api-token header, which Pipedrive's v1 API takes for every call. It went in the
         address, and a failed call's message, with the address in it, was saved in the sync log (CO-158)."""
-        url = f'{PIPEDRIVE_BASE}{path}'
+        url = path if path.startswith(PIPEDRIVE_V2) else f'{PIPEDRIVE_BASE}{path}'
         try:
             resp = requests.request(
                 method, url,

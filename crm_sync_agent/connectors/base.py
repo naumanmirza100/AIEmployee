@@ -184,7 +184,10 @@ class BaseCRMConnector(ABC):
 
     # Changes made in the CRM, read back (2 Nov 2026): off until switched on.
 
-    def changed_contacts(self, since) -> list:
-        """Contacts changed in the CRM since `since` (an aware datetime), oldest first:
-        [{"id", "email", "first_name", "last_name", "phone", "job_title", "company"}], blanks as ''."""
+    def changed_contacts(self, since, ids) -> list:
+        """Of the contacts `ids` (CRM ids CRM Sync made or linked), those changed since `since` (an aware datetime):
+        [{"id", "email", "first_name", "last_name", "phone", "job_title", "company"}], blanks as ''.
+
+        Only these ids are asked about. It read every contact changed in the CRM, the company's own included, and
+        kept only ours (3 Nov 2026)."""
         raise CRMError('This CRM cannot say what changed.', retriable=False)
