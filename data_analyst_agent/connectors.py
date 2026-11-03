@@ -126,6 +126,16 @@ def friendly_error(exc) -> str:
     return message
 
 
+_TIMED_OUT = ('statement timeout', 'max_statement_time', 'maximum statement execution time', 'execution was interrupted',
+              'lost connection to mysql server during query')
+
+
+def timed_out(exc) -> bool:
+    """The database stopped the query at our time limit (PostgreSQL, MySQL, MariaDB, or SQLite's progress check)."""
+    text = str(getattr(exc, 'orig', None) or exc).lower()
+    return any(words in text for words in _TIMED_OUT) or text.strip() == 'interrupted'
+
+
 def run(source: DataSource, sql: str, max_rows: int = MAX_ROWS) -> dict:
     """Run one already-checked query read-only. {"columns", "rows", "truncated", "duration_ms"}."""
     engine = _engine(source)

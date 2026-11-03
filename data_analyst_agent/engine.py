@@ -35,6 +35,9 @@ CHOOSE_LIST_CHARS = 20000
 ROWS_TO_AI = 100
 ROWS_TO_SCREEN = 200
 HISTORY_TURNS = 6
+# The site's web server cuts a request at 60 seconds. A query stopped at the time limit isn't tried again, and another
+# try is made only while it still fits: two 30-second queries came to 66 seconds and the screen got an error page.
+ASK_SECONDS = 50
 
 _Fact = namedtuple('_Fact', 'text')
 _THOUSANDS = re.compile(r'(?<=\d)[,  ](?=\d{3}(?!\d))')
@@ -202,7 +205,7 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
         raise Refused('Test this database first, so its tables are known.')
     history = _history(conversation, source)
     tables = _choose_tables(ai, source, question, history)
-    attempt, result, sql, previous = 0, None, '', ''
+    attempt, result, sql, previous, too_long = 0, None, '', '', False
     while attempt < 2:
         attempt += 1
         written = _write_sql(ai, source, question, history, tables, previous)
@@ -221,12 +224,18 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
             raise
         except Exception as exc:          # the database's own error: a wrong column, a type, a timeout
             reason = connectors.friendly_error(exc)
+            if connectors.timed_out(exc):
+                too_long = True
         sql = written['sql']
         previous = f'\nYour last query was:\n{sql[:1500]}\nIt failed: {reason}\nWrite a corrected one.\n'
         logger.info('data analyst: query %s failed (%s): %s', attempt, source.kind, reason[:200])
+        if too_long or time.monotonic() - started + connectors.QUERY_TIMEOUT + 10 > ASK_SECONDS:
+            break
     if result is None:
         record.status, record.sql, record.error = DataQuestion.STATUS_FAILED, sql, reason
-        record.answer = f'The query could not be run: {reason}'
+        record.answer = (f'The query took longer than {connectors.QUERY_TIMEOUT} seconds, the most a question may take, '
+                         'so the database stopped it. Ask about a smaller part, such as one period or one group.'
+                         if too_long else f'The query could not be run: {reason}')
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.save()
         return _reply(record, rows=[])
