@@ -35,7 +35,8 @@ MAX_FACTS = 120
 AGENT_NAMES = {'project_manager_agent': 'Project Manager', 'hr_agent': 'HR', 'frontline_agent': 'Frontline',
                'recruitment_agent': 'Recruitment', 'exec_meeting_agent': 'Executive Meeting',
                'operations_agent': 'Operations', 'marketing_agent': 'Marketing', 'ai_sdr_agent': 'AI SDR',
-               'reply_draft_agent': 'Reply Draft', 'crm_sync_agent': 'CRM Sync'}
+               'reply_draft_agent': 'Reply Draft', 'crm_sync_agent': 'CRM Sync',
+               'data_analyst_agent': 'Data Analyst'}
 #: The agents version 1 reads. The others' questions are answered with what they need, plainly.
 #: The agents the lookups read: all of them since phase 2 (2 Nov 2026). An agent added later and not here is said
 #: plainly to be one the assistant can't read yet.

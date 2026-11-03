@@ -45,6 +45,9 @@ pytesseract==0.3.13
 
 # Database / ORM
 SQLAlchemy==2.0.46
+# AI Data Analyst: the SQL check (sqlglot) and the PostgreSQL driver for companies' databases
+sqlglot==26.17.1
+psycopg[binary]==3.2.9
 
 # Celery & Redis
 celery==5.3.4
