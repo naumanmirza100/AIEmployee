@@ -21,7 +21,8 @@ from django.core.validators import validate_email
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
@@ -1047,7 +1048,23 @@ def research_lead_endpoint(request, lead_id):
     # tab returns the finished profile or a "running" answer instead of paying for the research twice.
     from ai_sdr_agent.tasks import research_lead_impl
     campaign_id = request.data.get('campaign_id')
-    result = research_lead_impl(lead.id, campaign_id=campaign_id, force=bool(request.data.get('force', False)))
+    force = bool(request.data.get('force', False))
+
+    # R1: research can take ~47 s per lead — past nginx's 60 s, and it starves the
+    # single API worker. Run it in the background (like enrichment) and let the
+    # screen poll the GET side of this endpoint for `research_status`.
+    if bool(request.data.get('async', False)):
+        from ai_sdr_agent.tasks import research_lead_task
+        task = research_lead_task.delay(lead.id, campaign_id=campaign_id, force=force)
+        return Response({
+            'status': 'queued',
+            'lead_id': lead.id,
+            'task_id': task.id,
+            'research_status': 'running',
+            'message': 'Research job queued in background.',
+        })
+
+    result = research_lead_impl(lead.id, campaign_id=campaign_id, force=force)
     if result['status'] == 'already_running':
         return Response({'status': 'error', 'message': 'Research is already running for this lead.'}, status=409)
     if result['status'] not in ('success', 'already_completed'):
@@ -1081,12 +1098,22 @@ def research_leads_batch_endpoint(request):
     if not owned_ids:
         return Response({'status': 'error', 'message': 'No matching leads found.'}, status=404)
 
+    campaign_id = request.data.get('campaign_id')
+    force = bool(request.data.get('force', False))
+
+    # R1: a batch of up to 50 leads at ~47 s each cannot run in one request.
+    if bool(request.data.get('async', False)):
+        from ai_sdr_agent.tasks import research_leads_batch_task
+        task = research_leads_batch_task.delay(owned_ids, campaign_id=campaign_id, force=force)
+        return Response({
+            'status': 'queued',
+            'lead_count': len(owned_ids),
+            'task_id': task.id,
+            'message': f'{len(owned_ids)} leads queued for background research.',
+        })
+
     from ai_sdr_agent.tasks import research_leads_batch_impl
-    batch = research_leads_batch_impl(
-        owned_ids,
-        campaign_id=request.data.get('campaign_id'),
-        force=bool(request.data.get('force', False)),
-    )
+    batch = research_leads_batch_impl(owned_ids, campaign_id=campaign_id, force=force)
     return Response({'status': 'success', **batch})
 
 
@@ -3824,9 +3851,32 @@ def sdr_agent_settings(request):
 # Public booking endpoints — no auth required (token in URL acts as auth)
 # ==========================================================================
 
+# S8: the booking link is public and had no limits — throttle it by IP and give
+# it a lifetime so a stale or guessed token can't be hammered or used forever.
+BOOKING_LINK_TTL_DAYS = 30
+
+
+class BookingThrottle(AnonRateThrottle):
+    """Rate-limit the public booking endpoints by IP (S8)."""
+    scope = 'sdr_booking'
+
+    def get_rate(self):
+        return '30/min'
+
+
+def _booking_link_expired(meeting) -> bool:
+    """A still-unbooked booking link older than its TTL is expired. Already
+    booked/confirmed links stay viewable."""
+    if meeting.status not in ('pending', 'awaiting_approval'):
+        return False
+    created = meeting.created_at or timezone.now()
+    return created < timezone.now() - timedelta(days=BOOKING_LINK_TTL_DAYS)
+
+
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([])
+@throttle_classes([BookingThrottle])
 def sdr_booking_info(request, token):
     """Return public meeting info for the lead's booking page (no auth)."""
     from ai_sdr_agent.models import SDRMeeting
@@ -3836,6 +3886,10 @@ def sdr_booking_info(request, token):
         )
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
+
+    if _booking_link_expired(meeting):
+        return Response({'error': 'expired',
+                         'message': 'This booking link has expired. Please ask for a new one.'}, status=410)
 
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
 
@@ -3950,6 +4004,7 @@ def _give_call_a_link(meeting):
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([])
+@throttle_classes([BookingThrottle])
 def sdr_booking_confirm(request, token):
     """Lead submits their chosen time. Sets scheduled_at, marks meeting scheduled."""
     from ai_sdr_agent.models import SDRMeeting
@@ -3959,6 +4014,10 @@ def sdr_booking_confirm(request, token):
         ).get(booking_token=token)
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
+
+    if _booking_link_expired(meeting):   # S8
+        return Response({'error': 'expired',
+                         'message': 'This booking link has expired. Please ask for a new one.'}, status=410)
 
     if meeting.status not in ('pending', 'awaiting_approval'):
         return Response({
@@ -4055,6 +4114,16 @@ def sdr_booking_confirm(request, token):
     lead = meeting.lead
     lead.status = 'meeting_scheduled'
     lead.save(update_fields=['status'])
+
+    # S1: the public booking page claims the slot with .update() (no post_save
+    # signal), so the CRM sync signal never fires — the call would otherwise
+    # reach the CRM only at its reminder. Tell the CRM now, as the email-approval
+    # path does. log_meeting is idempotent and its guards already pass here.
+    try:
+        from crm_sync_agent.signals import log_meeting
+        log_meeting(meeting)
+    except Exception as crm_exc:
+        logger.warning("CRM sync of booked meeting %s failed: %s", meeting.id, crm_exc)
 
     # Send confirmation email (calendar_link is already included in the email body)
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None

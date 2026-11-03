@@ -382,7 +382,6 @@ const SDROutreachTab = () => {
 
   const [loading, setLoading] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [processing, setProcessing] = useState(false);
   const [generatingSteps, setGeneratingSteps] = useState(false);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -620,24 +619,6 @@ const SDROutreachTab = () => {
   };
 
   // ── Process outreach ──────────────────────────────────────────────────
-  const handleProcess = async () => {
-    setProcessing(true);
-    try {
-      const resp = await processOutreach(selectedCampaign.id);
-      const hasErrors = resp.failed > 0 && resp.errors?.length > 0;
-      toast({
-        title: `Processed ${resp.processed} enrollment${resp.processed !== 1 ? 's' : ''}`,
-        description: hasErrors
-          ? `Sent: ${resp.sent} | Failed: ${resp.failed} | Skipped: ${resp.skipped}\nError: ${resp.errors[0]}`
-          : `Sent: ${resp.sent} | Skipped: ${resp.skipped} | Failed: ${resp.failed}`,
-        variant: hasErrors ? 'destructive' : 'default',
-      });
-      await loadDetail(selectedCampaign);
-    } catch (e) {
-      toast({ title: 'Process failed', description: apiErrorMessage(e, 'Failed to process outreach'), variant: 'destructive' });
-    } finally { setProcessing(false); }
-  };
-
   // ── Pause / Resume campaign ──────────────────────────────────────────
   const handlePauseResume = async () => {
     if (!selectedCampaign) return;
@@ -969,7 +950,7 @@ const SDROutreachTab = () => {
                 </div>
                 <p style={{ color: '#6b7280', fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
                   Sequence runs Day 1 (email) → Day 3 (LinkedIn) → Day 5 (follow-up) → Day 10 (last touch).
-                  Background workers send each step automatically — no need to click "Process Now".
+                  Background workers send each step automatically.
                 </p>
               </div>
 

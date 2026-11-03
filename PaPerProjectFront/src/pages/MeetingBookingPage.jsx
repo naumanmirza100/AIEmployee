@@ -347,7 +347,7 @@ export default function MeetingBookingPage() {
 
         <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, lineHeight: 1.65, marginBottom: 28 }}>
           Hi <strong style={{ color: 'var(--text-soft)' }}>{info.lead_first_name || info.lead_name}</strong>,
-          please pick a date and time below. Once you confirm, you'll receive a calendar invite.
+          please pick a date and time below. Once you confirm, you'll receive a confirmation email with the meeting details and link.
         </p>
         <p data-testid="booking-zone" style={{ color: '#6b7280', fontSize: 12, margin: '-18px 0 22px' }}>
           Times are shown in your time zone ({LEAD_ZONE}).

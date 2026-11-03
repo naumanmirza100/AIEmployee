@@ -6,6 +6,9 @@ NOTE: booking→CRM (S1), meeting→converted (S2) and re-score-after-enrichment
 (§5) belong to the other developer's area and are intentionally NOT changed or
 tested here.
 """
+import contextlib
+import uuid
+from datetime import timedelta
 from unittest import mock
 
 from django.test import override_settings
@@ -14,7 +17,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from api.views import ai_sdr_agent as views
 from ai_sdr_agent import tasks
-from ai_sdr_agent.models import SDRIcpProfile, SDRLead
+from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRMeeting
 from ai_sdr_agent.tests import SDRBase
 
 
@@ -136,3 +139,166 @@ class LeadsExportAllTests(SDRBase):
         body = self._csv({})
         self.assertIn('mine@acme.com', body)
         self.assertNotIn('leak@other.com', body)    # no cross-company leak
+
+
+class BookingConfirmSyncsToCrmTests(SDRBase):
+    """S1: the public booking-page confirm tells the CRM about the meeting."""
+
+    def test_public_booking_confirm_notifies_crm(self):
+        lead = self.make_lead('lead@acme.com')
+        meeting = SDRMeeting.objects.create(
+            company_user=self.cu, lead=lead, status='pending',
+            duration_minutes=30, booking_token=uuid.uuid4(),
+        )
+        future = (timezone.now() + timedelta(days=3)).replace(
+            hour=14, minute=0, second=0, microsecond=0)
+        req = APIRequestFactory().post('/x', {'scheduled_at': future.isoformat()}, format='json')
+        with mock.patch.object(views, '_in_work_hours', return_value=True), \
+                mock.patch.object(views, '_host_booking', return_value=contextlib.nullcontext()), \
+                mock.patch.object(views, '_give_call_a_link', return_value='https://meet.example/x'), \
+                mock.patch('core.scheduling.sync.safe_sync_id'), \
+                mock.patch('ai_sdr_agent.alerts.call_booked'), \
+                mock.patch('crm_sync_agent.signals.log_meeting') as log_m:
+            views.sdr_booking_confirm(req, token=str(meeting.booking_token))
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, 'scheduled')
+        log_m.assert_called_once()
+        self.assertEqual(log_m.call_args.args[0].id, meeting.id)
+
+
+class ResearchAsyncTests(SDRBase):
+    """R1: per-lead research endpoints run in the background on async=true
+    (queued via the task) instead of blocking the request."""
+
+    def test_single_research_async_queues_and_does_not_run_sync(self):
+        lead = self.make_lead('r@acme.com')
+        req = APIRequestFactory().post('/x', {'async': True, 'force': True}, format='json')
+        force_authenticate(req, user=self.cu)
+        fake_task = mock.MagicMock(id='task-123')
+        with mock.patch('ai_sdr_agent.tasks.research_lead_task.delay', return_value=fake_task) as delay, \
+                mock.patch('ai_sdr_agent.tasks.research_lead_impl') as impl:
+            resp = views.research_lead_endpoint(req, lead_id=lead.id)
+        self.assertEqual(resp.data['status'], 'queued')
+        self.assertEqual(resp.data['task_id'], 'task-123')
+        delay.assert_called_once()
+        impl.assert_not_called()   # did NOT run inside the request
+
+    def test_single_research_sync_still_works(self):
+        lead = self.make_lead('r2@acme.com')
+        req = APIRequestFactory().post('/x', {'force': True}, format='json')
+        force_authenticate(req, user=self.cu)
+        with mock.patch('ai_sdr_agent.tasks.research_lead_impl',
+                        return_value={'status': 'success', 'profile': {'research_status': 'completed'}}) as impl:
+            resp = views.research_lead_endpoint(req, lead_id=lead.id)
+        self.assertEqual(resp.data['status'], 'success')
+        impl.assert_called_once()
+
+    def test_batch_research_async_queues(self):
+        l1 = self.make_lead('b1@acme.com')
+        l2 = self.make_lead('b2@acme.com')
+        req = APIRequestFactory().post('/x', {'lead_ids': [l1.id, l2.id], 'async': True}, format='json')
+        force_authenticate(req, user=self.cu)
+        fake_task = mock.MagicMock(id='batch-1')
+        with mock.patch('ai_sdr_agent.tasks.research_leads_batch_task.delay', return_value=fake_task) as delay, \
+                mock.patch('ai_sdr_agent.tasks.research_leads_batch_impl') as impl:
+            resp = views.research_leads_batch_endpoint(req)
+        self.assertEqual(resp.data['status'], 'queued')
+        self.assertEqual(resp.data['lead_count'], 2)
+        delay.assert_called_once()
+        impl.assert_not_called()
+
+
+class ContactVerifierMxTests(SDRBase):
+    """R3: a domain with no A/AAAA record (possibly MX-only) is RISKY, not
+    INVALID — so a legitimate email on a receive-only domain isn't dropped."""
+
+    def test_no_a_record_is_risky_not_invalid(self):
+        import socket
+        from ai_sdr_agent.agents.contact_verifier import verify_email
+        from ai_sdr_agent.agents.enrichment_contract import VerificationStatus
+        with mock.patch('socket.getaddrinfo', side_effect=socket.gaierror('no A record')):
+            res = verify_email('ceo@mail-only.acme-corp.net', check_dns=True)
+        self.assertEqual(res['status'], VerificationStatus.RISKY)
+        self.assertTrue(res['is_valid'])   # not dropped
+
+
+class BadKeyTerminalTests(SDRBase):
+    """S3: a rejected AI key fails the lead (terminal), not endless 'pending';
+    a quota error stays transient (retried)."""
+
+    def _run_with(self, exc):
+        SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
+        lead = self.make_lead('k@acme.com', qualification_status='pending',
+                              qualification_queued_at=timezone.now())
+        fake_agent = mock.MagicMock()
+        fake_agent.qualify_lead.side_effect = exc
+        with mock.patch('api.views.ai_sdr_agent._get_qualification_agent', return_value=fake_agent):
+            tasks.qualify_queue_impl()
+        lead.refresh_from_db()
+        return lead
+
+    def test_bad_api_key_fails_lead(self):
+        from core.api_key_service import BadAPIKey
+        lead = self._run_with(BadAPIKey())
+        self.assertEqual(lead.qualification_status, 'failed')
+        self.assertEqual(lead.qualification_attempts, 3)   # QUALIFY_MAX_ATTEMPTS
+
+    def test_quota_error_stays_pending(self):
+        from core.api_key_service import QuotaExhausted
+        lead = self._run_with(QuotaExhausted())
+        self.assertEqual(lead.qualification_status, 'pending')   # transient, retried
+
+
+class BookingLinkExpiryTests(SDRBase):
+    """S8: an unbooked booking link older than its TTL is rejected (410)."""
+
+    def test_expired_link_is_rejected(self):
+        lead = self.make_lead('exp@acme.com')
+        meeting = SDRMeeting.objects.create(
+            company_user=self.cu, lead=lead, status='pending',
+            duration_minutes=30, booking_token=uuid.uuid4())
+        # Age the link well past the TTL (created_at is auto, so update directly).
+        SDRMeeting.objects.filter(pk=meeting.pk).update(
+            created_at=timezone.now() - timedelta(days=60))
+        req = APIRequestFactory().get('/x')
+        resp = views.sdr_booking_info(req, token=str(meeting.booking_token))
+        self.assertEqual(resp.status_code, 410)
+
+    def test_fresh_link_still_works(self):
+        lead = self.make_lead('fresh@acme.com')
+        meeting = SDRMeeting.objects.create(
+            company_user=self.cu, lead=lead, status='pending',
+            duration_minutes=30, booking_token=uuid.uuid4())
+        req = APIRequestFactory().get('/x')
+        resp = views.sdr_booking_info(req, token=str(meeting.booking_token))
+        self.assertEqual(resp.status_code, 200)
+
+
+class ScoreReconcileTests(SDRBase):
+    """C1: the AI score is always reconciled to the breakdown sum, so the number
+    and the bars can't disagree (previously only when they differed by >10)."""
+
+    def test_ai_score_reconciled_to_breakdown(self):
+        import json
+        from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
+        icp = SDRIcpProfile.objects.create(
+            company_user=self.cu, is_active=True, hot_threshold=75, warm_threshold=60)
+        lead = self.make_lead('rec@acme.com')
+        # AI returns score=85 but a breakdown that sums to 76 (gap 9 — within the
+        # old 10 tolerance, so it used to stay 85).
+        content = json.dumps({
+            'score': 85, 'temperature': 'hot',
+            'breakdown': {'company_quality': 30, 'contact_quality': 20, 'business_fit': 10,
+                          'engagement_signals': 6, 'data_completeness': 10},
+            'reasoning': 'x', 'key_strengths': [], 'concerns': [], 'outreach_strategy': 'y',
+        })
+        fake_resp = mock.MagicMock()
+        fake_resp.choices = [mock.MagicMock(message=mock.MagicMock(content=content))]
+        fake_resp.usage = mock.MagicMock(total_tokens=100)
+        agent = LeadQualificationAgent(company=None)
+        agent.groq_client = mock.MagicMock()
+        agent.groq_client.chat.completions.create.return_value = fake_resp
+        with mock.patch('ai_sdr_agent.agents.sdr_key_resolver.record_sdr_usage'):
+            res = agent.qualify_lead(lead, icp)
+        self.assertEqual(res['score'], 76)                       # reconciled, not 85
+        self.assertEqual(sum(res['score_breakdown'].values()), 76)

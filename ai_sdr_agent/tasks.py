@@ -822,10 +822,16 @@ def enrich_lead_impl(lead_id: int, force: bool = False) -> dict:
     try:
         sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
         apollo_key = (sdr_settings.apollo_api_key or None) if sdr_settings else None
+        # R4: wire Hunter from a setting so the provider actually runs when a key
+        # is configured (previously the agent was built with Apollo only, so the
+        # Hunter provider was never given a key and never used).
+        from django.conf import settings as dj_settings
+        hunter_key = getattr(dj_settings, 'HUNTER_API_KEY', None) or None
         agent = EnrichmentAgent(
             company=company,
             company_user=company_user,
             apollo_api_key=apollo_key,
+            hunter_api_key=hunter_key,
         )
         res = agent.enrich_lead(lead, force=force)
 
@@ -972,7 +978,7 @@ def qualify_queue_impl():
     """
     from django.db.models import Q as _Q
     from ai_sdr_agent.models import SDRLead, SDRIcpProfile
-    from core.api_key_service import KeyServiceError
+    from core.api_key_service import KeyServiceError, BadAPIKey
     from api.views.ai_sdr_agent import _get_qualification_agent
 
     from django.db.models import Min
@@ -1054,6 +1060,17 @@ def qualify_queue_impl():
             lead.qualification_error = ''
             lead.save()
             qualified += 1
+        except BadAPIKey as exc:
+            # S3: a wrong/invalid key never clears on its own, so retrying it
+            # forever as "tokens exhausted" strands the lead. Fail it for good.
+            lead.qualification_status = 'failed'
+            lead.qualification_attempts = QUALIFY_MAX_ATTEMPTS
+            lead.qualification_error = ('AI key was rejected — check the API key. ' + str(exc))[:500]
+            lead.save(update_fields=[
+                'qualification_status', 'qualification_attempts', 'qualification_error', 'updated_at'])
+            blocked_companies.add(cu_id)   # this company's key is bad for the whole tick
+            failed += 1
+            logger.warning("SDR qualify-queue: bad AI key for company_user=%s: %s", cu_id, exc)
         except KeyServiceError as exc:
             # Tokens/key exhausted for this company — leave the lead pending and
             # stop touching this company for the rest of the tick.

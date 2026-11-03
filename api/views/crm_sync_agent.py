@@ -65,7 +65,6 @@ def _serialize_integration(integration: CRMIntegration, request=None) -> dict:
         'key_refused_at': integration.key_refused_at,
         'missing_permission': integration.missing_permission,
         'waiting': CRMSyncQueue.objects.filter(integration=integration, status=CRMSyncQueue.STATUS_WAITING).count(),
-        'field_mappings': integration.field_mappings,
         'sync_contacts': integration.sync_contacts,
         'sync_emails': integration.sync_emails,
         'sync_meetings': integration.sync_meetings,
@@ -164,7 +163,6 @@ def integrations_list(request):
     integration = CRMIntegration(
         company=company,
         provider=provider,
-        field_mappings=data.get('field_mappings', {}),
         sync_contacts=data.get('sync_contacts', True),
         sync_emails=data.get('sync_emails', True),
         sync_meetings=data.get('sync_meetings', True),
@@ -227,8 +225,6 @@ def integration_detail(request, integration_id: int):
             integration.missing_permission = ''
             from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
             CRMSyncAgent.release_waiting(integration)
-    if 'field_mappings' in data:
-        integration.field_mappings = data['field_mappings']
     for flag in ('sync_contacts', 'sync_emails', 'sync_meetings', 'sync_notes', 'sync_support', 'sync_marketing',
                  'sync_back', 'is_active'):
         if flag in data:

@@ -6,7 +6,6 @@ Implements the BaseEnrichmentProvider interface:
   - ApolloEnrichmentProvider
   - HunterEnrichmentProvider
   - PublicWebEnrichmentProvider
-  - MockEnrichmentProvider (for deterministic tests)
 """
 
 import abc
@@ -335,46 +334,4 @@ class PublicWebEnrichmentProvider(BaseEnrichmentProvider):
             max_pages=5,
         )
         return enriched
-
-
-class MockEnrichmentProvider(BaseEnrichmentProvider):
-    """Deterministic mock provider for unit and integration testing."""
-
-    def __init__(
-        self,
-        name: str = "mock",
-        priority: int = 70,
-        mock_data: Optional[Dict[str, Any]] = None,
-        should_fail: bool = False,
-        supported_fields: Optional[Set[str]] = None,
-    ):
-        self.name = name
-        self.priority = priority
-        self.mock_data = mock_data or {}
-        self.should_fail = should_fail
-        self.supported_fields = supported_fields or set(self.mock_data.keys())
-
-    def is_configured(self) -> bool:
-        return True
-
-    def enrich(
-        self,
-        lead_data: Dict[str, Any],
-        missing_fields: Set[str],
-    ) -> Dict[str, FieldProvenance]:
-        if self.should_fail:
-            raise RuntimeError(f"Mock provider {self.name} failed")
-
-        results: Dict[str, FieldProvenance] = {}
-        for f in missing_fields & self.supported_fields:
-            if f in self.mock_data:
-                val = self.mock_data[f]
-                results[f] = FieldProvenance(
-                    field_name=f,
-                    value=val,
-                    source=self.name,
-                    confidence=80,
-                    verification_status=VerificationStatus.UNVERIFIED,
-                )
-        return results
 

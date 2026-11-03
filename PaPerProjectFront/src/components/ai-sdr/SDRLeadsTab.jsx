@@ -965,8 +965,35 @@ const SDRLeadsTab = () => {
     if (!lead) return;
     setResearchingId(lead.id);
     try {
-      const resp = await researchLead(lead.id, { force: true });
-      const data = resp?.data || resp;
+      const startResp = await researchLead(lead.id, { force: true, async: true });
+      const started = startResp?.data || startResp;
+
+      // R1: research now runs in the background (it can take ~47 s). Poll the GET
+      // side of the endpoint for research_status until it finishes.
+      let data = started;
+      if (started?.status === 'queued') {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const TERMINAL = ['completed', 'partial', 'failed'];
+        data = null;
+        for (let i = 0; i < 60; i++) {          // ~3 min at 3s/poll
+          await sleep(3000);
+          let pollResp;
+          try { pollResp = await getLeadResearch(lead.id); } catch (_) { continue; }
+          const p = pollResp?.data || pollResp;
+          if (TERMINAL.includes(p?.research_status)) { data = p; break; }
+        }
+        if (!data) {
+          toast({ title: 'Still researching…', description: 'Taking a while — it keeps running in the background; refresh shortly.' });
+          loadLeads();
+          return;
+        }
+      }
+
+      if (data?.research_status === 'failed') {
+        toast({ title: 'Research failed', description: 'Could not complete research for this lead.', variant: 'destructive' });
+        return;
+      }
+
       toast({
         title: 'Research Complete',
         description: `Intelligence gathered for ${lead.company_name || lead.full_name || 'lead'}`,

@@ -620,15 +620,6 @@ export const sendSdrDailySummary = async () => {
   }
 };
 
-export const generatePersonalizedEmail = async (data) => {
-  try {
-    return await companyApi.post('/sdr/emails/generate/', data);
-  } catch (error) {
-    console.error('Generate email error:', error);
-    throw error;
-  }
-};
-
 // --------------------------------------------------------------------------
 // Public booking (no auth — token from URL)
 // --------------------------------------------------------------------------

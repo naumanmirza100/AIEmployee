@@ -31,9 +31,6 @@ class CRMIntegration(models.Model):
     # before encryption hold the plain values and are still read.
     credentials = models.JSONField(default=dict)
 
-    # Optional per-integration field mappings: {"internal_field": "crm_field_name"}
-    field_mappings = models.JSONField(default=dict)
-
     #: Credential fields that say where to sign in, not how; shown as they are.
     NOT_SECRET = ('domain', 'username', 'instance_url')
 
