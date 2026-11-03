@@ -18,6 +18,7 @@ import { getAgentNavItems } from '@/utils/agentNavItems';
 import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
 import { getAdminNavItems } from '@/utils/adminNavItems';
 import { useAuth } from '@/contexts/AuthContext';
+import { pageLogin } from '@/utils/pageLogin';
 
 /**
  * Full-page notification list.
@@ -126,10 +127,12 @@ const NotificationsPage = () => {
   const [search, setSearch] = useState('');
   const [readFilter, setReadFilter] = useState('all');
 
-  // Same endpoint selection as DashboardNavbar.
-  const isCompanyUser = !!localStorage.getItem('company_auth_token');
-  const authToken = localStorage.getItem('auth_token') || localStorage.getItem('company_auth_token');
-  const isPM = isCompanyUser && !localStorage.getItem('auth_token');
+  // Same login as DashboardNavbar: the page's area decides (utils/pageLogin). /notifications is the
+  // company's when a company login is there; the admin's copy is /admin/notifications.
+  const login = pageLogin();
+  const isCompanyUser = login.kind === 'company';
+  const authToken = login.token;
+  const isPM = isCompanyUser;
   const notifEndpoint = isPM
     ? `${API_BASE_URL}/company/notifications`
     : `${API_BASE_URL}/notifications`;
@@ -143,7 +146,7 @@ const NotificationsPage = () => {
   // the label "Admin". Who is an admin is asked of the session, and an
   // employee is sent to their own notifications page.
   const { logout: adminLogout, user: adminUser, isAdmin, loading: authLoading } = useAuth();
-  const signedInAsUser = !isCompanyUser && !!localStorage.getItem('auth_token');
+  const signedInAsUser = login.kind === 'other';
   const isAdminUser = signedInAsUser && !authLoading && !!isAdmin();
   useEffect(() => {
     if (signedInAsUser && !authLoading && !isAdmin()) navigate('/me/notifications', { replace: true });

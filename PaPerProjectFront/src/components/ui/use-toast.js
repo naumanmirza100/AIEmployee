@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react"
 import { withSeverity } from "@/utils/messageSeverity"
 import { ToastAction } from "@/components/ui/toast"
+import { pageLogin } from "@/utils/pageLogin"
 
 const TOAST_LIMIT = 1
 
@@ -44,7 +45,7 @@ function withKeysLink(props) {
   const text = typeof props.description === 'string' ? props.description : ''
   if (!/API Keys/i.test(text)) return props
   let isCompanyLogin = false
-  try { isCompanyLogin = !!localStorage.getItem('company_auth_token') && !localStorage.getItem('auth_token') } catch { /* no storage */ }
+  isCompanyLogin = pageLogin().kind === 'company'
   const title = /free AI allowance/i.test(text) && /^\s*(error|warning|oops)[!.]?\s*$/i.test(String(props.title || ''))
     ? 'Free AI allowance used up' : props.title
   if (!isCompanyLogin || props.action || window.location.pathname.startsWith(API_KEYS_PAGE)) return { ...props, title }
