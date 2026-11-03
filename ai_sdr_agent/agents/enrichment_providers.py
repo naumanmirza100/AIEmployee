@@ -10,9 +10,7 @@ Implements the BaseEnrichmentProvider interface:
 
 import abc
 import logging
-import time
-from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlparse
+from typing import Any, Dict, Optional, Set
 
 import requests
 
