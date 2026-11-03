@@ -212,6 +212,13 @@ def _normalize_lead_list(val) -> list:
 
 def _serialize_lead(lead: SDRLead) -> dict:
     raw = lead.raw_data if isinstance(lead.raw_data, dict) else {}
+    # Enrichment lifecycle is now a model field (none/pending/processing/done/
+    # failed). Fall back to the raw_data outcome for leads enriched before the
+    # field existed, so their button still reads "Re-enrich".
+    _enr = raw.get('enrichment') if isinstance(raw.get('enrichment'), dict) else {}
+    enr_status = lead.enrichment_status
+    if enr_status in ('none', '') and _enr.get('status') in ('completed', 'partial'):
+        enr_status = 'done'
     return {
         'id': lead.id,
         'full_name': lead.display_name,
@@ -249,7 +256,7 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'source': lead.source,
         'research_status': raw.get('research_status', 'none'),
         'research_profile': raw.get('research_profile'),
-        'enrichment_status': (raw.get('enrichment') or {}).get('status', 'none') if isinstance(raw.get('enrichment'), dict) else 'none',
+        'enrichment_status': enr_status,
         'enrichment_contract': raw.get('enrichment') if isinstance(raw.get('enrichment'), dict) else None,
         'personal_email': (raw.get('enrichment') or {}).get('personal_email', '') if isinstance(raw.get('enrichment'), dict) else '',
         'qualified_at': lead.qualified_at.isoformat() if lead.qualified_at else None,
@@ -478,6 +485,9 @@ def leads_list(request):
             # scored automatically like research/CSV leads.
             qualification_status='pending',
             qualification_queued_at=timezone.now(),
+            # Auto-enrich new leads in the background too (contact/company fields).
+            enrichment_status='pending',
+            enrichment_queued_at=timezone.now(),
         )
         return Response({'status': 'success', 'data': _serialize_lead(lead)}, status=201)
     except KeyServiceError:
@@ -787,6 +797,10 @@ def _execute_research_job(job_id):
         queued = SDRLead.objects.filter(
             pk__in=created_ids, score__isnull=True, qualification_status='none',
         ).update(qualification_status='pending', qualification_queued_at=timezone.now())
+
+        # Auto-enrich the newly discovered leads in the background too.
+        SDRLead.objects.filter(pk__in=created_ids, enrichment_status='none').update(
+            enrichment_status='pending', enrichment_queued_at=timezone.now())
 
         params['skipped_duplicates'] = skipped_dupes
         params['leads_queued'] = queued
@@ -1198,6 +1212,8 @@ def fetch_apify_leads(request):
                 # AI token limits. The scheduler drains the queue in small batches.
                 qualification_status='pending',
                 qualification_queued_at=timezone.now(),
+                enrichment_status='pending',
+                enrichment_queued_at=timezone.now(),
             )
             created += 1
 
@@ -1350,6 +1366,8 @@ def import_leads_csv(request):
                     # scored automatically instead of sitting permanently unscored.
                     qualification_status='pending',
                     qualification_queued_at=timezone.now(),
+                    enrichment_status='pending',
+                    enrichment_queued_at=timezone.now(),
                 )
                 created += 1
             except KeyServiceError:
@@ -2893,6 +2911,12 @@ def sdr_meeting_detail(request, meeting_id):
             new_status = meeting.status
             # Send completion thank-you email when status changes to completed
             if old_status != 'completed' and new_status == 'completed':
+                # Meeting done → the lead has converted. This is the funnel's
+                # terminal stage (read by the analytics funnel); nothing else
+                # writes it, so without this the "Converted" count stays 0.
+                if meeting.lead and meeting.lead.status != 'converted':
+                    meeting.lead.status = 'converted'
+                    meeting.lead.save(update_fields=['status'])
                 try:
                     if meeting.enrollment and meeting.enrollment.campaign:
                         from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
@@ -3949,6 +3973,16 @@ def sdr_booking_confirm(request, token):
     lead = meeting.lead
     lead.status = 'meeting_scheduled'
     lead.save(update_fields=['status'])
+
+    # This is the primary (self-serve) booking path. It claims the slot with
+    # .update() (no post_save signal), so — unlike the dashboard-confirm path —
+    # the CRM sync signal never fires. Tell the CRM explicitly, exactly as the
+    # email-approval path does. log_meeting is idempotent and its guards pass.
+    try:
+        from crm_sync_agent.signals import log_meeting
+        log_meeting(meeting)
+    except Exception as crm_exc:
+        logger.warning("CRM sync of booked meeting %s failed: %s", meeting.id, crm_exc)
 
     # Send confirmation email (calendar_link is already included in the email body)
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None

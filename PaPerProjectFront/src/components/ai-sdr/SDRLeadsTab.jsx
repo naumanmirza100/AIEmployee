@@ -888,7 +888,11 @@ const SDRLeadsTab = () => {
     try {
       const resp = await enrichLead(lead.id, { force: true });
       const data = resp?.data || resp;
-      const updatedFields = data?.contract?.fields_updated || [];
+      // The backend returns the updated-field list at the top level as
+      // `fields_updated` (and as the keys of `changes`). It is NOT on the
+      // contract object, so reading data.contract.fields_updated was always
+      // empty → every enrichment showed "No New Data" even when it added data.
+      const updatedFields = data?.fields_updated || Object.keys(data?.changes || {});
       if (updatedFields.length > 0) {
         toast({
           title: 'Enrichment Complete',
@@ -1756,7 +1760,7 @@ const SDRLeadsTab = () => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, paddingTop: 14, borderTop: '1px solid var(--sfc-1e0f38)' }}>
               <Button
                 onClick={() => handleEnrichOne(selectedLead)}
-                disabled={enrichingId === selectedLead.id}
+                disabled={enrichingId === selectedLead.id || ['pending', 'processing'].includes(selectedLead.enrichment_status)}
                 style={{
                   height: 38,
                   padding: '0 10px',

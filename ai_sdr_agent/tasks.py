@@ -642,6 +642,14 @@ def auto_research_leads_impl(leads_per_run: int = 10):
                     source='apify',
                     temperature='cold',
                     status='new',
+                    # Queue for background qualification, exactly like the
+                    # manual/CSV/Apollo creation paths do — otherwise these
+                    # auto-discovered leads default to qualification_status='none'
+                    # and the qualifier never scores them.
+                    qualification_status='pending',
+                    qualification_queued_at=tz.now(),
+                    enrichment_status='pending',
+                    enrichment_queued_at=tz.now(),
                 )
                 created += 1
 
@@ -808,7 +816,8 @@ def enrich_lead_impl(lead_id: int, force: bool = False) -> dict:
             }
         enrichment_blob['status'] = 'running'
         lead.raw_data['enrichment'] = enrichment_blob
-        lead.save(update_fields=['raw_data', 'updated_at'])
+        lead.enrichment_status = 'processing'
+        lead.save(update_fields=['raw_data', 'enrichment_status', 'updated_at'])
 
     try:
         sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
@@ -820,9 +829,33 @@ def enrich_lead_impl(lead_id: int, force: bool = False) -> dict:
         )
         res = agent.enrich_lead(lead, force=force)
 
+        from django.db.models import F
+        status = res.get('status')
+        if status == 'already_running':
+            return res  # another worker owns it; leave the queue state alone
+        if status in ('failed', 'error'):
+            SDRLead.all_objects.filter(pk=lead_id).update(
+                enrichment_status='failed',
+                enrichment_attempts=F('enrichment_attempts') + 1,
+            )
+            return res
+
+        # Enriched (success / already_completed): mark done. Fresh contact/company
+        # data can change the score, so re-queue qualification (skip when nothing
+        # actually ran this time).
+        updates = {'enrichment_status': 'done'}
+        if status != 'already_completed':
+            updates['qualification_status'] = 'pending'
+            updates['qualification_queued_at'] = timezone.now()
+        SDRLead.all_objects.filter(pk=lead_id).update(**updates)
         return res
     except Exception as exc:
         logger.error("enrich_lead_impl failed for lead=%d: %s", lead_id, exc, exc_info=True)
+        from django.db.models import F
+        SDRLead.all_objects.filter(pk=lead_id).update(
+            enrichment_status='failed',
+            enrichment_attempts=F('enrichment_attempts') + 1,
+        )
         return {'status': 'failed', 'lead_id': lead_id, 'error': str(exc)}
 
 
@@ -859,6 +892,67 @@ def enrich_lead_task(self, lead_id: int, force: bool = False):
 def enrich_leads_batch_task(self, lead_ids: list[int], force: bool = False):
     return enrich_leads_batch_impl(lead_ids, force=force)
 
+
+# ---------------------------------------------------------------------------
+# Lead enrichment queue — background, batched, self-retrying (no LLM)
+# ---------------------------------------------------------------------------
+ENRICH_BATCH_SIZE = 5         # leads enriched per company per scheduler tick
+ENRICH_CEILING = 20           # leads enriched per tick in all (provider rate limits)
+ENRICH_MAX_ATTEMPTS = 3       # give up after this many failed attempts
+ENRICH_STUCK_MINUTES = 15     # a 'processing' lead older than this is retried
+
+
+def enrich_queue_impl():
+    """Enrich a small batch of queued leads. Runs every ~3 min via the scheduler.
+
+    New leads are queued with ``enrichment_status='pending'`` at creation; this
+    drains them a few per company per tick so provider rate limits hold.
+    Enrichment uses Apollo/Hunter/public-web — no LLM — so there is no
+    key/quota blocking like the qualification queue has. ``enrich_lead_impl``
+    sets each lead's ``enrichment_status`` to done/failed and (on new data)
+    re-queues it for qualification.
+    """
+    from django.db.models import Q as _Q, Min
+    from ai_sdr_agent.models import SDRLead
+    from core.models import Company
+
+    now = timezone.now()
+    stuck_before = now - timedelta(minutes=ENRICH_STUCK_MINUTES)
+    queued = SDRLead.objects.filter(
+        _Q(enrichment_status='pending')
+        | _Q(enrichment_status='failed', enrichment_attempts__lt=ENRICH_MAX_ATTEMPTS)
+        | _Q(enrichment_status='processing', updated_at__lt=stuck_before)
+    )
+    access_cache: dict = {}
+    waiting = (queued.order_by().values('company_user__company_id')
+               .annotate(since=Min('enrichment_queued_at')).order_by('since'))
+    batch_ids: list = []
+    for row in waiting:
+        if len(batch_ids) >= ENRICH_CEILING:
+            break
+        company = Company.objects.filter(pk=row['company_user__company_id']).first()
+        if company is None or not _has_sdr_access(company, access_cache):
+            continue                    # a lapsed plan: its leads wait
+        batch_ids += list(
+            queued.filter(company_user__company=company)
+            .order_by('enrichment_queued_at', 'created_at')
+            .values_list('pk', flat=True)[:min(ENRICH_BATCH_SIZE, ENRICH_CEILING - len(batch_ids))]
+        )
+    if not batch_ids:
+        return {'processed': 0, 'enriched': 0, 'failed': 0, 'pending': queued.count()}
+
+    enriched = failed = 0
+    for lead_id in batch_ids:
+        res = enrich_lead_impl(lead_id)
+        st = res.get('status')
+        if st in ('success', 'already_completed'):
+            enriched += 1
+        elif st in ('failed', 'error'):
+            failed += 1
+    return {
+        'processed': len(batch_ids), 'enriched': enriched, 'failed': failed,
+        'pending': SDRLead.objects.filter(enrichment_status='pending').count(),
+    }
 
 
 # ---------------------------------------------------------------------------

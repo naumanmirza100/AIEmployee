@@ -148,6 +148,23 @@ class SDRLead(models.Model):
     qualification_error = models.TextField(blank=True)
     qualification_queued_at = models.DateTimeField(null=True, blank=True)
 
+    # Background enrichment queue. New leads are auto-enriched (contact/company
+    # fields from Apollo/Hunter/public web — no LLM) the same way they are
+    # auto-qualified: queued on creation and drained by the scheduler in small
+    # batches. The detailed per-field provenance lives in raw_data['enrichment'].
+    ENRICHMENT_STATUS_CHOICES = [
+        ('none',       'Not queued'),
+        ('pending',    'Queued'),
+        ('processing', 'Enriching'),
+        ('done',       'Enriched'),
+        ('failed',     'Failed'),
+    ]
+    enrichment_status = models.CharField(
+        max_length=12, choices=ENRICHMENT_STATUS_CHOICES, default='none', db_index=True,
+    )
+    enrichment_attempts = models.IntegerField(default=0)
+    enrichment_queued_at = models.DateTimeField(null=True, blank=True)
+
     # Workflow
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='new')
     source = models.CharField(max_length=30, choices=SOURCE_CHOICES, default='manual')
