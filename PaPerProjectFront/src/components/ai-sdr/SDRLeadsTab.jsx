@@ -634,7 +634,7 @@ const SDRLeadsTab = () => {
   const [csvImport, setCsvImport] = useState(null); // { file, rows, columns, skippedEmpty } | null
   const [csvImporting, setCsvImporting] = useState(false);
   const [leads, setLeads] = useState([]);
-  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0 });
+  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, enriching: 0 });
   const [pagination, setPagination] = useState({ page: 1, page_size: 25, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
 
   const [loading, setLoading] = useState(true);
@@ -688,7 +688,7 @@ const SDRLeadsTab = () => {
         page_size:   opts.page_size   ?? pageSize,
       });
       setLeads(resp?.data || []);
-      setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0 });
+      setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, enriching: 0 });
       setPagination(resp?.pagination || { page: 1, page_size: pageSize, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
       setSelectedIds(new Set());
       if (resp?.data) {
@@ -705,13 +705,14 @@ const SDRLeadsTab = () => {
 
   useEffect(() => { loadLeads(); }, []);
 
-  // While leads are being qualified in the background, poll every 12s so scores
-  // appear on their own. Stops once the queue drains.
+  // While leads are being qualified or enriched in the background, poll every
+  // 12s so scores and enriched fields appear on their own. Stops once both
+  // queues drain.
   useEffect(() => {
-    if (!stats.qualifying) return undefined;
+    if (!stats.qualifying && !stats.enriching) return undefined;
     const id = setInterval(() => loadLeads(), 12000);
     return () => clearInterval(id);
-  }, [stats.qualifying, loadLeads]);
+  }, [stats.qualifying, stats.enriching, loadLeads]);
 
   useEffect(() => {
     setPage(1);
@@ -1191,6 +1192,11 @@ const SDRLeadsTab = () => {
               <Loader2 size={15} className="animate-spin" /> Qualifying {stats.qualifying}…
             </span>
           )}
+          {stats.enriching > 0 && (
+            <span title="Leads are being enriched in the background — missing fields (phone, email, LinkedIn…) will appear on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', borderRadius: 8, fontWeight: 600, fontSize: 13, padding: '8px 14px' }}>
+              <Loader2 size={15} className="animate-spin" /> Enriching {stats.enriching}…
+            </span>
+          )}
           {stats.unscored > 0 && stats.unscored > (stats.qualifying || 0) && (
             <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`AI-qualify unscored lead(s) now`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
               {qualifyingAll ? <Loader2 size={15} className="animate-spin" /> : <Brain size={15} />}
@@ -1420,6 +1426,11 @@ const SDRLeadsTab = () => {
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 14 }}>{lead.full_name}</div>
                       <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>{lead.company_name}</div>
+                      {(lead.enrichment_status === 'pending' || lead.enrichment_status === 'processing') && (
+                        <span title="Enriching in the background — missing contact fields will fill in on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', whiteSpace: 'nowrap' }}>
+                          <Loader2 size={9} className="animate-spin" /> Enriching…
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>{lead.job_title || '—'}</span>

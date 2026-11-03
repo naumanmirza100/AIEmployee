@@ -109,6 +109,31 @@ class AutoEnrichmentQueueTests(SDRBase):
         self.assertEqual(r['processed'], 0)
 
 
+class EnrichingStatCountTests(SDRBase):
+    """The lead-list stats expose an `enriching` count (pending/processing in the
+    background enrichment queue) so the screen can show an "Enriching N…" badge
+    the same way it shows "Qualifying N…"."""
+
+    def test_enriching_counts_only_pending_and_processing(self):
+        self.make_lead('a@acme.com', enrichment_status='pending')
+        self.make_lead('b@acme.com', enrichment_status='processing')
+        self.make_lead('c@acme.com', enrichment_status='done')
+        self.make_lead('d@acme.com', enrichment_status='none')
+        stats = views._lead_stats(self.cu)
+        self.assertEqual(stats['enriching'], 2)
+
+    def test_enriching_is_company_scoped(self):
+        from core.models import Company, CompanyUser
+        other_co = Company.objects.create(name='Other', email='o2@test.local')
+        other_cu = CompanyUser.objects.create(
+            company=other_co, email='o2@cu.local', full_name='O',
+            role='admin', password_hash='x', is_active=True)
+        SDRLead.objects.create(company_user=other_cu, email='leak@other.com',
+                               full_name='Leak', enrichment_status='pending')
+        self.make_lead('mine@acme.com', enrichment_status='pending')
+        self.assertEqual(views._lead_stats(self.cu)['enriching'], 1)
+
+
 class LeadsExportAllTests(SDRBase):
     """Export ALL leads (every page) as CSV, respecting filters + company scope."""
 

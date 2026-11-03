@@ -292,6 +292,8 @@ def _lead_stats(company_user) -> dict:
         'unscored': qs.filter(score__isnull=True).count(),
         # Leads waiting in / running through the background qualification queue.
         'qualifying': qs.filter(qualification_status__in=['pending', 'processing']).count(),
+        # Leads waiting in / running through the background enrichment queue.
+        'enriching': qs.filter(enrichment_status__in=['pending', 'processing']).count(),
     }
 
 
