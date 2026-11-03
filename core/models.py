@@ -2291,6 +2291,7 @@ MODULE_DISPLAY_NAMES = {
     'hr_agent': 'HR Support Agent',
     'ai_sdr_agent': 'AI SDR Agent',
     'crm_sync_agent': 'CRM & System Sync Agent',
+    'data_analyst_agent': 'AI Data Analyst',
     'exec_meeting_agent': 'AI Executive Meeting Assistant',
     'company_assistant': 'Company Assistant',
 }

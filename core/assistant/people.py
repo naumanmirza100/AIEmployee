@@ -29,10 +29,18 @@ class Person:
     department: str = ''
     manager: str = ''
     role: str = ''
+    #: The first day of someone hired who hasn't started (HR's "candidate": offer signed, not started).
+    starts: object = None
+
+    @property
+    def current(self) -> bool:
+        return self.starts is None
 
     def describe(self) -> str:
         """'Sara Malik (Designer, Product)': enough to tell two Saras apart."""
-        extra = ', '.join(p for p in (self.title or self.role, self.department) if p)
+        starts = ('' if self.current else f'starts {self.starts.day} {self.starts:%b %Y}'
+                  if hasattr(self.starts, 'day') else 'not started yet')
+        extra = ', '.join(p for p in (self.title or self.role, self.department, starts) if p)
         return f'{self.name} ({extra})' if extra else (f'{self.name} <{self.email}>' if self.email else self.name)
 
     def facts(self) -> dict:
@@ -42,6 +50,8 @@ class Person:
                 out[key] = getattr(self, key)
         if self.role:
             out['dashboard_login_role'] = self.role
+        if not self.current:
+            out['hired, starts'] = self.starts.isoformat() if hasattr(self.starts, 'isoformat') else 'not set'
         return out
 
 
@@ -93,7 +103,9 @@ class Directory:
             person = Person(key=f'emp:{e.pk}', name=e.full_name.strip() or e.work_email, email=e.work_email or '',
                             employee=e, title=e.job_title or '',
                             department=(getattr(e.department_obj, 'name', '') or e.department or ''),
-                            manager=e.manager.full_name if e.manager_id else '')
+                            manager=e.manager.full_name if e.manager_id else '',
+                            # A hire who hasn't started; a same-named colleague asked "which one?" (3 Nov 2026).
+                            starts=(e.start_date or True) if e.employment_status == 'candidate' else None)
             if e.user_id:
                 person.user_ids.add(e.user_id)
             self.people.append(person)
@@ -134,8 +146,17 @@ class Directory:
     def me(self, company_user) -> Person | None:
         return self._by_login.get(company_user.pk)
 
-    def find(self, name, *, asker=None) -> list[Person]:
-        """Everyone `name` may mean, best matches only. 'me' is the asker."""
+    def find(self, name, *, asker=None, current_only=True) -> list[Person]:
+        """Everyone `name` may mean, best matches only. 'me' is the asker.
+
+        With `current_only`, a hire who hasn't started yet is left out when someone already working matches
+        too: a colleague of the same name was asked about as "which one?" (3 Nov 2026)."""
+        found = self._find(name, asker=asker)
+        if current_only and any(p.current for p in found):
+            return [p for p in found if p.current]
+        return found
+
+    def _find(self, name, *, asker=None) -> list[Person]:
         query = _norm(name)
         if not query:
             return []

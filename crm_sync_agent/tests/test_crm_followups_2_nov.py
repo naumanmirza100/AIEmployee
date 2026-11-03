@@ -477,28 +477,70 @@ class ChangesFromTheCRM(SupportBase):
         self.assertIsNone(self.crm.last_pulled_at)
         self.assertTrue(CRMSyncLog.objects.filter(operation=CRMSyncLog.OP_PULL, status=CRMSyncLog.STATUS_FAILED).exists())
 
-    def test_hubspot_is_asked_by_last_change_oldest_first(self):
+    def test_only_our_contacts_are_asked_about(self):
+        # It read every contact changed in the CRM, the company's own too, and kept ours (3 Nov 2026).
+        _, asked = self.pull([])
+        self.assertEqual(sorted(asked.call_args[0][1]), ['901', '902'])
+
+    def test_with_no_linked_contacts_the_crm_is_not_asked(self):
+        CRMContactMapping.objects.all().delete()
+        counts, asked = self.pull([])
+        asked.assert_not_called()
+        self.assertEqual(counts, {'read': 0, 'updated': 0})
+
+    def test_a_row_for_someone_not_ours_is_never_applied(self):
+        counts, _ = self.pull([{'id': '999', 'email': 'stranger@x.test', 'first_name': 'Not', 'last_name': 'Ours',
+                                'phone': '+1 555', 'job_title': '', 'company': ''}])
+        self.assertEqual(counts['updated'], 0)
+
+    def test_hubspot_is_asked_about_our_ids_changed_since(self):
         from crm_sync_agent.connectors.hubspot import HubSpotConnector
         page = answer(200, {'results': [{'id': '7', 'properties': {
             'email': 'a@b.test', 'firstname': 'Ali', 'lastname': 'Raza', 'phone': None, 'jobtitle': 'Owner',
             'company': 'Raza Co'}}]})
         with mock.patch('crm_sync_agent.connectors.hubspot.requests.request', return_value=page) as req:
-            rows = HubSpotConnector('synthetic').changed_contacts(datetime(2026, 11, 2, 10, 0, tzinfo=dt_timezone.utc))
-        body = req.call_args[1]['json']
-        self.assertEqual(body['filterGroups'][0]['filters'][0]['propertyName'], 'lastmodifieddate')
-        self.assertEqual(body['sorts'][0]['direction'], 'ASCENDING')
+            rows = HubSpotConnector('synthetic').changed_contacts(
+                datetime(2026, 11, 2, 10, 0, tzinfo=dt_timezone.utc), ['7', '8', 'not-an-id'])
+        filters = req.call_args[1]['json']['filterGroups'][0]['filters']
+        self.assertEqual((filters[0]['propertyName'], filters[0]['operator'], filters[0]['values']),
+                         ('hs_object_id', 'IN', ['7', '8']))
+        self.assertEqual(filters[1]['propertyName'], 'lastmodifieddate')
         self.assertEqual(rows, [{'id': '7', 'email': 'a@b.test', 'first_name': 'Ali', 'last_name': 'Raza', 'phone': '',
                                  'job_title': 'Owner', 'company': 'Raza Co'}])
 
-    def test_pipedrive_takes_the_primary_email_and_phone(self):
-        page = answer(200, {'data': [{'item': 'person', 'id': 5, 'data': {
+    def test_hubspot_asks_100_ids_at_a_time(self):
+        from crm_sync_agent.connectors.hubspot import HubSpotConnector
+        with mock.patch('crm_sync_agent.connectors.hubspot.requests.request',
+                        return_value=answer(200, {'results': []})) as req:
+            HubSpotConnector('synthetic').changed_contacts(datetime(2026, 11, 2, tzinfo=dt_timezone.utc),
+                                                           [str(i) for i in range(1, 251)])
+        self.assertEqual(req.call_count, 3)
+
+    def test_salesforce_asks_by_id_and_keeps_out_anything_not_an_id(self):
+        from crm_sync_agent.connectors.salesforce import SalesforceConnector
+        c = SalesforceConnector({'instance_url': 'https://acme.my.salesforce.com', 'client_id': 'x', 'client_secret': 'y'})
+        c._access_token, c._instance_url = 'synthetic', 'https://acme.my.salesforce.com'
+        with mock.patch.object(SalesforceConnector, '_ensure_token'), \
+             mock.patch('crm_sync_agent.connectors.salesforce.requests.request',
+                        return_value=answer(200, {'records': []})) as req:
+            c.changed_contacts(datetime(2026, 11, 2, tzinfo=dt_timezone.utc),
+                               ['003d500000J4gLuAAJ', "x') OR Name LIKE ('%"])
+        q = req.call_args[1]['params']['q']
+        self.assertIn("WHERE Id IN ('003d500000J4gLuAAJ') AND LastModifiedDate >", q)
+        self.assertNotIn('LIKE', q)
+
+    def test_pipedrive_asks_which_of_ours_changed_then_reads_those_whole(self):
+        listed = answer(200, {'data': [{'id': 5}]})
+        person = answer(200, {'data': {
             'id': 5, 'first_name': 'Sana', 'last_name': 'Malik', 'org_name': 'Malik and Sons', 'job_title': '',
             'email': [{'value': 'old@x.test', 'primary': False}, {'value': 'sana@malik.test', 'primary': True}],
-            'phone': [{'value': '+92 300 7654321', 'primary': True}]}}],
-            'additional_data': {'pagination': {'more_items_in_collection': False}}})
-        with mock.patch('crm_sync_agent.connectors.pipedrive.requests.request', return_value=page) as req:
+            'phone': [{'value': '+92 300 7654321', 'primary': True}]}})
+        with mock.patch('crm_sync_agent.connectors.pipedrive.requests.request', side_effect=[listed, person]) as req:
             rows = PipedriveConnector('synthetic').changed_contacts(
-                datetime(2026, 11, 2, 15, 0, tzinfo=ZoneInfo('Asia/Karachi')))
-        self.assertEqual(req.call_args[1]['params']['since_timestamp'], '2026-11-02 10:00:00')
+                datetime(2026, 11, 2, 15, 0, tzinfo=ZoneInfo('Asia/Karachi')), ['5', '6'])
+        first = req.call_args_list[0]
+        self.assertEqual(first[0][1], 'https://api.pipedrive.com/api/v2/persons')
+        self.assertEqual((first[1]['params']['ids'], first[1]['params']['updated_since']), ('5,6', '2026-11-02T10:00:00Z'))
+        self.assertEqual(req.call_args_list[1][0][1], 'https://api.pipedrive.com/v1/persons/5')
         self.assertEqual((rows[0]['email'], rows[0]['phone'], rows[0]['company']),
                          ('sana@malik.test', '+92 300 7654321', 'Malik and Sons'))

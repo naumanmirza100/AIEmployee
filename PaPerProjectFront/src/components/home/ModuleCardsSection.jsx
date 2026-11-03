@@ -12,7 +12,8 @@ import {
   Target,
   UserCog,
   CalendarClock,
-  RefreshCw
+  RefreshCw,
+  Database
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -253,6 +254,26 @@ const ModuleCardsSection = () => {
         'Reply Draft customer mail and Frontline support tickets',
         'Campaign replies, deals and CRM corrections, when switched on',
         'A queue that retries and says what the CRM refused'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'AI Data Analyst',
+      moduleName: 'data_analyst_agent',
+      description: 'Ask questions about your own database in plain words. It writes the query, runs it read-only and answers with the table and the SQL. Your data is never copied.',
+      icon: Database,
+      iconColor: 'text-sky-500',
+      gradientFrom: gradientColors['cyan-500'],
+      gradientTo: gradientColors['emerald-500'],
+      price: 22,
+      pricePeriod: 'month',
+      features: [
+        'PostgreSQL, MySQL / MariaDB, or an uploaded SQLite file',
+        'Questions in plain words, answered with a table and the SQL',
+        'Read-only: every query is checked and run in a read-only session',
+        'Your data is never copied: only questions, answers and queries are kept',
+        'Owners and admins choose who may ask each database',
+        'Any answer as a CSV'
       ],
       highlight: false,
     }

@@ -75,6 +75,7 @@ import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
 import { ReturnToTracker } from '@/utils/returnTo';
 import DoNotEmailPage from '@/pages/DoNotEmailPage';
 import CrmSyncPage from '@/pages/CrmSyncPage';
+import DataAnalystPage from '@/pages/DataAnalystPage';
 import TeamRolesPage from '@/pages/TeamRolesPage';
 import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
 import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
@@ -188,6 +189,8 @@ import { useTranslation } from 'react-i18next';
             <Route path="/company/settings/team" element={<TeamRolesPage />} />
             {/* CRM Sync is its own agent; this is its page for a company that has it */}
             <Route path="/crm-sync" element={<CrmSyncPage />} />
+            {/* AI Data Analyst: questions answered read-only from the company's own database */}
+            <Route path="/data-analyst" element={<DataAnalystPage />} />
             {/* Full-detail notification list — the navbar dropdown links here */}
             <Route path="/notifications" element={<NotificationsPage />} />
             {/* Everything waiting for a dashboard login, across the agents */}
