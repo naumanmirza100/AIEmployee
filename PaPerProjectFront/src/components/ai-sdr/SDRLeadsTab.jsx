@@ -18,7 +18,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
-  researchLead, getLeadResearch, researchLeads, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
+  researchLead, getLeadResearch, researchLeads, getResearchJob, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads,
 } from '@/services/aiSdrService';
@@ -638,6 +638,7 @@ const SDRLeadsTab = () => {
   const [genIcpId, setGenIcpId] = useState('');
   const [icpProfiles, setIcpProfiles] = useState([]);
   const [generating, setGenerating] = useState(false);
+  const [genProgress, setGenProgress] = useState(null); // { created, total } while a run is in flight
   const [copiedKey, setCopiedKey] = useState(null);
   const [showSetupGuide, setShowSetupGuide] = useState(null);
 
@@ -762,31 +763,83 @@ const SDRLeadsTab = () => {
 
   const handleGenerate = async () => {
     setGenerating(true);
+    setGenProgress({ created: 0, total: genCount });
+    const apifyApprovalToast = (url) => toast({
+      title: 'Approve the Apify actor first',
+      description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
+      variant: 'destructive',
+      action: (
+        <ToastAction altText="Open Apify" onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>
+          Open Apify
+        </ToastAction>
+      ),
+    });
     try {
-      const resp = await researchLeads({ count: genCount, source: genSource, icp_id: genIcpId || undefined });
-      const created = resp?.data?.leads_created ?? resp?.leads_created ?? '?';
-      toast({ title: `${created} leads generated!`, description: `Source: ${genSource.toUpperCase()}` });
+      // Kick off the background job; the backend returns a job id immediately.
+      const startResp = await researchLeads({ count: genCount, source: genSource, icp_id: genIcpId || undefined });
+      const started = startResp?.data ?? startResp;
+      const jobId = started?.job_id;
+      if (!jobId) {
+        throw Object.assign(new Error(started?.message || 'Could not start generation.'), { data: started });
+      }
+
+      // Poll the job until it finishes (large Apify/Apollo runs can take minutes).
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      let job = null;
+      for (let i = 0; i < 400; i++) { // ~20 min ceiling at 3s/poll
+        await sleep(3000);
+        let jobResp;
+        try { jobResp = await getResearchJob(jobId); } catch (_) { continue; }
+        job = (jobResp?.data ?? jobResp)?.job;
+        if (!job) continue;
+        setGenProgress({ created: job.leads_created || 0, total: genCount });
+        if (job.done) break;
+      }
+
+      if (!job || !job.done) {
+        toast({
+          title: 'Still generating…',
+          description: 'This run is taking a while. It keeps going in the background — refresh the list shortly.',
+        });
+        setShowGenModal(false);
+        setPage(1);
+        loadLeads({ page: 1 });
+        return;
+      }
+
+      if (job.state === 'failed') {
+        if (job.error_code === 'apify_approval_required' && job.approval_url) {
+          apifyApprovalToast(job.approval_url);
+        } else {
+          toast({ title: 'Generate failed', description: job.error_message || 'Lead generation failed.', variant: 'destructive' });
+        }
+        return;
+      }
+
+      const created = job.leads_created || 0;
+      const skipped = job.skipped_duplicates || 0;
+      toast({
+        title: created ? `${created} leads generated!` : 'No new leads found',
+        description: [
+          `Source: ${(job.source || genSource).toUpperCase()}`,
+          skipped ? `${skipped} duplicates skipped.` : '',
+          job.leads_queued ? `Qualifying ${job.leads_queued} in the background.` : '',
+        ].filter(Boolean).join(' '),
+      });
       setShowGenModal(false);
       setPage(1);
       loadLeads({ page: 1 });
     } catch (e) {
       const data = e?.data || e?.response?.data;
       if (data?.code === 'apify_approval_required') {
-        // The user must approve the actor once on Apify; give them the link.
-        toast({
-          title: 'Approve the Apify actor first',
-          description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
-          variant: 'destructive',
-          action: (
-            <ToastAction altText="Open Apify" onClick={() => window.open(data.approval_url, '_blank', 'noopener,noreferrer')}>
-              Open Apify
-            </ToastAction>
-          ),
-        });
+        apifyApprovalToast(data.approval_url);
       } else {
         toast({ title: 'Generate failed', description: data?.message || e.message, variant: 'destructive' });
       }
-    } finally { setGenerating(false); }
+    } finally {
+      setGenerating(false);
+      setGenProgress(null);
+    }
   };
 
   // Import leads already generated in the Apify Console (works on the free plan,
@@ -2092,7 +2145,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               </label>
               <input type="range" min={5} max={1500} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width: '100%', accentColor: '#a855f7' }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563', fontSize: 11, marginTop: 2 }}>
-                <span>5</span><span>50</span>
+                <span>5</span><span>1500</span>
               </div>
             </div>
           </div>
@@ -2118,7 +2171,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               disabled={generating || icpProfiles.length === 0 || (sdrKeyStatus.loaded && !sdrKeyStatus[genSource])}
               style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {generating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-              {generating ? 'Generating…' : `Generate ${genCount} Leads`}
+              {generating
+                ? (genProgress ? `Generating… ${genProgress.created}/${genProgress.total}` : 'Starting…')
+                : `Generate ${genCount} Leads`}
             </Button>
           </DialogFooter>
         </DialogContent>

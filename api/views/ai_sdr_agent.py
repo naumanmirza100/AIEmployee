@@ -623,14 +623,214 @@ def research_sources(request):
     })
 
 
+def _execute_research_job(job_id):
+    """
+    Run a lead-discovery job in a background daemon thread and record progress /
+    outcome on its SDRLeadResearchJob row (which the UI polls via
+    ``research_job_status``).
+
+    A run of up to 1500 leads can take minutes — far longer than an HTTP request
+    should block — so ``research_leads`` returns immediately and this does the
+    actual Apollo/Apify search + lead creation + qualification queueing out of
+    band. It must NEVER raise out of the thread; every failure is written to the
+    job row instead.
+    """
+    from ai_sdr_agent.agents.lead_validator import validate_lead
+    from django.db import close_old_connections
+
+    job = (SDRLeadResearchJob.objects
+           .filter(pk=job_id)
+           .select_related('company_user', 'company_user__company', 'icp_profile')
+           .first())
+    if not job:
+        return
+
+    def _fail(exc, code=None):
+        params = job.search_params or {}
+        if code:
+            params['error_code'] = code
+        if isinstance(exc, ApifyApprovalRequired):
+            params['approval_url'] = exc.approval_url
+            params['actor'] = exc.actor
+        job.search_params = params
+        job.status = 'failed'
+        job.error_message = str(exc)
+        job.completed_at = timezone.now()
+        job.save()
+
+    try:
+        company_user = job.company_user
+        icp = job.icp_profile
+        params = job.search_params or {}
+        count = int(params.get('count', 20))
+        source = params.get('source', 'auto')
+
+        researcher = _get_research_agent(company_user.company, company_user=company_user)
+        raw_leads = researcher.search_leads(icp, count=count, source=source)
+
+        created = 0
+        created_ids = []
+        skipped_dupes = 0
+
+        # Pre-load existing keys to catch dupes. LinkedIn URL is the most
+        # reliable (unique per profile) — essential for no-email sources like
+        # the Google scraper, where company often doesn't parse and name+company
+        # dedup misses. Also track email, name+company, and name-only.
+        existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list(
+            'email', 'full_name', 'company_name', 'linkedin_url'
+        )
+        existing_emails_lower = set()
+        existing_name_company = set()
+        existing_linkedin = set()
+        existing_names = set()
+
+        _norm_li = normalize_linkedin_url
+
+        for em, fn, cn, li in existing_leads_qs:
+            if em:
+                existing_emails_lower.add(em.lower())
+            if fn and cn:
+                existing_name_company.add((fn.lower().strip(), cn.lower().strip()))
+            if fn:
+                existing_names.add(fn.lower().strip())
+            nli = _norm_li(li)
+            if nli:
+                existing_linkedin.add(nli)
+
+        for ld in raw_leads:
+            full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
+            lead_email = (ld.get('email') or '').strip().lower()
+            company_name = (ld.get('company_name') or '').strip()
+            linkedin = _norm_li(ld.get('linkedin_url'))
+
+            # ── Reject leads with no name and no company (totally empty) ──
+            if not full_name.strip() and not company_name:
+                skipped_dupes += 1
+                continue
+
+            # ── Duplicate guard — linkedin > email > name+company > name ──
+            if linkedin and linkedin in existing_linkedin:
+                skipped_dupes += 1
+                continue
+            if lead_email and lead_email in existing_emails_lower:
+                skipped_dupes += 1
+                continue
+            name_company_key = (full_name.lower().strip(), company_name.lower().strip())
+            if full_name and company_name and name_company_key in existing_name_company:
+                skipped_dupes += 1
+                continue
+            # No email/company (Google scraper) → fall back to name-only so
+            # the same profile scraped twice isn't inserted again.
+            name_key = full_name.lower().strip()
+            if not lead_email and not company_name and not linkedin and name_key and name_key in existing_names:
+                skipped_dupes += 1
+                continue
+
+            # Track all keys for intra-batch dedup
+            if linkedin:
+                existing_linkedin.add(linkedin)
+            if lead_email:
+                existing_emails_lower.add(lead_email)
+            if full_name and company_name:
+                existing_name_company.add(name_company_key)
+            if name_key:
+                existing_names.add(name_key)
+            # ─────────────────────────────────────────────────────────────
+
+            validation = validate_lead({**ld, 'full_name': full_name})
+
+            new_lead = SDRLead.objects.create(
+                company_user=company_user,
+                icp_profile=icp,
+                first_name=ld.get('first_name', ''),
+                last_name=ld.get('last_name', ''),
+                full_name=full_name,
+                email=lead_email or ld.get('email', ''),
+                phone=ld.get('phone', ''),
+                job_title=ld.get('job_title', ''),
+                seniority_level=ld.get('seniority_level', ''),
+                department=ld.get('department', ''),
+                company_name=ld.get('company_name', ''),
+                company_domain=ld.get('company_domain', ''),
+                company_industry=ld.get('company_industry', ''),
+                company_size=ld.get('company_size') or None,
+                company_size_range=ld.get('company_size_range', ''),
+                company_location=ld.get('company_location', ''),
+                company_technologies=ld.get('company_technologies', []),
+                linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
+                company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
+                company_website=_ensure_https(ld.get('company_website', '')),
+                recent_news=ld.get('recent_news', []),
+                buying_signals=ld.get('buying_signals', []),
+                apollo_id=ld.get('apollo_id', ''),
+                raw_data=ld.get('raw_data', {}),
+                source=ld.get('source') or researcher.source_label,
+                status='new',
+                confidence_score=validation['confidence_score'],
+                data_quality_flags=validation['data_quality_flags'],
+            )
+            created += 1
+            created_ids.append(new_lead.pk)
+
+            # Surface incremental progress to the polling UI without hammering
+            # the DB on every single insert.
+            if created % 50 == 0:
+                job.leads_created = created
+                job.total_found = len(raw_leads)
+                job.save(update_fields=['leads_created', 'total_found'])
+
+        # Queue ONLY the leads created by this run for background
+        # qualification — the scheduler drains the queue in small batches so
+        # AI tokens aren't exhausted in one burst, and retries failures
+        # automatically. Scoping to created_ids avoids sweeping up unrelated
+        # pre-existing unscored leads (e.g. CSV/manual imports).
+        queued = SDRLead.objects.filter(
+            pk__in=created_ids, score__isnull=True, qualification_status='none',
+        ).update(qualification_status='pending', qualification_queued_at=timezone.now())
+
+        params['skipped_duplicates'] = skipped_dupes
+        params['leads_queued'] = queued
+        job.search_params = params
+        job.status = 'completed'
+        job.total_found = len(raw_leads)
+        job.leads_created = created
+        job.leads_qualified = 0
+        job.source = researcher.source_label
+        job.completed_at = timezone.now()
+        job.save()
+
+    except ApifyApprovalRequired as exc:
+        # Not a server error: the user has to approve the actor once on Apify.
+        _fail(exc, code='apify_approval_required')
+    except NoLeadSource as exc:
+        _fail(exc, code='no_lead_source')
+    except KeyServiceError as exc:
+        _fail(exc, code='llm_key')
+    except Exception as exc:
+        logger.error("Research job %s failed: %s", job_id, exc)
+        try:
+            _fail(exc)
+        except Exception:
+            pass
+    finally:
+        # Each worker thread returns its Django DB connection when done.
+        close_old_connections()
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def research_leads(request):
     """
-    Find new leads from Apollo.io or Apify, whichever key is configured. With neither, nothing is searched (the AI
-    no longer makes leads up). Found leads are queued for qualification.
+    Kick off a lead-discovery run (Apollo.io / Apify, whichever key is
+    configured) in the background and return immediately with a ``job_id``.
+
+    A run can take minutes and create up to 1500 leads, so the actual work runs
+    in a daemon thread (``_execute_research_job``) that records progress on the
+    SDRLeadResearchJob row; the UI polls ``research_job_status``. With no source
+    key configured, the job fails with ``error_code='no_lead_source'``.
     """
+    import threading
     company_user = request.user
     try:
         count = min(int(request.data.get('count', 20)), 1500)
@@ -643,6 +843,17 @@ def research_leads(request):
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
+        # Fast, deterministic pre-flight: if no provider key is configured there
+        # is nothing to search, so fail immediately (no job, no made-up leads)
+        # rather than starting a background job that is doomed. Network/approval
+        # errors can only be known after the fetch and are surfaced on the job.
+        if not _get_research_agent(company_user.company, company_user=company_user).available_sources:
+            return Response({
+                'status': 'error',
+                'code': 'no_lead_source',
+                'message': 'No lead source is configured. Add an Apollo.io or Apify API key in Settings first.',
+            }, status=400)
+
         job = SDRLeadResearchJob.objects.create(
             company_user=company_user,
             icp_profile=icp,
@@ -651,180 +862,57 @@ def research_leads(request):
             started_at=timezone.now(),
         )
 
-        try:
-            researcher = _get_research_agent(company_user.company, company_user=company_user)
-            raw_leads = researcher.search_leads(icp, count=count, source=source)
+        threading.Thread(
+            target=_execute_research_job,
+            args=(job.id,),
+            name=f"sdr-research-job-{job.id}",
+            daemon=True,
+        ).start()
 
-            created = 0
-            created_ids = []
-            skipped_dupes = 0
-
-            # Pre-load existing keys to catch dupes. LinkedIn URL is the most
-            # reliable (unique per profile) — essential for no-email sources like
-            # the Google scraper, where company often doesn't parse and name+company
-            # dedup misses. Also track email, name+company, and name-only.
-            existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list(
-                'email', 'full_name', 'company_name', 'linkedin_url'
-            )
-            existing_emails_lower = set()
-            existing_name_company = set()
-            existing_linkedin = set()
-            existing_names = set()
-
-            _norm_li = normalize_linkedin_url
-
-            for em, fn, cn, li in existing_leads_qs:
-                if em:
-                    existing_emails_lower.add(em.lower())
-                if fn and cn:
-                    existing_name_company.add((fn.lower().strip(), cn.lower().strip()))
-                if fn:
-                    existing_names.add(fn.lower().strip())
-                nli = _norm_li(li)
-                if nli:
-                    existing_linkedin.add(nli)
-
-            from ai_sdr_agent.agents.lead_validator import validate_lead
-            for ld in raw_leads:
-                full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
-                lead_email = (ld.get('email') or '').strip().lower()
-                company_name = (ld.get('company_name') or '').strip()
-                linkedin = _norm_li(ld.get('linkedin_url'))
-
-                # ── Reject leads with no name and no company (totally empty) ──
-                if not full_name.strip() and not company_name:
-                    logger.info("SDR [research] SKIPPING empty lead (no name, no company)")
-                    skipped_dupes += 1
-                    continue
-
-                # ── Duplicate guard — linkedin > email > name+company > name ──
-                if linkedin and linkedin in existing_linkedin:
-                    logger.info("SDR [research] SKIPPING duplicate linkedin=%s", linkedin)
-                    skipped_dupes += 1
-                    continue
-                if lead_email and lead_email in existing_emails_lower:
-                    logger.info("SDR [research] SKIPPING duplicate email=%s", lead_email)
-                    skipped_dupes += 1
-                    continue
-                name_company_key = (full_name.lower().strip(), company_name.lower().strip())
-                if full_name and company_name and name_company_key in existing_name_company:
-                    logger.info("SDR [research] SKIPPING duplicate name+company: %s @ %s", full_name, company_name)
-                    skipped_dupes += 1
-                    continue
-                # No email/company (Google scraper) → fall back to name-only so
-                # the same profile scraped twice isn't inserted again.
-                name_key = full_name.lower().strip()
-                if not lead_email and not company_name and not linkedin and name_key and name_key in existing_names:
-                    logger.info("SDR [research] SKIPPING duplicate name-only: %s", full_name)
-                    skipped_dupes += 1
-                    continue
-
-                # Track all keys for intra-batch dedup
-                if linkedin:
-                    existing_linkedin.add(linkedin)
-                if lead_email:
-                    existing_emails_lower.add(lead_email)
-                if full_name and company_name:
-                    existing_name_company.add(name_company_key)
-                if name_key:
-                    existing_names.add(name_key)
-                # ─────────────────────────────────────────────────────────────
-
-                validation = validate_lead({**ld, 'full_name': full_name})
-
-                new_lead = SDRLead.objects.create(
-                    company_user=company_user,
-                    icp_profile=icp,
-                    first_name=ld.get('first_name', ''),
-                    last_name=ld.get('last_name', ''),
-                    full_name=full_name,
-                    email=lead_email or ld.get('email', ''),
-                    phone=ld.get('phone', ''),
-                    job_title=ld.get('job_title', ''),
-                    seniority_level=ld.get('seniority_level', ''),
-                    department=ld.get('department', ''),
-                    company_name=ld.get('company_name', ''),
-                    company_domain=ld.get('company_domain', ''),
-                    company_industry=ld.get('company_industry', ''),
-                    company_size=ld.get('company_size') or None,
-                    company_size_range=ld.get('company_size_range', ''),
-                    company_location=ld.get('company_location', ''),
-                    company_technologies=ld.get('company_technologies', []),
-                    linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
-                    company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
-                    company_website=_ensure_https(ld.get('company_website', '')),
-                    recent_news=ld.get('recent_news', []),
-                    buying_signals=ld.get('buying_signals', []),
-                    apollo_id=ld.get('apollo_id', ''),
-                    raw_data=ld.get('raw_data', {}),
-                    source=ld.get('source') or researcher.source_label,
-                    status='new',
-                    confidence_score=validation['confidence_score'],
-                    data_quality_flags=validation['data_quality_flags'],
-                )
-                created += 1
-                created_ids.append(new_lead.pk)
-
-            # Queue ONLY the leads created by this run for background
-            # qualification — the scheduler drains the queue in small batches so
-            # AI tokens aren't exhausted in one burst, and retries failures
-            # automatically. Scoping to created_ids avoids sweeping up unrelated
-            # pre-existing unscored leads (e.g. CSV/manual imports).
-            queued = SDRLead.objects.filter(
-                pk__in=created_ids, score__isnull=True, qualification_status='none',
-            ).update(qualification_status='pending', qualification_queued_at=timezone.now())
-
-            job.status = 'completed'
-            job.total_found = len(raw_leads)
-            job.leads_created = created
-            job.leads_qualified = 0
-            job.source = researcher.source_label
-            job.completed_at = timezone.now()
-            job.save()
-
-            if queued:
-                message = (
-                    f'Found {created} leads. Qualifying {queued} in the background — '
-                    f'scores will appear shortly. Skipped {skipped_dupes} duplicates.'
-                )
-            else:
-                message = f'Found {created} leads. Skipped {skipped_dupes} duplicates.'
-
-            return Response({
-                'status': 'success',
-                'message': message,
-                'leads_created': created,
-                'leads_queued': queued,
-                'skipped_duplicates': skipped_dupes,
-                'source': job.source,
-                'stats': _lead_stats(company_user),
-            })
-
-        except KeyServiceError:
-            raise
-        except Exception as exc:
-            job.status = 'failed'
-            job.error_message = str(exc)
-            job.completed_at = timezone.now()
-            job.save()
-            raise
-
-    except KeyServiceError:
-        raise
-    except ApifyApprovalRequired as exc:
-        # Not a server error: the user has to approve the actor once on Apify.
         return Response({
-            'status': 'error',
-            'code': 'apify_approval_required',
-            'message': str(exc),
-            'approval_url': exc.approval_url,
-            'actor': exc.actor,
-        }, status=400)
-    except NoLeadSource as exc:
-        return Response({'status': 'error', 'code': 'no_lead_source', 'message': str(exc)}, status=400)
+            'status': 'started',
+            'job_id': job.id,
+            'count': count,
+            'source': source,
+            'message': f'Generating up to {count} leads in the background. Large runs can take a few minutes.',
+        }, status=202)
+
     except Exception as exc:
-        logger.error("Research leads error: %s", exc)
+        logger.error("Research leads start error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_job_status(request, job_id):
+    """Poll a background lead-discovery job started by ``research_leads``."""
+    company_user = request.user
+    job = SDRLeadResearchJob.objects.filter(company_user=company_user, pk=job_id).first()
+    if not job:
+        return Response({'status': 'error', 'message': 'Research job not found.'}, status=404)
+
+    params = job.search_params or {}
+    return Response({
+        'status': 'success',
+        'job': {
+            'id': job.id,
+            'state': job.status,                       # running | completed | failed
+            'done': job.status in ('completed', 'failed'),
+            'total_found': job.total_found,
+            'leads_created': job.leads_created,
+            'leads_queued': params.get('leads_queued', 0),
+            'skipped_duplicates': params.get('skipped_duplicates', 0),
+            'source': job.source,
+            'error_message': job.error_message,
+            'error_code': params.get('error_code'),
+            'approval_url': params.get('approval_url'),
+            'actor': params.get('actor'),
+            'started_at': job.started_at,
+            'completed_at': job.completed_at,
+        },
+        'stats': _lead_stats(company_user),
+    })
 
 
 @api_view(['GET', 'POST'])

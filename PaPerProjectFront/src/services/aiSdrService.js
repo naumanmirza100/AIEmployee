@@ -228,13 +228,26 @@ export const researchLeadsBatch = async (leadIds, data = {}) => {
   }
 };
 
-// Research (Apollo.io or AI generation)
+// Research (Apollo.io or Apify discovery) — starts a background job and
+// returns { job_id, ... }. Poll getResearchJob(jobId) for progress/result.
 // --------------------------------------------------------------------------
-export const researchLeads = async ({ count = 20, source = 'auto' } = {}) => {
+export const researchLeads = async ({ count = 20, source = 'auto', icp_id } = {}) => {
   try {
-    return await companyApi.post('/sdr/leads/research/', { count, source });
+    const body = { count, source };
+    if (icp_id) body.icp_id = icp_id;
+    return await companyApi.post('/sdr/leads/research/', body);
   } catch (error) {
     console.error('Research leads error:', error);
+    throw error;
+  }
+};
+
+/** Poll a background lead-discovery job started by researchLeads. */
+export const getResearchJob = async (jobId) => {
+  try {
+    return await companyApi.get(`/sdr/leads/research/jobs/${jobId}/`);
+  } catch (error) {
+    console.error('Get research job error:', error);
     throw error;
   }
 };
