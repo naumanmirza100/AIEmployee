@@ -120,6 +120,10 @@ local_settings.py
 settings.py
 db.sqlite3
 db.sqlite3-journal
+# Copies of a local database (db.sqlite3.bak-…) hold its leads and keys, and this repository is public (4 Nov 2026)
+db.sqlite3.*
+*.sqlite3
+*.sqlite3.bak*
 /staticfiles/
 /media/
 /mediafiles/
