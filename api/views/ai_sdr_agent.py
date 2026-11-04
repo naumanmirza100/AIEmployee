@@ -255,7 +255,7 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'status': lead.status,
         'qualification_status': lead.qualification_status,
         'source': lead.source,
-        'research_status': raw.get('research_status', 'none'),
+        'research_status': lead.research_status,
         'research_profile': raw.get('research_profile'),
         'enrichment_status': enr_status,
         'enrichment_contract': raw.get('enrichment') if isinstance(raw.get('enrichment'), dict) else None,
@@ -653,8 +653,7 @@ def qualify_lead(request, lead_id):
         lead.concerns = result.get('concerns', [])
         lead.outreach_strategy = result.get('outreach_strategy', '')
         lead.qualified_at = timezone.now()
-        if lead.status in ('new', 'qualified'):   # never regress contacted/replied/etc.
-            lead.status = 'qualified'
+        lead.set_status_from_score()
         lead.save()
         return Response({'status': 'success', 'data': _serialize_lead(lead)})
     except SDRLead.DoesNotExist:
@@ -900,7 +899,8 @@ def _execute_research_job(job_id):
         job.total_found = len(raw_leads)
         job.leads_created = created
         job.leads_qualified = 0
-        job.source = researcher.source_label
+        # The provider that answered: with both keys, "apollo" was written even for an Apify run.
+        job.source = next((ld.get('source') for ld in raw_leads if ld.get('source')), job.source)
         job.completed_at = timezone.now()
         job.save()
 
@@ -952,7 +952,8 @@ def research_leads(request):
         # is nothing to search, so fail immediately (no job, no made-up leads)
         # rather than starting a background job that is doomed. Network/approval
         # errors can only be known after the fetch and are surfaced on the job.
-        if not _get_research_agent(company_user.company, company_user=company_user).available_sources:
+        researcher = _get_research_agent(company_user.company, company_user=company_user)
+        if not researcher.available_sources:
             return Response({
                 'status': 'error',
                 'code': 'no_lead_source',
@@ -963,6 +964,9 @@ def research_leads(request):
             company_user=company_user,
             icp_profile=icp,
             status='running',
+            # The provider asked; a failed run keeps it. 'auto' tries Apollo first, and a fallback to Apify
+            # replaces this when the job finishes.
+            source=source if source in ('apollo', 'apify') else researcher.source_label,
             search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count, 'source': source},
             started_at=timezone.now(),
         )
@@ -1036,7 +1040,7 @@ def research_lead_endpoint(request, lead_id):
     if request.method == 'GET':
         raw_data = lead.raw_data if isinstance(lead.raw_data, dict) else {}
         profile = raw_data.get('research_profile')
-        status = raw_data.get('research_status', 'none')
+        status = lead.research_status
         return Response({
             'status': 'success',
             'lead_id': lead.id,

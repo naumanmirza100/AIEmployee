@@ -384,7 +384,6 @@ MIDDLEWARE = [
     # Reports a logged-in screen calling an API address that doesn't exist here
     # (a frontend newer than this backend). Only looks at 404 responses.
     'api.middleware.unknown_endpoint.UnknownEndpointMiddleware',
-    'ai_sdr_agent.middleware.AutoLeadResearchMiddleware',  # Apify auto lead research every 24h
 ]
 
 ROOT_URLCONF = 'project_manager_ai.urls'
@@ -825,7 +824,6 @@ LOGGING = {
             'propagate': False,
         },
         'ai_sdr_agent.tasks': {'level': 'WARNING'},
-        'ai_sdr_agent.middleware': {'level': 'WARNING'},
 
         # Startup import warnings ("PyPDF2 not available") repeat on every boot
         # and are not actionable during normal work.
@@ -841,7 +839,7 @@ if os.getenv('VERBOSE_LOGS', '').strip().lower() in ('1', 'true', 'yes'):
         'apscheduler', 'asyncio',
         'recruitment_agent.tasks',
         'ai_sdr_agent.scheduler', 'ai_sdr_agent.tasks',
-        'ai_sdr_agent.middleware', 'marketing_agent.tasks',
+        'marketing_agent.tasks',
         'api.views.pm_agent',
     ):
         LOGGING['loggers'][_name]['level'] = 'INFO'

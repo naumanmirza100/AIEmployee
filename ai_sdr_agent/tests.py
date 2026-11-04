@@ -661,6 +661,8 @@ class BookingTests(SDRBase):
         m = self.meeting(scheduled_at=was, calendar_link='https://meet.google.com/abc',
                          google_event_id='ev-42', google_event_state=event_state(was, 30))
         when = was + timedelta(days=1)
+        while when.weekday() >= 5:  # Friday + 1 is a Saturday, which the booking page refuses
+            when += timedelta(days=1)
         with mock.patch('core.google_calendar.create_google_event') as create:
             with mock.patch('core.google_calendar.update_google_event', return_value=True) as move:
                 with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):

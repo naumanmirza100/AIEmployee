@@ -552,134 +552,6 @@ def sdr_daily_analytics_task(self):
 
 
 # ---------------------------------------------------------------------------
-# Apify Auto Lead Research
-# ---------------------------------------------------------------------------
-
-def auto_research_leads_impl(leads_per_run: int = 10):
-    """
-    Automatically fetch leads from Apify for all company users who have:
-    - An active ICP profile
-    - Apify token configured in settings
-    """
-    import os
-    from django.conf import settings
-    from django.utils import timezone as tz
-
-    apify_token = (
-        getattr(settings, 'APIFY_API_TOKEN', None)
-        or os.environ.get('APIFY_API_TOKEN', '')
-    ).strip()
-
-    if not apify_token:
-        logger.info("Apify auto-research skipped: APIFY_API_TOKEN not set")
-        return {'skipped': True, 'reason': 'No APIFY_API_TOKEN'}
-
-    from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRLeadResearchJob
-    from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
-
-    researcher = LeadResearchAgent()
-    total_created = 0
-    errors = 0
-    access_cache: dict = {}
-
-    active_icps = SDRIcpProfile.objects.filter(is_active=True).select_related('company_user__company')
-    logger.info("Apify auto-research: found %d active ICP profiles", active_icps.count())
-
-    for icp in active_icps:
-        company_user = icp.company_user
-        if not _has_sdr_access(company_user.company, access_cache):
-            continue
-        try:
-            job = SDRLeadResearchJob.objects.create(
-                company_user=company_user,
-                icp_profile=icp,
-                status='running',
-                source='apify',
-                search_params={'count': leads_per_run, 'source': 'apify', 'auto': True},
-                started_at=tz.now(),
-            )
-
-            raw_leads = researcher.search_leads(icp, count=leads_per_run, source='apify')
-            created = 0
-
-            for ld in raw_leads:
-                email = ld.get('email', '').strip().lower()
-                full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
-                if email:
-                    is_dup = SDRLead.all_objects.filter(company_user=company_user, email=email).exists()
-                else:
-                    # No email to match on: fall back to LinkedIn URL, then name + company,
-                    # so the same person isn't re-inserted on every run.
-                    linkedin = (ld.get('linkedin_url') or '').strip()
-                    if linkedin:
-                        is_dup = SDRLead.all_objects.filter(company_user=company_user, linkedin_url=linkedin).exists()
-                    else:
-                        is_dup = bool(full_name) and SDRLead.all_objects.filter(
-                            company_user=company_user, full_name__iexact=full_name,
-                            company_name__iexact=ld.get('company_name', ''),
-                        ).exists()
-                if is_dup:
-                    continue  # skip duplicate
-
-                SDRLead.objects.create(
-                    company_user=company_user,
-                    icp_profile=icp,
-                    first_name=ld.get('first_name', ''),
-                    last_name=ld.get('last_name', ''),
-                    full_name=full_name,
-                    email=email,
-                    phone=ld.get('phone', ''),
-                    job_title=ld.get('job_title', ''),
-                    seniority_level=ld.get('seniority_level', ''),
-                    department=ld.get('department', ''),
-                    company_name=ld.get('company_name', ''),
-                    company_domain=ld.get('company_domain', ''),
-                    company_industry=ld.get('company_industry', ''),
-                    company_size=ld.get('company_size'),
-                    company_location=ld.get('company_location', ''),
-                    linkedin_url=ld.get('linkedin_url', ''),
-                    company_website=ld.get('company_website', ''),
-                    source='apify',
-                    temperature='cold',
-                    status='new',
-                    # Queue for background qualification, exactly like the
-                    # manual/CSV/Apollo creation paths do — otherwise these
-                    # auto-discovered leads default to qualification_status='none'
-                    # and the qualifier never scores them.
-                    qualification_status='pending',
-                    qualification_queued_at=tz.now(),
-                    enrichment_status='pending',
-                    enrichment_queued_at=tz.now(),
-                )
-                created += 1
-
-            job.status = 'completed'
-            job.leads_created = created
-            job.completed_at = tz.now()
-            job.save(update_fields=['status', 'leads_created', 'completed_at'])
-
-            total_created += created
-            logger.info("Apify auto-research: company_user=%d created=%d leads", company_user.pk, created)
-
-        except Exception as exc:
-            errors += 1
-            logger.error("Apify auto-research failed for company_user=%d: %s", company_user.pk, exc)
-            try:
-                SDRLeadResearchJob.objects.filter(
-                    company_user=company_user, status='running'
-                ).update(status='failed', error_message=str(exc))
-            except Exception:
-                pass
-
-    return {'total_created': total_created, 'errors': errors}
-
-
-@shared_task(bind=True, name='ai_sdr_agent.tasks.auto_research_leads_task', max_retries=1)
-def auto_research_leads_task(self):
-    return auto_research_leads_impl()
-
-
-# ---------------------------------------------------------------------------
 # Independent Lead Research Tasks
 # ---------------------------------------------------------------------------
 
@@ -706,19 +578,16 @@ def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = Fals
         if not isinstance(lead.raw_data, dict):
             lead.raw_data = {}
 
-        current_status = lead.raw_data.get('research_status')
+        current_status = lead.research_status  # A run past its time reads 'failed', so it can start again
         if current_status == 'running':
-            # Check if stuck (running for > 15 mins)
-            updated_at = lead.updated_at or timezone.now()
-            if (timezone.now() - updated_at) < timedelta(minutes=15):
-                return {'status': 'already_running', 'lead_id': lead_id}
+            return {'status': 'already_running', 'lead_id': lead_id}
         if not force and current_status == 'completed':
             return {
                 'status': 'already_completed',
                 'lead_id': lead_id,
                 'profile': lead.raw_data.get('research_profile'),
             }
-        lead.raw_data['research_status'] = 'running'
+        lead.mark_research_running()
         lead.save(update_fields=['raw_data', 'updated_at'])
 
     campaign = None
@@ -1054,8 +923,7 @@ def qualify_queue_impl():
             lead.concerns = result.get('concerns', [])
             lead.outreach_strategy = result.get('outreach_strategy', '')
             lead.qualified_at = now
-            if lead.status in ('new', 'qualified'):   # never regress contacted/replied/etc.
-                lead.status = 'qualified'
+            lead.set_status_from_score()
             lead.qualification_status = 'done'
             lead.qualification_error = ''
             lead.save()

@@ -21,26 +21,50 @@ from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRMeeting
 from ai_sdr_agent.tests import SDRBase
 
 
-class AutoResearchQueuesQualificationTests(SDRBase):
-    """R2: auto-researched (Apify) leads are queued for qualification."""
+class NoLeadsWithoutAskingTests(SDRBase):
+    """Leads come only from a search, import or entry someone makes. A daily Apify run used to add 10 leads
+    to every company with an active ICP, on the platform's Apify token, without anyone asking."""
 
-    @override_settings(APIFY_API_TOKEN='tok')
-    def test_auto_researched_leads_are_queued_for_qualification(self):
+    def test_nothing_searches_for_leads_on_its_own(self):
+        from django.conf import settings
+        self.assertFalse(hasattr(tasks, 'auto_research_leads_impl'))
+        self.assertNotIn('ai_sdr_agent.middleware.AutoLeadResearchMiddleware', settings.MIDDLEWARE)
+
+
+class StatusFollowsTheScoreTests(SDRBase):
+    """A cold lead scoring 11 showed as Qualified: scoring set every lead "qualified"."""
+
+    def scored(self, temperature, status='new'):
+        lead = self.make_lead(f'{temperature}-{status}@acme.com', status=status, temperature=temperature)
+        lead.set_status_from_score()
+        return lead.status
+
+    def test_hot_and_warm_are_qualified_and_cold_is_not(self):
+        self.assertEqual(self.scored('hot'), 'qualified')
+        self.assertEqual(self.scored('warm'), 'qualified')
+        self.assertEqual(self.scored('cold'), 'new')
+        self.assertEqual(self.scored('cold', status='qualified'), 'new')   # re-scored after enrichment
+
+    def test_later_stages_and_unsubscribes_are_kept(self):
+        self.assertEqual(self.scored('cold', status='contacted'), 'contacted')
+        self.assertEqual(self.scored('hot', status='disqualified'), 'disqualified')
+
+
+class ResearchJobSourceTests(SDRBase):
+    """Failed Apify searches were labelled ai_generated: the job only took its provider when a search succeeded."""
+
+    def test_a_failed_search_keeps_the_provider_it_asked(self):
+        from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+        from ai_sdr_agent.models import SDRLeadResearchJob
         SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
-        fake_leads = [{
-            'full_name': 'New Prospect', 'first_name': 'New', 'last_name': 'Prospect',
-            'email': 'new.prospect@target.example', 'job_title': 'CEO',
-            'company_name': 'Target Co',
-        }]
-        with mock.patch(
-            'ai_sdr_agent.agents.lead_research_agent.LeadResearchAgent.search_leads',
-            return_value=fake_leads,
-        ):
-            tasks.auto_research_leads_impl(leads_per_run=5)
-
-        lead = SDRLead.objects.get(email='new.prospect@target.example')
-        self.assertEqual(lead.qualification_status, 'pending')
-        self.assertIsNotNone(lead.qualification_queued_at)
+        agent = LeadResearchAgent(apify_token='tok', apify_actor='code_crafter/leads-finder')
+        request = APIRequestFactory().post('/x', {'source': 'apify', 'count': 5}, format='json')
+        force_authenticate(request, user=self.cu)
+        with mock.patch.object(views, '_get_research_agent', return_value=agent), \
+                mock.patch('threading.Thread'):
+            response = views.research_leads(request)
+        job = SDRLeadResearchJob.objects.get(pk=response.data['job_id'])
+        self.assertEqual(job.source, 'apify')
 
 
 class EnrichmentReportsUpdatedFieldsTests(SDRBase):

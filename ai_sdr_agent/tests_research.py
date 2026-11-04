@@ -5,6 +5,7 @@ The same behaviour is measured against the real services by `manage.py eval_lead
 """
 
 import json
+from datetime import timedelta
 from unittest import mock
 
 import requests
@@ -652,6 +653,57 @@ class GroundingTests(_Fixture, SimpleTestCase):
             self.research(self.lead(), groq=groq)
 
 
+class TokenUseTests(_Fixture, SimpleTestCase):
+    QUOTE = 'Stripe builds financial infrastructure for the internet'
+
+    def groq(self):
+        return GroundingTests.groq(self, {'claims': [{'field': 'overview', 'value': 'Stripe builds financial infrastructure',
+                                                      'source': 'S1', 'quote': self.QUOTE}]})
+
+    def prompt(self, groq):
+        return groq.chat.completions.create.call_args.kwargs['messages'][1]['content']
+
+    def test_reasoning_is_kept_low(self):
+        groq = self.groq()
+        self.research(_lead(company_name='Stripe', company_domain='stripe.com'), groq=groq)
+        self.assertEqual(groq.chat.completions.create.call_args.kwargs['extra_body'], {'reasoning_effort': 'low'})
+
+    def test_unchanged_sources_reuse_the_last_answer(self):
+        lead = _lead(company_name='Stripe', company_domain='stripe.com')
+        first = self.research(lead, groq=self.groq())
+        groq = self.groq()
+        again = self.research({**lead, 'raw_data': {'research_profile': first}}, groq=groq)
+        groq.chat.completions.create.assert_not_called()
+        self.assertEqual(again['provider_status']['llm'], 'cached')
+        self.assertEqual(again['company_research']['overview'], 'Stripe builds financial infrastructure')
+
+    def test_changed_sources_ask_again(self):
+        lead = _lead(company_name='Stripe', company_domain='stripe.com')
+        first = self.research(lead, groq=self.groq())
+        groq = self.groq()
+        news = _search_result('Stripe raises $1B', 'Stripe raises $1B in new funding')
+        self.research({**lead, 'raw_data': {'research_profile': first}}, snippets=[news], groq=groq)
+        groq.chat.completions.create.assert_called_once()
+
+    def test_long_pages_are_cut_and_repeated_menus_sent_once(self):
+        menu = 'Home. Pricing. Contact us. '
+        pages = [{'page_type': 'homepage', 'url': 'https://stripe.com', 'content': menu + f'{self.QUOTE}. ' + 'Filler text here. ' * 400},
+                 {'page_type': 'careers', 'url': 'https://stripe.com/jobs', 'content': menu + 'We are hiring engineers. ' * 400}]
+        groq = self.groq()
+        profile = self.research(_lead(company_name='Stripe', company_domain='stripe.com'), pages=pages, groq=groq)
+        prompt = self.prompt(groq)
+        self.assertLess(len(prompt), 6000)
+        self.assertEqual(prompt.count('Contact us.'), 1)
+        self.assertEqual(profile['company_research']['overview'], 'Stripe builds financial infrastructure')
+
+    def test_role_is_not_asked_for_an_unconfirmed_prospect(self):
+        groq = self.groq()
+        self.research(_lead(full_name='Velmora Quistan', job_title='VP Sales', company_name='Stripe',
+                            company_domain='stripe.com'), groq=groq)
+        self.assertNotIn('responsibilities', self.prompt(groq))
+        self.assertNotIn('Velmora', self.prompt(groq))
+
+
 class ProspectAssessmentTests(SimpleTestCase):
     def check(self, title, company, *texts, name='Patrick Collison', official=False):
         sources = [{'url': f'https://s/{i}', 'text': text, 'official': official} for i, text in enumerate(texts)]
@@ -1088,6 +1140,40 @@ class ExtractorTests(SimpleTestCase):
         self.assertFalse(page['success'])
         get.assert_called_once()
 
+    def test_a_refused_redirect_is_not_retried_with_curl(self):
+        # curl -L used to retry it and follow the redirect to the private address unchecked.
+        extractor = WebpageExtractor()
+        redirect = mock.MagicMock(is_redirect=True, headers={'Location': 'http://169.254.169.254/latest/meta-data'})
+        with mock.patch('ai_sdr_agent.agents.lead_research_tools.is_public_host', side_effect=lambda h: h == 'evil.example'), \
+                mock.patch.object(extractor.session, 'get', return_value=redirect), \
+                mock.patch('subprocess.run') as curl:
+            self.assertFalse(extractor.fetch_page('http://evil.example/')['success'])
+        curl.assert_not_called()
+
+    def test_curl_checks_every_redirect_itself(self):
+        hop = mock.MagicMock(returncode=0, stdout='\n__curl_status__ 302 http://169.254.169.254/latest/meta-data')
+        with mock.patch('ai_sdr_agent.agents.lead_research_tools.is_public_host', side_effect=lambda h: h == 'evil.example'), \
+                mock.patch('subprocess.run', return_value=hop) as curl:
+            self.assertIsNone(WebpageExtractor()._curl_fallback('https://evil.example/'))
+        curl.assert_called_once()
+        self.assertNotIn('-L', curl.call_args.args[0])
+
+    def test_curl_reads_a_public_site_through_its_redirects(self):
+        html = '<html><title>Acme</title><body>' + 'Acme makes dental software. ' * 20 + '</body></html>'
+        hops = [mock.MagicMock(returncode=0, stdout='\n__curl_status__ 301 https://www.acme.example/'),
+                mock.MagicMock(returncode=0, stdout=html + '\n__curl_status__ 200 ')]
+        with mock.patch('ai_sdr_agent.agents.lead_research_tools.is_public_host', return_value=True), \
+                mock.patch('subprocess.run', side_effect=hops):
+            page = WebpageExtractor()._curl_fallback('https://acme.example/')
+        self.assertEqual(page['url'], 'https://www.acme.example/')
+        self.assertIn('dental software', page['content'])
+
+    def test_an_error_page_from_curl_is_not_the_site(self):
+        notfound = mock.MagicMock(returncode=0, stdout='<html>' + 'x' * 300 + '</html>\n__curl_status__ 404 ')
+        with mock.patch('ai_sdr_agent.agents.lead_research_tools.is_public_host', return_value=True), \
+                mock.patch('subprocess.run', return_value=notfound):
+            self.assertIsNone(WebpageExtractor()._curl_fallback('https://acme.example/'))
+
     def test_pages_that_answer_200_but_say_nothing(self):
         self.assertEqual(classify_page('Just a moment...', ''), 'blocked')
         self.assertEqual(classify_page('Page not found', ''), 'not_found')
@@ -1120,6 +1206,21 @@ class DuplicateResearchTests(LeadResearchTestCase):
         with mock.patch.object(LeadResearchAgent, 'research_lead') as research:
             self.assertEqual(research_lead_impl(lead.id, force=True)['status'], 'already_running')
         research.assert_not_called()
+
+    def test_an_interrupted_run_reads_failed_and_can_start_again(self):
+        # Two leads showed "running" for days: enrichment kept moving updated_at, so the run never looked old.
+        started = (timezone.now() - timedelta(hours=30)).isoformat()
+        lead = SDRLead.objects.create(company_user=self.cu, company_name='X',
+                                      raw_data={'research_status': 'running', 'research_started_at': started})
+        self.assertEqual(lead.research_status, 'failed')
+        with mock.patch.object(LeadResearchAgent, 'research_lead', return_value={}) as research:
+            self.assertEqual(research_lead_impl(lead.id)['status'], 'success')
+        research.assert_called_once()
+
+    def test_a_run_in_progress_still_reads_running(self):
+        lead = SDRLead.objects.create(company_user=self.cu, company_name='X')
+        lead.mark_research_running()
+        self.assertEqual(lead.research_status, 'running')
 
     def test_batch_with_repeated_ids_researches_once(self):
         lead = SDRLead.objects.create(company_user=self.cu, company_name='AcmeCloud', company_domain='acmecloud.io')
