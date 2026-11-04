@@ -683,10 +683,12 @@ def auto_research_leads_task(self):
 # Independent Lead Research Tasks
 # ---------------------------------------------------------------------------
 
-def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = False) -> dict:
+def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = False, agents: dict = None) -> dict:
     """
     Executes independent research on an existing lead.
     Safe against concurrent runs and respects subscription access.
+    ``agents`` is a batch's agents by login: reusing one lets colleagues at the same company share its crawl
+    and news search, which a new agent per lead never did.
     """
     from ai_sdr_agent.models import SDRAgentSettings, SDRLead, SDRCampaign
     from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
@@ -723,14 +725,18 @@ def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = Fals
         campaign = SDRCampaign.objects.filter(pk=campaign_id, company_user=company_user).first()
 
     try:
-        # The keys the user saved in Settings, as the rest of the SDR agent uses
-        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
-        agent = LeadResearchAgent(
-            company=company,
-            apollo_api_key=(sdr_settings.apollo_api_key or None) if sdr_settings else None,
-            apify_token=(sdr_settings.apify_api_token or None) if sdr_settings else None,
-            apify_actor=(sdr_settings.apify_actor_id or None) if sdr_settings else None,
-        )
+        agent = (agents or {}).get(company_user.pk)
+        if agent is None:
+            # The keys the user saved in Settings, as the rest of the SDR agent uses
+            sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+            agent = LeadResearchAgent(
+                company=company,
+                apollo_api_key=(sdr_settings.apollo_api_key or None) if sdr_settings else None,
+                apify_token=(sdr_settings.apify_api_token or None) if sdr_settings else None,
+                apify_actor=(sdr_settings.apify_actor_id or None) if sdr_settings else None,
+            )
+            if agents is not None:
+                agents[company_user.pk] = agent
         profile = agent.research_lead(lead, campaign=campaign)
         return {'status': 'success', 'lead_id': lead_id, 'profile': profile}
     except Exception as exc:
@@ -745,9 +751,10 @@ def research_leads_batch_impl(lead_ids: list[int], campaign_id: int = None, forc
     results = []
     completed_count = 0
     failed_count = 0
+    agents = {}  # One per login for the whole batch, so a company's website is read once
 
     for lid in dict.fromkeys(lead_ids):
-        res = research_lead_impl(lid, campaign_id=campaign_id, force=force)
+        res = research_lead_impl(lid, campaign_id=campaign_id, force=force, agents=agents)
         results.append(res)
         if res.get('status') in ('success', 'already_completed'):
             completed_count += 1

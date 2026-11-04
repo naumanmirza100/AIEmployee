@@ -1231,6 +1231,20 @@ class DuplicateResearchTests(LeadResearchTestCase):
         self.assertEqual(len(result['results']), 1)
         self.assertEqual(crawl.call_count, 1)
 
+    def test_colleagues_in_a_batch_share_one_company_crawl(self):
+        # Each lead used to get a new agent, so a company's website was read once per person there.
+        ana = SDRLead.objects.create(company_user=self.cu, full_name='Ana One', company_name='AcmeCloud',
+                                     company_domain='acmecloud.io')
+        ben = SDRLead.objects.create(company_user=self.cu, full_name='Ben Two', company_name='AcmeCloud',
+                                     company_domain='acmecloud.io')
+        other = SDRLead.objects.create(company_user=self.cu, full_name='Cy Three', company_name='Globex',
+                                       company_domain='globex.io')
+        with mock.patch.object(WebpageExtractor, 'extract_company_site', return_value=self._make_mock_pages()) as crawl, \
+                mock.patch.object(ApifySearchTool, 'search', return_value=[]):
+            result = research_leads_batch_impl([ana.id, ben.id, other.id])
+        self.assertEqual(result['completed'], 3)
+        self.assertEqual(sorted(c.args[0] for c in crawl.call_args_list), ['acmecloud.io', 'globex.io'])
+
     def test_task_uses_the_keys_saved_in_settings(self):
         from ai_sdr_agent.models import SDRAgentSettings
         SDRAgentSettings.objects.create(company_user=self.cu, apify_api_token='saved-token')
