@@ -198,3 +198,15 @@ celery_results.db
 
 # Frontend build zipped for upload to Hostinger; rebuild it with npm run build
 frontend-dist.zip
+
+# Personal local folder: notes/md files and other stuff kept out of git
+_local/
+
+# Local database files (any SQLite/db file created during dev)
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

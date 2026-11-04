@@ -634,7 +634,7 @@ const SDRLeadsTab = () => {
   const [csvImport, setCsvImport] = useState(null); // { file, rows, columns, skippedEmpty } | null
   const [csvImporting, setCsvImporting] = useState(false);
   const [leads, setLeads] = useState([]);
-  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, enriching: 0 });
+  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, unqueued: 0, enriching: 0 });
   const [pagination, setPagination] = useState({ page: 1, page_size: 25, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
 
   const [loading, setLoading] = useState(true);
@@ -688,7 +688,7 @@ const SDRLeadsTab = () => {
         page_size:   opts.page_size   ?? pageSize,
       });
       setLeads(resp?.data || []);
-      setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, enriching: 0 });
+      setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, unqueued: 0, enriching: 0 });
       setPagination(resp?.pagination || { page: 1, page_size: pageSize, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
       setSelectedIds(new Set());
       if (resp?.data) {
@@ -1197,10 +1197,12 @@ const SDRLeadsTab = () => {
               <Loader2 size={15} className="animate-spin" /> Enriching {stats.enriching}…
             </span>
           )}
-          {stats.unscored > 0 && stats.unscored > (stats.qualifying || 0) && (
-            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`AI-qualify unscored lead(s) now`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
+          {/* Only for unscored leads the queue won't reach on its own (never queued, or failed for good);
+              queued leads are already covered by the "Qualifying…" badge. */}
+          {stats.unqueued > 0 && (
+            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`${stats.unqueued} unscored lead${stats.unqueued === 1 ? ' is' : 's are'} not in the qualification queue (never queued, or qualification failed). Add ${stats.unqueued === 1 ? 'it' : 'them'} to the queue.`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
               {qualifyingAll ? <Loader2 size={15} className="animate-spin" /> : <Brain size={15} />}
-              Qualify now
+              Qualify {stats.unqueued} more
             </Button>
           )}
           <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
@@ -2078,7 +2080,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               </div>
 
               {/* Preview table (first 10) */}
-              <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden', maxHeight: 340, overflowY: 'auto' }}>
+              <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, maxHeight: 340, overflow: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead style={{ position: 'sticky', top: 0, background: 'var(--panel-1)' }}>
                     <tr>

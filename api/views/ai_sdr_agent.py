@@ -292,6 +292,8 @@ def _lead_stats(company_user) -> dict:
         'unscored': qs.filter(score__isnull=True).count(),
         # Leads waiting in / running through the background qualification queue.
         'qualifying': qs.filter(qualification_status__in=['pending', 'processing']).count(),
+        # Unscored leads the queue will not pick up (never queued, or failed for good) — what "Qualify all" would add.
+        'unqueued': qs.filter(score__isnull=True).exclude(qualification_status__in=['pending', 'processing']).count(),
         # Leads waiting in / running through the background enrichment queue.
         'enriching': qs.filter(enrichment_status__in=['pending', 'processing']).count(),
     }
@@ -654,6 +656,9 @@ def qualify_lead(request, lead_id):
         lead.outreach_strategy = result.get('outreach_strategy', '')
         lead.qualified_at = timezone.now()
         lead.set_status_from_score()
+        # Take it out of the background queue too, or the queue scores it a second time.
+        lead.qualification_status = 'done'
+        lead.qualification_error = ''
         lead.save()
         return Response({'status': 'success', 'data': _serialize_lead(lead)})
     except SDRLead.DoesNotExist:
