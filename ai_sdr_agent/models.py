@@ -41,6 +41,29 @@ class SDRIcpProfile(models.Model):
         return f"{self.company_user} — {self.name}"
 
 
+class SDRLeadCategory(models.Model):
+    """The industry a batch of leads was gathered for ("Dentistry", "Educational Institutes"). Leads from a
+    dentistry search and an education search landed in one list with nothing to tell them apart; filed under a
+    category they can be filtered and exported apart. Categories come from the data, never a fixed list: a search
+    files its leads under the industry searched for, an import under each lead's own industry
+    (ai_sdr_agent/categories.py). Names are unique per user, case-insensitively (checked in get_or_create)."""
+    company_user = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.CASCADE, related_name='sdr_lead_categories'
+    )
+    name = models.CharField(max_length=100)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'sdr_lead_category'
+        ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(fields=['company_user', 'name'], name='sdr_lead_category_unique_name'),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class SDRLeadManager(models.Manager):
     """Default manager that hides soft-deleted leads.
 
@@ -85,6 +108,11 @@ class SDRLead(models.Model):
     )
     icp_profile = models.ForeignKey(
         'SDRIcpProfile', on_delete=models.SET_NULL, null=True, blank=True
+    )
+    # The industry the user filed this lead under (see SDRLeadCategory); deleting a category leaves its leads
+    # uncategorised.
+    category = models.ForeignKey(
+        'SDRLeadCategory', on_delete=models.SET_NULL, null=True, blank=True, related_name='leads'
     )
 
     # Identity

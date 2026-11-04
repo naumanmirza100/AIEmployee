@@ -8,7 +8,7 @@ import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ArrowUpDown, SlidersHorizontal, Download, FileText, FileSpreadsheet,
   Square, CheckSquare, MinusSquare, ShieldCheck, ShieldAlert, Target,
-  AlertTriangle, Sparkles, Route, CheckCircle2,
+  AlertTriangle, Sparkles, Route, CheckCircle2, Tag, Pencil, Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,7 +20,8 @@ import {
   listLeads, exportAllLeadsCsv, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
   researchLead, getLeadResearch, researchLeads, getResearchJob, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
-  bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads,
+  bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads, updateLead,
+  listLeadCategories, renameLeadCategory, deleteLeadCategory, bulkSetLeadCategory,
 } from '@/services/aiSdrService';
 
 // --------------------------------------------------------------------------
@@ -175,7 +176,8 @@ const EXPORT_COLUMNS = [
   { key: 'phone',              label: 'Phone' },
   { key: 'job_title',          label: 'Job Title' },
   { key: 'company_name',       label: 'Company' },
-  { key: 'company_industry',   label: 'Industry' },
+  { key: 'category',           label: 'Industry Category' },
+  { key: 'company_industry',   label: 'Company Industry' },
   { key: 'company_size',       label: 'Company Size' },
   { key: 'company_location',   label: 'Location' },
   { key: 'score',              label: 'Score' },
@@ -219,7 +221,7 @@ async function exportToPdf(leads, filename = 'leads') {
   doc.setLineWidth(0.3);
   doc.line(14, 30, 283, 30);
   // Fit fewer data columns to leave room for the leading Sr# column.
-  const columns = EXPORT_COLUMNS.slice(0, 9);
+  const columns = EXPORT_COLUMNS.slice(0, 10);
   autoTable(doc, {
     startY: 34,
     // Prepend a "Sr#" column so any lead can be referenced by row number.
@@ -231,7 +233,7 @@ async function exportToPdf(leads, filename = 'leads') {
     styles: { fontSize: 8, cellPadding: { top: 3, bottom: 3, left: 4, right: 4 }, textColor: [30, 30, 30], fillColor: [255, 255, 255], lineColor: [220, 220, 220], lineWidth: 0.25, overflow: 'linebreak' },
     headStyles: { fillColor: [124, 58, 237], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5, halign: 'left' },
     alternateRowStyles: { fillColor: [248, 245, 255] },
-    columnStyles: { 0: { cellWidth: 12, halign: 'right' }, 1: { cellWidth: 34 }, 2: { cellWidth: 42 }, 3: { cellWidth: 24 }, 4: { cellWidth: 34 }, 5: { cellWidth: 26 }, 6: { cellWidth: 22 }, 7: { cellWidth: 16 }, 8: { cellWidth: 22 }, 9: { cellWidth: 14 } },
+    columnStyles: { 0: { cellWidth: 12, halign: 'right' }, 1: { cellWidth: 30 }, 2: { cellWidth: 40 }, 3: { cellWidth: 22 }, 4: { cellWidth: 28 }, 5: { cellWidth: 26 }, 6: { cellWidth: 24 }, 7: { cellWidth: 24 }, 8: { cellWidth: 14 }, 9: { cellWidth: 26 }, 10: { cellWidth: 12 } },
     margin: { left: 14, right: 14 },
     didDrawPage: (data) => {
       const pageCount = doc.internal.getNumberOfPages();
@@ -337,6 +339,127 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
         </div>
       )}
     </div>
+  );
+};
+
+// --------------------------------------------------------------------------
+// Category picker — one of the user's industry categories, or a new one typed
+// in. `value` is a category name ('' = none); the server makes a new name into
+// a category on first use, so nothing here is a fixed list.
+// --------------------------------------------------------------------------
+const NEW_CATEGORY = '__new__';
+
+const CategoryPicker = ({ categories, value, onChange, emptyLabel = 'No category' }) => {
+  const match = categories.find(c => c.name.toLowerCase() === (value || '').trim().toLowerCase());
+  const [typing, setTyping] = useState(!!value && !match);
+
+  if (typing) {
+    return (
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input autoFocus value={value} maxLength={100} onChange={e => onChange(e.target.value)}
+          placeholder="New category, e.g. Educational Institutes" style={inputStyle} />
+        <button type="button" title="Pick from your categories" onClick={() => { setTyping(false); onChange(''); }}
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, cursor: 'pointer', color: '#6b7280' }}>
+          <X size={14} />
+        </button>
+      </div>
+    );
+  }
+  return (
+    <select value={match ? match.name : ''} style={{ ...inputStyle, cursor: 'pointer' }}
+      onChange={e => {
+        if (e.target.value === NEW_CATEGORY) { setTyping(true); onChange(''); } else onChange(e.target.value);
+      }}>
+      <option value="">{emptyLabel}</option>
+      {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+      <option value={NEW_CATEGORY}>+ Add new category…</option>
+    </select>
+  );
+};
+
+// --------------------------------------------------------------------------
+// Manage categories — rename (e.g. tidy a provider's "Hospital & Health Care")
+// or delete one; a deleted category's leads stay, with no category.
+// --------------------------------------------------------------------------
+const CategoryManagerDialog = ({ open, onOpenChange, categories, onChanged }) => {
+  const { toast } = useToast();
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => { if (!open) { setEditingId(null); setConfirmDeleteId(null); } }, [open]);
+
+  const rename = async (cat) => {
+    if (!draft.trim() || draft.trim() === cat.name) { setEditingId(null); return; }
+    setBusyId(cat.id);
+    try {
+      await renameLeadCategory(cat.id, draft.trim());
+      setEditingId(null);
+      onChanged();
+    } catch (e) {
+      toast({ title: 'Could not rename', description: e?.message, variant: 'destructive' });
+    } finally { setBusyId(null); }
+  };
+
+  const remove = async (cat) => {
+    setBusyId(cat.id);
+    try {
+      await deleteLeadCategory(cat.id);
+      setConfirmDeleteId(null);
+      toast({ title: `Deleted "${cat.name}"`, description: 'Its leads are kept, with no category.' });
+      onChanged();
+    } catch (e) {
+      toast({ title: 'Could not delete', description: e?.message, variant: 'destructive' });
+    } finally { setBusyId(null); }
+  };
+
+  const iconBtn = { display: 'flex', alignItems: 'center', padding: 6, background: 'none', border: 'none', cursor: 'pointer' };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 520 }}>
+        <DialogHeader>
+          <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Tag size={18} color="#a855f7" /> Lead categories
+          </DialogTitle>
+        </DialogHeader>
+        {categories.length === 0 ? (
+          <p style={{ color: '#6b7280', fontSize: 13, padding: '8px 0' }}>
+            No categories yet. They're made from the industry as leads come in, or when you pick "Add new category" anywhere.
+          </p>
+        ) : (
+          <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, maxHeight: '55vh', overflowY: 'auto' }}>
+            {categories.map(cat => (
+              <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
+                {editingId === cat.id ? (
+                  <input autoFocus value={draft} maxLength={100} onChange={e => setDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') rename(cat); if (e.key === 'Escape') setEditingId(null); }}
+                    style={{ ...inputStyle, padding: '5px 10px', fontSize: 13 }} />
+                ) : (
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
+                )}
+                <span style={{ color: '#6b7280', fontSize: 12, whiteSpace: 'nowrap' }}>{cat.lead_count ?? 0} leads</span>
+                {busyId === cat.id ? <Loader2 size={14} className="animate-spin" style={{ color: '#6b7280', margin: 6 }} />
+                  : editingId === cat.id ? (
+                    <button title="Save" onClick={() => rename(cat)} style={{ ...iconBtn, color: 'hsl(var(--pt-4ade80))' }}><Check size={14} /></button>
+                  ) : confirmDeleteId === cat.id ? (
+                    <>
+                      <button onClick={() => remove(cat)} style={{ ...iconBtn, color: '#f87171', fontSize: 12, fontWeight: 600 }}>Delete</button>
+                      <button onClick={() => setConfirmDeleteId(null)} style={{ ...iconBtn, color: '#6b7280', fontSize: 12 }}>Keep</button>
+                    </>
+                  ) : (
+                    <>
+                      <button title="Rename" onClick={() => { setEditingId(cat.id); setDraft(cat.name); setConfirmDeleteId(null); }} style={{ ...iconBtn, color: '#9ca3af' }}><Pencil size={13} /></button>
+                      <button title="Delete" onClick={() => { setConfirmDeleteId(cat.id); setEditingId(null); }} style={{ ...iconBtn, color: '#f87171' }}><Trash2 size={13} /></button>
+                    </>
+                  )}
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -651,7 +774,20 @@ const SDRLeadsTab = () => {
   const [filterTemp, setFilterTemp] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSource, setFilterSource] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');   // '' all, 'none', or a category id
   const [sortBy, setSortBy] = useState('score_desc');
+
+  // Industry categories (made from the data as leads come in, or typed in by hand).
+  const [categories, setCategories] = useState([]);
+  const [uncategorizedCount, setUncategorizedCount] = useState(0);
+  const [newLeadCategory, setNewLeadCategory] = useState('');
+  const [csvCategory, setCsvCategory] = useState('');
+  const [genCategory, setGenCategory] = useState('');
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [bulkCategorySaving, setBulkCategorySaving] = useState(false);
+  const [allMatching, setAllMatching] = useState(false);   // the bulk action covers every lead the filters match
+  const [detailCategory, setDetailCategory] = useState('');
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
@@ -683,6 +819,7 @@ const SDRLeadsTab = () => {
         temperature: opts.temperature ?? filterTemp,
         status:      opts.status      ?? filterStatus,
         source:      opts.source      ?? filterSource,
+        category:    opts.category    ?? filterCategory,
         sort:        opts.sort        ?? sortBy,
         page:        opts.page        ?? page,
         page_size:   opts.page_size   ?? pageSize,
@@ -691,6 +828,7 @@ const SDRLeadsTab = () => {
       setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, unqueued: 0, enriching: 0 });
       setPagination(resp?.pagination || { page: 1, page_size: pageSize, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
       setSelectedIds(new Set());
+      setAllMatching(false);
       if (resp?.data) {
         setSelectedLead(prev => {
           if (!prev?.id) return prev;
@@ -701,9 +839,17 @@ const SDRLeadsTab = () => {
     } catch (e) {
       toast({ title: 'Failed to load leads', description: e?.message, variant: 'destructive' });
     } finally { setLoading(false); }
-  }, [search, filterTemp, filterStatus, filterSource, sortBy, page, pageSize, toast]);
+  }, [search, filterTemp, filterStatus, filterSource, filterCategory, sortBy, page, pageSize, toast]);
 
-  useEffect(() => { loadLeads(); }, []);
+  const loadCategories = useCallback(async () => {
+    try {
+      const resp = await listLeadCategories();
+      setCategories(resp?.data || []);
+      setUncategorizedCount(resp?.uncategorized || 0);
+    } catch (_) { /* the pickers just show no categories */ }
+  }, []);
+
+  useEffect(() => { loadLeads(); loadCategories(); }, []);
 
   // While leads are being qualified or enriched in the background, poll every
   // 12s so scores and enriched fields appear on their own. Stops once both
@@ -716,17 +862,67 @@ const SDRLeadsTab = () => {
 
   useEffect(() => {
     setPage(1);
-    loadLeads({ page: 1, search, temperature: filterTemp, status: filterStatus, source: filterSource, sort: sortBy, page_size: pageSize });
-  }, [search, filterTemp, filterStatus, filterSource, sortBy, pageSize]);
+    loadLeads({ page: 1, search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, sort: sortBy, page_size: pageSize });
+  }, [search, filterTemp, filterStatus, filterSource, filterCategory, sortBy, pageSize]);
 
   const goToPage = useCallback((p) => { setPage(p); loadLeads({ page: p }); }, [loadLeads]);
 
+  // The Filters panel's count; the category filter sits outside the panel.
   const activeFiltersCount = [filterTemp, filterStatus, filterSource].filter(Boolean).length;
+  const anyFilter = activeFiltersCount > 0 || !!filterCategory;
+  const clearAllFilters = () => { setFilterTemp(''); setFilterStatus(''); setFilterSource(''); setFilterCategory(''); };
+  // The list's current filters, for actions that cover every matching lead (bulk category, Export ALL).
+  const currentFilters = { search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory };
+
+  // After a change that can add categories or move leads between them.
+  const refreshAfterCategoryChange = () => { loadLeads(); loadCategories(); };
+
+  const handleBulkSetCategory = async () => {
+    setBulkCategorySaving(true);
+    try {
+      const resp = await bulkSetLeadCategory({
+        category: bulkCategory.trim() || null,
+        ...(allMatching ? { filters: currentFilters } : { ids: [...selectedIds] }),
+      });
+      toast({ title: resp?.message || 'Category updated' });
+      setBulkCategory('');
+      refreshAfterCategoryChange();
+    } catch (e) {
+      toast({ title: 'Could not change the category', description: e?.message, variant: 'destructive' });
+    } finally { setBulkCategorySaving(false); }
+  };
+
+  // Filtering by a category that was just deleted would show an empty list: go back to all.
+  useEffect(() => {
+    if (filterCategory && filterCategory !== 'none' && !categories.some(c => String(c.id) === filterCategory)) {
+      setFilterCategory('');
+    }
+  }, [categories]);
+
+  // A closed import dialog forgets its category, so the next file starts on Automatic.
+  useEffect(() => { if (!csvImport) setCsvCategory(''); }, [csvImport]);
+
+  // The detail panel's picker follows whichever lead is open.
+  useEffect(() => { setDetailCategory(selectedLead?.category || ''); }, [selectedLead?.id, selectedLead?.category]);
+
+  const handleSaveDetailCategory = async () => {
+    if (!selectedLead) return;
+    try {
+      const resp = await updateLead(selectedLead.id, { category: detailCategory.trim() || null });
+      const updated = resp?.data;
+      if (updated) setSelectedLead(prev => ({ ...prev, ...updated }));
+      toast({ title: updated?.category ? `Moved to "${updated.category}"` : 'Category removed' });
+      refreshAfterCategoryChange();
+    } catch (e) {
+      toast({ title: 'Could not change the category', description: e?.message, variant: 'destructive' });
+    }
+  };
   const allPageIds = leads.map(l => l.id);
   const allSelected = allPageIds.length > 0 && allPageIds.every(id => selectedIds.has(id));
   const someSelected = allPageIds.some(id => selectedIds.has(id)) && !allSelected;
 
   const toggleSelectAll = () => {
+    setAllMatching(false);
     if (allSelected) {
       setSelectedIds(prev => { const n = new Set(prev); allPageIds.forEach(id => n.delete(id)); return n; });
     } else {
@@ -735,6 +931,7 @@ const SDRLeadsTab = () => {
   };
 
   const toggleSelect = (id) => {
+    setAllMatching(false);
     setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   };
 
@@ -809,7 +1006,9 @@ const SDRLeadsTab = () => {
     });
     try {
       // Kick off the background job; the backend returns a job id immediately.
-      const startResp = await researchLeads({ count: genCount, source: genSource, icp_id: genIcpId || undefined });
+      const startResp = await researchLeads({
+        count: genCount, source: genSource, icp_id: genIcpId || undefined, category: genCategory.trim() || undefined,
+      });
       const started = startResp?.data ?? startResp;
       const jobId = started?.job_id;
       if (!jobId) {
@@ -860,8 +1059,10 @@ const SDRLeadsTab = () => {
         ].filter(Boolean).join(' '),
       });
       setShowGenModal(false);
+      setGenCategory('');
       setPage(1);
       loadLeads({ page: 1 });
+      loadCategories();
     } catch (e) {
       const data = e?.data || e?.response?.data;
       if (data?.code === 'apify_approval_required') {
@@ -881,7 +1082,7 @@ const SDRLeadsTab = () => {
   const handleFetchApify = async () => {
     setFetchingApify(true);
     try {
-      const resp = await fetchApifyLeads({ count: 200 });
+      const resp = await fetchApifyLeads({ count: 200, category: genCategory.trim() || undefined });
       const created = resp?.data?.leads_created ?? resp?.leads_created ?? 0;
       const skipped = resp?.data?.skipped_duplicates ?? resp?.skipped_duplicates ?? 0;
       toast({
@@ -889,8 +1090,10 @@ const SDRLeadsTab = () => {
         description: skipped ? `${skipped} duplicates skipped.` : (resp?.message || resp?.data?.message || ''),
       });
       setShowGenModal(false);
+      setGenCategory('');
       setPage(1);
       loadLeads({ page: 1 });
+      loadCategories();
     } catch (e) {
       toast({ title: 'Fetch failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
     } finally { setFetchingApify(false); }
@@ -1084,12 +1287,18 @@ const SDRLeadsTab = () => {
 
     setAddingLead(true);
     try {
-      await createLead({ ...newLead, company_size: newLead.company_size ? parseInt(newLead.company_size) : null });
+      await createLead({
+        ...newLead,
+        company_size: newLead.company_size ? parseInt(newLead.company_size) : null,
+        category: newLeadCategory.trim() || null,   // none picked → the Industry typed in decides
+      });
       setShowAddModal(false);
       setNewLead(BLANK_LEAD);
+      setNewLeadCategory('');
       toast({ title: 'Lead added' });
       setPage(1);
       loadLeads({ page: 1 });
+      loadCategories();
     } catch (e) {
       toast({ title: 'Add failed', description: e.message, variant: 'destructive' });
     } finally { setAddingLead(false); }
@@ -1131,13 +1340,15 @@ const SDRLeadsTab = () => {
     if (!csvImport?.file) return;
     setCsvImporting(true);
     try {
-      const resp = await importLeadsFromCSV(csvImport.file);
+      const resp = await importLeadsFromCSV(csvImport.file, csvCategory.trim());
       // Refused rows are listed with their reasons: 5 seconds was too short to read them (AI SDR film, 30 Oct).
       toast({ title: `Imported ${resp.created} leads`, description: resp.message,
         ...(resp.refused?.length ? { duration: 15000 } : {}) });
       setCsvImport(null);
+      setCsvCategory('');
       setPage(1);
       loadLeads({ page: 1 });
+      loadCategories();
     } catch (err) {
       toast({ title: 'Import failed', description: err?.message, variant: 'destructive' });
     } finally { setCsvImporting(false); }
@@ -1213,7 +1424,7 @@ const SDRLeadsTab = () => {
           <div style={{ marginLeft: 'auto' }}>
             <ExportDropdown leads={leads} selectedLeads={selectedIds} allLeadsOnPage={leads}
               totalCount={pagination.total_count}
-              exportParams={{ search, temperature: filterTemp, status: filterStatus, source: filterSource, sort: sortBy }} />
+              exportParams={{ ...currentFilters, sort: sortBy }} />
           </div>
         </div>
       </div>
@@ -1221,12 +1432,35 @@ const SDRLeadsTab = () => {
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 18px', borderRadius: 12, background: 'linear-gradient(90deg, rgba(168,85,247,0.08), rgba(99,102,241,0.08))', border: '1px solid rgba(168,85,247,0.3)' }}>
-          <span style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 700, fontSize: 14 }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''} selected</span>
+          <span style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 700, fontSize: 14 }}>
+            {allMatching
+              ? `All ${pagination.total_count.toLocaleString()} matching leads selected`
+              : `${selectedIds.size} lead${selectedIds.size > 1 ? 's' : ''} selected`}
+          </span>
+          {/* Every lead on the page ticked, with more pages: offer the whole filtered list (for filing a big import at once). */}
+          {!allMatching && allSelected && pagination.total_count > leads.length && (
+            <button onClick={() => setAllMatching(true)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#60a5fa', fontSize: 13, textDecoration: 'underline' }}>
+              Select all {pagination.total_count.toLocaleString()} matching leads
+            </button>
+          )}
           <div style={{ width: 1, height: 20, background: 'var(--line-1)' }} />
-          <button onClick={() => setShowBulkDeleteConfirm(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', fontSize: 13, fontWeight: 600 }}>
-            <Trash2 size={13} /> Delete {selectedIds.size} selected
-          </button>
-          <button onClick={() => setSelectedIds(new Set())} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', background: 'none', border: '1px solid var(--line-1)', color: '#6b7280', fontSize: 13 }}>
+          {/* File the selection under a category (pick one, type a new one, or "No category" to clear). */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Tag size={13} style={{ color: '#a78bfa', flexShrink: 0 }} />
+            <div style={{ width: 220 }}>
+              <CategoryPicker categories={categories} value={bulkCategory} onChange={setBulkCategory} emptyLabel="No category (clear)" />
+            </div>
+            <button onClick={handleBulkSetCategory} disabled={bulkCategorySaving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.35)', color: 'hsl(var(--pt-a78bfa))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {bulkCategorySaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Set category
+            </button>
+          </div>
+          {/* Delete works on ticked leads only, never on "all matching". */}
+          {!allMatching && (
+            <button onClick={() => setShowBulkDeleteConfirm(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', fontSize: 13, fontWeight: 600 }}>
+              <Trash2 size={13} /> Delete {selectedIds.size} selected
+            </button>
+          )}
+          <button onClick={() => { setSelectedIds(new Set()); setAllMatching(false); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', background: 'none', border: '1px solid var(--line-1)', color: '#6b7280', fontSize: 13 }}>
             <X size={12} /> Deselect all
           </button>
         </div>
@@ -1245,6 +1479,18 @@ const SDRLeadsTab = () => {
               </button>
             )}
           </div>
+          {/* Industry category: the main way to keep one industry's leads apart from another's. */}
+          <FilterDropdown label="All categories" value={filterCategory} onChange={setFilterCategory} icon={Tag}
+            options={[
+              { key: '', label: 'All categories', color: '#6b7280' },
+              ...categories.map(c => ({ key: String(c.id), label: `${c.name} (${c.lead_count ?? 0})`, color: '#a78bfa' })),
+              { key: 'none', label: `No category (${uncategorizedCount})`, color: '#9ca3af' },
+            ]}
+          />
+          <button onClick={() => setShowCategoryManager(true)} title="Rename or delete categories"
+            style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
+            <Pencil size={13} />
+          </button>
           {(() => {
             const totalActive = activeFiltersCount + (sortBy !== 'score_desc' ? 1 : 0);
             return (
@@ -1347,7 +1593,7 @@ const SDRLeadsTab = () => {
             ? <span style={{ color: 'hsl(var(--pt-a78bfa))' }}>Loading…</span>
             : <>
                 <span>Showing <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count === 0 ? 0 : ((pagination.page - 1) * pagination.page_size) + 1}–{Math.min(pagination.page * pagination.page_size, pagination.total_count)}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count.toLocaleString()}</strong> leads</span>
-                {(searchRaw || activeFiltersCount > 0) && <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'hsl(var(--pt-a78bfa))', fontSize: 11 }}>filtered</span>}
+                {(searchRaw || anyFilter) && <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'hsl(var(--pt-a78bfa))', fontSize: 11 }}>filtered</span>}
               </>
           }
         </div>
@@ -1363,17 +1609,17 @@ const SDRLeadsTab = () => {
               <Users size={30} style={{ color: '#a855f7' }} />
             </div>
             <p style={{ color: 'var(--text-soft)', fontWeight: 600, marginBottom: 6, fontSize: 15 }}>
-              {(search || activeFiltersCount > 0) ? 'No leads match your filters' : 'No leads yet'}
+              {(search || anyFilter) ? 'No leads match your filters' : 'No leads yet'}
             </p>
             <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 20, maxWidth: 360, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
-              {(search || activeFiltersCount > 0)
+              {(search || anyFilter)
                 ? 'Try clearing your search or filters to see more leads.'
                 : hasSource
                   ? 'Generate leads from Apollo.io / Apify, import a CSV, or add one manually to get started.'
                   : 'Import a CSV of your leads, or add one by hand. Lead search needs an Apollo.io or Apify key in Settings.'}
             </p>
-            {(search || activeFiltersCount > 0) ? (
-              <Button onClick={() => { setSearchRaw(''); setFilterTemp(''); setFilterStatus(''); setFilterSource(''); }} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>
+            {(search || anyFilter) ? (
+              <Button onClick={() => { setSearchRaw(''); clearAllFilters(); }} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>
                 Clear filters
               </Button>
             ) : (
@@ -1428,6 +1674,13 @@ const SDRLeadsTab = () => {
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 14 }}>{lead.full_name}</div>
                       <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>{lead.company_name}</div>
+                      {lead.category && (
+                        <span title={`Show only "${lead.category}" leads`}
+                          onClick={e => { e.stopPropagation(); setFilterCategory(String(lead.category_id)); }}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, marginRight: 4, padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600, background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)', color: 'hsl(var(--pt-a78bfa))', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                          <Tag size={9} /> {lead.category}
+                        </span>
+                      )}
                       {(lead.enrichment_status === 'pending' || lead.enrichment_status === 'processing') && (
                         <span title="Enriching in the background — missing contact fields will fill in on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', whiteSpace: 'nowrap' }}>
                           <Loader2 size={9} className="animate-spin" /> Enriching…
@@ -1554,6 +1807,23 @@ const SDRLeadsTab = () => {
               <button onClick={() => setSelectedLead(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280' }}>
                 <X size={20} />
               </button>
+            </div>
+
+            {/* Industry category: move this lead to another category, or a new one. */}
+            <div style={{ marginBottom: 20 }}>
+              <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Tag size={11} /> Industry category
+              </h4>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <CategoryPicker key={selectedLead.id} categories={categories} value={detailCategory} onChange={setDetailCategory} />
+                </div>
+                {detailCategory.trim().toLowerCase() !== (selectedLead.category || '').toLowerCase() && (
+                  <Button onClick={handleSaveDetailCategory} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, height: 38 }}>
+                    Save
+                  </Button>
+                )}
+              </div>
             </div>
 
             {/* Score + category */}
@@ -2105,6 +2375,11 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               {csvImport.total > 10 && (
                 <p style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>Showing first 10 of {csvImport.total}. All will be imported.</p>
               )}
+              <div style={{ marginTop: 12 }}>
+                <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>Category for these leads</label>
+                <CategoryPicker categories={categories} value={csvCategory} onChange={setCsvCategory}
+                  emptyLabel="Automatic (each row's Industry column)" />
+              </div>
               <p style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
                 Duplicate emails already in your list are skipped automatically.
               </p>
@@ -2157,9 +2432,14 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                 <input type={type || 'text'} placeholder={p} value={newLead[k]} onChange={e => setNewLead(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} />
               </div>
             ))}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 4 }}>Category</label>
+              <CategoryPicker categories={categories} value={newLeadCategory} onChange={setNewLeadCategory}
+                emptyLabel="Automatic (from the Industry above)" />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); }} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); setNewLeadCategory(''); }} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleAddLead} disabled={addingLead} style={{ background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {addingLead ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
               Add Lead
@@ -2246,6 +2526,19 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               </div>
             )}
 
+            {/* Category the new leads are filed under */}
+            <div>
+              <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>Category</label>
+              <CategoryPicker categories={categories} value={genCategory} onChange={setGenCategory}
+                emptyLabel="Automatic (the industry you search for)" />
+              <p style={{ color: '#6b7280', fontSize: 11, marginTop: 4 }}>
+                Automatic files each lead under the ICP industry it matches{(() => {
+                  const ind = icpProfiles.find(p => String(p.id) === String(genIcpId))?.industries || [];
+                  return ind.length ? ` (${ind.join(', ')})` : '';
+                })()}. Apify runs you fetch go under each lead's own industry.
+              </p>
+            </div>
+
             {/* Count */}
             <div>
               <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>
@@ -2286,6 +2579,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CategoryManagerDialog open={showCategoryManager} onOpenChange={setShowCategoryManager}
+        categories={categories} onChanged={refreshAfterCategoryChange} />
 
       {/* Setup Guide Modal */}
       <Dialog open={!!showSetupGuide} onOpenChange={() => setShowSetupGuide(null)}>

@@ -576,6 +576,7 @@ def auto_research_leads_impl(leads_per_run: int = 10):
 
     from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRLeadResearchJob
     from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+    from ai_sdr_agent.categories import category_for_lead
 
     researcher = LeadResearchAgent()
     total_created = 0
@@ -601,6 +602,7 @@ def auto_research_leads_impl(leads_per_run: int = 10):
 
             raw_leads = researcher.search_leads(icp, count=leads_per_run, source='apify')
             created = 0
+            category_cache: dict = {}
 
             for ld in raw_leads:
                 email = ld.get('email', '').strip().lower()
@@ -624,6 +626,9 @@ def auto_research_leads_impl(leads_per_run: int = 10):
                 SDRLead.objects.create(
                     company_user=company_user,
                     icp_profile=icp,
+                    # Filed under the industry searched for, like a search started from the screen.
+                    category=category_for_lead(
+                        company_user, icp.industries, ld.get('company_industry'), category_cache),
                     first_name=ld.get('first_name', ''),
                     last_name=ld.get('last_name', ''),
                     full_name=full_name,
