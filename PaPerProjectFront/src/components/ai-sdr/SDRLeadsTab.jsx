@@ -1398,35 +1398,42 @@ const SDRLeadsTab = () => {
           <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
             <Zap size={15} /> Generate Leads
           </Button>
-          {stats.qualifying > 0 && (
-            <span title="Leads are being qualified in the background." style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', borderRadius: 8, fontWeight: 600, fontSize: 13, padding: '8px 14px' }}>
-              <Loader2 size={15} className="animate-spin" /> Qualifying {stats.qualifying}…
-            </span>
-          )}
-          {stats.enriching > 0 && (
-            <span title="Leads are being enriched in the background — missing fields (phone, email, LinkedIn…) will appear on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', borderRadius: 8, fontWeight: 600, fontSize: 13, padding: '8px 14px' }}>
-              <Loader2 size={15} className="animate-spin" /> Enriching {stats.enriching}…
-            </span>
-          )}
+          <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
+          <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Upload size={14} /> Import CSV
+          </Button>
+          <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
           {/* Only for unscored leads the queue won't reach on its own (never queued, or failed for good);
-              queued leads are already covered by the "Qualifying…" badge. */}
+              queued leads are already covered by the "Qualifying…" status below. */}
           {stats.unqueued > 0 && (
             <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`${stats.unqueued} unscored lead${stats.unqueued === 1 ? ' is' : 's are'} not in the qualification queue (never queued, or qualification failed). Add ${stats.unqueued === 1 ? 'it' : 'them'} to the queue.`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
               {qualifyingAll ? <Loader2 size={15} className="animate-spin" /> : <Brain size={15} />}
               Qualify {stats.unqueued} more
             </Button>
           )}
-          <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
-          <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Upload size={14} /> Import CSV
-          </Button>
-          <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
           <div style={{ marginLeft: 'auto' }}>
             <ExportDropdown leads={leads} selectedLeads={selectedIds} allLeadsOnPage={leads}
               totalCount={pagination.total_count}
               exportParams={{ ...currentFilters, sort: sortBy }} />
           </div>
         </div>
+        {/* Background work in progress. A line of its own: as buttons in the row above, "Qualifying" and
+            "Enriching" pushed Export onto a second line on the live site. */}
+        {(stats.qualifying > 0 || stats.enriching > 0) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 10, paddingTop: 10, borderTop: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
+            {stats.qualifying > 0 && (
+              <span title="Leads are being qualified in the background." style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
+                <Loader2 size={12} className="animate-spin" /> Qualifying {stats.qualifying.toLocaleString()}…
+              </span>
+            )}
+            {stats.enriching > 0 && (
+              <span title="Leads are being enriched in the background — missing fields (phone, email, LinkedIn…) will appear on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
+                <Loader2 size={12} className="animate-spin" /> Enriching {stats.enriching.toLocaleString()}…
+              </span>
+            )}
+            <span style={{ color: '#6b7280', fontSize: 12 }}>Runs in the background; scores and details fill in on their own.</span>
+          </div>
+        )}
       </div>
 
       {/* Bulk action bar */}
@@ -1599,8 +1606,8 @@ const SDRLeadsTab = () => {
         </div>
       </div>
 
-      {/* Lead table */}
-      <div style={{ ...cardStyle, overflow: 'hidden' }}>
+      {/* Lead table. Scrolls sideways on a narrow screen: with overflow hidden the Actions column was cut off. */}
+      <div style={{ ...cardStyle, overflowX: 'auto' }}>
         {loading ? (
           <LeadTableSkeleton />
         ) : leads.length === 0 ? (
