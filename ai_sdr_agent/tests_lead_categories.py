@@ -6,10 +6,12 @@ import io
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from ai_sdr_agent import tasks
 from ai_sdr_agent.categories import industry_for_lead
-from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRLeadCategory, SDRLeadResearchJob
+from ai_sdr_agent.models import SDRAgentSettings, SDRIcpProfile, SDRLead, SDRLeadCategory, SDRLeadResearchJob
 from ai_sdr_agent.tests import SDRBase
 from api.views import ai_sdr_agent as views
 
@@ -36,10 +38,16 @@ class CategoryApiBase(SDRBase):
         super().setUp()
         self.rf = APIRequestFactory()
 
-    def call(self, view, method, path='/x', data=None, fmt='json', **kw):
+    def call(self, view, method, path='/x', data=None, fmt='json', user=None, **kw):
         req = getattr(self.rf, method)(path, data or {}, format=fmt)
-        force_authenticate(req, user=self.cu)
+        force_authenticate(req, user=user or self.cu)
         return view(req, **kw)
+
+    def other_user(self):
+        """A second login with its own leads and categories."""
+        from core.models import CompanyUser
+        return CompanyUser.objects.create(company=self.company, email='o@test.local', full_name='O',
+                                          role='admin', password_hash='x', is_active=True)
 
 
 class CreatingLeadsFilesThemTests(CategoryApiBase):
@@ -59,10 +67,7 @@ class CreatingLeadsFilesThemTests(CategoryApiBase):
         self.assertEqual(SDRLeadCategory.objects.filter(company_user=self.cu).count(), 1)
 
     def test_another_users_category_id_is_refused(self):
-        from core.models import CompanyUser
-        other = CompanyUser.objects.create(company=self.company, email='o@test.local', full_name='O',
-                                           role='admin', password_hash='x', is_active=True)
-        theirs = SDRLeadCategory.objects.create(company_user=other, name='Theirs')
+        theirs = SDRLeadCategory.objects.create(company_user=self.other_user(), name='Theirs')
         r = self.call(views.leads_list, 'post', data={'full_name': 'D', 'email': 'd@x.example', 'category': theirs.id})
         self.assertEqual(r.status_code, 400)
 
@@ -97,6 +102,74 @@ class CreatingLeadsFilesThemTests(CategoryApiBase):
         with mock.patch.object(views, '_get_research_agent', return_value=agent):
             views._execute_research_job(job.id)
         self.assertEqual(set(SDRLead.objects.values_list('category__name', flat=True)), {'Educational Institutes'})
+
+    @override_settings(APIFY_API_TOKEN='tok')
+    def test_the_daily_auto_research_files_its_leads_under_the_icp_industry(self):
+        SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, industries=['Dentistry'], job_titles=['Owner'])
+        found = [{'full_name': 'Ann Lee', 'first_name': 'Ann', 'last_name': 'Lee', 'email': 'ann@smile.example',
+                  'job_title': 'Owner', 'company_name': 'Smile Co', 'company_industry': 'Health, Wellness & Fitness'}]
+        with mock.patch('ai_sdr_agent.agents.lead_research_agent.LeadResearchAgent.search_leads', return_value=found):
+            tasks.auto_research_leads_impl(leads_per_run=5)
+        self.assertEqual(SDRLead.objects.get(email='ann@smile.example').category.name, 'Dentistry')
+
+    def fetch_from_apify(self, data):
+        SDRAgentSettings.objects.update_or_create(company_user=self.cu, defaults={'apify_api_token': 'own-tok'})
+        agent = mock.Mock()
+        agent.fetch_apify_runs.return_value = [
+            {'full_name': 'Ann Lee', 'email': 'ann@smile.example', 'company_name': 'Smile Co', 'company_industry': 'Dentistry'},
+            {'full_name': 'Bo Ray', 'email': 'bo@school.example', 'company_name': 'School', 'company_industry': 'Education'},
+        ]
+        with mock.patch.object(views, '_get_research_agent', return_value=agent):
+            r = self.call(views.fetch_apify_leads, 'post', data=data)
+        self.assertEqual(r.status_code, 200, r.data)
+        return {l.email: l.category.name for l in SDRLead.objects.select_related('category')}
+
+    def test_an_apify_import_files_each_lead_under_its_industry(self):
+        self.assertEqual(self.fetch_from_apify({}), {'ann@smile.example': 'Dentistry', 'bo@school.example': 'Education'})
+
+    def test_a_category_picked_for_the_apify_import_wins(self):
+        self.assertEqual(set(self.fetch_from_apify({'category': 'Apify Batch 1'}).values()), {'Apify Batch 1'})
+
+
+class OneLeadTests(CategoryApiBase):
+    def test_the_detail_panel_sets_changes_and_clears_a_category(self):
+        lead = self.make_lead('a@x.example')
+        dent = SDRLeadCategory.objects.create(company_user=self.cu, name='Dentistry')
+        r = self.call(views.lead_detail, 'put', data={'category': dent.id}, lead_id=lead.id)
+        self.assertEqual(r.data['data']['category'], 'Dentistry')
+        r = self.call(views.lead_detail, 'put', data={'category': 'Orthodontists'}, lead_id=lead.id)   # a new one
+        self.assertEqual(r.data['data']['category'], 'Orthodontists')
+        r = self.call(views.lead_detail, 'put', data={'category': None}, lead_id=lead.id)
+        self.assertEqual((r.data['data']['category'], r.data['data']['category_id']), ('', None))
+
+    def test_the_detail_panel_refuses_another_accounts_category(self):
+        lead = self.make_lead('a@x.example')
+        theirs = SDRLeadCategory.objects.create(company_user=self.other_user(), name='Theirs')
+        r = self.call(views.lead_detail, 'put', data={'category': theirs.id}, lead_id=lead.id)
+        self.assertEqual(r.status_code, 400)
+        lead.refresh_from_db()
+        self.assertIsNone(lead.category)
+
+    def test_qualifying_one_lead_takes_it_out_of_the_queue_and_clears_an_old_failure(self):
+        SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['Owner'])
+        lead = self.make_lead('a@x.example', qualification_status='failed', qualification_attempts=3,
+                              qualification_error='No active ICP profile - set one up, then qualify again.')
+        agent = mock.Mock()
+        agent.qualify_lead.return_value = {'score': 82, 'temperature': 'hot'}
+        with mock.patch.object(views, '_get_qualification_agent', return_value=agent):
+            r = self.call(views.qualify_lead, 'post', lead_id=lead.id)
+        self.assertEqual(r.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual((lead.score, lead.qualification_status, lead.qualification_error), (82, 'done', ''))
+
+    def test_qualify_more_counts_unscored_leads_the_queue_will_not_pick_up(self):
+        self.make_lead('new@x.example')                                         # never queued
+        self.make_lead('failed@x.example', qualification_status='failed')        # gave up
+        self.make_lead('queued@x.example', qualification_status='pending')       # the queue has it
+        self.make_lead('running@x.example', qualification_status='processing')
+        self.make_lead('scored@x.example', score=70)
+        stats = views._lead_stats(self.cu)
+        self.assertEqual((stats['unqueued'], stats['qualifying'], stats['unscored']), (2, 2, 4))
 
 
 class FilterRefileAndExportTests(CategoryApiBase):
@@ -152,6 +225,20 @@ class FilterRefileAndExportTests(CategoryApiBase):
         self.call(views.sdr_bulk_set_category, 'post', data={'ids': [self.a.id], 'category': None})
         self.a.refresh_from_db()
         self.assertIsNone(self.a.category)
+
+    def test_another_account_sees_none_of_these_categories_and_cannot_refile_these_leads(self):
+        other = self.other_user()
+        r = self.call(views.sdr_lead_categories, 'get', user=other)
+        self.assertEqual((r.data['data'], r.data['uncategorized']), ([], 0))
+        mine = SDRLeadCategory.objects.create(company_user=other, name='Mine')
+        r = self.call(views.sdr_bulk_set_category, 'post', data={'ids': [self.a.id, self.b.id], 'category': mine.id}, user=other)
+        self.assertEqual(r.data.get('updated', 0), 0)
+        r = self.call(views.sdr_bulk_set_category, 'post', path='/x', data={'all_matching': True, 'category': mine.id}, user=other)
+        self.assertEqual(r.data.get('updated', 0), 0)
+        self.a.refresh_from_db()
+        self.assertEqual(self.a.category, self.dent)
+        r = self.call(views.sdr_lead_category_detail, 'delete', category_id=self.dent.id, user=other)
+        self.assertEqual(r.status_code, 404)
 
     def test_rename_refuses_a_name_already_used(self):
         r = self.call(views.sdr_lead_category_detail, 'put', data={'name': 'education'}, category_id=self.dent.id)
