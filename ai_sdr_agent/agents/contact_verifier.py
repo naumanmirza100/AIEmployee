@@ -60,8 +60,12 @@ def verify_email_syntax(email: str) -> Tuple[bool, str]:
 
 def check_domain_mx(domain: str, timeout: float = 3.0) -> Tuple[bool, str]:
     """
-    Check if the domain resolves and has active mail exchanger (MX) or host records.
-    Uses standard library socket to avoid external dns dependencies.
+    Check whether the domain resolves to a host (A/AAAA) record.
+
+    Uses the standard library ``socket`` to avoid an external DNS dependency,
+    which means it CANNOT query MX records — a receive-only (MX-only) domain
+    returns False here. Callers must treat a False result as "risky", not
+    "invalid", so legitimate mail-only domains aren't dropped (R3).
     """
     if not domain:
         return False, "Empty domain"
@@ -172,13 +176,17 @@ def verify_email(
         details["dns_verified"] = dns_ok
         details["dns_message"] = dns_msg
         if not dns_ok:
+            # R3: the standard library can only resolve A/AAAA records, not MX.
+            # A failed lookup may simply be a receive-only (MX-only) domain, so
+            # mark the email RISKY rather than INVALID — otherwise a legitimate
+            # address on such a domain is wrongly dropped.
             return {
-                "status": VerificationStatus.INVALID,
-                "is_valid": False,
-                "confidence": 15,
+                "status": VerificationStatus.RISKY,
+                "is_valid": True,
+                "confidence": 35,
                 "email": clean_email,
                 "domain": domain,
-                "reason": f"Domain MX/DNS check failed: {dns_msg}",
+                "reason": f"Domain has no A/AAAA record (may be MX-only): {dns_msg}",
                 "details": details,
             }
         confidence = min(100, confidence + 10)

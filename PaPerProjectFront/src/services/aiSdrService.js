@@ -88,6 +88,21 @@ export const listLeads = async ({
   }
 };
 
+/**
+ * Export ALL leads matching the current filters as a CSV blob (server-side, no
+ * pagination) so thousands of leads can be exported in one download.
+ */
+export const exportAllLeadsCsv = async ({ search = '', temperature = '', status = '', source = '', sort = 'score_desc' } = {}) => {
+  const params = {};
+  if (search)      params.search = search;
+  if (temperature) params.temperature = temperature;
+  if (status)      params.status = status;
+  if (source)      params.source = source;
+  if (sort)        params.sort = sort;
+  const resp = await companyApi.get('/sdr/leads/export/', { params, responseType: 'blob' });
+  return resp?.data ?? resp;
+};
+
 export const createLead = async (data) => {
   try {
     return await companyApi.post('/sdr/leads/', data);
@@ -228,13 +243,26 @@ export const researchLeadsBatch = async (leadIds, data = {}) => {
   }
 };
 
-// Research (Apollo.io or AI generation)
+// Research (Apollo.io or Apify discovery) — starts a background job and
+// returns { job_id, ... }. Poll getResearchJob(jobId) for progress/result.
 // --------------------------------------------------------------------------
-export const researchLeads = async ({ count = 20, source = 'auto' } = {}) => {
+export const researchLeads = async ({ count = 20, source = 'auto', icp_id } = {}) => {
   try {
-    return await companyApi.post('/sdr/leads/research/', { count, source });
+    const body = { count, source };
+    if (icp_id) body.icp_id = icp_id;
+    return await companyApi.post('/sdr/leads/research/', body);
   } catch (error) {
     console.error('Research leads error:', error);
+    throw error;
+  }
+};
+
+/** Poll a background lead-discovery job started by researchLeads. */
+export const getResearchJob = async (jobId) => {
+  try {
+    return await companyApi.get(`/sdr/leads/research/jobs/${jobId}/`);
+  } catch (error) {
+    console.error('Get research job error:', error);
     throw error;
   }
 };
@@ -588,15 +616,6 @@ export const sendSdrDailySummary = async () => {
     return await companyApi.post('/sdr/analytics/send-summary/');
   } catch (error) {
     console.error('SDR send summary error:', error);
-    throw error;
-  }
-};
-
-export const generatePersonalizedEmail = async (data) => {
-  try {
-    return await companyApi.post('/sdr/emails/generate/', data);
-  } catch (error) {
-    console.error('Generate email error:', error);
     throw error;
   }
 };

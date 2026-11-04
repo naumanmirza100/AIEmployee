@@ -661,6 +661,8 @@ class BookingTests(SDRBase):
         m = self.meeting(scheduled_at=was, calendar_link='https://meet.google.com/abc',
                          google_event_id='ev-42', google_event_state=event_state(was, 30))
         when = was + timedelta(days=1)
+        while when.weekday() >= 5:  # Friday + 1 is a Saturday, which the booking page refuses
+            when += timedelta(days=1)
         with mock.patch('core.google_calendar.create_google_event') as create:
             with mock.patch('core.google_calendar.update_google_event', return_value=True) as move:
                 with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
@@ -776,35 +778,45 @@ class ApifyApprovalTests(SDRBase):
         SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
 
     def run_research(self, apify_body, actor='code_crafter/leads-finder'):
+        # Discovery is async: research_leads starts a background job and the
+        # provider/approval error is recorded on the SDRLeadResearchJob row
+        # (which the UI polls). We run the job worker directly (no thread) so the
+        # assertion is deterministic while the requests mock is still in scope.
         from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+        from ai_sdr_agent.models import SDRLeadResearchJob
         resp403 = mock.MagicMock(status_code=403)
         resp403.json.return_value = apify_body
         resp403.text = str(apify_body)
         agent = LeadResearchAgent(apify_token='tok', apify_actor=actor)
-        req = self.rf.post('/x', {'count': 5, 'source': 'apify'}, format='json')
-        force_authenticate(req, user=self.cu)
+        icp = SDRIcpProfile.objects.filter(company_user=self.cu, is_active=True).first()
+        job = SDRLeadResearchJob.objects.create(
+            company_user=self.cu, icp_profile=icp, status='running',
+            search_params={'count': 5, 'source': 'apify'},
+        )
         with mock.patch.object(views, '_get_research_agent', return_value=agent), \
                 mock.patch('requests.post', return_value=resp403):
-            return views.research_leads(req)
+            views._execute_research_job(job.id)
+        job.refresh_from_db()
+        return job
 
     def test_apify_approval_url_is_returned_to_the_ui(self):
         body = {'error': {'type': 'actor-not-approved', 'message': 'approvePermissions required',
                           'data': {'approvalUrl': 'https://console.apify.com/approve/abc'}}}
-        resp = self.run_research(body)
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['code'], 'apify_approval_required')
-        self.assertEqual(resp.data['approval_url'], 'https://console.apify.com/approve/abc')
+        job = self.run_research(body)
+        self.assertEqual(job.status, 'failed')
+        self.assertEqual(job.search_params.get('error_code'), 'apify_approval_required')
+        self.assertEqual(job.search_params.get('approval_url'), 'https://console.apify.com/approve/abc')
 
     def test_falls_back_to_the_actor_page_when_apify_sends_no_link(self):
         body = {'error': {'type': 'not-approved', 'message': 'not-approved'}}
-        resp = self.run_research(body)
-        self.assertEqual(resp.data['code'], 'apify_approval_required')
-        self.assertEqual(resp.data['approval_url'], 'https://apify.com/code_crafter/leads-finder')
+        job = self.run_research(body)
+        self.assertEqual(job.search_params.get('error_code'), 'apify_approval_required')
+        self.assertEqual(job.search_params.get('approval_url'), 'https://apify.com/code_crafter/leads-finder')
 
     def test_other_403_is_still_a_normal_error(self):
-        resp = self.run_research({'error': {'type': 'forbidden', 'message': 'bad token'}})
-        self.assertEqual(resp.status_code, 500)
-        self.assertNotIn('code', resp.data)
+        job = self.run_research({'error': {'type': 'forbidden', 'message': 'bad token'}})
+        self.assertEqual(job.status, 'failed')
+        self.assertIsNone(job.search_params.get('error_code'))
 
     def test_settings_returns_actor_page_link(self):
         SDRAgentSettings.objects.create(company_user=self.cu, apify_actor_id='code_crafter/leads-finder')

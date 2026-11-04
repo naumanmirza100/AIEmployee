@@ -145,6 +145,19 @@ def _run_qualify_queue():
         _close_db()
 
 
+@singleton_job('enrich_queue', ttl_seconds=900, min_interval_seconds=120)
+def _run_enrich_queue():
+    try:
+        from ai_sdr_agent.tasks import enrich_queue_impl
+        result = enrich_queue_impl()
+        if result and result.get('processed'):
+            logger.debug("SDR enrich_queue → %s", result)
+    except Exception as exc:
+        logger.exception("SDR enrich_queue crashed: %s", exc)
+    finally:
+        _close_db()
+
+
 @singleton_job('check_inbox', ttl_seconds=1800, min_interval_seconds=240)
 def _run_check_inbox():
     try:
@@ -278,6 +291,7 @@ def start_scheduler() -> None:
         jobs = [
             ('send_due_steps',    _run_send_due_steps,     300,    30),
             ('qualify_queue',     _run_qualify_queue,      120,    45),
+            ('enrich_queue',      _run_enrich_queue,        180,    75),
             ('check_inbox',       _run_check_inbox,         300,    60),
             ('auto_start',        _run_auto_start,          900,    90),
             ('auto_complete',     _run_auto_complete,       3600,  120),

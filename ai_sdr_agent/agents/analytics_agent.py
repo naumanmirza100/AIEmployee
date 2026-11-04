@@ -134,7 +134,9 @@ class AnalyticsAgent:
             })
 
         # ── Rates ─────────────────────────────────────────────────────
-        reply_rate_week = round((replied_week / emails_week * 100) if emails_week else 0, 1)
+        # S7: replies this week can answer emails sent earlier, so the raw ratio
+        # can exceed 100%. Cap it at 100% so the figure stays sensible.
+        reply_rate_week = round(min(100.0, (replied_week / emails_week * 100)) if emails_week else 0, 1)
         # Of the leads who replied, how many have a meeting. All meetings over replies counted the ones
         # added by hand too, which follow no reply, and the rate read 200%.
         replied_with_meeting = (booked_qs.filter(enrollment__in=answered_qs)

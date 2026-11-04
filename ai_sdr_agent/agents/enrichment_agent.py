@@ -234,6 +234,10 @@ class EnrichmentAgent:
                 "enrichment_status": contract.status,
                 "summary": wf_summary,
                 "changes": changes,
+                # Flat list of the fields this run actually added/updated. The UI
+                # reads this to decide between "Enrichment Complete" and "No New
+                # Data"; it is NOT part of contract.to_dict(), so expose it here.
+                "fields_updated": list(changes.keys()),
                 "contract": contract.to_dict(),
             }
 

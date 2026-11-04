@@ -104,6 +104,10 @@ class _CleanTextHTMLParser(HTMLParser):
         return ' '.join(self._pieces)
 
 
+class NotPublicAddress(requests.RequestException):
+    """A URL, or a redirect hop, that points at a private address. Refused for good: no fallback may retry it."""
+
+
 def is_public_host(hostname: str) -> bool:
     """False for anything resolving to a private, loopback or link-local address. The hosts we fetch come from
     CSV imports and manual entry, so without this a lead could point the server at its own network."""
@@ -178,7 +182,7 @@ class WebpageExtractor:
         for _ in range(MAX_REDIRECTS + 1):
             parsed = urlparse(url)
             if parsed.scheme not in ('http', 'https') or not parsed.hostname or not is_public_host(parsed.hostname):
-                raise requests.RequestException(f"Not a reachable public address: {parsed.hostname or url}")
+                raise NotPublicAddress(f"Not a reachable public address: {parsed.hostname or url}")
             resp = self.session.get(url, timeout=DEFAULT_REQUEST_TIMEOUT, stream=True, allow_redirects=False)
             if not resp.is_redirect:
                 return resp
@@ -234,7 +238,8 @@ class WebpageExtractor:
                 }
 
         except requests.RequestException as exc:
-            curl_res = self._curl_fallback(url)
+            # curl is for sites that turn away this client, never for an address we refused.
+            curl_res = None if isinstance(exc, NotPublicAddress) else self._curl_fallback(url)
             if curl_res:
                 return curl_res
             logger.warning("WebpageExtractor failed to fetch %s: %s", url, exc)
@@ -250,20 +255,32 @@ class WebpageExtractor:
 
     def _curl_fallback(self, url: str) -> Optional[dict]:
         """Subprocess curl fallback for anti-bot / TLS-fingerprint protected sites (e.g. SiteGround, Cloudflare)."""
+        marker = '\n__curl_status__ '
         try:
-            parsed = urlparse(url)
-            if not parsed.hostname or not is_public_host(parsed.hostname):
-                return None
             import subprocess
-            proc = subprocess.run(
-                ['curl.exe', '-s', '-k', '-L', '--max-redirs', '5', '--max-time', '10', url],
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace'
-            )
-            if proc.returncode == 0 and proc.stdout and len(proc.stdout) > 200:
-                html = proc.stdout
+            # Redirects are followed here, one hop at a time, so each is checked like _get_following_redirects
+            # does. curl's own -L would follow a public site's redirect to a private address unchecked.
+            for _ in range(MAX_REDIRECTS + 1):
+                parsed = urlparse(url)
+                if parsed.scheme not in ('http', 'https') or not parsed.hostname or not is_public_host(parsed.hostname):
+                    return None
+                proc = subprocess.run(
+                    ['curl.exe', '-s', '-k', '--max-time', '10', '-w', marker + '%{http_code} %{redirect_url}', url],
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace'
+                )
+                if proc.returncode != 0 or marker not in proc.stdout:
+                    return None
+                html, _, tail = proc.stdout.rpartition(marker)
+                status, _, location = tail.strip().partition(' ')
+                if not (status.startswith('3') and location):
+                    break
+                url = urljoin(url, location)
+            else:
+                return None
+            if status.startswith('2') and len(html) > 200:  # Not an error page's body as if it were the site
                 parsed_html = self.parse_html(html)
                 page_state = classify_page(parsed_html['title'], parsed_html['content'])
                 return {

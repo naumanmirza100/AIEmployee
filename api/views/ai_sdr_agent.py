@@ -21,7 +21,8 @@ from django.core.validators import validate_email
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
@@ -212,6 +213,13 @@ def _normalize_lead_list(val) -> list:
 
 def _serialize_lead(lead: SDRLead) -> dict:
     raw = lead.raw_data if isinstance(lead.raw_data, dict) else {}
+    # Enrichment lifecycle is now a model field (none/pending/processing/done/
+    # failed). Fall back to the raw_data outcome for leads enriched before the
+    # field existed, so their button still reads "Re-enrich".
+    _enr = raw.get('enrichment') if isinstance(raw.get('enrichment'), dict) else {}
+    enr_status = lead.enrichment_status
+    if enr_status in ('none', '') and _enr.get('status') in ('completed', 'partial'):
+        enr_status = 'done'
     return {
         'id': lead.id,
         'full_name': lead.display_name,
@@ -247,9 +255,9 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'status': lead.status,
         'qualification_status': lead.qualification_status,
         'source': lead.source,
-        'research_status': raw.get('research_status', 'none'),
+        'research_status': lead.research_status,
         'research_profile': raw.get('research_profile'),
-        'enrichment_status': (raw.get('enrichment') or {}).get('status', 'none') if isinstance(raw.get('enrichment'), dict) else 'none',
+        'enrichment_status': enr_status,
         'enrichment_contract': raw.get('enrichment') if isinstance(raw.get('enrichment'), dict) else None,
         'personal_email': (raw.get('enrichment') or {}).get('personal_email', '') if isinstance(raw.get('enrichment'), dict) else '',
         'qualified_at': lead.qualified_at.isoformat() if lead.qualified_at else None,
@@ -284,6 +292,8 @@ def _lead_stats(company_user) -> dict:
         'unscored': qs.filter(score__isnull=True).count(),
         # Leads waiting in / running through the background qualification queue.
         'qualifying': qs.filter(qualification_status__in=['pending', 'processing']).count(),
+        # Leads waiting in / running through the background enrichment queue.
+        'enriching': qs.filter(enrichment_status__in=['pending', 'processing']).count(),
     }
 
 
@@ -345,6 +355,94 @@ def icp_profile(request):
 # ==========================================================================
 # Leads — list / create
 # ==========================================================================
+
+# Sort options shared by the list and the "export all" endpoints.
+_LEAD_SORT_MAP = {
+    'score_desc':   ['-score', '-created_at'],
+    'score_asc':    ['score',  '-created_at'],
+    'name_asc':     ['full_name'],
+    'name_desc':    ['-full_name'],
+    'created_desc': ['-created_at'],
+    'created_asc':  ['created_at'],
+    'company_asc':  ['company_name'],
+}
+
+
+def _apply_lead_filters(qs, request):
+    """Apply the leads-list filters (search / temperature / status / source /
+    sort) to a queryset. Shared by the paginated list and the CSV export so the
+    export respects whatever the user is currently looking at."""
+    search = request.GET.get('search', '').strip()
+    if search:
+        qs = qs.filter(
+            Q(full_name__icontains=search)
+            | Q(first_name__icontains=search)
+            | Q(last_name__icontains=search)
+            | Q(company_name__icontains=search)
+            | Q(email__icontains=search)
+            | Q(job_title__icontains=search)
+            | Q(company_location__icontains=search)
+            | Q(company_industry__icontains=search)
+        )
+    temp = request.GET.get('temperature', '').strip()
+    if temp:
+        qs = qs.filter(temperature=temp)
+    status_f = request.GET.get('status', '').strip()
+    if status_f:
+        qs = qs.filter(status=status_f)
+    source_f = request.GET.get('source', '').strip()
+    if source_f:
+        qs = qs.filter(source=source_f)
+    sort_by = request.GET.get('sort', 'score_desc')
+    return qs.order_by(*_LEAD_SORT_MAP.get(sort_by, ['-score', '-created_at']))
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_leads_export(request):
+    """Stream EVERY lead matching the current filters (no pagination) as CSV, so
+    the whole list — 1000s of leads — can be exported at once. Company-scoped
+    and memory-safe via a streaming response + queryset iterator."""
+    from django.http import StreamingHttpResponse
+
+    company_user = request.user
+    qs = _apply_lead_filters(SDRLead.objects.filter(company_user=company_user), request)
+
+    columns = [
+        ('full_name', 'Name'), ('email', 'Email'), ('phone', 'Phone'),
+        ('job_title', 'Title'), ('seniority_level', 'Seniority'),
+        ('company_name', 'Company'), ('company_industry', 'Industry'),
+        ('company_size', 'Company Size'), ('company_location', 'Location'),
+        ('company_website', 'Website'), ('linkedin_url', 'LinkedIn'),
+        ('score', 'Score'), ('temperature', 'Temperature'),
+        ('status', 'Status'), ('source', 'Source'), ('created_at', 'Created'),
+    ]
+
+    class _Echo:
+        """A write-only file-like object that returns what it's handed (Django
+        streaming-CSV pattern)."""
+        def write(self, value):
+            return value
+
+    writer = csv.writer(_Echo())
+
+    def _val(v):
+        if v is None:
+            return ''
+        if hasattr(v, 'isoformat'):
+            return v.isoformat()
+        return str(v)
+
+    def _rows():
+        yield writer.writerow([header for _, header in columns])
+        for lead in qs.iterator(chunk_size=1000):
+            yield writer.writerow([_val(getattr(lead, field, '')) for field, _ in columns])
+
+    resp = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = 'attachment; filename="sdr-leads-export.csv"'
+    return resp
+
 
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
@@ -478,6 +576,9 @@ def leads_list(request):
             # scored automatically like research/CSV leads.
             qualification_status='pending',
             qualification_queued_at=timezone.now(),
+            # Auto-enrich new leads in the background too (contact/company fields).
+            enrichment_status='pending',
+            enrichment_queued_at=timezone.now(),
         )
         return Response({'status': 'success', 'data': _serialize_lead(lead)}, status=201)
     except KeyServiceError:
@@ -552,8 +653,7 @@ def qualify_lead(request, lead_id):
         lead.concerns = result.get('concerns', [])
         lead.outreach_strategy = result.get('outreach_strategy', '')
         lead.qualified_at = timezone.now()
-        if lead.status in ('new', 'qualified'):   # never regress contacted/replied/etc.
-            lead.status = 'qualified'
+        lead.set_status_from_score()
         lead.save()
         return Response({'status': 'success', 'data': _serialize_lead(lead)})
     except SDRLead.DoesNotExist:
@@ -623,17 +723,222 @@ def research_sources(request):
     })
 
 
+def _execute_research_job(job_id):
+    """
+    Run a lead-discovery job in a background daemon thread and record progress /
+    outcome on its SDRLeadResearchJob row (which the UI polls via
+    ``research_job_status``).
+
+    A run of up to 1500 leads can take minutes — far longer than an HTTP request
+    should block — so ``research_leads`` returns immediately and this does the
+    actual Apollo/Apify search + lead creation + qualification queueing out of
+    band. It must NEVER raise out of the thread; every failure is written to the
+    job row instead.
+    """
+    from ai_sdr_agent.agents.lead_validator import validate_lead
+    from django.db import close_old_connections
+
+    job = (SDRLeadResearchJob.objects
+           .filter(pk=job_id)
+           .select_related('company_user', 'company_user__company', 'icp_profile')
+           .first())
+    if not job:
+        return
+
+    def _fail(exc, code=None):
+        params = job.search_params or {}
+        if code:
+            params['error_code'] = code
+        if isinstance(exc, ApifyApprovalRequired):
+            params['approval_url'] = exc.approval_url
+            params['actor'] = exc.actor
+        job.search_params = params
+        job.status = 'failed'
+        job.error_message = str(exc)
+        job.completed_at = timezone.now()
+        job.save()
+
+    try:
+        company_user = job.company_user
+        icp = job.icp_profile
+        params = job.search_params or {}
+        count = int(params.get('count', 20))
+        source = params.get('source', 'auto')
+
+        researcher = _get_research_agent(company_user.company, company_user=company_user)
+        raw_leads = researcher.search_leads(icp, count=count, source=source)
+
+        created = 0
+        created_ids = []
+        skipped_dupes = 0
+
+        # Pre-load existing keys to catch dupes. LinkedIn URL is the most
+        # reliable (unique per profile) — essential for no-email sources like
+        # the Google scraper, where company often doesn't parse and name+company
+        # dedup misses. Also track email, name+company, and name-only.
+        existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list(
+            'email', 'full_name', 'company_name', 'linkedin_url'
+        )
+        existing_emails_lower = set()
+        existing_name_company = set()
+        existing_linkedin = set()
+        existing_names = set()
+
+        _norm_li = normalize_linkedin_url
+
+        for em, fn, cn, li in existing_leads_qs:
+            if em:
+                existing_emails_lower.add(em.lower())
+            if fn and cn:
+                existing_name_company.add((fn.lower().strip(), cn.lower().strip()))
+            if fn:
+                existing_names.add(fn.lower().strip())
+            nli = _norm_li(li)
+            if nli:
+                existing_linkedin.add(nli)
+
+        for ld in raw_leads:
+            full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
+            lead_email = (ld.get('email') or '').strip().lower()
+            company_name = (ld.get('company_name') or '').strip()
+            linkedin = _norm_li(ld.get('linkedin_url'))
+
+            # ── Reject leads with no name and no company (totally empty) ──
+            if not full_name.strip() and not company_name:
+                skipped_dupes += 1
+                continue
+
+            # ── Duplicate guard — linkedin > email > name+company > name ──
+            if linkedin and linkedin in existing_linkedin:
+                skipped_dupes += 1
+                continue
+            if lead_email and lead_email in existing_emails_lower:
+                skipped_dupes += 1
+                continue
+            name_company_key = (full_name.lower().strip(), company_name.lower().strip())
+            if full_name and company_name and name_company_key in existing_name_company:
+                skipped_dupes += 1
+                continue
+            # No email/company (Google scraper) → fall back to name-only so
+            # the same profile scraped twice isn't inserted again.
+            name_key = full_name.lower().strip()
+            if not lead_email and not company_name and not linkedin and name_key and name_key in existing_names:
+                skipped_dupes += 1
+                continue
+
+            # Track all keys for intra-batch dedup
+            if linkedin:
+                existing_linkedin.add(linkedin)
+            if lead_email:
+                existing_emails_lower.add(lead_email)
+            if full_name and company_name:
+                existing_name_company.add(name_company_key)
+            if name_key:
+                existing_names.add(name_key)
+            # ─────────────────────────────────────────────────────────────
+
+            validation = validate_lead({**ld, 'full_name': full_name})
+
+            new_lead = SDRLead.objects.create(
+                company_user=company_user,
+                icp_profile=icp,
+                first_name=ld.get('first_name', ''),
+                last_name=ld.get('last_name', ''),
+                full_name=full_name,
+                email=lead_email or ld.get('email', ''),
+                phone=ld.get('phone', ''),
+                job_title=ld.get('job_title', ''),
+                seniority_level=ld.get('seniority_level', ''),
+                department=ld.get('department', ''),
+                company_name=ld.get('company_name', ''),
+                company_domain=ld.get('company_domain', ''),
+                company_industry=ld.get('company_industry', ''),
+                company_size=ld.get('company_size') or None,
+                company_size_range=ld.get('company_size_range', ''),
+                company_location=ld.get('company_location', ''),
+                company_technologies=ld.get('company_technologies', []),
+                linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
+                company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
+                company_website=_ensure_https(ld.get('company_website', '')),
+                recent_news=ld.get('recent_news', []),
+                buying_signals=ld.get('buying_signals', []),
+                apollo_id=ld.get('apollo_id', ''),
+                raw_data=ld.get('raw_data', {}),
+                source=ld.get('source') or researcher.source_label,
+                status='new',
+                confidence_score=validation['confidence_score'],
+                data_quality_flags=validation['data_quality_flags'],
+            )
+            created += 1
+            created_ids.append(new_lead.pk)
+
+            # Surface incremental progress to the polling UI without hammering
+            # the DB on every single insert.
+            if created % 50 == 0:
+                job.leads_created = created
+                job.total_found = len(raw_leads)
+                job.save(update_fields=['leads_created', 'total_found'])
+
+        # Queue ONLY the leads created by this run for background
+        # qualification — the scheduler drains the queue in small batches so
+        # AI tokens aren't exhausted in one burst, and retries failures
+        # automatically. Scoping to created_ids avoids sweeping up unrelated
+        # pre-existing unscored leads (e.g. CSV/manual imports).
+        queued = SDRLead.objects.filter(
+            pk__in=created_ids, score__isnull=True, qualification_status='none',
+        ).update(qualification_status='pending', qualification_queued_at=timezone.now())
+
+        # Auto-enrich the newly discovered leads in the background too.
+        SDRLead.objects.filter(pk__in=created_ids, enrichment_status='none').update(
+            enrichment_status='pending', enrichment_queued_at=timezone.now())
+
+        params['skipped_duplicates'] = skipped_dupes
+        params['leads_queued'] = queued
+        job.search_params = params
+        job.status = 'completed'
+        job.total_found = len(raw_leads)
+        job.leads_created = created
+        job.leads_qualified = 0
+        # The provider that answered: with both keys, "apollo" was written even for an Apify run.
+        job.source = next((ld.get('source') for ld in raw_leads if ld.get('source')), job.source)
+        job.completed_at = timezone.now()
+        job.save()
+
+    except ApifyApprovalRequired as exc:
+        # Not a server error: the user has to approve the actor once on Apify.
+        _fail(exc, code='apify_approval_required')
+    except NoLeadSource as exc:
+        _fail(exc, code='no_lead_source')
+    except KeyServiceError as exc:
+        _fail(exc, code='llm_key')
+    except Exception as exc:
+        logger.error("Research job %s failed: %s", job_id, exc)
+        try:
+            _fail(exc)
+        except Exception:
+            pass
+    finally:
+        # Each worker thread returns its Django DB connection when done.
+        close_old_connections()
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def research_leads(request):
     """
-    Find new leads from Apollo.io or Apify, whichever key is configured. With neither, nothing is searched (the AI
-    no longer makes leads up). Found leads are queued for qualification.
+    Kick off a lead-discovery run (Apollo.io / Apify, whichever key is
+    configured) in the background and return immediately with a ``job_id``.
+
+    A run can take minutes and create up to 1500 leads, so the actual work runs
+    in a daemon thread (``_execute_research_job``) that records progress on the
+    SDRLeadResearchJob row; the UI polls ``research_job_status``. With no source
+    key configured, the job fails with ``error_code='no_lead_source'``.
     """
+    import threading
     company_user = request.user
     try:
-        count = min(int(request.data.get('count', 20)), 50)
+        count = min(int(request.data.get('count', 20)), 1500)
         source = request.data.get('source', 'auto')
         icp_id = request.data.get('icp_id')
         if icp_id:
@@ -643,188 +948,80 @@ def research_leads(request):
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
+        # Fast, deterministic pre-flight: if no provider key is configured there
+        # is nothing to search, so fail immediately (no job, no made-up leads)
+        # rather than starting a background job that is doomed. Network/approval
+        # errors can only be known after the fetch and are surfaced on the job.
+        researcher = _get_research_agent(company_user.company, company_user=company_user)
+        if not researcher.available_sources:
+            return Response({
+                'status': 'error',
+                'code': 'no_lead_source',
+                'message': 'No lead source is configured. Add an Apollo.io or Apify API key in Settings first.',
+            }, status=400)
+
         job = SDRLeadResearchJob.objects.create(
             company_user=company_user,
             icp_profile=icp,
             status='running',
+            # The provider asked; a failed run keeps it. 'auto' tries Apollo first, and a fallback to Apify
+            # replaces this when the job finishes.
+            source=source if source in ('apollo', 'apify') else researcher.source_label,
             search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count, 'source': source},
             started_at=timezone.now(),
         )
 
-        try:
-            researcher = _get_research_agent(company_user.company, company_user=company_user)
-            raw_leads = researcher.search_leads(icp, count=count, source=source)
+        threading.Thread(
+            target=_execute_research_job,
+            args=(job.id,),
+            name=f"sdr-research-job-{job.id}",
+            daemon=True,
+        ).start()
 
-            created = 0
-            created_ids = []
-            skipped_dupes = 0
-
-            # Pre-load existing keys to catch dupes. LinkedIn URL is the most
-            # reliable (unique per profile) — essential for no-email sources like
-            # the Google scraper, where company often doesn't parse and name+company
-            # dedup misses. Also track email, name+company, and name-only.
-            existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list(
-                'email', 'full_name', 'company_name', 'linkedin_url'
-            )
-            existing_emails_lower = set()
-            existing_name_company = set()
-            existing_linkedin = set()
-            existing_names = set()
-
-            _norm_li = normalize_linkedin_url
-
-            for em, fn, cn, li in existing_leads_qs:
-                if em:
-                    existing_emails_lower.add(em.lower())
-                if fn and cn:
-                    existing_name_company.add((fn.lower().strip(), cn.lower().strip()))
-                if fn:
-                    existing_names.add(fn.lower().strip())
-                nli = _norm_li(li)
-                if nli:
-                    existing_linkedin.add(nli)
-
-            from ai_sdr_agent.agents.lead_validator import validate_lead
-            for ld in raw_leads:
-                full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
-                lead_email = (ld.get('email') or '').strip().lower()
-                company_name = (ld.get('company_name') or '').strip()
-                linkedin = _norm_li(ld.get('linkedin_url'))
-
-                # ── Reject leads with no name and no company (totally empty) ──
-                if not full_name.strip() and not company_name:
-                    logger.info("SDR [research] SKIPPING empty lead (no name, no company)")
-                    skipped_dupes += 1
-                    continue
-
-                # ── Duplicate guard — linkedin > email > name+company > name ──
-                if linkedin and linkedin in existing_linkedin:
-                    logger.info("SDR [research] SKIPPING duplicate linkedin=%s", linkedin)
-                    skipped_dupes += 1
-                    continue
-                if lead_email and lead_email in existing_emails_lower:
-                    logger.info("SDR [research] SKIPPING duplicate email=%s", lead_email)
-                    skipped_dupes += 1
-                    continue
-                name_company_key = (full_name.lower().strip(), company_name.lower().strip())
-                if full_name and company_name and name_company_key in existing_name_company:
-                    logger.info("SDR [research] SKIPPING duplicate name+company: %s @ %s", full_name, company_name)
-                    skipped_dupes += 1
-                    continue
-                # No email/company (Google scraper) → fall back to name-only so
-                # the same profile scraped twice isn't inserted again.
-                name_key = full_name.lower().strip()
-                if not lead_email and not company_name and not linkedin and name_key and name_key in existing_names:
-                    logger.info("SDR [research] SKIPPING duplicate name-only: %s", full_name)
-                    skipped_dupes += 1
-                    continue
-
-                # Track all keys for intra-batch dedup
-                if linkedin:
-                    existing_linkedin.add(linkedin)
-                if lead_email:
-                    existing_emails_lower.add(lead_email)
-                if full_name and company_name:
-                    existing_name_company.add(name_company_key)
-                if name_key:
-                    existing_names.add(name_key)
-                # ─────────────────────────────────────────────────────────────
-
-                validation = validate_lead({**ld, 'full_name': full_name})
-
-                new_lead = SDRLead.objects.create(
-                    company_user=company_user,
-                    icp_profile=icp,
-                    first_name=ld.get('first_name', ''),
-                    last_name=ld.get('last_name', ''),
-                    full_name=full_name,
-                    email=lead_email or ld.get('email', ''),
-                    phone=ld.get('phone', ''),
-                    job_title=ld.get('job_title', ''),
-                    seniority_level=ld.get('seniority_level', ''),
-                    department=ld.get('department', ''),
-                    company_name=ld.get('company_name', ''),
-                    company_domain=ld.get('company_domain', ''),
-                    company_industry=ld.get('company_industry', ''),
-                    company_size=ld.get('company_size') or None,
-                    company_size_range=ld.get('company_size_range', ''),
-                    company_location=ld.get('company_location', ''),
-                    company_technologies=ld.get('company_technologies', []),
-                    linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
-                    company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
-                    company_website=_ensure_https(ld.get('company_website', '')),
-                    recent_news=ld.get('recent_news', []),
-                    buying_signals=ld.get('buying_signals', []),
-                    apollo_id=ld.get('apollo_id', ''),
-                    raw_data=ld.get('raw_data', {}),
-                    source=ld.get('source') or researcher.source_label,
-                    status='new',
-                    confidence_score=validation['confidence_score'],
-                    data_quality_flags=validation['data_quality_flags'],
-                )
-                created += 1
-                created_ids.append(new_lead.pk)
-
-            # Queue ONLY the leads created by this run for background
-            # qualification — the scheduler drains the queue in small batches so
-            # AI tokens aren't exhausted in one burst, and retries failures
-            # automatically. Scoping to created_ids avoids sweeping up unrelated
-            # pre-existing unscored leads (e.g. CSV/manual imports).
-            queued = SDRLead.objects.filter(
-                pk__in=created_ids, score__isnull=True, qualification_status='none',
-            ).update(qualification_status='pending', qualification_queued_at=timezone.now())
-
-            job.status = 'completed'
-            job.total_found = len(raw_leads)
-            job.leads_created = created
-            job.leads_qualified = 0
-            job.source = researcher.source_label
-            job.completed_at = timezone.now()
-            job.save()
-
-            if queued:
-                message = (
-                    f'Found {created} leads. Qualifying {queued} in the background — '
-                    f'scores will appear shortly. Skipped {skipped_dupes} duplicates.'
-                )
-            else:
-                message = f'Found {created} leads. Skipped {skipped_dupes} duplicates.'
-
-            return Response({
-                'status': 'success',
-                'message': message,
-                'leads_created': created,
-                'leads_queued': queued,
-                'skipped_duplicates': skipped_dupes,
-                'source': job.source,
-                'stats': _lead_stats(company_user),
-            })
-
-        except KeyServiceError:
-            raise
-        except Exception as exc:
-            job.status = 'failed'
-            job.error_message = str(exc)
-            job.completed_at = timezone.now()
-            job.save()
-            raise
-
-    except KeyServiceError:
-        raise
-    except ApifyApprovalRequired as exc:
-        # Not a server error: the user has to approve the actor once on Apify.
         return Response({
-            'status': 'error',
-            'code': 'apify_approval_required',
-            'message': str(exc),
-            'approval_url': exc.approval_url,
-            'actor': exc.actor,
-        }, status=400)
-    except NoLeadSource as exc:
-        return Response({'status': 'error', 'code': 'no_lead_source', 'message': str(exc)}, status=400)
+            'status': 'started',
+            'job_id': job.id,
+            'count': count,
+            'source': source,
+            'message': f'Generating up to {count} leads in the background. Large runs can take a few minutes.',
+        }, status=202)
+
     except Exception as exc:
-        logger.error("Research leads error: %s", exc)
+        logger.error("Research leads start error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_job_status(request, job_id):
+    """Poll a background lead-discovery job started by ``research_leads``."""
+    company_user = request.user
+    job = SDRLeadResearchJob.objects.filter(company_user=company_user, pk=job_id).first()
+    if not job:
+        return Response({'status': 'error', 'message': 'Research job not found.'}, status=404)
+
+    params = job.search_params or {}
+    return Response({
+        'status': 'success',
+        'job': {
+            'id': job.id,
+            'state': job.status,                       # running | completed | failed
+            'done': job.status in ('completed', 'failed'),
+            'total_found': job.total_found,
+            'leads_created': job.leads_created,
+            'leads_queued': params.get('leads_queued', 0),
+            'skipped_duplicates': params.get('skipped_duplicates', 0),
+            'source': job.source,
+            'error_message': job.error_message,
+            'error_code': params.get('error_code'),
+            'approval_url': params.get('approval_url'),
+            'actor': params.get('actor'),
+            'started_at': job.started_at,
+            'completed_at': job.completed_at,
+        },
+        'stats': _lead_stats(company_user),
+    })
 
 
 @api_view(['GET', 'POST'])
@@ -843,7 +1040,7 @@ def research_lead_endpoint(request, lead_id):
     if request.method == 'GET':
         raw_data = lead.raw_data if isinstance(lead.raw_data, dict) else {}
         profile = raw_data.get('research_profile')
-        status = raw_data.get('research_status', 'none')
+        status = lead.research_status
         return Response({
             'status': 'success',
             'lead_id': lead.id,
@@ -857,7 +1054,23 @@ def research_lead_endpoint(request, lead_id):
     # tab returns the finished profile or a "running" answer instead of paying for the research twice.
     from ai_sdr_agent.tasks import research_lead_impl
     campaign_id = request.data.get('campaign_id')
-    result = research_lead_impl(lead.id, campaign_id=campaign_id, force=bool(request.data.get('force', False)))
+    force = bool(request.data.get('force', False))
+
+    # R1: research can take ~47 s per lead — past nginx's 60 s, and it starves the
+    # single API worker. Run it in the background (like enrichment) and let the
+    # screen poll the GET side of this endpoint for `research_status`.
+    if bool(request.data.get('async', False)):
+        from ai_sdr_agent.tasks import research_lead_task
+        task = research_lead_task.delay(lead.id, campaign_id=campaign_id, force=force)
+        return Response({
+            'status': 'queued',
+            'lead_id': lead.id,
+            'task_id': task.id,
+            'research_status': 'running',
+            'message': 'Research job queued in background.',
+        })
+
+    result = research_lead_impl(lead.id, campaign_id=campaign_id, force=force)
     if result['status'] == 'already_running':
         return Response({'status': 'error', 'message': 'Research is already running for this lead.'}, status=409)
     if result['status'] not in ('success', 'already_completed'):
@@ -891,12 +1104,22 @@ def research_leads_batch_endpoint(request):
     if not owned_ids:
         return Response({'status': 'error', 'message': 'No matching leads found.'}, status=404)
 
+    campaign_id = request.data.get('campaign_id')
+    force = bool(request.data.get('force', False))
+
+    # R1: a batch of up to 50 leads at ~47 s each cannot run in one request.
+    if bool(request.data.get('async', False)):
+        from ai_sdr_agent.tasks import research_leads_batch_task
+        task = research_leads_batch_task.delay(owned_ids, campaign_id=campaign_id, force=force)
+        return Response({
+            'status': 'queued',
+            'lead_count': len(owned_ids),
+            'task_id': task.id,
+            'message': f'{len(owned_ids)} leads queued for background research.',
+        })
+
     from ai_sdr_agent.tasks import research_leads_batch_impl
-    batch = research_leads_batch_impl(
-        owned_ids,
-        campaign_id=request.data.get('campaign_id'),
-        force=bool(request.data.get('force', False)),
-    )
+    batch = research_leads_batch_impl(owned_ids, campaign_id=campaign_id, force=force)
     return Response({'status': 'success', **batch})
 
 
@@ -1110,6 +1333,8 @@ def fetch_apify_leads(request):
                 # AI token limits. The scheduler drains the queue in small batches.
                 qualification_status='pending',
                 qualification_queued_at=timezone.now(),
+                enrichment_status='pending',
+                enrichment_queued_at=timezone.now(),
             )
             created += 1
 
@@ -1262,6 +1487,8 @@ def import_leads_csv(request):
                     # scored automatically instead of sitting permanently unscored.
                     qualification_status='pending',
                     qualification_queued_at=timezone.now(),
+                    enrichment_status='pending',
+                    enrichment_queued_at=timezone.now(),
                 )
                 created += 1
             except KeyServiceError:
@@ -3630,9 +3857,32 @@ def sdr_agent_settings(request):
 # Public booking endpoints — no auth required (token in URL acts as auth)
 # ==========================================================================
 
+# S8: the booking link is public and had no limits — throttle it by IP and give
+# it a lifetime so a stale or guessed token can't be hammered or used forever.
+BOOKING_LINK_TTL_DAYS = 30
+
+
+class BookingThrottle(AnonRateThrottle):
+    """Rate-limit the public booking endpoints by IP (S8)."""
+    scope = 'sdr_booking'
+
+    def get_rate(self):
+        return '30/min'
+
+
+def _booking_link_expired(meeting) -> bool:
+    """A still-unbooked booking link older than its TTL is expired. Already
+    booked/confirmed links stay viewable."""
+    if meeting.status not in ('pending', 'awaiting_approval'):
+        return False
+    created = meeting.created_at or timezone.now()
+    return created < timezone.now() - timedelta(days=BOOKING_LINK_TTL_DAYS)
+
+
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([])
+@throttle_classes([BookingThrottle])
 def sdr_booking_info(request, token):
     """Return public meeting info for the lead's booking page (no auth)."""
     from ai_sdr_agent.models import SDRMeeting
@@ -3642,6 +3892,10 @@ def sdr_booking_info(request, token):
         )
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
+
+    if _booking_link_expired(meeting):
+        return Response({'error': 'expired',
+                         'message': 'This booking link has expired. Please ask for a new one.'}, status=410)
 
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
 
@@ -3756,6 +4010,7 @@ def _give_call_a_link(meeting):
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([])
+@throttle_classes([BookingThrottle])
 def sdr_booking_confirm(request, token):
     """Lead submits their chosen time. Sets scheduled_at, marks meeting scheduled."""
     from ai_sdr_agent.models import SDRMeeting
@@ -3765,6 +4020,10 @@ def sdr_booking_confirm(request, token):
         ).get(booking_token=token)
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
+
+    if _booking_link_expired(meeting):   # S8
+        return Response({'error': 'expired',
+                         'message': 'This booking link has expired. Please ask for a new one.'}, status=410)
 
     if meeting.status not in ('pending', 'awaiting_approval'):
         return Response({
@@ -3861,6 +4120,16 @@ def sdr_booking_confirm(request, token):
     lead = meeting.lead
     lead.status = 'meeting_scheduled'
     lead.save(update_fields=['status'])
+
+    # S1: the public booking page claims the slot with .update() (no post_save
+    # signal), so the CRM sync signal never fires — the call would otherwise
+    # reach the CRM only at its reminder. Tell the CRM now, as the email-approval
+    # path does. log_meeting is idempotent and its guards already pass here.
+    try:
+        from crm_sync_agent.signals import log_meeting
+        log_meeting(meeting)
+    except Exception as crm_exc:
+        logger.warning("CRM sync of booked meeting %s failed: %s", meeting.id, crm_exc)
 
     # Send confirmation email (calendar_link is already included in the email body)
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
