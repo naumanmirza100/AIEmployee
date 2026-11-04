@@ -130,8 +130,7 @@
       "Bash(python -c ' *)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('api/views/marketing_agent.py', encoding='utf-8'\\).read\\(\\)\\)\")",
       "Bash(python3 -c ' *)",
-      "Bash(python manage.py shell)",
-      "PowerShell(try { \\(Invoke-WebRequest \"http://localhost:3000/src/components/ai-sdr/SDRLeadsTab.jsx\" -UseBasicParsing -TimeoutSec 30\\).StatusCode } catch { $_.Exception.Message })"
+      "Bash(python manage.py shell)"
     ]
   }
 }

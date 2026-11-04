@@ -65,6 +65,34 @@ class StatusFollowsTheScoreTests(SDRBase):
 class ResearchJobSourceTests(SDRBase):
     """Failed Apify searches were labelled ai_generated: the job only took its provider when a search succeeded."""
 
+    def _start(self, count):
+        from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+        from ai_sdr_agent.models import SDRLeadResearchJob
+        SDRIcpProfile.objects.get_or_create(company_user=self.cu, is_active=True, defaults={'job_titles': ['CEO']})
+        agent = LeadResearchAgent(apify_token='tok', apify_actor='code_crafter/leads-finder')
+        request = APIRequestFactory().post('/x', {'source': 'apify', 'count': count}, format='json')
+        force_authenticate(request, user=self.cu)
+        with mock.patch.object(views, '_get_research_agent', return_value=agent), mock.patch('threading.Thread'):
+            response = views.research_leads(request)
+        return SDRLeadResearchJob.objects.get(pk=response.data['job_id'])
+
+    def test_one_search_finds_at_most_200_leads(self):
+        # 1,500 was one click away, each lead costing the company's credits (4 Nov 2026).
+        self.assertEqual(self._start(1500).search_params['count'], 200)
+        self.assertEqual(self._start(50).search_params['count'], 50)
+
+    def test_a_search_cut_short_by_a_restart_stops_saying_running(self):
+        job = self._start(20)
+        job.started_at = timezone.now() - timedelta(minutes=31)
+        job.save(update_fields=['started_at'])
+        request = APIRequestFactory().get('/x')
+        force_authenticate(request, user=self.cu)
+        data = views.research_job_status(request, job.pk).data['job']
+        self.assertEqual((data['state'], data['done'], data['error_code']), ('failed', True, 'interrupted'))
+        fresh = self._start(20)
+        data = views.research_job_status(request, fresh.pk).data['job']
+        self.assertEqual(data['state'], 'running')
+
     def test_a_failed_search_keeps_the_provider_it_asked(self):
         from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
         from ai_sdr_agent.models import SDRLeadResearchJob
@@ -200,6 +228,14 @@ class LeadsExportAllTests(SDRBase):
         body = self._csv({})
         self.assertIn('mine@acme.com', body)
         self.assertNotIn('leak@other.com', body)    # no cross-company leak
+
+    def test_a_cell_excel_would_run_stays_text_and_a_phone_stays_as_it_is(self):
+        self.make_lead('x@acme.com', company_name='=HYPERLINK("http://bad.example","Click")',
+                       job_title='-2+3+cmd|" /C calc"!A0', phone='+92 300 1234567')
+        body = self._csv({})
+        self.assertIn('"\'=HYPERLINK(""http://bad.example"",""Click"")"', body)
+        self.assertIn('\'-2+3+cmd', body)
+        self.assertIn(',+92 300 1234567,', body)
 
 
 class BookingConfirmSyncsToCrmTests(SDRBase):
