@@ -109,6 +109,7 @@ import { FrontlineMeetingsTab } from './FrontlineMeetingsTab';
 import { CalendarDays } from 'lucide-react';
 import { FrontlineAnalyticsTab } from './FrontlineAnalyticsTab';
 import DocumentSearchBanner from '@/components/shared/DocumentSearchBanner';
+import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
 // Document types for Q&A scope (must match backend Document.DOCUMENT_TYPE_CHOICES)
 const DOCUMENT_TYPE_OPTIONS = [
@@ -384,7 +385,7 @@ const FrontlineDashboard = () => {
 
   const [showSidebarSearch, setShowSidebarSearch] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState('');
-  const [showChatHistory, setShowChatHistory] = useState(true);
+  const [showChatHistory, setShowChatHistory] = useState(sidePanelStartsOpen);
   const messagesEndRef = useRef(null);
   // Q&A scope: restrict answers to document type(s) or specific documents
   const [qaScopeMode, setQaScopeMode] = useState('all'); // 'all' | 'type' | 'documents'

@@ -43,6 +43,7 @@ import hrAgentService from '@/services/hrAgentService';
 import MeetingDraftForm from '@/components/common/MeetingDraftForm';
 import InfoHint from '../frontline/InfoHint';
 import { HR_HINTS } from './hrTutorialSteps';
+import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
 // ---------- markdown helper (lifted from PM/HR Q&A) ----------
 function markdownToHtml(markdown) {
@@ -120,7 +121,7 @@ export default function HRMeetingScheduler() {
   const [chats, setChats] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [loadingChats, setLoadingChats] = useState(true);
-  const [showChatHistory, setShowChatHistory] = useState(true);
+  const [showChatHistory, setShowChatHistory] = useState(sidePanelStartsOpen);
   const [showSidebarSearch, setShowSidebarSearch] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState('');
 

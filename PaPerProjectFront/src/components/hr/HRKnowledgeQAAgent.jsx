@@ -25,6 +25,7 @@ import hrAgentService from '@/services/hrAgentService';
 import InfoHint from '../frontline/InfoHint';
 import { HR_HINTS } from './hrTutorialSteps';
 import { ElapsedTimer } from '../frontline/chatShellUtils';
+import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
 // ---------- markdown → HTML (lifted from PM agent's helper) ----------
 function markdownToHtml(markdown) {
@@ -104,7 +105,7 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
   const [loadingChats, setLoadingChats] = useState(false);
 
   // Sidebar state
-  const [showChatHistory, setShowChatHistory] = useState(true);
+  const [showChatHistory, setShowChatHistory] = useState(sidePanelStartsOpen);
   const [showSidebarSearch, setShowSidebarSearch] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState('');
 

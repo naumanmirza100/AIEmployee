@@ -483,6 +483,15 @@
       * {
         @apply border-border;
       }
+      /* A text box in a row shrinks with the row instead of running past its edge: a browser keeps a box at its
+         built-in width (about 20 characters) unless told otherwise, as company sign-up's Website did (4 Nov 2026).
+         Checkboxes, radios and file pickers keep their size next to a long label. A box that sets its own min-w-*
+         still wins. */
+      input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=color]):not([type=hidden]),
+      textarea,
+      select {
+        min-width: 0;
+      }
       html, body {
         @apply bg-background text-foreground;
         /* overflow-x: hidden; */
