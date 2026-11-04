@@ -2251,9 +2251,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>
                 Number of Leads: <span style={{ color: '#a855f7', fontWeight: 700 }}>{genCount}</span>
               </label>
-              <input type="range" min={5} max={1500} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width: '100%', accentColor: '#a855f7' }} />
+              <input type="range" min={5} max={200} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width: '100%', accentColor: '#a855f7' }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563', fontSize: 11, marginTop: 2 }}>
-                <span>5</span><span>1500</span>
+                <span>5</span><span>200</span>
               </div>
             </div>
           </div>

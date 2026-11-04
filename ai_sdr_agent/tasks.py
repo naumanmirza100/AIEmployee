@@ -914,8 +914,8 @@ def enrich_queue_impl():
     drains them a few per company per tick so provider rate limits hold.
     Enrichment uses Apollo/Hunter/public-web — no LLM — so there is no
     key/quota blocking like the qualification queue has. ``enrich_lead_impl``
-    sets each lead's ``enrichment_status`` to done/failed and (on new data)
-    re-queues it for qualification.
+    sets each lead's ``enrichment_status`` to done or failed. A lead is not scored again
+    after enrichment (a separate decision).
     """
     from django.db.models import Q as _Q, Min
     from ai_sdr_agent.models import SDRLead

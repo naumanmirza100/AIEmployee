@@ -399,6 +399,19 @@ def _apply_lead_filters(qs, request):
     return qs.order_by(*_LEAD_SORT_MAP.get(sort_by, ['-score', '-created_at']))
 
 
+_PHONE_CHARS = set('0123456789 ()-.+/')
+
+
+def _no_formula(text: str) -> str:
+    """A cell Excel would run as a formula (=, @, or + and - followed by more than a phone number) gets a leading
+    apostrophe. Lead data comes from outside: a scraped name like '=HYPERLINK(...)' must stay text."""
+    if not text:
+        return text
+    if text[0] in '=@\t\r' or (text[0] in '+-' and not set(text) <= _PHONE_CHARS):
+        return "'" + text
+    return text
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -434,7 +447,7 @@ def sdr_leads_export(request):
             return ''
         if hasattr(v, 'isoformat'):
             return v.isoformat()
-        return str(v)
+        return _no_formula(str(v))
 
     def _rows():
         yield writer.writerow([header for _, header in columns])
@@ -728,13 +741,35 @@ def research_sources(request):
     })
 
 
+# One search finds at most this many leads. Each costs the company's Apollo or Apify credits, then an AI scoring
+# and an Apollo enrichment; 1,500 was one click away (4 Nov 2026).
+MAX_LEADS_PER_SEARCH = 200
+# A search runs in a thread of the web server, so a deploy or restart ends it without a word and its job said
+# "running" for good. A search of 200 leads takes a few minutes: one running this long was cut short.
+RESEARCH_JOB_STALE_AFTER = timedelta(minutes=30)
+
+
+def _settle_stale_job(job):
+    """A job still "running" past RESEARCH_JOB_STALE_AFTER is marked failed, so the screen stops waiting for it."""
+    if job.status != 'running' or not job.started_at or timezone.now() - job.started_at < RESEARCH_JOB_STALE_AFTER:
+        return job
+    params = job.search_params or {}
+    params['error_code'] = 'interrupted'
+    job.search_params = params
+    job.status = 'failed'
+    job.error_message = 'The search was cut short, most likely by a server restart. Please start it again.'
+    job.completed_at = timezone.now()
+    job.save(update_fields=['search_params', 'status', 'error_message', 'completed_at'])
+    return job
+
+
 def _execute_research_job(job_id):
     """
     Run a lead-discovery job in a background daemon thread and record progress /
     outcome on its SDRLeadResearchJob row (which the UI polls via
     ``research_job_status``).
 
-    A run of up to 1500 leads can take minutes — far longer than an HTTP request
+    A run of up to MAX_LEADS_PER_SEARCH leads can take minutes — far longer than an HTTP request
     should block — so ``research_leads`` returns immediately and this does the
     actual Apollo/Apify search + lead creation + qualification queueing out of
     band. It must NEVER raise out of the thread; every failure is written to the
@@ -935,7 +970,7 @@ def research_leads(request):
     Kick off a lead-discovery run (Apollo.io / Apify, whichever key is
     configured) in the background and return immediately with a ``job_id``.
 
-    A run can take minutes and create up to 1500 leads, so the actual work runs
+    A run can take minutes and create up to MAX_LEADS_PER_SEARCH leads, so the actual work runs
     in a daemon thread (``_execute_research_job``) that records progress on the
     SDRLeadResearchJob row; the UI polls ``research_job_status``. With no source
     key configured, the job fails with ``error_code='no_lead_source'``.
@@ -943,7 +978,7 @@ def research_leads(request):
     import threading
     company_user = request.user
     try:
-        count = min(int(request.data.get('count', 20)), 1500)
+        count = max(1, min(int(request.data.get('count', 20)), MAX_LEADS_PER_SEARCH))
         source = request.data.get('source', 'auto')
         icp_id = request.data.get('icp_id')
         if icp_id:
@@ -1005,6 +1040,7 @@ def research_job_status(request, job_id):
     job = SDRLeadResearchJob.objects.filter(company_user=company_user, pk=job_id).first()
     if not job:
         return Response({'status': 'error', 'message': 'Research job not found.'}, status=404)
+    _settle_stale_job(job)
 
     params = job.search_params or {}
     return Response({
