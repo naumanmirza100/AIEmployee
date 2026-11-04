@@ -140,6 +140,14 @@ const SOURCE_LABELS = {
   apollo: 'Apollo.io', apify: 'Apify', ai_generated: 'AI Gen', csv_import: 'CSV', manual: 'Manual',
 };
 
+// The dot beside a lead's name; colours match the Enrichment filter. Not-yet-enriched leads get none.
+const ENRICHMENT_DOT = {
+  done:       { color: '#34d399', title: 'Enriched' },
+  pending:    { color: '#60a5fa', title: 'Enriching' },
+  processing: { color: '#60a5fa', title: 'Enriching' },
+  failed:     { color: '#f87171', title: 'Enrichment failed' },
+};
+
 const LEAD_STATUS_CONFIG = {
   new:              { label: 'New',             color: '#6b7280', bg: 'rgba(107,114,128,0.12)', border: 'rgba(107,114,128,0.25)' },
   qualified:        { label: 'Qualified',        color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.25)'  },
@@ -710,7 +718,7 @@ const ConfidenceBadge = ({ score }) => {
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 3,
       padding: '2px 7px', borderRadius: 8, fontSize: 11,
-      background: `${color}14`, border: `1px solid ${color}40`, color,
+      background: `${color}14`, border: `1px solid ${color}40`, color, whiteSpace: 'nowrap',
     }}>
       <Icon size={10} /> {label} quality
     </span>
@@ -775,6 +783,7 @@ const SDRLeadsTab = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSource, setFilterSource] = useState('');
   const [filterCategory, setFilterCategory] = useState('');   // '' all, 'none', or a category id
+  const [filterEnrichment, setFilterEnrichment] = useState(''); // '' all, done, not, in_progress, failed
   const [sortBy, setSortBy] = useState('score_desc');
 
   // Industry categories (made from the data as leads come in, or typed in by hand).
@@ -820,7 +829,8 @@ const SDRLeadsTab = () => {
         status:      opts.status      ?? filterStatus,
         source:      opts.source      ?? filterSource,
         category:    opts.category    ?? filterCategory,
-        sort:        opts.sort        ?? sortBy,
+        enrichment:  opts.enrichment  ?? filterEnrichment,
+        sort:       opts.sort        ?? sortBy,
         page:        opts.page        ?? page,
         page_size:   opts.page_size   ?? pageSize,
       });
@@ -839,7 +849,7 @@ const SDRLeadsTab = () => {
     } catch (e) {
       toast({ title: 'Failed to load leads', description: e?.message, variant: 'destructive' });
     } finally { setLoading(false); }
-  }, [search, filterTemp, filterStatus, filterSource, filterCategory, sortBy, page, pageSize, toast]);
+  }, [search, filterTemp, filterStatus, filterSource, filterCategory, filterEnrichment, sortBy, page, pageSize, toast]);
 
   const loadCategories = useCallback(async () => {
     try {
@@ -862,17 +872,17 @@ const SDRLeadsTab = () => {
 
   useEffect(() => {
     setPage(1);
-    loadLeads({ page: 1, search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, sort: sortBy, page_size: pageSize });
-  }, [search, filterTemp, filterStatus, filterSource, filterCategory, sortBy, pageSize]);
+    loadLeads({ page: 1, search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, enrichment: filterEnrichment, sort: sortBy, page_size: pageSize });
+  }, [search, filterTemp, filterStatus, filterSource, filterCategory, filterEnrichment, sortBy, pageSize]);
 
   const goToPage = useCallback((p) => { setPage(p); loadLeads({ page: p }); }, [loadLeads]);
 
   // The Filters panel's count; the category filter sits outside the panel.
-  const activeFiltersCount = [filterTemp, filterStatus, filterSource].filter(Boolean).length;
+  const activeFiltersCount = [filterTemp, filterStatus, filterSource, filterEnrichment].filter(Boolean).length;
   const anyFilter = activeFiltersCount > 0 || !!filterCategory;
-  const clearAllFilters = () => { setFilterTemp(''); setFilterStatus(''); setFilterSource(''); setFilterCategory(''); };
+  const clearAllFilters = () => { setFilterTemp(''); setFilterStatus(''); setFilterSource(''); setFilterCategory(''); setFilterEnrichment(''); };
   // The list's current filters, for actions that cover every matching lead (bulk category, Export ALL).
-  const currentFilters = { search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory };
+  const currentFilters = { search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, enrichment: filterEnrichment };
 
   // After a change that can add categories or move leads between them.
   const refreshAfterCategoryChange = () => { loadLeads(); loadCategories(); };
@@ -1566,6 +1576,20 @@ const SDRLeadsTab = () => {
               </div>
               <div>
                 <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Sparkles size={11} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> ENRICHMENT
+                </div>
+                <FilterDropdown fullWidth label="All Enrichment" value={filterEnrichment} onChange={setFilterEnrichment}
+                  options={[
+                    { key: '',            label: 'All Enrichment', color: '#6b7280' },
+                    { key: 'done',        label: 'Enriched',       color: '#34d399', dot: true },
+                    { key: 'not',         label: 'Not enriched',   color: '#6b7280', dot: true },
+                    { key: 'in_progress', label: 'Enriching',      color: '#60a5fa', dot: true },
+                    { key: 'failed',      label: 'Enrichment failed', color: '#f87171', dot: true },
+                  ]}
+                />
+              </div>
+              <div>
+                <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <ArrowUpDown size={11} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> SORT BY
                 </div>
                 <FilterDropdown fullWidth label="Sort by" value={sortBy} onChange={setSortBy} icon={ArrowUpDown}
@@ -1595,12 +1619,21 @@ const SDRLeadsTab = () => {
           </div>
         )}
 
-        <div style={{ marginTop: 8, fontSize: 12, color: '#4b5563', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ marginTop: 8, fontSize: 12, color: '#4b5563', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {loading
             ? <span style={{ color: 'hsl(var(--pt-a78bfa))' }}>Loading…</span>
             : <>
                 <span>Showing <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count === 0 ? 0 : ((pagination.page - 1) * pagination.page_size) + 1}–{Math.min(pagination.page * pagination.page_size, pagination.total_count)}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count.toLocaleString()}</strong> leads</span>
                 {(searchRaw || anyFilter) && <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'hsl(var(--pt-a78bfa))', fontSize: 11 }}>filtered</span>}
+                {/* Key to the dot beside each name. */}
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  {[['#34d399', 'Enriched'], ['#60a5fa', 'Enriching'], ['#f87171', 'Enrichment failed']].map(([color, label]) => (
+                    <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color }} /> {label}
+                    </span>
+                  ))}
+                  <span style={{ whiteSpace: 'nowrap' }}>No dot = not enriched</span>
+                </span>
               </>
           }
         </div>
@@ -1679,8 +1712,14 @@ const SDRLeadsTab = () => {
                       </button>
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
-                      <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 14 }}>{lead.full_name}</div>
-                      <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>{lead.company_name}</div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                        {lead.full_name}
+                        {/* Enrichment at a glance: the same colours as the Enrichment filter. */}
+                        {ENRICHMENT_DOT[lead.enrichment_status] && (
+                          <span title={ENRICHMENT_DOT[lead.enrichment_status].title}
+                            style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: ENRICHMENT_DOT[lead.enrichment_status].color }} />
+                        )}
+                      </div>
                       {lead.category && (
                         <span title={`Show only "${lead.category}" leads`}
                           onClick={e => { e.stopPropagation(); setFilterCategory(String(lead.category_id)); }}
@@ -1688,13 +1727,8 @@ const SDRLeadsTab = () => {
                           <Tag size={9} /> {lead.category}
                         </span>
                       )}
-                      {(lead.enrichment_status === 'pending' || lead.enrichment_status === 'processing') && (
-                        <span title="Enriching in the background — missing contact fields will fill in on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', whiteSpace: 'nowrap' }}>
-                          <Loader2 size={9} className="animate-spin" /> Enriching…
-                        </span>
-                      )}
                     </td>
-                    <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
+                    <td style={{ padding: '13px 16px', minWidth: 200 }} onClick={() => setSelectedLead(lead)}>
                       <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>{lead.job_title || '—'}</span>
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
@@ -1710,7 +1744,7 @@ const SDRLeadsTab = () => {
                           {cat.label}
                         </span>
                       ) : tcfg ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: tcfg.bg, border: `1px solid ${tcfg.border}`, color: tcfg.color }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: tcfg.bg, border: `1px solid ${tcfg.border}`, color: tcfg.color, whiteSpace: 'nowrap' }}>
                           <TIcon size={11} /> {tcfg.label}
                         </span>
                       ) : (lead.qualification_status === 'pending' || lead.qualification_status === 'processing') ? (
@@ -1733,13 +1767,13 @@ const SDRLeadsTab = () => {
                       {confScore != null ? (
                         <ConfidenceBadge score={confScore} />
                       ) : hasFlags ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 8, fontSize: 11, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: 'hsl(var(--pt-f59e0b))' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 8, fontSize: 11, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: 'hsl(var(--pt-f59e0b))', whiteSpace: 'nowrap' }}>
                           <AlertTriangle size={10} /> {(lead.data_quality_flags || []).length} flag{(lead.data_quality_flags || []).length > 1 ? 's' : ''}
                         </span>
                       ) : <span style={{ color: 'var(--line-1)', fontSize: 12 }}>—</span>}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
-                      <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 11, background: 'hsl(var(--surface-invert) / 0.05)', color: '#6b7280' }}>
+                      <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 11, background: 'hsl(var(--surface-invert) / 0.05)', color: '#6b7280', whiteSpace: 'nowrap' }}>
                         {SOURCE_LABELS[lead.source] || lead.source}
                       </span>
                     </td>

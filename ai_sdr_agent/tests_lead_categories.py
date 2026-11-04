@@ -116,6 +116,18 @@ class FilterRefileAndExportTests(CategoryApiBase):
         self.assertEqual(self.listed('category=none'), {'c@x.example'})
         self.assertEqual(self.listed(''), {'a@x.example', 'b@x.example', 'c@x.example'})
 
+    def test_the_list_filters_by_enrichment(self):
+        SDRLead.objects.filter(pk=self.a.pk).update(enrichment_status='done')
+        SDRLead.objects.filter(pk=self.b.pk).update(enrichment_status='pending')
+        # Enriched before the field existed: only raw_data says so.
+        self.make_lead('old@x.example', raw_data={'enrichment': {'status': 'completed'}})
+        self.make_lead('bad@x.example', enrichment_status='failed')
+        self.assertEqual(self.listed('enrichment=done'), {'a@x.example', 'old@x.example'})
+        self.assertEqual(self.listed('enrichment=not'), {'c@x.example'})
+        self.assertEqual(self.listed('enrichment=in_progress'), {'b@x.example'})
+        self.assertEqual(self.listed('enrichment=failed'), {'bad@x.example'})
+        self.assertEqual(self.listed(f'enrichment=done&category={self.dent.id}'), {'a@x.example'})
+
     def test_categories_come_with_their_lead_counts(self):
         self.make_lead('gone@x.example', category=self.dent).soft_delete()
         r = self.call(views.sdr_lead_categories, 'get')

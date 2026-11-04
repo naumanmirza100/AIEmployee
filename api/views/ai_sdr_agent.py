@@ -391,7 +391,7 @@ _LEAD_SORT_MAP = {
 
 def _apply_lead_filters(qs, request):
     """Apply the leads-list filters (search / temperature / status / source /
-    sort) to a queryset. Shared by the paginated list and the CSV export so the
+    category / enrichment / sort) to a queryset. Shared by the paginated list and the CSV export so the
     export respects whatever the user is currently looking at."""
     search = request.GET.get('search', '').strip()
     if search:
@@ -420,6 +420,21 @@ def _apply_lead_filters(qs, request):
         qs = qs.filter(category__isnull=True)
     elif category_f.isdigit():
         qs = qs.filter(category_id=int(category_f))
+    # Enrichment progress, apart from the pipeline status. Leads enriched before the field existed only
+    # record it in raw_data (see _serialize_lead), so they count as enriched, not as never enriched.
+    enrichment_f = request.GET.get('enrichment', '').strip()
+    if enrichment_f:
+        legacy_done = Q(enrichment_status__in=['none', ''], raw_data__enrichment__status__in=['completed', 'partial'])
+        if enrichment_f == 'done':
+            qs = qs.filter(Q(enrichment_status='done') | legacy_done)
+        elif enrichment_f == 'not':
+            # A subquery: excluding on the JSON key directly would also drop leads with no 'enrichment' key (NULL).
+            qs = qs.filter(enrichment_status__in=['none', '']).exclude(
+                pk__in=SDRLead.objects.filter(legacy_done).values('pk'))
+        elif enrichment_f == 'in_progress':
+            qs = qs.filter(enrichment_status__in=['pending', 'processing'])
+        elif enrichment_f == 'failed':
+            qs = qs.filter(enrichment_status='failed')
     sort_by = request.GET.get('sort', 'score_desc')
     return qs.order_by(*_LEAD_SORT_MAP.get(sort_by, ['-score', '-created_at']))
 

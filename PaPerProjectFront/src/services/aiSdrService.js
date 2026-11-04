@@ -68,7 +68,7 @@ export const saveIcpProfile = async (data) => {
 // Leads — CRUD
 // --------------------------------------------------------------------------
 export const listLeads = async ({
-  search = '', temperature = '', status = '', source = '', category = '',
+  search = '', temperature = '', status = '', source = '', category = '', enrichment = '',
   sort = 'score_desc', page = 1, page_size = 25, not_in_campaign = '',
 } = {}) => {
   try {
@@ -79,6 +79,7 @@ export const listLeads = async ({
     if (status)      params.set('status', status);
     if (source)      params.set('source', source);
     if (category)    params.set('category', category);   // a category id, or 'none'
+    if (enrichment)  params.set('enrichment', enrichment); // done / not / in_progress / failed
     if (sort)        params.set('sort', sort);
     params.set('page', page);
     params.set('page_size', page_size);
@@ -93,13 +94,14 @@ export const listLeads = async ({
  * Export ALL leads matching the current filters as a CSV blob (server-side, no
  * pagination) so thousands of leads can be exported in one download.
  */
-export const exportAllLeadsCsv = async ({ search = '', temperature = '', status = '', source = '', category = '', sort = 'score_desc' } = {}) => {
+export const exportAllLeadsCsv = async ({ search = '', temperature = '', status = '', source = '', category = '', enrichment = '', sort = 'score_desc' } = {}) => {
   const params = {};
   if (search)      params.search = search;
   if (temperature) params.temperature = temperature;
   if (status)      params.status = status;
   if (source)      params.source = source;
   if (category)    params.category = category;
+  if (enrichment)  params.enrichment = enrichment;
   if (sort)        params.sort = sort;
   // The filters go in the URL: companyApi.get drops a `params` option on a blob request, so "Export ALL" used to
   // export every lead whatever the filters said.
