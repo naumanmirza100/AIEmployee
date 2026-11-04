@@ -1672,17 +1672,20 @@ const SDRLeadsTab = () => {
               );
             })()}
 
-            {/* Enriched Data — what the enrichment agent found, with its source */}
-            {selectedLead.enrichment_contract?.fields
-              && Object.values(selectedLead.enrichment_contract.fields).some(f => f && f.value) && (
+            {/* Enriched Data — only what the enrichment agent found, with its source.
+                Fields seeded from the lead itself (source "lead_model:...") are not enrichment. */}
+            {(() => {
+              const enriched = Object.entries(selectedLead.enrichment_contract?.fields || {})
+                .filter(([, f]) => f && f.value && !String(f.source || '').startsWith('lead_model:'));
+              if (!enriched.length) return null;
+              return (
               <div style={{ marginBottom: 20, padding: '12px 14px', borderRadius: 10, background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <Sparkles size={13} style={{ color: '#10b981' }} />
                   <h4 style={{ color: '#10b981', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Enriched Data</h4>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {Object.entries(selectedLead.enrichment_contract.fields)
-                    .filter(([, f]) => f && f.value)
+                  {enriched
                     .map(([key, f]) => (
                       <div key={key} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
                         <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, textTransform: 'capitalize', flexShrink: 0 }}>{key.replace(/_/g, ' ')}</span>
@@ -1694,7 +1697,8 @@ const SDRLeadsTab = () => {
                     ))}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Contact */}
             <div style={{ marginBottom: 20 }}>
