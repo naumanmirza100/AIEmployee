@@ -14,6 +14,7 @@ import Skeleton from '@/components/common/Skeleton';
 import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 import { trackPMRecentlyViewed } from './pmLocalStore';
+import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -49,7 +50,7 @@ export default function MeetingScheduler() {
   const [chats, setChats] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [loadingChats, setLoadingChats] = useState(true);
-  const [showChatHistory, setShowChatHistory] = useState(true);
+  const [showChatHistory, setShowChatHistory] = useState(sidePanelStartsOpen);
   const [showSidebarSearch, setShowSidebarSearch] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState('');
 

@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2, Search, BarChart2, Save, LayoutDashboard, Maximize2, Check, History, ChevronsLeft, ChevronsRight, Bot, Sparkles, Activity, Users, TrendingUp } from 'lucide-react';
 import { recruitmentQAStream, listQAChats, createQAChat, updateQAChat, deleteQAChat, generateGraph, savePrompt, getSavedPrompts, isPromptOnDashboard } from '@/services/recruitmentAgentService';
 import { renderChart } from '@/components/common/ChartRenderer';
+import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
 // ...existing code...
 
@@ -245,7 +246,7 @@ const AiInterviewQuestions = () => {
   const [saveTags, setSaveTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveContext, setSaveContext] = useState(null); // { prompt, chartTitle, chartType }
-  const [showChatHistory, setShowChatHistory] = useState(true);
+  const [showChatHistory, setShowChatHistory] = useState(sidePanelStartsOpen);
   const [expandedGraph, setExpandedGraph] = useState(null); // { chart, chartTitle } when modal open
   const [addedToDashboard, setAddedToDashboard] = useState(new Set()); // track prompts already added to dashboard
   const messagesEndRef = useRef(null);

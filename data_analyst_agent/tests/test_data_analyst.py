@@ -184,6 +184,33 @@ class AFileAskedEndToEnd(AnalystCase):
         with sqlite3.connect(source.file_path) as conn:
             self.assertEqual(conn.execute('SELECT sum(total) FROM orders').fetchone()[0], 4750.5)
 
+    def test_a_query_stopped_at_the_time_limit_is_said_plainly_and_not_tried_again(self):
+        # Live, 3 Nov 2026: a count over RNAcentral's rna table ran 30 s twice, and the site cut the request at 60 s.
+        source = self.source()
+        heavy = 'WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000000) SELECT count(*) AS c FROM n'
+        fake = FakeAI({'sql': heavy}, {'sql': heavy})
+        with mock.patch('data_analyst_agent.connectors.QUERY_TIMEOUT', 0):
+            code, body = self.ask(self.admin, source, 'Count to five million', fake)
+        self.assertEqual(code, 200, body)
+        self.assertEqual(len(fake.prompts), 1)
+        self.assertEqual(body['data']['status'], 'failed')
+        self.assertIn('the database stopped it. Ask about a smaller part', body['data']['answer'])
+
+    def test_a_slow_failure_leaves_no_time_for_another_try(self):
+        source = self.source()
+        fake = FakeAI({'sql': 'SELECT amount FROM orders'}, {'sql': 'SELECT sum(total) AS total FROM orders'})
+        calls = []
+
+        def clock():
+            calls.append(1)
+            return 0.0 if len(calls) == 1 else 25.0      # the first query took 25 s before it failed
+
+        with mock.patch('data_analyst_agent.connectors.run', side_effect=Exception('no such column: amount')), \
+             mock.patch('data_analyst_agent.engine.time.monotonic', side_effect=clock):
+            code, body = self.ask(self.admin, source, 'Total of all orders?', fake)
+        self.assertEqual(len(fake.prompts), 1)
+        self.assertEqual(body['data']['answer'], 'The query could not be run: no such column: amount')
+
     def test_a_question_the_tables_cant_answer_is_asked_back(self):
         source = self.source()
         fake = FakeAI({'sql': '', 'ask_back': 'There is no table of refunds.'})

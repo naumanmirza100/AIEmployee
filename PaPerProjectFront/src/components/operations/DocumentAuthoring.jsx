@@ -20,6 +20,7 @@ import {
   TEMPLATES, TONES, getTemplate, getTone,
   AUTHORING_ACCENT as ACCENT_SHARED,
 } from './authoringConstants';
+import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
 // ──────────────────────────────────────────────
 // Theming — matches the rest of the Operations module (amber/orange)
@@ -137,7 +138,7 @@ const DocumentAuthoring = () => {
 
   // view: 'create' | 'view'
   const [view, setView] = useState('create');
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(sidePanelStartsOpen);
 
   // History list
   const [generatedDocs, setGeneratedDocs] = useState([]);

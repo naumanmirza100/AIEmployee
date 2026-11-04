@@ -17,6 +17,7 @@ import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 import { trackPMRecentlyViewed } from './pmLocalStore';
 import { isRealError } from '@/utils/messageSeverity';
+import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
 // A reply asking for a yes or no ("Shall I update the deadline?") gets Confirm and Reject buttons; a reply
 // asking for details does not.
@@ -29,7 +30,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
 
   const [showSidebarSearch, setShowSidebarSearch] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState('');
-  const [showChatHistory, setShowChatHistory] = useState(true);
+  const [showChatHistory, setShowChatHistory] = useState(sidePanelStartsOpen);
 
   const [chats, setChats] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);

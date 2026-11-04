@@ -205,14 +205,15 @@ const CompanySignupPage = () => {
                               : 'border-input focus-within:ring-ring'
                           }`}
                         >
-                          <span className="select-none pl-3 pr-0.5 text-muted-foreground">https://</span>
+                          <span className="shrink-0 select-none pl-3 pr-0.5 text-muted-foreground">https://</span>
+                          {/* min-w-0: a long address scrolls inside the box instead of running past its edge (4 Nov 2026) */}
                           <input
                             id="website"
                             value={form.website}
                             onChange={setField('website')}
                             placeholder="laskon.com"
                             aria-invalid={!!errors.website}
-                            className="h-full flex-1 rounded-r-md bg-transparent pr-3 outline-none placeholder:text-muted-foreground"
+                            className="h-full min-w-0 flex-1 rounded-r-md bg-transparent pr-3 outline-none placeholder:text-muted-foreground"
                           />
                         </div>
                         <FieldError message={errors.website} />

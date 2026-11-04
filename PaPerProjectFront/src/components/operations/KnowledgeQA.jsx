@@ -14,6 +14,7 @@ import {
 import operationsService from '@/services/operationsAgentService';
 import { ElapsedTimer } from '@/components/frontline/chatShellUtils';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
+import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
 const ACCENT = '#f59e0b'; // amber / operations accent
 const ACCENT_SOFT = 'rgba(245,158,11,0.12)';
@@ -183,7 +184,7 @@ const KnowledgeQA = () => {
   const [deletingChat, setDeletingChat] = useState(false);
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(sidePanelStartsOpen);
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [renamingId, setRenamingId] = useState(null);

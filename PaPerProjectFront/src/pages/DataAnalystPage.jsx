@@ -165,7 +165,9 @@ function AskTab({ sources, onAsked }) {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+    // grid-cols-1 and min-w-0: a long query or line of SQL scrolls in its box instead of widening the page past a
+    // phone's screen (4 Nov 2026).
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] [&>*]:min-w-0">
       <aside className="space-y-3">
         <label className="block text-xs text-muted-foreground" htmlFor="analyst-source">Database</label>
         <select id="analyst-source" className={field} value={sourceId} onChange={(e) => { setSourceId(e.target.value); startNew(); }}>
@@ -335,7 +337,7 @@ function DatabasesTab({ setup, sources, reload }) {
   };
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_440px]">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_440px] [&>*]:min-w-0">
       <div className="space-y-3">
         {note && <p className="text-sm text-muted-foreground">{note}</p>}
         {sources.length === 0 && <p className={`${panel} p-6 text-sm text-muted-foreground`}>No database yet.</p>}
