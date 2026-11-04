@@ -21,14 +21,26 @@ from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRMeeting
 from ai_sdr_agent.tests import SDRBase
 
 
-class NoLeadsWithoutAskingTests(SDRBase):
-    """Leads come only from a search, import or entry someone makes. A daily Apify run used to add 10 leads
-    to every company with an active ICP, on the platform's Apify token, without anyone asking."""
+class AutoResearchQueuesQualificationTests(SDRBase):
+    """R2: auto-researched (Apify) leads are queued for qualification."""
 
-    def test_nothing_searches_for_leads_on_its_own(self):
-        from django.conf import settings
-        self.assertFalse(hasattr(tasks, 'auto_research_leads_impl'))
-        self.assertNotIn('ai_sdr_agent.middleware.AutoLeadResearchMiddleware', settings.MIDDLEWARE)
+    @override_settings(APIFY_API_TOKEN='tok')
+    def test_auto_researched_leads_are_queued_for_qualification(self):
+        SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
+        fake_leads = [{
+            'full_name': 'New Prospect', 'first_name': 'New', 'last_name': 'Prospect',
+            'email': 'new.prospect@target.example', 'job_title': 'CEO',
+            'company_name': 'Target Co',
+        }]
+        with mock.patch(
+            'ai_sdr_agent.agents.lead_research_agent.LeadResearchAgent.search_leads',
+            return_value=fake_leads,
+        ):
+            tasks.auto_research_leads_impl(leads_per_run=5)
+
+        lead = SDRLead.objects.get(email='new.prospect@target.example')
+        self.assertEqual(lead.qualification_status, 'pending')
+        self.assertIsNotNone(lead.qualification_queued_at)
 
 
 class StatusFollowsTheScoreTests(SDRBase):
