@@ -17,8 +17,8 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
-  listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
-  researchLead, getLeadResearch, researchLeads, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
+  listLeads, exportAllLeadsCsv, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
+  researchLead, getLeadResearch, researchLeads, getResearchJob, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads,
 } from '@/services/aiSdrService';
@@ -343,7 +343,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
 // --------------------------------------------------------------------------
 // Export Dropdown
 // --------------------------------------------------------------------------
-const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage }) => {
+const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage, totalCount = 0, exportParams = {} }) => {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(null);
   const ref = useRef(null);
@@ -369,6 +369,27 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage }) => {
       toast({ title: `Exported ${exportTarget.length} leads as ${format.toUpperCase()}` });
     } catch (e) {
       toast({ title: 'Export failed', description: e.message, variant: 'destructive' });
+    } finally { setExporting(null); }
+  };
+
+  // Export EVERY lead matching the current filters (all pages), streamed as CSV
+  // from the server — so 1000s of leads export in one download.
+  const doExportAll = async () => {
+    setExporting('all');
+    setOpen(false);
+    try {
+      const blob = await exportAllLeadsCsv(exportParams);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sdr-leads-all-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast({ title: `Exported all ${totalCount ? totalCount.toLocaleString() + ' ' : ''}leads as CSV` });
+    } catch (e) {
+      toast({ title: 'Export failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
     } finally { setExporting(null); }
   };
 
@@ -404,6 +425,17 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage }) => {
               <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>{opt.label}</span>
             </button>
           ))}
+          {/* Export ALL matching leads (every page) as CSV, streamed from the server. */}
+          <button onClick={doExportAll}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 16px', border: 'none', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)', cursor: 'pointer', background: 'rgba(168,85,247,0.06)', transition: 'background 0.1s' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.14)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.06)'; }}
+          >
+            <Download size={15} style={{ color: '#a855f7', flexShrink: 0 }} />
+            <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>
+              Export ALL{totalCount ? ` ${totalCount.toLocaleString()}` : ''} leads (CSV)
+            </span>
+          </button>
         </div>
       )}
     </div>
@@ -602,7 +634,7 @@ const SDRLeadsTab = () => {
   const [csvImport, setCsvImport] = useState(null); // { file, rows, columns, skippedEmpty } | null
   const [csvImporting, setCsvImporting] = useState(false);
   const [leads, setLeads] = useState([]);
-  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0 });
+  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, enriching: 0 });
   const [pagination, setPagination] = useState({ page: 1, page_size: 25, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
 
   const [loading, setLoading] = useState(true);
@@ -638,6 +670,7 @@ const SDRLeadsTab = () => {
   const [genIcpId, setGenIcpId] = useState('');
   const [icpProfiles, setIcpProfiles] = useState([]);
   const [generating, setGenerating] = useState(false);
+  const [genProgress, setGenProgress] = useState(null); // { created, total } while a run is in flight
   const [copiedKey, setCopiedKey] = useState(null);
   const [showSetupGuide, setShowSetupGuide] = useState(null);
 
@@ -655,7 +688,7 @@ const SDRLeadsTab = () => {
         page_size:   opts.page_size   ?? pageSize,
       });
       setLeads(resp?.data || []);
-      setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0 });
+      setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, enriching: 0 });
       setPagination(resp?.pagination || { page: 1, page_size: pageSize, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
       setSelectedIds(new Set());
       if (resp?.data) {
@@ -672,13 +705,14 @@ const SDRLeadsTab = () => {
 
   useEffect(() => { loadLeads(); }, []);
 
-  // While leads are being qualified in the background, poll every 12s so scores
-  // appear on their own. Stops once the queue drains.
+  // While leads are being qualified or enriched in the background, poll every
+  // 12s so scores and enriched fields appear on their own. Stops once both
+  // queues drain.
   useEffect(() => {
-    if (!stats.qualifying) return undefined;
+    if (!stats.qualifying && !stats.enriching) return undefined;
     const id = setInterval(() => loadLeads(), 12000);
     return () => clearInterval(id);
-  }, [stats.qualifying, loadLeads]);
+  }, [stats.qualifying, stats.enriching, loadLeads]);
 
   useEffect(() => {
     setPage(1);
@@ -762,31 +796,83 @@ const SDRLeadsTab = () => {
 
   const handleGenerate = async () => {
     setGenerating(true);
+    setGenProgress({ created: 0, total: genCount });
+    const apifyApprovalToast = (url) => toast({
+      title: 'Approve the Apify actor first',
+      description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
+      variant: 'destructive',
+      action: (
+        <ToastAction altText="Open Apify" onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>
+          Open Apify
+        </ToastAction>
+      ),
+    });
     try {
-      const resp = await researchLeads({ count: genCount, source: genSource, icp_id: genIcpId || undefined });
-      const created = resp?.data?.leads_created ?? resp?.leads_created ?? '?';
-      toast({ title: `${created} leads generated!`, description: `Source: ${genSource.toUpperCase()}` });
+      // Kick off the background job; the backend returns a job id immediately.
+      const startResp = await researchLeads({ count: genCount, source: genSource, icp_id: genIcpId || undefined });
+      const started = startResp?.data ?? startResp;
+      const jobId = started?.job_id;
+      if (!jobId) {
+        throw Object.assign(new Error(started?.message || 'Could not start generation.'), { data: started });
+      }
+
+      // Poll the job until it finishes (large Apify/Apollo runs can take minutes).
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      let job = null;
+      for (let i = 0; i < 400; i++) { // ~20 min ceiling at 3s/poll
+        await sleep(3000);
+        let jobResp;
+        try { jobResp = await getResearchJob(jobId); } catch (_) { continue; }
+        job = (jobResp?.data ?? jobResp)?.job;
+        if (!job) continue;
+        setGenProgress({ created: job.leads_created || 0, total: genCount });
+        if (job.done) break;
+      }
+
+      if (!job || !job.done) {
+        toast({
+          title: 'Still generating…',
+          description: 'This run is taking a while. It keeps going in the background — refresh the list shortly.',
+        });
+        setShowGenModal(false);
+        setPage(1);
+        loadLeads({ page: 1 });
+        return;
+      }
+
+      if (job.state === 'failed') {
+        if (job.error_code === 'apify_approval_required' && job.approval_url) {
+          apifyApprovalToast(job.approval_url);
+        } else {
+          toast({ title: 'Generate failed', description: job.error_message || 'Lead generation failed.', variant: 'destructive' });
+        }
+        return;
+      }
+
+      const created = job.leads_created || 0;
+      const skipped = job.skipped_duplicates || 0;
+      toast({
+        title: created ? `${created} leads generated!` : 'No new leads found',
+        description: [
+          `Source: ${(job.source || genSource).toUpperCase()}`,
+          skipped ? `${skipped} duplicates skipped.` : '',
+          job.leads_queued ? `Qualifying ${job.leads_queued} in the background.` : '',
+        ].filter(Boolean).join(' '),
+      });
       setShowGenModal(false);
       setPage(1);
       loadLeads({ page: 1 });
     } catch (e) {
       const data = e?.data || e?.response?.data;
       if (data?.code === 'apify_approval_required') {
-        // The user must approve the actor once on Apify; give them the link.
-        toast({
-          title: 'Approve the Apify actor first',
-          description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
-          variant: 'destructive',
-          action: (
-            <ToastAction altText="Open Apify" onClick={() => window.open(data.approval_url, '_blank', 'noopener,noreferrer')}>
-              Open Apify
-            </ToastAction>
-          ),
-        });
+        apifyApprovalToast(data.approval_url);
       } else {
         toast({ title: 'Generate failed', description: data?.message || e.message, variant: 'destructive' });
       }
-    } finally { setGenerating(false); }
+    } finally {
+      setGenerating(false);
+      setGenProgress(null);
+    }
   };
 
   // Import leads already generated in the Apify Console (works on the free plan,
@@ -835,7 +921,11 @@ const SDRLeadsTab = () => {
     try {
       const resp = await enrichLead(lead.id, { force: true });
       const data = resp?.data || resp;
-      const updatedFields = data?.contract?.fields_updated || [];
+      // The backend returns the updated-field list at the top level as
+      // `fields_updated` (and as the keys of `changes`). It is NOT on the
+      // contract object, so reading data.contract.fields_updated was always
+      // empty → every enrichment showed "No New Data" even when it added data.
+      const updatedFields = data?.fields_updated || Object.keys(data?.changes || {});
       if (updatedFields.length > 0) {
         toast({
           title: 'Enrichment Complete',
@@ -876,8 +966,35 @@ const SDRLeadsTab = () => {
     if (!lead) return;
     setResearchingId(lead.id);
     try {
-      const resp = await researchLead(lead.id, { force: true });
-      const data = resp?.data || resp;
+      const startResp = await researchLead(lead.id, { force: true, async: true });
+      const started = startResp?.data || startResp;
+
+      // R1: research now runs in the background (it can take ~47 s). Poll the GET
+      // side of the endpoint for research_status until it finishes.
+      let data = started;
+      if (started?.status === 'queued') {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const TERMINAL = ['completed', 'partial', 'failed'];
+        data = null;
+        for (let i = 0; i < 60; i++) {          // ~3 min at 3s/poll
+          await sleep(3000);
+          let pollResp;
+          try { pollResp = await getLeadResearch(lead.id); } catch (_) { continue; }
+          const p = pollResp?.data || pollResp;
+          if (TERMINAL.includes(p?.research_status)) { data = p; break; }
+        }
+        if (!data) {
+          toast({ title: 'Still researching…', description: 'Taking a while — it keeps running in the background; refresh shortly.' });
+          loadLeads();
+          return;
+        }
+      }
+
+      if (data?.research_status === 'failed') {
+        toast({ title: 'Research failed', description: 'Could not complete research for this lead.', variant: 'destructive' });
+        return;
+      }
+
       toast({
         title: 'Research Complete',
         description: `Intelligence gathered for ${lead.company_name || lead.full_name || 'lead'}`,
@@ -1075,6 +1192,11 @@ const SDRLeadsTab = () => {
               <Loader2 size={15} className="animate-spin" /> Qualifying {stats.qualifying}…
             </span>
           )}
+          {stats.enriching > 0 && (
+            <span title="Leads are being enriched in the background — missing fields (phone, email, LinkedIn…) will appear on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', borderRadius: 8, fontWeight: 600, fontSize: 13, padding: '8px 14px' }}>
+              <Loader2 size={15} className="animate-spin" /> Enriching {stats.enriching}…
+            </span>
+          )}
           {stats.unscored > 0 && stats.unscored > (stats.qualifying || 0) && (
             <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`AI-qualify unscored lead(s) now`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
               {qualifyingAll ? <Loader2 size={15} className="animate-spin" /> : <Brain size={15} />}
@@ -1087,7 +1209,9 @@ const SDRLeadsTab = () => {
           </Button>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
           <div style={{ marginLeft: 'auto' }}>
-            <ExportDropdown leads={leads} selectedLeads={selectedIds} allLeadsOnPage={leads} />
+            <ExportDropdown leads={leads} selectedLeads={selectedIds} allLeadsOnPage={leads}
+              totalCount={pagination.total_count}
+              exportParams={{ search, temperature: filterTemp, status: filterStatus, source: filterSource, sort: sortBy }} />
           </div>
         </div>
       </div>
@@ -1302,6 +1426,11 @@ const SDRLeadsTab = () => {
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 14 }}>{lead.full_name}</div>
                       <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>{lead.company_name}</div>
+                      {(lead.enrichment_status === 'pending' || lead.enrichment_status === 'processing') && (
+                        <span title="Enriching in the background — missing contact fields will fill in on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', whiteSpace: 'nowrap' }}>
+                          <Loader2 size={9} className="animate-spin" /> Enriching…
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>{lead.job_title || '—'}</span>
@@ -1543,6 +1672,34 @@ const SDRLeadsTab = () => {
               );
             })()}
 
+            {/* Enriched Data — only what the enrichment agent found, with its source.
+                Fields seeded from the lead itself (source "lead_model:...") are not enrichment. */}
+            {(() => {
+              const enriched = Object.entries(selectedLead.enrichment_contract?.fields || {})
+                .filter(([, f]) => f && f.value && !String(f.source || '').startsWith('lead_model:'));
+              if (!enriched.length) return null;
+              return (
+              <div style={{ marginBottom: 20, padding: '12px 14px', borderRadius: 10, background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Sparkles size={13} style={{ color: '#10b981' }} />
+                  <h4 style={{ color: '#10b981', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Enriched Data</h4>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {enriched
+                    .map(([key, f]) => (
+                      <div key={key} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, textTransform: 'capitalize', flexShrink: 0 }}>{key.replace(/_/g, ' ')}</span>
+                        <span style={{ color: 'var(--text-soft)', fontSize: 12.5, textAlign: 'right', wordBreak: 'break-word' }}>
+                          {String(f.value)}
+                          {f.source && <span style={{ marginLeft: 6, color: '#6b7280', fontSize: 10 }}>({f.source})</span>}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+              );
+            })()}
+
             {/* Contact */}
             <div style={{ marginBottom: 20 }}>
               <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Contact</h4>
@@ -1703,7 +1860,7 @@ const SDRLeadsTab = () => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, paddingTop: 14, borderTop: '1px solid var(--sfc-1e0f38)' }}>
               <Button
                 onClick={() => handleEnrichOne(selectedLead)}
-                disabled={enrichingId === selectedLead.id}
+                disabled={enrichingId === selectedLead.id || ['pending', 'processing'].includes(selectedLead.enrichment_status)}
                 style={{
                   height: 38,
                   padding: '0 10px',
@@ -1720,9 +1877,11 @@ const SDRLeadsTab = () => {
                   gap: 6,
                 }}
               >
-                {enrichingId === selectedLead.id ? <Loader2 size={13} className="animate-spin flex-shrink-0" /> : <Sparkles size={13} className="flex-shrink-0" />}
+                {(enrichingId === selectedLead.id || ['pending', 'processing'].includes(selectedLead.enrichment_status)) ? <Loader2 size={13} className="animate-spin flex-shrink-0" /> : <Sparkles size={13} className="flex-shrink-0" />}
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {selectedLead.enrichment_status === 'completed' ? 'Re-enrich' : 'Enrich Lead'}
+                  {(enrichingId === selectedLead.id || selectedLead.enrichment_status === 'pending' || selectedLead.enrichment_status === 'processing')
+                    ? 'Enriching…'
+                    : (['done', 'completed', 'partial'].includes(selectedLead.enrichment_status) ? 'Re-enrich' : 'Enrich Lead')}
                 </span>
               </Button>
 
@@ -2090,9 +2249,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>
                 Number of Leads: <span style={{ color: '#a855f7', fontWeight: 700 }}>{genCount}</span>
               </label>
-              <input type="range" min={5} max={50} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width: '100%', accentColor: '#a855f7' }} />
+              <input type="range" min={5} max={1500} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width: '100%', accentColor: '#a855f7' }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563', fontSize: 11, marginTop: 2 }}>
-                <span>5</span><span>50</span>
+                <span>5</span><span>1500</span>
               </div>
             </div>
           </div>
@@ -2118,7 +2277,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               disabled={generating || icpProfiles.length === 0 || (sdrKeyStatus.loaded && !sdrKeyStatus[genSource])}
               style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {generating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-              {generating ? 'Generating…' : `Generate ${genCount} Leads`}
+              {generating
+                ? (genProgress ? `Generating… ${genProgress.created}/${genProgress.total}` : 'Starting…')
+                : `Generate ${genCount} Leads`}
             </Button>
           </DialogFooter>
         </DialogContent>

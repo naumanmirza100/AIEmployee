@@ -16,6 +16,7 @@ Validates all required scenarios:
 12. End-to-end provenance and auditability
 """
 
+from typing import Any, Dict, Optional, Set
 from unittest import mock
 from django.test import SimpleTestCase
 
@@ -48,11 +49,48 @@ from ai_sdr_agent.agents.enrichment_providers import (
     ApolloEnrichmentProvider,
     BaseEnrichmentProvider,
     HunterEnrichmentProvider,
-    MockEnrichmentProvider,
     PublicWebEnrichmentProvider,
 )
 from ai_sdr_agent.agents.enrichment_waterfall import EnrichmentWaterfall
 from ai_sdr_agent.agents.enrichment_agent import EnrichmentAgent
+
+
+class MockEnrichmentProvider(BaseEnrichmentProvider):
+    """Deterministic mock provider for unit/integration testing.
+
+    Lives in the tests, not the production module (R5)."""
+
+    def __init__(
+        self,
+        name: str = "mock",
+        priority: int = 70,
+        mock_data: Optional[Dict[str, Any]] = None,
+        should_fail: bool = False,
+        supported_fields: Optional[Set[str]] = None,
+    ):
+        self.name = name
+        self.priority = priority
+        self.mock_data = mock_data or {}
+        self.should_fail = should_fail
+        self.supported_fields = supported_fields or set(self.mock_data.keys())
+
+    def is_configured(self) -> bool:
+        return True
+
+    def enrich(self, lead_data: Dict[str, Any], missing_fields: Set[str]) -> Dict[str, FieldProvenance]:
+        if self.should_fail:
+            raise RuntimeError(f"Mock provider {self.name} failed")
+        results: Dict[str, FieldProvenance] = {}
+        for f in missing_fields & self.supported_fields:
+            if f in self.mock_data:
+                results[f] = FieldProvenance(
+                    field_name=f,
+                    value=self.mock_data[f],
+                    source=self.name,
+                    confidence=80,
+                    verification_status=VerificationStatus.UNVERIFIED,
+                )
+        return results
 
 
 class CompleteLeadEnrichmentTests(SimpleTestCase):

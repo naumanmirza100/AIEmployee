@@ -642,6 +642,14 @@ def auto_research_leads_impl(leads_per_run: int = 10):
                     source='apify',
                     temperature='cold',
                     status='new',
+                    # Queue for background qualification, exactly like the
+                    # manual/CSV/Apollo creation paths do — otherwise these
+                    # auto-discovered leads default to qualification_status='none'
+                    # and the qualifier never scores them.
+                    qualification_status='pending',
+                    qualification_queued_at=tz.now(),
+                    enrichment_status='pending',
+                    enrichment_queued_at=tz.now(),
                 )
                 created += 1
 
@@ -675,10 +683,12 @@ def auto_research_leads_task(self):
 # Independent Lead Research Tasks
 # ---------------------------------------------------------------------------
 
-def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = False) -> dict:
+def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = False, agents: dict = None) -> dict:
     """
     Executes independent research on an existing lead.
     Safe against concurrent runs and respects subscription access.
+    ``agents`` is a batch's agents by login: reusing one lets colleagues at the same company share its crawl
+    and news search, which a new agent per lead never did.
     """
     from ai_sdr_agent.models import SDRAgentSettings, SDRLead, SDRCampaign
     from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
@@ -698,19 +708,16 @@ def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = Fals
         if not isinstance(lead.raw_data, dict):
             lead.raw_data = {}
 
-        current_status = lead.raw_data.get('research_status')
+        current_status = lead.research_status  # A run past its time reads 'failed', so it can start again
         if current_status == 'running':
-            # Check if stuck (running for > 15 mins)
-            updated_at = lead.updated_at or timezone.now()
-            if (timezone.now() - updated_at) < timedelta(minutes=15):
-                return {'status': 'already_running', 'lead_id': lead_id}
+            return {'status': 'already_running', 'lead_id': lead_id}
         if not force and current_status == 'completed':
             return {
                 'status': 'already_completed',
                 'lead_id': lead_id,
                 'profile': lead.raw_data.get('research_profile'),
             }
-        lead.raw_data['research_status'] = 'running'
+        lead.mark_research_running()
         lead.save(update_fields=['raw_data', 'updated_at'])
 
     campaign = None
@@ -718,14 +725,18 @@ def research_lead_impl(lead_id: int, campaign_id: int = None, force: bool = Fals
         campaign = SDRCampaign.objects.filter(pk=campaign_id, company_user=company_user).first()
 
     try:
-        # The keys the user saved in Settings, as the rest of the SDR agent uses
-        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
-        agent = LeadResearchAgent(
-            company=company,
-            apollo_api_key=(sdr_settings.apollo_api_key or None) if sdr_settings else None,
-            apify_token=(sdr_settings.apify_api_token or None) if sdr_settings else None,
-            apify_actor=(sdr_settings.apify_actor_id or None) if sdr_settings else None,
-        )
+        agent = (agents or {}).get(company_user.pk)
+        if agent is None:
+            # The keys the user saved in Settings, as the rest of the SDR agent uses
+            sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+            agent = LeadResearchAgent(
+                company=company,
+                apollo_api_key=(sdr_settings.apollo_api_key or None) if sdr_settings else None,
+                apify_token=(sdr_settings.apify_api_token or None) if sdr_settings else None,
+                apify_actor=(sdr_settings.apify_actor_id or None) if sdr_settings else None,
+            )
+            if agents is not None:
+                agents[company_user.pk] = agent
         profile = agent.research_lead(lead, campaign=campaign)
         return {'status': 'success', 'lead_id': lead_id, 'profile': profile}
     except Exception as exc:
@@ -740,9 +751,10 @@ def research_leads_batch_impl(lead_ids: list[int], campaign_id: int = None, forc
     results = []
     completed_count = 0
     failed_count = 0
+    agents = {}  # One per login for the whole batch, so a company's website is read once
 
     for lid in dict.fromkeys(lead_ids):
-        res = research_lead_impl(lid, campaign_id=campaign_id, force=force)
+        res = research_lead_impl(lid, campaign_id=campaign_id, force=force, agents=agents)
         results.append(res)
         if res.get('status') in ('success', 'already_completed'):
             completed_count += 1
@@ -808,21 +820,47 @@ def enrich_lead_impl(lead_id: int, force: bool = False) -> dict:
             }
         enrichment_blob['status'] = 'running'
         lead.raw_data['enrichment'] = enrichment_blob
-        lead.save(update_fields=['raw_data', 'updated_at'])
+        lead.enrichment_status = 'processing'
+        lead.save(update_fields=['raw_data', 'enrichment_status', 'updated_at'])
 
     try:
         sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
         apollo_key = (sdr_settings.apollo_api_key or None) if sdr_settings else None
+        # R4: wire Hunter from a setting so the provider actually runs when a key
+        # is configured (previously the agent was built with Apollo only, so the
+        # Hunter provider was never given a key and never used).
+        from django.conf import settings as dj_settings
+        hunter_key = getattr(dj_settings, 'HUNTER_API_KEY', None) or None
         agent = EnrichmentAgent(
             company=company,
             company_user=company_user,
             apollo_api_key=apollo_key,
+            hunter_api_key=hunter_key,
         )
         res = agent.enrich_lead(lead, force=force)
 
+        from django.db.models import F
+        status = res.get('status')
+        if status == 'already_running':
+            return res  # another worker owns it; leave the queue state alone
+        if status in ('failed', 'error'):
+            SDRLead.all_objects.filter(pk=lead_id).update(
+                enrichment_status='failed',
+                enrichment_attempts=F('enrichment_attempts') + 1,
+            )
+            return res
+
+        # Enriched (success / already_completed): mark done. (Re-scoring a lead
+        # after enrichment is a separate, jointly-owned decision — not done here.)
+        SDRLead.all_objects.filter(pk=lead_id).update(enrichment_status='done')
         return res
     except Exception as exc:
         logger.error("enrich_lead_impl failed for lead=%d: %s", lead_id, exc, exc_info=True)
+        from django.db.models import F
+        SDRLead.all_objects.filter(pk=lead_id).update(
+            enrichment_status='failed',
+            enrichment_attempts=F('enrichment_attempts') + 1,
+        )
         return {'status': 'failed', 'lead_id': lead_id, 'error': str(exc)}
 
 
@@ -860,6 +898,67 @@ def enrich_leads_batch_task(self, lead_ids: list[int], force: bool = False):
     return enrich_leads_batch_impl(lead_ids, force=force)
 
 
+# ---------------------------------------------------------------------------
+# Lead enrichment queue — background, batched, self-retrying (no LLM)
+# ---------------------------------------------------------------------------
+ENRICH_BATCH_SIZE = 5         # leads enriched per company per scheduler tick
+ENRICH_CEILING = 20           # leads enriched per tick in all (provider rate limits)
+ENRICH_MAX_ATTEMPTS = 3       # give up after this many failed attempts
+ENRICH_STUCK_MINUTES = 15     # a 'processing' lead older than this is retried
+
+
+def enrich_queue_impl():
+    """Enrich a small batch of queued leads. Runs every ~3 min via the scheduler.
+
+    New leads are queued with ``enrichment_status='pending'`` at creation; this
+    drains them a few per company per tick so provider rate limits hold.
+    Enrichment uses Apollo/Hunter/public-web — no LLM — so there is no
+    key/quota blocking like the qualification queue has. ``enrich_lead_impl``
+    sets each lead's ``enrichment_status`` to done/failed and (on new data)
+    re-queues it for qualification.
+    """
+    from django.db.models import Q as _Q, Min
+    from ai_sdr_agent.models import SDRLead
+    from core.models import Company
+
+    now = timezone.now()
+    stuck_before = now - timedelta(minutes=ENRICH_STUCK_MINUTES)
+    queued = SDRLead.objects.filter(
+        _Q(enrichment_status='pending')
+        | _Q(enrichment_status='failed', enrichment_attempts__lt=ENRICH_MAX_ATTEMPTS)
+        | _Q(enrichment_status='processing', updated_at__lt=stuck_before)
+    )
+    access_cache: dict = {}
+    waiting = (queued.order_by().values('company_user__company_id')
+               .annotate(since=Min('enrichment_queued_at')).order_by('since'))
+    batch_ids: list = []
+    for row in waiting:
+        if len(batch_ids) >= ENRICH_CEILING:
+            break
+        company = Company.objects.filter(pk=row['company_user__company_id']).first()
+        if company is None or not _has_sdr_access(company, access_cache):
+            continue                    # a lapsed plan: its leads wait
+        batch_ids += list(
+            queued.filter(company_user__company=company)
+            .order_by('enrichment_queued_at', 'created_at')
+            .values_list('pk', flat=True)[:min(ENRICH_BATCH_SIZE, ENRICH_CEILING - len(batch_ids))]
+        )
+    if not batch_ids:
+        return {'processed': 0, 'enriched': 0, 'failed': 0, 'pending': queued.count()}
+
+    enriched = failed = 0
+    for lead_id in batch_ids:
+        res = enrich_lead_impl(lead_id)
+        st = res.get('status')
+        if st in ('success', 'already_completed'):
+            enriched += 1
+        elif st in ('failed', 'error'):
+            failed += 1
+    return {
+        'processed': len(batch_ids), 'enriched': enriched, 'failed': failed,
+        'pending': SDRLead.objects.filter(enrichment_status='pending').count(),
+    }
+
 
 # ---------------------------------------------------------------------------
 # Lead qualification queue — background, batched, self-retrying
@@ -883,7 +982,7 @@ def qualify_queue_impl():
     """
     from django.db.models import Q as _Q
     from ai_sdr_agent.models import SDRLead, SDRIcpProfile
-    from core.api_key_service import KeyServiceError
+    from core.api_key_service import KeyServiceError, BadAPIKey
     from api.views.ai_sdr_agent import _get_qualification_agent
 
     from django.db.models import Min
@@ -959,12 +1058,22 @@ def qualify_queue_impl():
             lead.concerns = result.get('concerns', [])
             lead.outreach_strategy = result.get('outreach_strategy', '')
             lead.qualified_at = now
-            if lead.status in ('new', 'qualified'):   # never regress contacted/replied/etc.
-                lead.status = 'qualified'
+            lead.set_status_from_score()
             lead.qualification_status = 'done'
             lead.qualification_error = ''
             lead.save()
             qualified += 1
+        except BadAPIKey as exc:
+            # S3: a wrong/invalid key never clears on its own, so retrying it
+            # forever as "tokens exhausted" strands the lead. Fail it for good.
+            lead.qualification_status = 'failed'
+            lead.qualification_attempts = QUALIFY_MAX_ATTEMPTS
+            lead.qualification_error = ('AI key was rejected — check the API key. ' + str(exc))[:500]
+            lead.save(update_fields=[
+                'qualification_status', 'qualification_attempts', 'qualification_error', 'updated_at'])
+            blocked_companies.add(cu_id)   # this company's key is bad for the whole tick
+            failed += 1
+            logger.warning("SDR qualify-queue: bad AI key for company_user=%s: %s", cu_id, exc)
         except KeyServiceError as exc:
             # Tokens/key exhausted for this company — leave the lead pending and
             # stop touching this company for the rest of the tick.

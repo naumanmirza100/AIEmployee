@@ -336,9 +336,7 @@ class LeadResearchAgent:
 
         # Mark running status in lead record if model instance
         if lead_obj:
-            if not isinstance(lead_obj.raw_data, dict):
-                lead_obj.raw_data = {}
-            lead_obj.raw_data['research_status'] = 'running'
+            lead_obj.mark_research_running()
             lead_obj.save(update_fields=['raw_data', 'updated_at'])
 
         try:

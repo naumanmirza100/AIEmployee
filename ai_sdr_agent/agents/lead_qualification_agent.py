@@ -159,10 +159,11 @@ Score this lead now:"""
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            # The model thinks before it answers, out of the same budget; 500 tokens left no room
-            # for the answer itself, so it was cut off and every lead fell back to the rule-based score.
+            # The model reasons before it answers, out of the same budget. 2000 was
+            # still tight for gpt-oss-20b and could truncate the JSON into a silent
+            # rule-based fallback; give it the same room as the Email Assistant (S4).
             temperature=0.1,
-            max_tokens=2000,
+            max_tokens=6000,
         )
 
         from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
@@ -195,9 +196,12 @@ Score this lead now:"""
             'engagement_signals': max(0, min(15, int(bd.get('engagement_signals', 0)))),
             'data_completeness':  max(0, min(10, int(bd.get('data_completeness', 0)))),
         }
-        # Recalculate score from breakdown to ensure consistency
+        # Recalculate score from the breakdown to keep them consistent. Doing
+        # this only when they differed by more than 10 (the old rule) left a
+        # within-10 gap where the stored score disagreed with the bars, and the
+        # temperature then followed the unreconciled score (C1).
         bd_sum = sum(breakdown.values())
-        if bd_sum > 0 and abs(bd_sum - score) > 10:
+        if bd_sum > 0:
             score = bd_sum
 
         # Derive temperature from the FINAL score (after breakdown reconciliation)

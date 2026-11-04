@@ -191,6 +191,18 @@ def apply_reply_action(company_user, campaign, enrollment, lead, classification,
             raise
         except Exception as exc:
             logger.warning('SDR [MORE-INFO] email failed for lead=%s: %s', lead.id, exc)
+            # S6: don't fail silently — tell the salesperson so they can follow up.
+            try:
+                from ai_sdr_agent.alerts import tell_salesperson
+                who = getattr(lead, 'display_name', None) or lead.email or 'a lead'
+                tell_salesperson(
+                    company_user, 'more_info_failed',
+                    title='Auto-reply could not be sent',
+                    message=(f"The automatic “more info” reply to {who} could not be sent "
+                             f"({exc}). Please follow up manually."),
+                )
+            except Exception:
+                logger.debug('SDR [MORE-INFO] could not notify salesperson', exc_info=True)
         return {'action': 'answer_waiting' if held else 'sent_more_info', 'meeting_created': False,
                 'category': category, 'info_email_sent': info_sent, 'answer_held': held}
 

@@ -11,6 +11,7 @@ whose quote is not in the source it cites is dropped (see lead_research_verifica
 be established stays "unknown", and profile['verification'] says what was verified, inferred or not found.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -83,6 +84,15 @@ _DEPARTMENT_RULES = (
 )
 # A finding about a person that means the lead's stated role must not be relied on.
 _FALSE_PROSPECT = ('not_found', 'conflict', 'outdated')
+
+# What the model is shown, in characters. Every source costs tokens on every lead, so pages are cut to what
+# usually carries the facts (the opening of the homepage and About page), and the whole prompt has a ceiling.
+_PAGE_CHARS = {'homepage': 2000, 'about': 2000}
+_OTHER_PAGE_CHARS = 1200
+_SNIPPET_CHARS = 400
+# Separate ceilings, so a long website never crowds out the news results the buying signals come from.
+_EVIDENCE_BUDGET = {'official_website': 6000, 'search_snippet': 5000}
+_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
 
 
 def _get_field(obj: Any, field: str, default: Any = '') -> Any:
@@ -350,15 +360,32 @@ class LeadResearchWorkflow:
             )
 
         sources = self._numbered_sources(trusted_pages, snippets)
-        extraction = None
+        extraction, llm_cache = None, None
         if self.groq_client and sources:
-            extraction = self._ai_synthesize(lead_data, campaign_context, sources)
-            provider_status['llm'] = 'ok' if extraction is not None else 'failed'
+            # _build_profile keeps a role only for a verified prospect, and angles only for a verified company:
+            # asking for them otherwise pays for output that is thrown away.
+            ask_role = (verification['prospect'] or {}).get('status') == 'verified'
+            ask_angles = verification['company']['status'] == 'verified'
+            prompt = self._synthesis_prompt(lead_data, campaign_context, sources, ask_role, ask_angles)
+            digest = hashlib.sha256(f"{self.model}\n{prompt}".encode('utf-8')).hexdigest()
+            previous = (raw_data.get('research_profile') or {}).get('llm_cache') if isinstance(raw_data, dict) else None
+            if isinstance(previous, dict) and previous.get('digest') == digest and isinstance(previous.get('result'), dict):
+                # Same sources as the last run: the answer would be the same, so it is not bought twice.
+                extraction = previous['result']
+                provider_status['llm'] = 'cached'
+            else:
+                extraction = self._ai_synthesize(prompt)
+                provider_status['llm'] = 'ok' if extraction is not None else 'failed'
+            if extraction is not None:
+                llm_cache = {'digest': digest, 'result': extraction}
         if extraction is None:
             extraction = self._fallback_synthesize(trusted_pages, snippets, sources)
 
-        return self._build_profile(lead_data, extraction, sources, verification, provider_status,
-                                   company['pages'], snippets, now_iso)
+        profile = self._build_profile(lead_data, extraction, sources, verification, provider_status,
+                                      company['pages'], snippets, now_iso)
+        if llm_cache:
+            profile['llm_cache'] = llm_cache
+        return profile
 
     def _assess_company(self, lead_data: dict, site: dict, snippets: list, search_ran: bool) -> dict:
         if site['status'] == 'verified':
@@ -384,7 +411,7 @@ class LeadResearchWorkflow:
         for page in pages:
             sources[f"S{len(sources) + 1}"] = {
                 'url': page['url'], 'text': page['content'], 'type': 'official_website', 'published_at': '',
-                'label': f"official website, {page['page_type']} page",
+                'label': f"official website, {page['page_type']} page", 'page_type': page['page_type'],
             }
         for snippet in snippets:
             sources[f"S{len(sources) + 1}"] = {
@@ -393,49 +420,75 @@ class LeadResearchWorkflow:
             }
         return sources
 
-    def _ai_synthesize(self, lead_data: dict, campaign_context: dict, sources: dict):
+    def _evidence_text(self, sources: dict) -> str:
+        """The sources as the model sees them: each cut to its budget, a sentence repeated across pages (menus,
+        footers, cookie banners) kept only the first time, and nothing past the budget for its kind. Grounding
+        still checks quotes against each source's full text."""
+        blocks, seen, used = [], set(), {kind: 0 for kind in _EVIDENCE_BUDGET}
+        for source_id, source in sources.items():
+            kind = source['type']
+            if kind == 'official_website':
+                limit = _PAGE_CHARS.get(source.get('page_type'), _OTHER_PAGE_CHARS)
+            else:
+                limit = _SNIPPET_CHARS
+            kept, length = [], 0
+            for sentence in _SENTENCE_RE.split(' '.join(source['text'].split())):
+                if not sentence or sentence.lower() in seen or sentence in kept:
+                    continue
+                if length + len(sentence) > limit:
+                    if not kept:  # A page with no full stops is one long "sentence"; keep its opening
+                        kept.append(sentence[:limit])
+                    break
+                kept.append(sentence)
+                length += len(sentence) + 1
+            text = ' '.join(kept)
+            if not text or used.get(kind, 0) + len(text) > _EVIDENCE_BUDGET.get(kind, 0):
+                continue  # Past the budget the model never sees the source, so nothing can cite it
+            used[kind] += len(text)
+            seen.update(sentence.lower() for sentence in kept)
+            blocks.append(f"[{source_id}] {source['label']}\n{text}")
+        return "\n\n".join(blocks)
+
+    def _synthesis_prompt(self, lead_data: dict, campaign_context: dict, sources: dict,
+                          ask_role: bool = True, ask_angles: bool = True) -> str:
+        fields = 'overview|industry|business_model|value_proposition|market_context|products_services|' \
+                 'target_customers|business_challenges' + ('|responsibilities' if ask_role else '')
+        offer = ' '.join((campaign_context.get('campaign_offer') or '').split())[:400]
+        lines = [f"COMPANY: {lead_data.get('company_name')}"]
+        if ask_role:
+            lines.append(f"PROSPECT: {lead_data.get('full_name')} ({lead_data.get('job_title') or 'no title'})")
+        if ask_angles and offer:
+            lines.append(f"OUR OFFER: {offer}")
+        angles = ',"campaign_relevance":{"relevant_opportunities":["..."],"potential_pain_points":["..."],' \
+                 '"personalization_angles":["..."]}' if ask_angles else ''
+        notes = ['"overview" is what the company does.',
+                 'One claim per item for list fields (products_services, target_customers, business_challenges).']
+        if ask_role:
+            notes.append('"responsibilities" is only what a source says about this prospect\'s own role.')
+        if ask_angles:
+            notes.append('Give 1-3 short campaign_relevance items per list, based only on your claims.')
+        return (
+            "Extract research about this company from the sources.\n"
+            + "\n".join(lines)
+            + f"\n\nSOURCES:\n{self._evidence_text(sources)}\n\n"
+            "Return JSON, leaving out anything the sources do not support. Keep values short:\n"
+            f'{{"claims":[{{"field":"{fields}","value":"","source":"S1","quote":"exact sentence from S1"}}],'
+            '"signals":[{"type":"funding|hiring|product_launch|expansion|partnership|strategic_announcement",'
+            '"description":"what happened, naming the company","source":"S2","quote":"exact sentence from S2"'
+            + (',"campaign_relevance":""' if ask_angles else '') + f'}}]{angles}}}\n'
+            + "\n".join(notes)
+        )
+
+    def _ai_synthesize(self, user_prompt: str):
         """
         Uses Groq to extract cited claims from the retrieved sources.
         Returns the parsed JSON, or None when the model failed and the rule-based extraction should run.
         Grounding happens afterwards in _build_profile, whatever the model returned.
         """
-        blocks = []
-        for source_id, source in sources.items():
-            blocks.append(f"--- {source_id} ({source['label']}) ---\n{source['text'][:3000]}")
-        evidence_text = "\n\n".join(blocks)
-
-        user_prompt = f"""Extract research about this company from the sources below.
-
-COMPANY: {lead_data.get('company_name')}
-PROSPECT: {lead_data.get('full_name') or 'none'} ({lead_data.get('job_title') or 'no title'})
-OUR OFFER: {campaign_context.get('campaign_offer') or 'not specified'}
-
-SOURCES:
-{evidence_text}
-
-Return a JSON object with this schema. Leave out anything the sources do not support:
-{{
-  "claims": [
-    {{"field": "overview | industry | business_model | value_proposition | market_context | products_services | target_customers | business_challenges | responsibilities",
-      "value": "the fact, one short sentence or phrase",
-      "source": "S1",
-      "quote": "sentence copied exactly from S1"}}
-  ],
-  "signals": [
-    {{"type": "funding | hiring | product_launch | expansion | partnership | strategic_announcement",
-      "description": "what happened, naming the company",
-      "source": "S2",
-      "quote": "sentence copied exactly from S2",
-      "campaign_relevance": "how this relates to our offer, or empty"}}
-  ],
-  "campaign_relevance": {{
-    "relevant_opportunities": ["based only on the claims above"],
-    "potential_pain_points": ["based only on the claims above"],
-    "personalization_angles": ["based only on the claims above"]
-  }}
-}}
-"overview" is what the company does. "responsibilities" is only what a source says about this prospect's own role.
-Use one claim per list item for products_services, target_customers and business_challenges."""
+        extra = {}
+        if 'gpt-oss' in (self.model or ''):
+            # Copying quotes out of text needs little thought, and reasoning tokens are billed as output.
+            extra['extra_body'] = {'reasoning_effort': 'low'}
 
         for attempt in (1, 2):
             try:
@@ -446,8 +499,9 @@ Use one claim per list item for products_services, target_customers and business
                         {"role": "user", "content": user_prompt},
                     ],
                     temperature=0.1,   # Low temperature for deterministic, factual extraction
-                    max_tokens=4000,
+                    max_tokens=2500,
                     response_format={"type": "json_object"},
+                    **extra,
                 )
 
                 # Record token usage via SDR key resolver
