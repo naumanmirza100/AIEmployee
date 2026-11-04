@@ -256,26 +256,23 @@ class HubSpotConnector(BaseCRMConnector):
             raise
         return str((resp.json() or {}).get('id', '')) or None
 
-    def changed_contacts(self, since) -> list:
-        """HubSpot's contact search on lastmodifieddate, 100 a page, at most 2,000 a run (the rest come next run:
-        the oldest go first and the time moves on only past what was read)."""
-        out, after = [], None
-        for _ in range(20):
-            body = {'filterGroups': [{'filters': [{'propertyName': 'lastmodifieddate', 'operator': 'GTE',
-                                                   'value': str(_to_hs_timestamp(since))}]}],
-                    'properties': ['email', 'firstname', 'lastname', 'phone', 'jobtitle', 'company'],
-                    'sorts': [{'propertyName': 'lastmodifieddate', 'direction': 'ASCENDING'}], 'limit': 100}
-            if after:
-                body['after'] = after
+    def changed_contacts(self, since, ids) -> list:
+        """HubSpot's contact search: our ids (100 a request, its limit for "IN"), changed since `since`. Tried on
+        a real account, 3 Nov 2026: a new contact is found once HubSpot has indexed it, within about 20 seconds,
+        which the pull's two-minute overlap covers."""
+        out = []
+        ids = [str(i) for i in ids if str(i).isdigit()]
+        for chunk in (ids[i:i + 100] for i in range(0, len(ids), 100)):
+            body = {'filterGroups': [{'filters': [
+                        {'propertyName': 'hs_object_id', 'operator': 'IN', 'values': chunk},
+                        {'propertyName': 'lastmodifieddate', 'operator': 'GTE', 'value': str(_to_hs_timestamp(since))}]}],
+                    'properties': ['email', 'firstname', 'lastname', 'phone', 'jobtitle', 'company'], 'limit': 100}
             data = self._post('/crm/v3/objects/contacts/search', json=body).json() or {}
             for r in data.get('results') or []:
                 p = r.get('properties') or {}
                 out.append({'id': str(r.get('id')), 'email': p.get('email') or '', 'first_name': p.get('firstname') or '',
                             'last_name': p.get('lastname') or '', 'phone': p.get('phone') or '',
                             'job_title': p.get('jobtitle') or '', 'company': p.get('company') or ''})
-            after = ((data.get('paging') or {}).get('next') or {}).get('after')
-            if not after:
-                break
         return out
 
     # ------------------------------------------------------------------ #

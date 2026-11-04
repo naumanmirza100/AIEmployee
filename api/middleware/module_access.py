@@ -34,6 +34,7 @@ PREFIX_TO_MODULE = {
     'hr': 'hr_agent',
     'sdr': 'ai_sdr_agent',
     'crm-sync': 'crm_sync_agent',
+    'data-analyst': 'data_analyst_agent',
     'exec-meeting': 'exec_meeting_agent',
 }
 

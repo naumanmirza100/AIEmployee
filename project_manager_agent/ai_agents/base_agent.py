@@ -106,7 +106,9 @@ class BaseAgent:
         self.client = None    # never pre-created; set per-call by _resolve_company_client
 
         self.agent_name = self.__class__.__name__
-        self.fallback_model = 'llama-3.3-70b-versatile'
+        # The Groq key has no llama-* models (see GROQ_MODEL in settings): the fallback was always model_not_found, which
+        # also hid why the first model failed (3 Nov 2026).
+        self.fallback_model = getattr(settings, 'GROQ_FALLBACK_MODEL', 'openai/gpt-oss-120b')
 
         # Per-agent model config (still read from settings for model name, NOT for keys)
         agent_config = getattr(settings, 'PM_AGENT_LLM_CONFIG', {})

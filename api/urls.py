@@ -45,6 +45,7 @@ from api.views import admin_api_keys
 from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
+from api.views import data_analyst_agent as analyst_api
 from api.views.health import health_check, ping, version
 from api.views import public_jobs
 from api.views import my_work
@@ -986,6 +987,17 @@ urlpatterns = [
     re_path(r'^crm-sync/logs/?$', crm_api.sync_logs, name='crm_sync_logs'),  # GET
     re_path(r'^crm-sync/queue/?$', crm_api.queue_status, name='crm_queue_status'),  # GET
     re_path(r'^crm-sync/queue/retry/?$', crm_api.retry_failed, name='crm_queue_retry'),  # POST
+
+    # AI Data Analyst: questions answered read-only from a company's own database (data_analyst_agent)
+    re_path(r'^data-analyst/setup/?$', analyst_api.setup, name='analyst_setup'),  # GET
+    re_path(r'^data-analyst/sources/?$', analyst_api.sources, name='analyst_sources'),  # GET, POST
+    re_path(r'^data-analyst/sources/(?P<source_id>\d+)/?$', analyst_api.source_detail, name='analyst_source_detail'),  # GET, PATCH, DELETE
+    re_path(r'^data-analyst/sources/(?P<source_id>\d+)/test/?$', analyst_api.source_test, name='analyst_source_test'),  # POST
+    re_path(r'^data-analyst/ask/?$', analyst_api.ask, name='analyst_ask'),  # POST
+    re_path(r'^data-analyst/questions/?$', analyst_api.questions, name='analyst_questions'),  # GET
+    re_path(r'^data-analyst/questions/(?P<question_id>\d+)/?$', analyst_api.question_detail, name='analyst_question_detail'),  # GET
+    re_path(r'^data-analyst/questions/(?P<question_id>\d+)/run/?$', analyst_api.question_run, name='analyst_question_run'),  # POST
+    re_path(r'^data-analyst/questions/(?P<question_id>\d+)/csv/?$', analyst_api.question_csv, name='analyst_question_csv'),  # GET
     # Built-in workflow templates — clone-to-instantiate
     re_path(r'^hr/workflow-templates/?$', hr_agent.list_workflow_templates, name='hr_list_workflow_templates'),  # GET
     re_path(r'^hr/workflows/from-template/?$', hr_agent.create_workflow_from_template, name='hr_create_workflow_from_template'),  # POST

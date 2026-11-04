@@ -31,6 +31,7 @@ import {
   Ticket,
   GitBranch,
   Sparkles,
+  Database,
   Network,
   ClipboardList,
   AlertTriangle,
@@ -243,6 +244,10 @@ const ALL_AGENTS = [
     // existed. Its page is the one AI SDR shows as a tab.
     key: 'crm_sync_agent', label: 'CRM Sync', icon: RefreshCw,
     section: 'crm-sync', path: '/crm-sync', basePath: '/crm-sync',
+  },
+  {
+    key: 'data_analyst_agent', label: 'AI Data Analyst', icon: Database,
+    section: 'data-analyst', path: '/data-analyst', basePath: '/data-analyst',
   },
   {
     key: 'hr_agent', label: 'HR Support Agent', icon: Users,

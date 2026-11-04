@@ -85,6 +85,7 @@ MODULE_PRICES = {
     'hr_agent': 129,
     'ai_sdr_agent': 199,
     'crm_sync_agent': 99,
+    'data_analyst_agent': 149,
     'exec_meeting_agent': 179,
 }
 

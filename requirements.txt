@@ -45,9 +45,14 @@ pytesseract==0.3.13
 
 # Database / ORM
 SQLAlchemy==2.0.46
+# AI Data Analyst: the SQL check (sqlglot) and the PostgreSQL driver for companies' databases
+sqlglot==26.17.1
+psycopg[binary]==3.2.9
 
 # Celery & Redis
 celery==5.3.4
+# kombu 5.7 refuses redis below 6.1 and stops the worker and beat (3 Nov 2026); 5.6.2 needs redis 3.2 or later
+kombu==5.6.2
 redis==5.0.1
 django-celery-beat==2.5.0
 spacy>=3.7.0,<3.8.0

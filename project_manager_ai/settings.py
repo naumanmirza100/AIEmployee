@@ -352,6 +352,7 @@ INSTALLED_APPS = [
     'api',  # API app
     'ai_sdr_agent.apps.AiSdrAgentConfig',  # AI SDR Agent
     'crm_sync_agent.apps.CRMSyncAgentConfig',  # CRM & System Sync Agent
+    'data_analyst_agent.apps.DataAnalystAgentConfig',  # AI Data Analyst: questions answered from a company's own database
     'meeting_agent.apps.MeetingAgentConfig',   # AI Executive Meeting Assistant
     'whitenoise.runserver_nostatic',
 ]
@@ -571,6 +572,12 @@ else:
 # Stable on-disk base for local-only artifacts (uploaded docs, FAISS indexes)
 # that never go to S3. The same folder as MEDIA_ROOT, with or without S3.
 LOCAL_STORAGE_ROOT = MEDIA_ROOT
+
+# AI Data Analyst (data_analyst_agent). The address companies allow in their database's firewall, shown on its
+# Sources page; also refused as a database host, with any others listed, so the agent can never reach this server.
+DATA_ANALYST_SERVER_IP = os.environ.get('DATA_ANALYST_SERVER_IP', '187.7.18.101').strip()
+DATA_ANALYST_BLOCKED_IPS = os.environ.get('DATA_ANALYST_BLOCKED_IPS', '').strip()
+DATA_ANALYST_MAX_FILE_MB = int(os.environ.get('DATA_ANALYST_MAX_FILE_MB', '500'))
 
 
 # --------------------
@@ -1494,6 +1501,10 @@ REST_FRAMEWORK = {
         'exec_llm': '30/hour',
         # The Company Assistant (two AI calls a question), per login.
         'assistant_llm': '120/hour',
+        # AI Data Analyst questions (three AI calls and a query each), per login.
+        'analyst_llm': '120/hour',
+        # Adding or testing a database: our server connects to an address someone typed.
+        'analyst_connect': '30/hour',
         # As Project Manager: the overview alone makes three list calls and is refreshed
         # from many places, and the people search sends a call per letter typed.
         'exec_crud': '1000/hour',
