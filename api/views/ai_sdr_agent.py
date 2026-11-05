@@ -19,7 +19,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.throttling import AnonRateThrottle
@@ -28,10 +28,11 @@ from rest_framework.response import Response
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from ai_sdr_agent.models import (
-    SDRIcpProfile, SDRLead, SDRLeadResearchJob,
+    SDRIcpProfile, SDRLead, SDRLeadCategory, SDRLeadResearchJob,
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
     SDRAgentSettings, SDRReplyDraft,
 )
+from ai_sdr_agent import categories as lead_categories
 from ai_sdr_agent.agents.lead_research_agent import (
     ApifyApprovalRequired, LeadResearchAgent, NoLeadSource, apify_actor_page_url,
 )
@@ -255,6 +256,8 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'status': lead.status,
         'qualification_status': lead.qualification_status,
         'source': lead.source,
+        'category_id': lead.category_id,
+        'category': lead.category.name if lead.category_id else '',
         'research_status': lead.research_status,
         'research_profile': raw.get('research_profile'),
         'enrichment_status': enr_status,
@@ -264,6 +267,22 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'created_at': lead.created_at.isoformat(),
         'updated_at': lead.updated_at.isoformat(),
     }
+
+
+def _resolve_category(company_user, value):
+    """The category picked by hand in a request: a category id, a name (made on first use, so a new category can
+    be typed straight into the picker), or nothing (None — the lead's industry decides, see categories.py).
+    Raises ValueError for an id that is not this user's, or a name that is too long."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit()):
+        cat = SDRLeadCategory.objects.filter(company_user=company_user, pk=int(value)).first()
+        if not cat:
+            raise ValueError('That category was not found.')
+        return cat
+    if len(' '.join(str(value).split())) > lead_categories.MAX_NAME:
+        raise ValueError(f'A category name can be at most {lead_categories.MAX_NAME} characters.')
+    return lead_categories.get_or_create_category(company_user, value)
 
 
 def _serialize_icp(icp: SDRIcpProfile) -> dict:
@@ -292,6 +311,8 @@ def _lead_stats(company_user) -> dict:
         'unscored': qs.filter(score__isnull=True).count(),
         # Leads waiting in / running through the background qualification queue.
         'qualifying': qs.filter(qualification_status__in=['pending', 'processing']).count(),
+        # Unscored leads the queue will not pick up (never queued, or failed for good) — what "Qualify all" would add.
+        'unqueued': qs.filter(score__isnull=True).exclude(qualification_status__in=['pending', 'processing']).count(),
         # Leads waiting in / running through the background enrichment queue.
         'enriching': qs.filter(enrichment_status__in=['pending', 'processing']).count(),
     }
@@ -370,7 +391,7 @@ _LEAD_SORT_MAP = {
 
 def _apply_lead_filters(qs, request):
     """Apply the leads-list filters (search / temperature / status / source /
-    sort) to a queryset. Shared by the paginated list and the CSV export so the
+    category / enrichment / sort) to a queryset. Shared by the paginated list and the CSV export so the
     export respects whatever the user is currently looking at."""
     search = request.GET.get('search', '').strip()
     if search:
@@ -393,6 +414,27 @@ def _apply_lead_filters(qs, request):
     source_f = request.GET.get('source', '').strip()
     if source_f:
         qs = qs.filter(source=source_f)
+    # 'none' = leads not filed under any industry category; a number = that category.
+    category_f = request.GET.get('category', '').strip()
+    if category_f == 'none':
+        qs = qs.filter(category__isnull=True)
+    elif category_f.isdigit():
+        qs = qs.filter(category_id=int(category_f))
+    # Enrichment progress, apart from the pipeline status. Leads enriched before the field existed only
+    # record it in raw_data (see _serialize_lead), so they count as enriched, not as never enriched.
+    enrichment_f = request.GET.get('enrichment', '').strip()
+    if enrichment_f:
+        legacy_done = Q(enrichment_status__in=['none', ''], raw_data__enrichment__status__in=['completed', 'partial'])
+        if enrichment_f == 'done':
+            qs = qs.filter(Q(enrichment_status='done') | legacy_done)
+        elif enrichment_f == 'not':
+            # A subquery: excluding on the JSON key directly would also drop leads with no 'enrichment' key (NULL).
+            qs = qs.filter(enrichment_status__in=['none', '']).exclude(
+                pk__in=SDRLead.objects.filter(legacy_done).values('pk'))
+        elif enrichment_f == 'in_progress':
+            qs = qs.filter(enrichment_status__in=['pending', 'processing'])
+        elif enrichment_f == 'failed':
+            qs = qs.filter(enrichment_status='failed')
     sort_by = request.GET.get('sort', 'score_desc')
     return qs.order_by(*_LEAD_SORT_MAP.get(sort_by, ['-score', '-created_at']))
 
@@ -420,12 +462,14 @@ def sdr_leads_export(request):
     from django.http import StreamingHttpResponse
 
     company_user = request.user
-    qs = _apply_lead_filters(SDRLead.objects.filter(company_user=company_user), request)
+    qs = _apply_lead_filters(
+        SDRLead.objects.filter(company_user=company_user).select_related('category'), request)
 
     columns = [
         ('full_name', 'Name'), ('email', 'Email'), ('phone', 'Phone'),
         ('job_title', 'Title'), ('seniority_level', 'Seniority'),
-        ('company_name', 'Company'), ('company_industry', 'Industry'),
+        ('category', 'Industry Category'),
+        ('company_name', 'Company'), ('company_industry', 'Company Industry'),
         ('company_size', 'Company Size'), ('company_location', 'Location'),
         ('company_website', 'Website'), ('linkedin_url', 'LinkedIn'),
         ('score', 'Score'), ('temperature', 'Temperature'),
@@ -465,49 +509,14 @@ def leads_list(request):
 
     if request.method == 'GET':
         try:
-            qs = SDRLead.objects.filter(company_user=company_user)
-
-            # ── Filters ───────────────────────────────────────────────
-            search = request.GET.get('search', '').strip()
-            if search:
-                qs = qs.filter(
-                    Q(full_name__icontains=search)
-                    | Q(first_name__icontains=search)
-                    | Q(last_name__icontains=search)
-                    | Q(company_name__icontains=search)
-                    | Q(email__icontains=search)
-                    | Q(job_title__icontains=search)
-                    | Q(company_location__icontains=search)
-                    | Q(company_industry__icontains=search)
-                )
-
-            temp = request.GET.get('temperature', '').strip()
-            if temp:
-                qs = qs.filter(temperature=temp)
-
-            status_f = request.GET.get('status', '').strip()
-            if status_f:
-                qs = qs.filter(status=status_f)
+            # Same filters as the export, so "Export ALL" gives exactly what the list shows.
+            qs = _apply_lead_filters(
+                SDRLead.objects.filter(company_user=company_user).select_related('category'), request)
 
             # The Enroll dialog leaves out leads already in that campaign (CO-146).
             not_in = request.GET.get('not_in_campaign', '').strip()
             if not_in.isdigit():
                 qs = qs.exclude(campaign_enrollments__campaign_id=int(not_in))
-            source_f = request.GET.get('source', '').strip()
-            if source_f:
-                qs = qs.filter(source=source_f)
-
-            SORT_MAP = {
-                'score_desc':   ['-score', '-created_at'],
-                'score_asc':    ['score',  '-created_at'],
-                'name_asc':     ['full_name'],
-                'name_desc':    ['-full_name'],
-                'created_desc': ['-created_at'],
-                'created_asc':  ['created_at'],
-                'company_asc':  ['company_name'],
-            }
-            sort_by = request.GET.get('sort', 'score_desc')
-            qs = qs.order_by(*SORT_MAP.get(sort_by, ['-score', '-created_at']))
 
             try:
                 page      = max(1, int(request.GET.get('page', 1)))
@@ -553,6 +562,10 @@ def leads_list(request):
         err = _validate_lead_input(full_name, email_input, linkedin_input, size_input)
         if err:
             return Response({'status': 'error', 'message': err}, status=400)
+        try:
+            category = _resolve_category(company_user, d.get('category'))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
         # ─────────────────────────────────────────────────────────────────────
 
         # ── Duplicate guard ──────────────────────────────────────────────────
@@ -583,6 +596,8 @@ def leads_list(request):
             company_location=d.get('company_location', ''),
             linkedin_url=d.get('linkedin_url', ''),
             company_website=d.get('company_website', ''),
+            # Picked in the form; else the Industry typed in.
+            category=category or lead_categories.category_for_lead(company_user, None, d.get('company_industry')),
             source='manual',
             status='new',
             # Queue for background qualification so manually-added leads get
@@ -629,6 +644,11 @@ def lead_detail(request, lead_id):
             ]:
                 if field in d:
                     setattr(lead, field, d[field])
+            if 'category' in d:
+                try:
+                    lead.category = _resolve_category(company_user, d['category'])
+                except ValueError as exc:
+                    return Response({'status': 'error', 'message': str(exc)}, status=400)
             lead.save()
             return Response({'status': 'success', 'data': _serialize_lead(lead)})
         except KeyServiceError:
@@ -667,6 +687,9 @@ def qualify_lead(request, lead_id):
         lead.outreach_strategy = result.get('outreach_strategy', '')
         lead.qualified_at = timezone.now()
         lead.set_status_from_score()
+        # Take it out of the background queue too, or the queue scores it a second time.
+        lead.qualification_status = 'done'
+        lead.qualification_error = ''
         lead.save()
         return Response({'status': 'success', 'data': _serialize_lead(lead)})
     except SDRLead.DoesNotExist:
@@ -799,6 +822,12 @@ def _execute_research_job(job_id):
         params = job.search_params or {}
         count = int(params.get('count', 20))
         source = params.get('source', 'auto')
+        # A category picked in the Generate dialog files every lead under it; else each lead goes under the
+        # industry searched for (categories.py). A picked one deleted meanwhile falls back the same way.
+        picked_category = SDRLeadCategory.objects.filter(
+            company_user=company_user, pk=params.get('category_id') or 0).first()
+        searched_industries = (icp.industries if icp else None) or params.get('industries') or []
+        category_cache: dict = {}
 
         researcher = _get_research_agent(company_user.company, company_user=company_user)
         raw_leads = researcher.search_leads(icp, count=count, source=source)
@@ -877,6 +906,8 @@ def _execute_research_job(job_id):
             new_lead = SDRLead.objects.create(
                 company_user=company_user,
                 icp_profile=icp,
+                category=picked_category or lead_categories.category_for_lead(
+                    company_user, searched_industries, ld.get('company_industry'), category_cache),
                 first_name=ld.get('first_name', ''),
                 last_name=ld.get('last_name', ''),
                 full_name=full_name,
@@ -982,6 +1013,10 @@ def research_leads(request):
             icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
+        try:
+            category = _resolve_category(company_user, request.data.get('category'))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
 
         # Fast, deterministic pre-flight: if no provider key is configured there
         # is nothing to search, so fail immediately (no job, no made-up leads)
@@ -1002,7 +1037,8 @@ def research_leads(request):
             # The provider asked; a failed run keeps it. 'auto' tries Apollo first, and a fallback to Apify
             # replaces this when the job finishes.
             source=source if source in ('apollo', 'apify') else researcher.source_label,
-            search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count, 'source': source},
+            search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count, 'source': source,
+                           'category_id': category.pk if category else None},
             started_at=timezone.now(),
         )
 
@@ -1282,6 +1318,11 @@ def fetch_apify_leads(request):
             return Response({'status': 'error', 'code': 'no_lead_source',
                              'message': 'Add your own Apify API token in SDR Agent → Settings to fetch your runs.'},
                             status=400)
+        try:
+            category = _resolve_category(company_user, request.data.get('category'))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
+        category_cache: dict = {}
         researcher = _get_research_agent(company_user.company, company_user=company_user)
         raw_leads = researcher.fetch_apify_runs(max_leads=max_leads, actor=actor)
         if not raw_leads:
@@ -1360,6 +1401,9 @@ def fetch_apify_leads(request):
                 buying_signals=ld.get('buying_signals', []),
                 apollo_id=ld.get('apollo_id', ''),
                 raw_data=ld.get('raw_data', {}),
+                # Runs fetched as they are have no search here to go by: the lead's own industry.
+                category=category or lead_categories.category_for_lead(
+                    company_user, None, ld.get('company_industry'), category_cache),
                 source='apify',
                 status='new',
                 confidence_score=validation['confidence_score'],
@@ -1414,6 +1458,13 @@ def import_leads_csv(request):
         csv_file = request.FILES.get('file')
         if not csv_file:
             return Response({'status': 'error', 'message': 'No file provided.'}, status=400)
+        # A category picked in the import dialog files every lead in the file under it; else each row goes under
+        # its own Industry column.
+        try:
+            category = _resolve_category(company_user, request.data.get('category'))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
+        category_cache: dict = {}
 
         decoded = csv_file.read().decode('utf-8-sig')
         reader = csv.DictReader(io.StringIO(decoded))
@@ -1517,6 +1568,8 @@ def import_leads_csv(request):
                     company_location=pick('company_location'),
                     linkedin_url=pick('linkedin_url'),
                     company_website=pick('company_website'),
+                    category=category or lead_categories.category_for_lead(
+                        company_user, None, pick('company_industry'), category_cache),
                     source='csv_import',
                     status='new',
                     # Queue for background qualification so imported leads get
@@ -1595,6 +1648,109 @@ def sdr_bulk_delete_leads(request):
     except Exception as exc:
         logger.error("SDR bulk delete error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_bulk_set_category(request):
+    """File many leads under one category, or take them out of theirs.
+
+    Body: {"category": <id | name | null>, "ids": [1, 2, ...]} for the ticked leads, or
+    {"category": ..., "all_matching": true} for every lead the list's filters match (they come in the query string,
+    as for the list) — so a 1,000-lead import is filed in one go, not 25 at a time.
+    A name not used before makes a new category; null or '' leaves the leads uncategorised.
+    """
+    company_user = request.user
+    try:
+        category = _resolve_category(company_user, request.data.get('category'))
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=400)
+
+    qs = SDRLead.objects.filter(company_user=company_user)
+    if request.data.get('all_matching') is True:
+        qs = _apply_lead_filters(qs, request).order_by()
+    else:
+        ids = request.data.get('ids', [])
+        if not isinstance(ids, list) or not ids:
+            return Response({'status': 'error', 'message': 'Provide a non-empty "ids" list, or "all_matching".'},
+                            status=400)
+        qs = qs.filter(id__in=ids)
+
+    updated = qs.update(category=category, updated_at=timezone.now())
+    return Response({
+        'status': 'success',
+        'updated': updated,
+        'category': _serialize_category(category) if category else None,
+        'message': (f'Moved {updated} lead(s) to "{category.name}".' if category
+                    else f'Removed the category from {updated} lead(s).'),
+    })
+
+
+# ==========================================================================
+# Lead categories (the industry each batch of leads was gathered for)
+# ==========================================================================
+
+def _serialize_category(cat: SDRLeadCategory, lead_count=None) -> dict:
+    data = {'id': cat.id, 'name': cat.name}
+    if lead_count is not None:
+        data['lead_count'] = lead_count
+    return data
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_lead_categories(request):
+    """GET: the user's categories with how many (not deleted) leads each holds, and how many leads have none.
+    POST {"name": ...}: add a category (or return the existing one of that name)."""
+    company_user = request.user
+    if request.method == 'POST':
+        name = request.data.get('name')
+        if not lead_categories.clean_name(name):
+            return Response({'status': 'error', 'message': 'Enter a category name.'}, status=400)
+        try:
+            cat = _resolve_category(company_user, str(name))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
+        return Response({'status': 'success', 'data': _serialize_category(cat)}, status=201)
+
+    cats = (SDRLeadCategory.objects.filter(company_user=company_user)
+            .annotate(n=Count('leads', filter=Q(leads__is_deleted=False))))
+    return Response({
+        'status': 'success',
+        'data': [_serialize_category(c, c.n) for c in cats],
+        'uncategorized': SDRLead.objects.filter(company_user=company_user, category__isnull=True).count(),
+    })
+
+
+@api_view(['PUT', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_lead_category_detail(request, category_id):
+    """PUT {"name": ...}: rename. DELETE: remove the category; its leads stay, uncategorised."""
+    company_user = request.user
+    cat = SDRLeadCategory.objects.filter(company_user=company_user, pk=category_id).first()
+    if not cat:
+        return Response({'status': 'error', 'message': 'Category not found.'}, status=404)
+
+    if request.method == 'DELETE':
+        cat.delete()
+        return Response({'status': 'success', 'message': f'Deleted the category "{cat.name}".'})
+
+    name = lead_categories.clean_name(request.data.get('name'))
+    if not name:
+        return Response({'status': 'error', 'message': 'Enter a category name.'}, status=400)
+    if len(' '.join(str(request.data.get('name')).split())) > lead_categories.MAX_NAME:
+        return Response({'status': 'error',
+                         'message': f'A category name can be at most {lead_categories.MAX_NAME} characters.'},
+                        status=400)
+    if SDRLeadCategory.objects.filter(company_user=company_user, name__iexact=name).exclude(pk=cat.pk).exists():
+        return Response({'status': 'error', 'message': f'You already have a category called "{name}".'},
+                        status=400)
+    cat.name = name
+    cat.save(update_fields=['name'])
+    return Response({'status': 'success', 'data': _serialize_category(cat)})
 
 
 # ==========================================================================
