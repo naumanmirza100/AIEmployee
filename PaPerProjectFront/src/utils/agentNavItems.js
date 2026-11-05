@@ -36,6 +36,7 @@ import {
   ClipboardList,
   AlertTriangle,
   ListChecks,
+  FlaskConical,
   CalendarDays,
   // PM restructure additions
   CheckSquare,
@@ -237,6 +238,8 @@ const ALL_AGENTS = [
       { label: 'CRM Sync',  icon: RefreshCw,       path: '/ai-sdr/crm-sync' },
       { label: 'Settings',  icon: Settings,        path: '/ai-sdr/settings' },
       { label: 'Do-not-email list', icon: MailX,   path: '/company/settings/do-not-email' },
+      // Owner or admin; anyone else is told so on the page.
+      { label: 'Tests',     icon: FlaskConical,    path: '/ai-sdr/tests' },
     ],
   },
   {
