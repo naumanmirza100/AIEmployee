@@ -492,6 +492,50 @@
       select {
         min-width: 0;
       }
+      /* Every native dropdown draws the same chevron, 12px in from its right edge. Chrome on Windows put its own
+         arrow about 6px from the border whatever the padding, jammed against the edge on most screens (6 Nov 2026).
+         !important because many selects set `background` inline, which would otherwise wipe the chevron out; the
+         background colour they set still shows. */
+      select:not([multiple]):not([size]) {
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 0.75rem center !important;
+        background-size: 1rem 1rem !important;
+        padding-right: 2.25rem !important;
+      }
+      /* The open list. Without a colour of their own the options took the dropdown's see-through background, which
+         Chrome laid over its light popup: a washed-out mauve with a grey bar for the chosen option (6 Nov 2026).
+         Solid theme colours instead, and the chosen option in the brand purple (the gradient is what makes Chrome
+         use it over the system highlight). */
+      select option,
+      select optgroup {
+        background-color: hsl(var(--popover));
+        color: hsl(var(--popover-foreground));
+      }
+      .dark select option,
+      .dark select optgroup {
+        background-color: #160d26;
+        color: #e5e7eb;
+      }
+      select option:checked {
+        background: linear-gradient(#7c3aed, #7c3aed);
+        color: #fff;
+      }
+      select option:disabled {
+        color: #6b7280;
+      }
+      /* The AI SDR screens' own dropdown (components/ai-sdr/SdrSelect.jsx): the option under the mouse or keyboard,
+         and the chosen one. */
+      .sdr-select-item[data-highlighted] {
+        background: rgba(168, 85, 247, 0.16);
+      }
+      .sdr-select-item[data-state='checked'] {
+        color: #c084fc;
+        font-weight: 600;
+      }
       html, body {
         @apply bg-background text-foreground;
         /* overflow-x: hidden; */

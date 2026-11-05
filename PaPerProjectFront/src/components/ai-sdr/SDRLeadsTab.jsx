@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import SdrSelect from './SdrSelect';
 import { useNavigate } from 'react-router-dom';
 import {
   Users, Search, Plus, Upload, Brain,
@@ -375,14 +376,15 @@ const CategoryPicker = ({ categories, value, onChange, emptyLabel = 'No category
     );
   }
   return (
-    <select value={match ? match.name : ''} style={{ ...inputStyle, cursor: 'pointer' }}
-      onChange={e => {
-        if (e.target.value === NEW_CATEGORY) { setTyping(true); onChange(''); } else onChange(e.target.value);
-      }}>
-      <option value="">{emptyLabel}</option>
-      {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-      <option value={NEW_CATEGORY}>+ Add new category…</option>
-    </select>
+    <SdrSelect value={match ? match.name : ''} style={inputStyle}
+      onChange={v => {
+        if (v === NEW_CATEGORY) { setTyping(true); onChange(''); } else onChange(v);
+      }}
+      options={[
+        { value: '', label: emptyLabel },
+        ...categories.map(c => ({ value: c.name, label: c.name })),
+        { value: NEW_CATEGORY, label: '+ Add new category…' },
+      ]} />
   );
 };
 
@@ -394,10 +396,11 @@ const IcpPicker = ({ icps, value, onChange, label = 'Score these leads with' }) 
   return (
     <div>
       <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 4 }}>{label}</label>
-      <select value={value || ''} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
-        <option value="">{def ? `${def.name} (default ICP)` : 'Default ICP'}</option>
-        {icps.filter(i => !i.is_active).map(i => <option key={i.id} value={String(i.id)}>{i.name}</option>)}
-      </select>
+      <SdrSelect value={value || ''} onChange={onChange} style={inputStyle}
+        options={[
+          { value: '', label: def ? `${def.name} (default ICP)` : 'Default ICP' },
+          ...icps.filter(i => !i.is_active).map(i => ({ value: String(i.id), label: i.name })),
+        ]} />
     </div>
   );
 };
@@ -559,28 +562,28 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage, totalCount = 0, 
         <ChevronDown size={11} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
       </button>
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 60, background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))', border: '1px solid var(--line-1)', borderRadius: 11, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', minWidth: 190, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 60, background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))', border: '1px solid var(--line-1)', borderRadius: 11, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', minWidth: 190, width: 'max-content', overflow: 'hidden' }}>
           {[
             { key: 'excel', Icon: FileSpreadsheet, label: 'Export as Excel (.xlsx)', color: '#10b981' },
             { key: 'pdf',   Icon: FileText,        label: 'Export as PDF',           color: '#f43f5e' },
           ].map((opt, idx) => (
             <button key={opt.key} onClick={() => doExport(opt.key)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 16px', border: 'none', cursor: 'pointer', background: 'transparent', borderBottom: idx === 0 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', transition: 'background 0.1s' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', gap: 10, width: '100%', padding: '11px 16px', border: 'none', cursor: 'pointer', background: 'transparent', borderBottom: idx === 0 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', transition: 'background 0.1s' }}
               onMouseEnter={e => { e.currentTarget.style.background = `${opt.color}12`; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
             >
               <opt.Icon size={15} style={{ color: opt.color, flexShrink: 0 }} />
-              <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>{opt.label}</span>
+              <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13, whiteSpace: 'nowrap' }}>{opt.label}</span>
             </button>
           ))}
           {/* Export ALL matching leads (every page) as CSV, streamed from the server. */}
           <button onClick={doExportAll}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 16px', border: 'none', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)', cursor: 'pointer', background: 'rgba(168,85,247,0.06)', transition: 'background 0.1s' }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', gap: 10, width: '100%', padding: '11px 16px', border: 'none', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)', cursor: 'pointer', background: 'rgba(168,85,247,0.06)', transition: 'background 0.1s' }}
             onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.14)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.06)'; }}
           >
             <Download size={15} style={{ color: '#a855f7', flexShrink: 0 }} />
-            <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>
+            <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13, whiteSpace: 'nowrap' }}>
               Export ALL{totalCount ? ` ${totalCount.toLocaleString()}` : ''} leads (CSV)
             </span>
           </button>
@@ -620,11 +623,16 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [formOnly, setFormOnly] = useState(false);     // the form was opened from the card, not from the list
 
   const defaultIcp = icps.find(i => i.is_active) || null;
 
-  const startEdit = (icp) => {
+  const openList = () => { setEditingId(null); setConfirmDeleteId(null); setFormOnly(false); setOpen(true); };
+
+  // icp: that ICP's form, or null for a new one. fromCard: Cancel closes the dialog instead of going to the list.
+  const startEdit = (icp, fromCard = false) => {
     setConfirmDeleteId(null);
+    setFormOnly(fromCard);
     if (!icp) {
       setEditingId('new');
       setForm({ ...BLANK_ICP, name: icps.length ? '' : 'Default ICP' });
@@ -694,25 +702,42 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {icps.length > 0 && (
-            <button onClick={() => startEdit(null)} style={smallBtn}><Plus size={13} /> New ICP</button>
+            <button onClick={() => startEdit(null, true)} style={smallBtn}><Plus size={13} /> New ICP</button>
           )}
-          <button onClick={() => (icps.length ? (setOpen(!open), setEditingId(null)) : startEdit(null))} style={smallBtn}>
-            <ChevronDown size={13} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
+          <button onClick={() => (icps.length ? openList() : startEdit(null, true))} style={smallBtn}>
+            <SlidersHorizontal size={13} />
             {icps.length ? 'Manage' : 'Setup'}
           </button>
         </div>
       </div>
 
-      {defaultIcp && !open && (
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {[...(defaultIcp.industries || []), ...(defaultIcp.job_titles || [])].slice(0, 6).map(t => (
-            <span key={t} style={{ padding: '2px 8px', borderRadius: 10, fontSize: 11, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)', color: 'hsl(var(--pt-c4b5fd))' }}>{t}</span>
+      {/* The default ICP's targets, on one line whatever their number: the card stays the same height. */}
+      {defaultIcp && (
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'nowrap', gap: 6, overflow: 'hidden' }}>
+          {[...(defaultIcp.industries || []), ...(defaultIcp.job_titles || [])].slice(0, 8).map(t => (
+            <span key={t} style={{ flexShrink: 0, padding: '2px 8px', borderRadius: 10, fontSize: 11, whiteSpace: 'nowrap', background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)', color: 'hsl(var(--pt-c4b5fd))' }}>{t}</span>
           ))}
         </div>
       )}
 
-      {open && editingId === null && icps.length > 0 && (
-        <div style={{ marginTop: 12, border: '1px solid var(--line-1)', borderRadius: 10 }}>
+      {/* The ICPs and their form open in a dialog, so adding ICPs never pushes the leads further down. */}
+      <Dialog open={open} onOpenChange={(o) => { if (!o && !saving) { setOpen(false); setEditingId(null); setConfirmDeleteId(null); } }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 600, maxHeight: '90vh', overflowY: 'auto' }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Brain size={18} color="#a855f7" />
+              {editingId === null ? 'ICP profiles'
+                : editingId === 'new' ? 'New ICP'
+                  : `Edit ${icps.find(i => i.id === editingId)?.name || 'ICP'}`}
+            </DialogTitle>
+          </DialogHeader>
+
+      {editingId === null && icps.length > 0 && (
+        <>
+        <p style={{ color: '#6b7280', fontSize: 12, margin: 0 }}>
+          Each lead is scored with the ICP it was found for. The default one is preselected in Generate, Import and Add lead.
+        </p>
+        <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, maxHeight: '50vh', overflowY: 'auto' }}>
           {icps.map(icp => (
             <div key={icp.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)', flexWrap: 'wrap' }}>
               <span style={{ flex: 1, minWidth: 120, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[...(icp.industries || []), ...(icp.job_titles || [])].join(', ')}>
@@ -747,10 +772,14 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
             </div>
           ))}
         </div>
+        <DialogFooter>
+          <button onClick={() => startEdit(null)} style={smallBtn}><Plus size={13} /> New ICP</button>
+        </DialogFooter>
+        </>
       )}
 
-      {open && editingId !== null && (
-        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {editingId !== null && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12 }}>
             {editingId === 'new'
               ? 'A new ICP. Leads you find or import for it are scored with it, whatever else you change meanwhile.'
@@ -777,13 +806,16 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button onClick={() => { setEditingId(null); if (!icps.length) setOpen(false); }} style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '7px 16px', color: 'hsl(var(--pt-9ca3af))', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+            {/* Back to the list when the form was opened from it; else close. */}
+            <button onClick={() => { setEditingId(null); if (formOnly || !icps.length) setOpen(false); }} style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '7px 16px', color: 'hsl(var(--pt-9ca3af))', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
             <button onClick={handleSave} disabled={saving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', border: 'none', borderRadius: 8, padding: '7px 20px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {saving ? <Loader2 size={12} className="animate-spin" /> : null} Save ICP
             </button>
           </div>
         </div>
       )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -1688,9 +1720,8 @@ const SDRLeadsTab = () => {
               </button>
             );
           })()}
-          <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} style={{ ...inputStyle, width: 'auto', padding: '7px 10px', fontSize: 13, border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer' }}>
-            {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
-          </select>
+          <SdrSelect value={String(pageSize)} onChange={v => setPageSize(Number(v))} style={{ ...inputStyle, width: 'auto', padding: '7px 10px', fontSize: 13, border: '1px solid var(--line-1)', borderRadius: 9 }}
+            options={PAGE_SIZE_OPTIONS.map(n => ({ value: String(n), label: `${n} / page` }))} />
           <button onClick={() => loadLeads()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
             <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           </button>
@@ -1897,8 +1928,14 @@ const SDRLeadsTab = () => {
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: '13px 16px', minWidth: 200 }} onClick={() => setSelectedLead(lead)}>
-                      <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>{lead.job_title || '—'}</span>
+                    <td style={{ padding: '13px 16px', minWidth: 200, maxWidth: 300 }} onClick={() => setSelectedLead(lead)}>
+                      {/* At most two lines: scraped titles run to a whole tagline ("Managing Director - Paye Umbrella, Peo &
+                          Cis Payroll - Apsco Trusted Partners + …") and made the row four lines tall. Hover for all of it;
+                          the lead's panel shows it in full. */}
+                      <span title={lead.job_title || ''}
+                        style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
+                        {lead.job_title || '—'}
+                      </span>
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       {lead.score != null ? (
@@ -2743,9 +2780,8 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             {icpProfiles.length > 1 && (
               <div>
                 <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>ICP Profile</label>
-                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle, background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)' }}>
-                  {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active ? ' (Default)' : ''}</option>)}
-                </select>
+                <SdrSelect value={String(genIcpId)} onChange={setGenIcpId} style={{ ...inputStyle, background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)' }}
+                  options={icpProfiles.map(p => ({ value: String(p.id), label: `${p.name}${p.is_active ? ' (Default)' : ''}` }))} />
               </div>
             )}
             {icpProfiles.length === 0 && (

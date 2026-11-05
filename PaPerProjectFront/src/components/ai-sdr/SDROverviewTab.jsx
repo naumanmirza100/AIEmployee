@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import SdrSelect from './SdrSelect';
 import {
   Users, Flame, Thermometer, Snowflake, Mail, Calendar,
   MessageSquare, TrendingUp, TrendingDown, Minus, RefreshCw,
@@ -672,9 +673,8 @@ export default function SDROverviewTab() {
             {icpProfiles.length > 1 && (
               <div>
                 <label style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12,display:'block',marginBottom:6 }}>ICP Profile</label>
-                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle }}>
-                  {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active?' (Default)':''}</option>)}
-                </select>
+                <SdrSelect value={String(genIcpId)} onChange={setGenIcpId} style={{ ...inputStyle }}
+                  options={icpProfiles.map(p => ({ value: String(p.id), label: `${p.name}${p.is_active ? ' (Default)' : ''}` }))} />
               </div>
             )}
             {icpProfiles.length === 1 && (
