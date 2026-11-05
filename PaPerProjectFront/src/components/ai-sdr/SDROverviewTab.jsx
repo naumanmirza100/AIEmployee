@@ -662,7 +662,7 @@ export default function SDROverviewTab() {
               <div>
                 <label style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12,display:'block',marginBottom:6 }}>ICP Profile</label>
                 <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle }}>
-                  {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active?' (Active)':''}</option>)}
+                  {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active?' (Default)':''}</option>)}
                 </select>
               </div>
             )}

@@ -19,6 +19,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
@@ -352,6 +353,9 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'source': lead.source,
         'category_id': lead.category_id,
         'category': lead.category.name if lead.category_id else '',
+        # The ICP this lead is scored with (none: older leads, scored with the default ICP).
+        'icp_id': lead.icp_profile_id,
+        'icp_name': lead.icp_profile.name if lead.icp_profile_id else '',
         'research_status': lead.research_status,
         'research_profile': raw.get('research_profile'),
         'enrichment_status': enr_status,
@@ -416,11 +420,65 @@ def _lead_stats(company_user) -> dict:
 # ICP Profile
 # ==========================================================================
 
+def _icp_fields(data) -> dict:
+    """The ICP form's fields, checked. Raises ValueError with a message for the user."""
+    # Checked before saving: 'high' as a threshold was a 500, and 150, -5, a warm bar above the hot one or a
+    # size range back to front were saved and made every score land in the wrong bucket.
+    name = str(data.get('name', 'Default ICP') or '').strip() or 'Default ICP'
+    if len(name) > 255:
+        raise ValueError('The ICP name can be at most 255 characters.')
+    lists = {}
+    for key, label in (('industries', 'Industries'), ('job_titles', 'Job titles'),
+                       ('locations', 'Locations'), ('keywords', 'Keywords')):
+        lists[key] = data.get(key) or []
+        if not isinstance(lists[key], list):
+            raise ValueError(f'{label} must be a list.')
+    size_min = _whole_number(data.get('company_size_min'), 'Minimum company size') or None
+    size_max = _whole_number(data.get('company_size_max'), 'Maximum company size') or None
+    if size_min and size_max and size_min > size_max:
+        raise ValueError('The minimum company size cannot be above the maximum.')
+    # Defaults must match SDRICPProfile model defaults (75 / 60) so
+    # hot/warm bucketing is consistent regardless of code path.
+    hot = _whole_number(data.get('hot_threshold', 75), 'The hot threshold', maximum=100)
+    warm = _whole_number(data.get('warm_threshold', 60), 'The warm threshold', maximum=100)
+    hot = 75 if hot is None else hot
+    warm = 60 if warm is None else warm
+    if warm > hot:
+        raise ValueError('The warm threshold cannot be above the hot threshold.')
+    return {'name': name, 'company_size_min': size_min, 'company_size_max': size_max,
+            'hot_threshold': hot, 'warm_threshold': warm, **lists}
+
+
+def _icp_waiting(icp) -> int:
+    """This ICP's leads waiting in or going through the qualification queue."""
+    return SDRLead.objects.filter(icp_profile=icp, qualification_status__in=['pending', 'processing']).count()
+
+
+def _serialize_icp_with_counts(icp) -> dict:
+    return {**_serialize_icp(icp), 'waiting': _icp_waiting(icp),
+            'lead_count': SDRLead.objects.filter(icp_profile=icp).count()}
+
+
+def _picked_icp(company_user, value):
+    """The ICP picked in a dialog (an id), else the login's default ICP, else None. Raises ValueError for an id
+    that is not one of this login's ICPs."""
+    if value is None or str(value).strip() == '':
+        return SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+    icp = None
+    if str(value).strip().isdigit():
+        icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=int(str(value).strip())).first()
+    if not icp:
+        raise ValueError('That ICP was not found.')
+    return icp
+
+
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def icp_profile(request):
-    """GET → return all ICPs (list). POST → upsert ICP."""
+    """GET → the default ICP (`data`) and all of the login's ICPs (`all`, each with its waiting and total leads).
+    POST → save an ICP: with `id` that ICP, with `new: true` a new one (the default only if it is the first),
+    with neither the default ICP (what the single-ICP screens send)."""
     company_user = request.user
 
     if request.method == 'GET':
@@ -428,10 +486,11 @@ def icp_profile(request):
             icps = SDRIcpProfile.objects.filter(company_user=company_user).order_by('-is_active', '-updated_at')
             if not icps.exists():
                 return Response({'status': 'success', 'data': None, 'all': []})
+            default = icps.filter(is_active=True).first()
             return Response({
                 'status': 'success',
-                'data': _serialize_icp(icps.filter(is_active=True).first()),
-                'all': [_serialize_icp(i) for i in icps],
+                'data': _serialize_icp(default) if default else None,
+                'all': [_serialize_icp_with_counts(i) for i in icps],
             })
         except KeyServiceError:
             raise
@@ -442,51 +501,75 @@ def icp_profile(request):
     # POST — save / update
     try:
         data = request.data
-        # Checked before saving: 'high' as a threshold was a 500, and 150, -5, a warm bar above the hot one or a
-        # size range back to front were saved and made every score land in the wrong bucket.
         try:
-            name = str(data.get('name', 'Default ICP') or '').strip() or 'Default ICP'
-            if len(name) > 255:
-                raise ValueError('The ICP name can be at most 255 characters.')
-            lists = {}
-            for key, label in (('industries', 'Industries'), ('job_titles', 'Job titles'),
-                               ('locations', 'Locations'), ('keywords', 'Keywords')):
-                lists[key] = data.get(key) or []
-                if not isinstance(lists[key], list):
-                    raise ValueError(f'{label} must be a list.')
-            size_min = _whole_number(data.get('company_size_min'), 'Minimum company size') or None
-            size_max = _whole_number(data.get('company_size_max'), 'Maximum company size') or None
-            if size_min and size_max and size_min > size_max:
-                raise ValueError('The minimum company size cannot be above the maximum.')
-            # Defaults must match SDRICPProfile model defaults (75 / 60) so
-            # hot/warm bucketing is consistent regardless of code path.
-            hot = _whole_number(data.get('hot_threshold', 75), 'The hot threshold', maximum=100)
-            warm = _whole_number(data.get('warm_threshold', 60), 'The warm threshold', maximum=100)
-            hot = 75 if hot is None else hot
-            warm = 60 if warm is None else warm
-            if warm > hot:
-                raise ValueError('The warm threshold cannot be above the hot threshold.')
+            fields = _icp_fields(data)
         except ValueError as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=400)
 
-        icp, _ = SDRIcpProfile.objects.update_or_create(
-            company_user=company_user,
-            is_active=True,
-            defaults={
-                'name': name,
-                'company_size_min': size_min,
-                'company_size_max': size_max,
-                'hot_threshold': hot,
-                'warm_threshold': warm,
-                **lists,
-            },
-        )
-        return Response({'status': 'success', 'message': 'ICP saved.', 'data': _serialize_icp(icp)})
+        icp_id = data.get('id')
+        if icp_id is not None and str(icp_id).strip() != '':
+            icp = None
+            if str(icp_id).strip().isdigit():
+                icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=int(str(icp_id).strip())).first()
+            if not icp:
+                return Response({'status': 'error', 'message': 'ICP not found.'}, status=404)
+            for key, value in fields.items():
+                setattr(icp, key, value)
+            icp.save()
+        elif data.get('new') in (True, 'true', '1', 1):
+            first = not SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).exists()
+            icp = SDRIcpProfile.objects.create(company_user=company_user, is_active=first, **fields)
+        else:
+            icp, _ = SDRIcpProfile.objects.update_or_create(
+                company_user=company_user, is_active=True, defaults=fields)
+        return Response({'status': 'success', 'message': 'ICP saved.', 'data': _serialize_icp_with_counts(icp)})
     except KeyServiceError:
         raise
     except Exception as exc:
         logger.error("Save ICP error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def icp_detail(request, icp_id):
+    """Delete an ICP. Not the default (another must be made the default first), and not while its leads are
+    waiting to be scored with it. Its scored leads keep their scores; they just no longer name an ICP."""
+    icp = SDRIcpProfile.objects.filter(company_user=request.user, pk=icp_id).first()
+    if not icp:
+        return Response({'status': 'error', 'message': 'ICP not found.'}, status=404)
+    if icp.is_active:
+        return Response({'status': 'error', 'message':
+                         'This is your default ICP. Make another ICP the default first, then delete this one.'},
+                        status=409)
+    waiting = _icp_waiting(icp)
+    if waiting:
+        noun = 'leads are' if waiting != 1 else 'lead is'
+        return Response({'status': 'error', 'message':
+                         f'{waiting:,} {noun} still being scored with this ICP. Delete it once they are done.'},
+                        status=409)
+    icp.delete()
+    return Response({'status': 'success', 'message': 'ICP deleted.'})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def icp_make_default(request, icp_id):
+    """Make this ICP the default. Leads already found for another ICP keep being scored with theirs."""
+    company_user = request.user
+    icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=icp_id).first()
+    if not icp:
+        return Response({'status': 'error', 'message': 'ICP not found.'}, status=404)
+    with transaction.atomic():
+        SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).exclude(pk=icp.pk).update(
+            is_active=False)
+        if not icp.is_active:
+            icp.is_active = True
+            icp.save(update_fields=['is_active', 'updated_at'])
+    return Response({'status': 'success', 'message': f'"{icp.name}" is now your default ICP.',
+                     'data': _serialize_icp_with_counts(icp)})
 
 
 # ==========================================================================
@@ -536,6 +619,12 @@ def _apply_lead_filters(qs, request):
         qs = qs.filter(category__isnull=True)
     elif category_f.isdigit():
         qs = qs.filter(category_id=int(category_f))
+    # 'none' = leads with no ICP of their own; a number = leads found for (and scored with) that ICP.
+    icp_f = request.GET.get('icp', '').strip()
+    if icp_f == 'none':
+        qs = qs.filter(icp_profile__isnull=True)
+    elif icp_f.isdigit():
+        qs = qs.filter(icp_profile_id=int(icp_f))
     # Enrichment progress, apart from the pipeline status. Leads enriched before the field existed only
     # record it in raw_data (see _serialize_lead), so they count as enriched, not as never enriched.
     enrichment_f = request.GET.get('enrichment', '').strip()
@@ -627,7 +716,7 @@ def leads_list(request):
         try:
             # Same filters as the export, so "Export ALL" gives exactly what the list shows.
             qs = _apply_lead_filters(
-                SDRLead.objects.filter(company_user=company_user).select_related('category'), request)
+                SDRLead.objects.filter(company_user=company_user).select_related('category', 'icp_profile'), request)
 
             # The Enroll dialog leaves out leads already in that campaign (CO-146).
             not_in = request.GET.get('not_in_campaign', '').strip()
@@ -680,6 +769,7 @@ def leads_list(request):
             return Response({'status': 'error', 'message': err}, status=400)
         try:
             category = _resolve_category(company_user, d.get('category'))
+            icp = _picked_icp(company_user, d.get('icp_id'))
         except ValueError as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=400)
         # ─────────────────────────────────────────────────────────────────────
@@ -714,6 +804,8 @@ def leads_list(request):
             company_website=d.get('company_website', ''),
             # Picked in the form; else the Industry typed in.
             category=category or lead_categories.category_for_lead(company_user, None, d.get('company_industry')),
+            # Scored with the ICP picked in the form (default preselected), whatever becomes the default later.
+            icp_profile=icp,
             source='manual',
             status='new',
             # Queue for background qualification so manually-added leads get
@@ -805,11 +897,13 @@ def qualify_lead(request, lead_id):
     company_user = request.user
     try:
         lead = SDRLead.objects.get(id=lead_id, company_user=company_user)
-        icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+        # The lead's own ICP, else the default one.
+        icp = lead.scoring_icp()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
         result = _get_qualification_agent(company_user.company).qualify_lead(lead, icp)
+        lead.icp_profile = icp
         lead.score = result['score']
         lead.temperature = result['temperature']
         lead.score_breakdown = result.get('score_breakdown', {})
@@ -851,9 +945,13 @@ def qualify_all_leads(request):
         # Put every unscored lead (that isn't already qualifying) into the queue.
         # The scheduler drains it in small batches, retrying failures — so this
         # never blocks or exhausts tokens in one shot.
-        queued = SDRLead.objects.filter(
+        to_queue = SDRLead.objects.filter(
             company_user=company_user, score__isnull=True,
-        ).exclude(qualification_status__in=['pending', 'processing']).update(
+        ).exclude(qualification_status__in=['pending', 'processing'])
+        # Leads with no ICP of their own are scored with today's default, even if another becomes the default
+        # before the queue reaches them.
+        to_queue.filter(icp_profile__isnull=True).update(icp_profile=icp)
+        queued = to_queue.update(
             qualification_status='pending', qualification_queued_at=timezone.now(),
             qualification_attempts=0, qualification_error='',
         )
@@ -1605,6 +1703,8 @@ def import_leads_csv(request):
         # its own Industry column.
         try:
             category = _resolve_category(company_user, request.data.get('category'))
+            # Every lead in the file is scored with the ICP picked in the dialog (default preselected).
+            icp = _picked_icp(company_user, request.data.get('icp_id'))
         except ValueError as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=400)
         category_cache: dict = {}
@@ -1722,6 +1822,7 @@ def import_leads_csv(request):
                     company_website=pick('company_website'),
                     category=category or lead_categories.category_for_lead(
                         company_user, None, pick('company_industry'), category_cache),
+                    icp_profile=icp,
                     source='csv_import',
                     status='new',
                     # Queue for background qualification so imported leads get

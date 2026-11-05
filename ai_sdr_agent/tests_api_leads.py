@@ -68,6 +68,7 @@ class OnlySignedInCompanyUsersGetInTests(LeadApiBase):
         lead = self.make_lead()
         return [
             (views.icp_profile, 'get', {}), (views.icp_profile, 'post', {}),
+            (views.icp_detail, 'delete', {'icp_id': 1}), (views.icp_make_default, 'post', {'icp_id': 1}),
             (views.leads_list, 'get', {}), (views.leads_list, 'post', {}),
             (views.lead_detail, 'get', {'lead_id': lead.id}), (views.lead_detail, 'delete', {'lead_id': lead.id}),
             (views.restore_lead, 'post', {'lead_id': lead.id}),
@@ -992,3 +993,193 @@ class SdrSettingsTests(LeadApiBase):
 
     def test_a_key_that_is_not_text_is_refused_not_a_crash(self):
         self.assertRefused(self.call(views.sdr_agent_settings, 'post', data={'apollo_api_key': 12345}))
+
+
+# ==========================================================================
+# Several ICPs: each lead is scored with the ICP it was found for
+# ==========================================================================
+
+class SeveralIcpsTests(LeadApiBase):
+    """A login keeps several ICPs; one is the default. Leads waiting to be scored for one ICP are not scored with
+    another when that one is made the default, so new leads can be found for a second ICP meanwhile."""
+
+    def new_icp(self, name, **data):
+        r = self.call(views.icp_profile, 'post', data={'new': True, 'name': name, 'industries': [name], **data})
+        self.assertEqual(r.status_code, 200, r.data)
+        return SDRIcpProfile.objects.get(pk=r.data['data']['id'])
+
+    def defaults(self):
+        return list(SDRIcpProfile.objects.filter(company_user=self.cu, is_active=True).values_list('name', flat=True))
+
+    def test_the_first_new_icp_is_the_default_and_later_ones_are_not(self):
+        dentistry = self.new_icp('Dentistry')
+        saas = self.new_icp('SaaS')
+        self.assertTrue(dentistry.is_active)
+        self.assertFalse(saas.is_active)
+        got = self.call(views.icp_profile).data
+        self.assertEqual(got['data']['name'], 'Dentistry')
+        self.assertEqual([i['name'] for i in got['all']], ['Dentistry', 'SaaS'])
+
+    def test_making_one_the_default_leaves_exactly_one_default(self):
+        self.new_icp('Dentistry')
+        saas = self.new_icp('SaaS')
+        r = self.call(views.icp_make_default, 'post', icp_id=saas.id)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.defaults(), ['SaaS'])
+
+    def test_saving_with_an_id_edits_that_icp_only(self):
+        dentistry = self.new_icp('Dentistry')
+        saas = self.new_icp('SaaS')
+        r = self.call(views.icp_profile, 'post', data={'id': saas.id, 'name': 'SaaS EU', 'locations': ['Germany']})
+        self.assertEqual(r.status_code, 200, r.data)
+        saas.refresh_from_db()
+        dentistry.refresh_from_db()
+        self.assertEqual((saas.name, saas.locations, saas.is_active), ('SaaS EU', ['Germany'], False))
+        self.assertEqual(dentistry.name, 'Dentistry')
+
+    def test_saving_without_an_id_still_edits_the_default(self):
+        """What the screens from before several ICPs send, while a deploy is half done."""
+        self.new_icp('Dentistry')
+        self.new_icp('SaaS')
+        self.call(views.icp_profile, 'post', data={'name': 'Dental clinics'})
+        self.assertEqual(sorted(SDRIcpProfile.objects.values_list('name', flat=True)), ['Dental clinics', 'SaaS'])
+        self.assertEqual(self.defaults(), ['Dental clinics'])
+
+    def test_another_logins_icp_cannot_be_edited_made_default_or_deleted(self):
+        theirs = self.icp(owner=self.outsider, name='Theirs')
+        self.assertRefused(self.call(views.icp_profile, 'post', data={'id': theirs.id, 'name': 'Mine now'}), 404)
+        self.assertRefused(self.call(views.icp_make_default, 'post', icp_id=theirs.id), 404)
+        self.assertRefused(self.call(views.icp_detail, 'delete', icp_id=theirs.id), 404)
+        theirs.refresh_from_db()
+        self.assertEqual((theirs.name, theirs.is_active), ('Theirs', True))
+
+    def test_the_default_icp_cannot_be_deleted(self):
+        dentistry = self.new_icp('Dentistry')
+        self.assertRefused(self.call(views.icp_detail, 'delete', icp_id=dentistry.id), 409)
+        self.assertTrue(SDRIcpProfile.objects.filter(pk=dentistry.pk).exists())
+
+    def test_an_icp_with_leads_waiting_cannot_be_deleted_and_says_how_many(self):
+        self.new_icp('SaaS')
+        dentistry = self.new_icp('Dentistry')
+        self.make_lead(email='a@d.example', icp_profile=dentistry, qualification_status='pending')
+        self.make_lead(email='b@d.example', icp_profile=dentistry, qualification_status='processing')
+        r = self.call(views.icp_detail, 'delete', icp_id=dentistry.id)
+        self.assertRefused(r, 409)
+        self.assertIn('2 leads', r.data['message'])
+        waiting = {i['name']: i['waiting'] for i in self.call(views.icp_profile).data['all']}
+        self.assertEqual(waiting, {'SaaS': 0, 'Dentistry': 2})
+
+    def test_deleting_an_icp_keeps_its_scored_leads_and_their_scores(self):
+        self.new_icp('SaaS')
+        dentistry = self.new_icp('Dentistry')
+        lead = self.make_lead(icp_profile=dentistry, score=70, temperature='warm', qualification_status='done')
+        r = self.call(views.icp_detail, 'delete', icp_id=dentistry.id)
+        self.assertEqual(r.status_code, 200, r.data)
+        lead.refresh_from_db()
+        self.assertEqual((lead.icp_profile_id, lead.score), (None, 70))
+
+    def test_the_lead_list_names_each_leads_icp_and_filters_by_it(self):
+        dentistry = self.new_icp('Dentistry')
+        saas = self.new_icp('SaaS')
+        self.make_lead(email='d@x.example', icp_profile=dentistry)
+        self.make_lead(email='s@x.example', icp_profile=saas)
+        self.make_lead(email='n@x.example')
+
+        def emails(**params):
+            r = self.call(views.leads_list, data=params)
+            return {lead['email']: lead['icp_name'] for lead in r.data['data']}
+        self.assertEqual(emails(icp=dentistry.id), {'d@x.example': 'Dentistry'})
+        self.assertEqual(emails(icp='none'), {'n@x.example': ''})
+        self.assertEqual(len(emails()), 3)
+
+
+class IcpOfNewLeadsTests(LeadApiBase):
+    """A lead added by hand or imported records the ICP picked in the dialog, else the default one."""
+
+    def setUp(self):
+        super().setUp()
+        self.dentistry = self.icp(name='Dentistry')
+        self.saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False)
+
+    def add(self, **extra):
+        return self.call(views.leads_list, 'post', data={'full_name': 'Ann', 'email': 'ann@corp.example', **extra})
+
+    def import_csv(self, **extra):
+        f = SimpleUploadedFile('l.csv', b'Name,Email\nAnn,ann@corp.example\n', content_type='text/csv')
+        return self.call(views.import_leads_csv, 'post', data={'file': f, **extra}, fmt='multipart')
+
+    def test_a_lead_added_by_hand_gets_the_picked_icp(self):
+        self.assertEqual(self.add(icp_id=self.saas.id).status_code, 201)
+        self.assertEqual(SDRLead.objects.get().icp_profile, self.saas)
+
+    def test_a_lead_added_by_hand_without_a_pick_gets_the_default(self):
+        self.add()
+        self.assertEqual(SDRLead.objects.get().icp_profile, self.dentistry)
+
+    def test_an_import_gets_the_picked_icp(self):
+        self.assertEqual(self.import_csv(icp_id=self.saas.id).status_code, 200)
+        self.assertEqual(SDRLead.objects.get().icp_profile, self.saas)
+
+    def test_an_import_without_a_pick_gets_the_default(self):
+        self.import_csv()
+        self.assertEqual(SDRLead.objects.get().icp_profile, self.dentistry)
+
+    def test_another_logins_icp_is_refused_and_nothing_is_created(self):
+        theirs = self.icp(owner=self.outsider)
+        for r in (self.add(icp_id=theirs.id), self.import_csv(icp_id=theirs.id), self.add(icp_id='abc')):
+            self.assertRefused(r)
+        self.assertFalse(SDRLead.objects.exists())
+
+    def test_qualify_all_pins_leads_without_an_icp_to_todays_default(self):
+        mine = self.make_lead()
+        found_for_saas = self.make_lead(email='s@x.example', icp_profile=self.saas)
+        self.call(views.qualify_all_leads, 'post')
+        mine.refresh_from_db()
+        found_for_saas.refresh_from_db()
+        self.assertEqual((mine.icp_profile, found_for_saas.icp_profile), (self.dentistry, self.saas))
+
+
+class ScoredWithItsOwnIcpTests(LeadApiBase):
+    """The queue and the Qualify button score a lead with its own ICP; the default only scores leads without one."""
+
+    def setUp(self):
+        super().setUp()
+        self.dentistry = self.icp(name='Dentistry')
+        self.saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False)
+        self.agent = mock.Mock()
+        self.agent.qualify_lead.return_value = {'score': 80, 'temperature': 'hot'}
+
+    def run_queue(self):
+        from ai_sdr_agent.tasks import qualify_queue_impl
+        with mock.patch('api.views.ai_sdr_agent._get_qualification_agent', return_value=self.agent):
+            qualify_queue_impl()
+
+    def scored_with(self):
+        return {call.args[0].email: call.args[1].name for call in self.agent.qualify_lead.call_args_list}
+
+    def test_waiting_leads_keep_their_icp_when_another_becomes_the_default(self):
+        self.make_lead(email='d@x.example', icp_profile=self.dentistry, qualification_status='pending')
+        self.call(views.icp_make_default, 'post', icp_id=self.saas.id)
+        self.make_lead(email='s@x.example', icp_profile=self.saas, qualification_status='pending')
+        self.make_lead(email='n@x.example', qualification_status='pending')
+        self.run_queue()
+        self.assertEqual(self.scored_with(), {'d@x.example': 'Dentistry', 's@x.example': 'SaaS',
+                                              'n@x.example': 'SaaS'})
+        # The lead without an ICP now records the one that scored it.
+        self.assertEqual(SDRLead.objects.get(email='n@x.example').icp_profile, self.saas)
+        self.assertEqual(SDRLead.objects.filter(qualification_status='done').count(), 3)
+
+    def test_an_edit_to_an_icp_applies_to_its_waiting_leads_only(self):
+        self.make_lead(email='d@x.example', icp_profile=self.dentistry, qualification_status='pending')
+        self.make_lead(email='s@x.example', icp_profile=self.saas, qualification_status='pending')
+        self.call(views.icp_profile, 'post', data={'id': self.dentistry.id, 'name': 'Dental clinics',
+                                                   'industries': ['Dental clinics']})
+        self.run_queue()
+        self.assertEqual(self.scored_with(), {'d@x.example': 'Dental clinics', 's@x.example': 'SaaS'})
+
+    def test_the_qualify_button_uses_the_leads_own_icp(self):
+        lead = self.make_lead(icp_profile=self.saas)
+        with mock.patch.object(views, '_get_qualification_agent', return_value=self.agent):
+            r = self.call(views.qualify_lead, 'post', lead_id=lead.id)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.scored_with(), {lead.email: 'SaaS'})

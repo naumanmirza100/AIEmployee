@@ -64,11 +64,17 @@ export const saveIcpProfile = async (data) => {
   }
 };
 
+// Several ICPs: each lead is scored with the ICP it was found for; the default one is preselected in the dialogs.
+export const createIcpProfile = (data) => saveIcpProfile({ ...data, new: true });
+export const updateIcpProfile = (id, data) => saveIcpProfile({ ...data, id });
+export const setDefaultIcpProfile = async (id) => companyApi.post(`/sdr/icp/${id}/default/`);
+export const deleteIcpProfile = async (id) => companyApi.delete(`/sdr/icp/${id}/`);
+
 // --------------------------------------------------------------------------
 // Leads — CRUD
 // --------------------------------------------------------------------------
 export const listLeads = async ({
-  search = '', temperature = '', status = '', source = '', category = '', enrichment = '',
+  search = '', temperature = '', status = '', source = '', category = '', enrichment = '', icp = '',
   sort = 'score_desc', page = 1, page_size = 25, not_in_campaign = '',
 } = {}) => {
   try {
@@ -80,6 +86,7 @@ export const listLeads = async ({
     if (source)      params.set('source', source);
     if (category)    params.set('category', category);   // a category id, or 'none'
     if (enrichment)  params.set('enrichment', enrichment); // done / not / in_progress / failed
+    if (icp)         params.set('icp', icp);               // an ICP id, or 'none'
     if (sort)        params.set('sort', sort);
     params.set('page', page);
     params.set('page_size', page_size);
@@ -94,7 +101,7 @@ export const listLeads = async ({
  * Export ALL leads matching the current filters as a CSV blob (server-side, no
  * pagination) so thousands of leads can be exported in one download.
  */
-export const exportAllLeadsCsv = async ({ search = '', temperature = '', status = '', source = '', category = '', enrichment = '', sort = 'score_desc' } = {}) => {
+export const exportAllLeadsCsv = async ({ search = '', temperature = '', status = '', source = '', category = '', enrichment = '', icp = '', sort = 'score_desc' } = {}) => {
   const params = {};
   if (search)      params.search = search;
   if (temperature) params.temperature = temperature;
@@ -102,6 +109,7 @@ export const exportAllLeadsCsv = async ({ search = '', temperature = '', status 
   if (source)      params.source = source;
   if (category)    params.category = category;
   if (enrichment)  params.enrichment = enrichment;
+  if (icp)         params.icp = icp;
   if (sort)        params.sort = sort;
   // The filters go in the URL: companyApi.get drops a `params` option on a blob request, so "Export ALL" used to
   // export every lead whatever the filters said.
@@ -348,7 +356,7 @@ export const getResearchSources = async () => {
 // --------------------------------------------------------------------------
 // CSV Import — uses raw fetch to send multipart/form-data
 // --------------------------------------------------------------------------
-export const importLeadsFromCSV = async (file, category = '') => {
+export const importLeadsFromCSV = async (file, category = '', icpId = '') => {
   try {
     const token = localStorage.getItem('company_auth_token');
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -356,6 +364,8 @@ export const importLeadsFromCSV = async (file, category = '') => {
     formData.append('file', file);
     // Optional: files every row under this category; else each row goes under its Industry column.
     if (category) formData.append('category', category);
+    // The ICP every row is scored with; the server uses the default one when it is left out.
+    if (icpId) formData.append('icp_id', icpId);
 
     const resp = await fetch(`${baseUrl}/sdr/leads/import/`, {
       method: 'POST',
