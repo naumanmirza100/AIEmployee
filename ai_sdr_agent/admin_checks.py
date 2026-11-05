@@ -38,6 +38,12 @@ _T = 'ai_sdr_agent.tests'
 _R29 = 'ai_sdr_agent.tests_replies_29_oct'
 _FUN = 'ai_sdr_agent.tests_funnel_fixes'
 _RES = 'ai_sdr_agent.tests_research'
+_LEADS = 'ai_sdr_agent.tests_api_leads'
+_CAMP = 'ai_sdr_agent.tests_api_campaigns'
+_MEET = 'ai_sdr_agent.tests_api_meetings'
+# Sign-in is not part of the AI SDR's code, but it is how a user reaches it.
+SIGN_IN = ['api.tests_company_sign_in', 'api.tests_sign_in_gaps', 'api.tests_session_check', 'api.tests_module_access',
+           'core.tests_reset_code', 'core.tests_company_logins']
 
 # Labels are test labels as `manage.py test` takes them: a module, a class or one test. A test may sit in more
 # than one part (the qualification tests are spread over several files); every test class in ai_sdr_agent is in
@@ -52,7 +58,7 @@ SUITES = [
             _RES,
             f'{_FUN}.ResearchJobSourceTests', f'{_FUN}.ResearchAsyncTests', f'{_FUN}.BadKeyTerminalTests',
             f'{_T}.ApifyApprovalTests', f'{_T}.ApifyErrorItemTests', f'{_T}.NoMadeUpLeadsTests',
-            f'{_R29}.ApifyKeyTests',
+            f'{_R29}.ApifyKeyTests', f'{_LEADS}.ResearchOneLeadTests', f'{_LEADS}.ResearchLeadsBatchTests', f'{_LEADS}.ResearchNewLeadsTests', f'{_LEADS}.ResearchJobStatusAndSourcesTests', f'{_LEADS}.FetchApifyLeadsTests',
         ],
     },
     {
@@ -70,7 +76,7 @@ SUITES = [
             'ai_sdr_agent.tests_lead_categories.OneLeadTests.'
             'test_qualify_more_counts_unscored_leads_the_queue_will_not_pick_up',
             f'{_RES}.LeadResearchTestCase.test_downstream_qualification_compatibility',
-            f'{_RES}.ValidatorTests.test_ai_generated_record_cannot_score_well',
+            f'{_RES}.ValidatorTests.test_ai_generated_record_cannot_score_well', f'{_LEADS}.IcpProfileTests', f'{_LEADS}.QualifyAllLeadsTests', f'{_LEADS}.QualifyOneLeadTests',
         ],
     },
     {
@@ -81,14 +87,19 @@ SUITES = [
         'labels': [
             'ai_sdr_agent.tests_enrichment_comprehensive', 'ai_sdr_agent.tests_enrichment_phase1',
             f'{_FUN}.EnrichmentReportsUpdatedFieldsTests', f'{_FUN}.AutoEnrichmentQueueTests',
-            f'{_FUN}.EnrichingStatCountTests', f'{_FUN}.ContactVerifierMxTests',
+            f'{_FUN}.EnrichingStatCountTests', f'{_FUN}.ContactVerifierMxTests', f'{_LEADS}.EnrichOneLeadTests', f'{_LEADS}.EnrichLeadsBatchTests',
         ],
     },
     {
         'key': 'categories',
-        'title': 'Lead list, categories & export',
+        'title': 'Leads: list, import, export & categories',
         'description': 'Filing leads under the industry they were found for, filtering, re-filing and CSV export.',
-        'labels': ['ai_sdr_agent.tests_lead_categories', f'{_FUN}.LeadsExportAllTests'],
+        'labels': [
+            'ai_sdr_agent.tests_lead_categories', f'{_FUN}.LeadsExportAllTests', f'{_LEADS}.CreatingALeadTests',
+            f'{_LEADS}.ListingLeadsTests', f'{_LEADS}.LeadDetailTests', f'{_LEADS}.RestoreLeadTests',
+            f'{_LEADS}.BulkDeleteLeadsTests', f'{_LEADS}.BulkRestoreLeadsTests', f'{_LEADS}.CategoryEndpointsTests',
+            f'{_LEADS}.BulkSetCategoryTests', f'{_LEADS}.ImportCsvTests', f'{_LEADS}.ExportCsvTests',
+        ],
     },
     {
         'key': 'outreach',
@@ -98,7 +109,7 @@ SUITES = [
             f'{_T}.OutreachSendTests', f'{_T}.SchedulerTests', f'{_T}.SendGuardTests', f'{_T}.EmailHtmlEscapeTests',
             f'{_T}.JobLockTests', f'{_T}.LifecycleTests', f'{_T}.SchedulerStartTests',
             f'{_R29}.EnrolTests', f'{_R29}.LiveRunTests', f'{_R29}.LiveRunCampaignTests', f'{_R29}.EmailBrandTests',
-            f'{_R29}.FiguresAndRegenerateTests', f'{_R29}.FilmFiguresTests', f'{_R29}.ClearingTests',
+            f'{_R29}.FiguresAndRegenerateTests', f'{_R29}.FilmFiguresTests', f'{_R29}.ClearingTests', f'{_CAMP}.CampaignCreateTests', f'{_CAMP}.CampaignDetailTests', f'{_CAMP}.StepListTests', f'{_CAMP}.StepDetailTests', f'{_CAMP}.GenerateStepsTests', f'{_CAMP}.EnrolTests', f'{_CAMP}.EnrolmentListTests', f'{_CAMP}.ProcessOutreachTests', f'{_CAMP}.RetryAndClearTests', f'{_CAMP}.DashboardTests', f'{_CAMP}.AnalyticsTests', f'{_CAMP}.DailySummaryTests', f'{_CAMP}.SchedulerStatusTests',
         ],
     },
     {
@@ -121,7 +132,7 @@ SUITES = [
             f'{_T}.ReplyProcessingTests', f'{_T}.ClassificationTests', f'{_T}.FinishedCampaignReplyTests',
             'ai_sdr_agent.tests_reply_answers', 'ai_sdr_agent.tests_answer_check_30_oct',
             f'{_R29}.ReadingTests', f'{_R29}.ReplyRuleTests', f'{_R29}.QuotedThreadTests', f'{_R29}.ReturnDateTests',
-            f'{_R29}.EmailAssistantTests', f'{_R29}.PastTalkTests',
+            f'{_R29}.EmailAssistantTests', f'{_R29}.PastTalkTests', f'{_CAMP}.MarkRepliedTests', f'{_CAMP}.ResetEnrolmentTests', f'{_CAMP}.CheckRepliesTests', f'{_CAMP}.ReplyDraftTests', f'{_CAMP}.EmailAssistantTests',
         ],
     },
     {
@@ -131,7 +142,7 @@ SUITES = [
         'labels': [
             f'{_T}.BookingTests', f'{_T}.PublicLinkTests', f'{_FUN}.BookingLinkExpiryTests',
             f'{_FUN}.BookingConfirmSyncsToCrmTests', f'{_R29}.MeetingEmailTests', f'{_R29}.BookedCallTests',
-            f'{_R29}.BookingPageTests', f'{_R29}.PrepNotesTests', f'{_R29}.BounceAndPrepTests',
+            f'{_R29}.BookingPageTests', f'{_R29}.PrepNotesTests', f'{_R29}.BounceAndPrepTests', f'{_MEET}.MeetingListTests', f'{_MEET}.MeetingDetailTests', f'{_MEET}.ConfirmMeetingTests', f'{_MEET}.MeetingReminderTests', f'{_MEET}.MeetingPrepTests', f'{_MEET}.ResendSchedulingTests', f'{_MEET}.LeadApprovalLinkTests', f'{_MEET}.LeadSuggestLinkTests', f'{_MEET}.BookingEndpointTests', f'{_MEET}.GoogleAuthTests',
         ],
     },
     {
@@ -140,6 +151,7 @@ SUITES = [
         'description': 'Unsubscribe links and replies, bounces and the company-wide do-not-email list.',
         'labels': [
             'ai_sdr_agent.tests_unsubscribe_link', f'{_R29}.UnsubscribeLinkTests', f'{_R29}.BounceAndPrepTests',
+            f'{_MEET}.UnsubscribeEndpointTests',
             f'{_T}.PublicLinkTests',
         ],
     },
@@ -157,7 +169,11 @@ SUITES = [
         'key': 'access',
         'title': 'Access & security',
         'description': 'Who may see and change what: subscription gating, salespeople, logins that were switched off.',
-        'labels': [f'{_T}.ApiTests', 'ai_sdr_agent.tests_leavers', f'{_R29}.SalespersonTests'],
+        'labels': [
+            f'{_T}.ApiTests', 'ai_sdr_agent.tests_leavers', f'{_R29}.SalespersonTests',
+            f'{_LEADS}.OnlySignedInCompanyUsersGetInTests', f'{_LEADS}.SdrSettingsTests', f'{_CAMP}.SignInTests',
+            f'{_MEET}.MeetingAuthTests',
+        ],
     },
     {
         'key': 'live_checks',
@@ -166,9 +182,31 @@ SUITES = [
                        'or emails anyone but the address typed.',
         'labels': ['ai_sdr_agent.tests_live_checks'],
     },
+    {
+        'key': 'sign_in',
+        'title': 'Sign-in',
+        'description': 'Company login and logout: missing or wrong email and password, switched-off logins, sessions, '
+                       'password reset, and that only companies with the AI SDR reach it.',
+        'labels': SIGN_IN,
+    },
+    {
+        'key': 'load',
+        'title': 'Load',
+        'description': 'A hundred requests twenty at a time; screens that ask the database no more for 300 leads '
+                       'than for 30; importing, exporting and deleting a thousand leads.',
+        'labels': ['ai_sdr_agent.tests_load'],
+    },
+    {
+        'key': 'screens',
+        'title': 'Screens (browser)',
+        'description': 'A real browser signs in and uses the AI SDR screens: forms, messages, lists. Needs Node and '
+                       'Chromium on the server; skipped without them.',
+        'labels': ['ai_sdr_agent.tests_browser'],
+    },
 ]
 
-ALL = {'key': 'all', 'title': 'Everything', 'description': 'Every AI SDR test.', 'labels': ['ai_sdr_agent']}
+ALL = {'key': 'all', 'title': 'Everything', 'description': 'Every AI SDR test, and sign-in.',
+       'labels': ['ai_sdr_agent'] + SIGN_IN}
 SUITES_BY_KEY = {s['key']: s for s in SUITES + [ALL]}
 
 

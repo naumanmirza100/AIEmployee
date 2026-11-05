@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  Loader2, Play, PlayCircle, CheckCircle2, XCircle, AlertTriangle, MinusCircle, FlaskConical,
+  Loader2, PlayCircle, CheckCircle2, XCircle, AlertTriangle, MinusCircle,
   ChevronDown, ChevronRight, Clock, ListChecks,
 } from 'lucide-react';
 import { CARD_CLASS, ROW_CLASS } from '@/components/admin/apiKeysShared';
@@ -26,6 +25,9 @@ const OUTCOME_META = {
   error:   { icon: AlertTriangle, cls: 'text-amber-400' },
   skipped: { icon: MinusCircle,   cls: 'text-white/40' },
 };
+
+const RANK = { error: 0, failed: 0, skipped: 1, passed: 2 };
+const isBad = (t) => t.outcome === 'failed' || t.outcome === 'error';
 
 const timeAgo = (iso) => {
   if (!iso) return '';
@@ -75,7 +77,7 @@ const Progress = ({ run }) => {
 };
 
 const TestRow = ({ test }) => {
-  const bad = test.outcome === 'failed' || test.outcome === 'error';
+  const bad = isBad(test);
   const [open, setOpen] = useState(false);
   const meta = OUTCOME_META[test.outcome] || OUTCOME_META.skipped;
   const Icon = meta.icon;
@@ -100,20 +102,45 @@ const TestRow = ({ test }) => {
   );
 };
 
-const RunResults = ({ run }) => {
-  // Failing tests first, then grouped by the area (test class) they check.
+// One area of the AI SDR in the results: collapsed when everything in it passed.
+const AreaResults = ({ title, tests }) => {
+  const bad = tests.filter(isBad).length;
+  const passed = tests.filter((t) => t.outcome === 'passed').length;
+  const [open, setOpen] = useState(bad > 0);
+  const Icon = bad ? XCircle : CheckCircle2;
+  return (
+    <div className={`${ROW_CLASS} rounded-lg`}>
+      <button type="button" className="w-full flex items-center gap-2 px-3 py-2 text-left" onClick={() => setOpen((o) => !o)}>
+        {open ? <ChevronDown className="w-4 h-4 text-white/40" /> : <ChevronRight className="w-4 h-4 text-white/40" />}
+        <Icon className={`w-4 h-4 shrink-0 ${bad ? 'text-red-400' : 'text-emerald-400'}`} />
+        <span className="flex-1 text-sm text-white">{title}</span>
+        <span className={`text-xs ${bad ? 'text-red-300' : 'text-white/50'}`}>
+          {bad ? `${bad} failing · ` : ''}{passed}/{tests.length} passed
+        </span>
+      </button>
+      {open ? (
+        <div className="space-y-1.5 px-3 pb-3">
+          {[...tests].sort((a, b) => (RANK[a.outcome] ?? 2) - (RANK[b.outcome] ?? 2)).map((t) => <TestRow key={t.id} test={t} />)}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const RunResults = ({ run, areas }) => {
+  // Every test under the first area of the AI SDR it belongs to; areas with failures first.
   const groups = useMemo(() => {
-    const rank = { error: 0, failed: 0, skipped: 1, passed: 2 };
-    const byClass = new Map();
-    [...(run.tests || [])]
-      .sort((a, b) => (rank[a.outcome] ?? 2) - (rank[b.outcome] ?? 2))
-      .forEach((t) => {
-        const key = t.class || 'Other';
-        if (!byClass.has(key)) byClass.set(key, []);
-        byClass.get(key).push(t);
-      });
-    return [...byClass.entries()];
-  }, [run.tests]);
+    const titles = Object.fromEntries((areas || []).map((a) => [a.key, a.title]));
+    const byArea = new Map();
+    (run.tests || []).forEach((t) => {
+      const key = (t.suites || [])[0] || 'other';
+      if (!byArea.has(key)) byArea.set(key, []);
+      byArea.get(key).push(t);
+    });
+    return [...byArea.entries()]
+      .map(([key, tests]) => ({ key, title: titles[key] || 'Other', tests, bad: tests.some(isBad) }))
+      .sort((a, b) => Number(b.bad) - Number(a.bad));
+  }, [run.tests, areas]);
 
   return (
     <div className="space-y-4">
@@ -131,29 +158,25 @@ const RunResults = ({ run }) => {
       {run.log_tail ? (
         <pre className="max-h-60 overflow-auto rounded bg-black/40 p-3 text-[11px] text-white/70 whitespace-pre-wrap">{run.log_tail}</pre>
       ) : null}
-      {groups.map(([name, tests]) => (
-        <div key={name} className="space-y-1.5">
-          <p className="text-[11px] uppercase tracking-wider text-white/40">{name}</p>
-          {tests.map((t) => <TestRow key={t.id} test={t} />)}
-        </div>
-      ))}
+      <div className="space-y-2">
+        {groups.map((g) => <AreaResults key={g.key} title={g.title} tests={g.tests} />)}
+      </div>
     </div>
   );
 };
 
 /**
- * The AI SDR's automated tests, one card per part of the agent, each with a Run button; the results open in a
- * dialog. Used by the Super Admin panel (/admin/sdr-checks) and by AI SDR → Tests for a company's owner or
- * admin. `api` is { getOverview, startRun, getRun } for the door in use. The tests themselves run on the server,
- * in a separate process on a throwaway database (ai_sdr_agent/admin_checks.py).
+ * The AI SDR's automated tests as one field: Run all tests, the latest result, and the results by area in a
+ * dialog. Used by the Super Admin panel (/admin/sdr-checks) and by AI SDR → Tests for a company's owner or admin.
+ * `api` is { getOverview, startRun, getRun } for the door in use. The tests run on the server, in a separate
+ * process on a throwaway database (ai_sdr_agent/admin_checks.py).
  */
 const SDRChecksPanel = ({ api }) => {
   const { toast } = useToast();
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(null);
-  // The results dialog: which run, seen through which part ('all' = the whole run).
-  const [viewing, setViewing] = useState(null);
+  const [starting, setStarting] = useState(false);
+  const [viewingId, setViewingId] = useState(null);  // the run in the results dialog
   const [viewRun, setViewRun] = useState(null);
   const watchedRun = useRef(null);
 
@@ -163,7 +186,7 @@ const SDRChecksPanel = ({ api }) => {
       setOverview(data);
       return data;
     } catch (e) {
-      toast({ title: 'Could not load the checks', description: String(e.message || e), variant: 'destructive' });
+      toast({ title: 'Could not load the tests', description: String(e.message || e), variant: 'destructive' });
       return null;
     } finally {
       setLoading(false);
@@ -186,7 +209,7 @@ const SDRChecksPanel = ({ api }) => {
         if (done) {
           const ok = done.status === 'passed';
           toast({
-            title: `${done.suite_title}: ${ok ? 'all tests passed' : STATUS_META[done.status]?.label.toLowerCase()}`,
+            title: ok ? 'All tests passed' : `Tests: ${STATUS_META[done.status]?.label.toLowerCase()}`,
             description: done.total ? `${done.passed} of ${done.total} passed` : done.error || undefined,
             variant: ok ? undefined : 'destructive',
           });
@@ -198,11 +221,11 @@ const SDRChecksPanel = ({ api }) => {
 
   // Keep the open results dialog up to date while its run is going.
   useEffect(() => {
-    if (!viewing) { setViewRun(null); return undefined; }
+    if (!viewingId) { setViewRun(null); return undefined; }
     let cancelled = false;
     const fetchRun = async () => {
       try {
-        const run = await api.getRun(viewing.runId, viewing.suite === 'all' ? undefined : viewing.suite);
+        const run = await api.getRun(viewingId);
         if (!cancelled) setViewRun(run);
         return run;
       } catch (e) {
@@ -216,146 +239,69 @@ const SDRChecksPanel = ({ api }) => {
       if (run && !['running', 'queued'].includes(run.status)) clearInterval(timer);
     }, POLL_MS);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [api, viewing, toast]);
+  }, [api, viewingId, toast]);
 
-  const run = async (suite) => {
-    setStarting(suite);
+  const runAll = async () => {
+    setStarting(true);
     try {
-      const started = await api.startRun(suite);
+      await api.startRun('all');
       await load();
-      setViewing({ runId: started.id, suite, title: started.suite_title });
     } catch (e) {
       toast({ title: 'Could not start the tests', description: String(e.message || e), variant: 'destructive' });
     } finally {
-      setStarting(null);
+      setStarting(false);
     }
   };
 
-  const busy = Boolean(current) || Boolean(starting);
-  const allLast = overview?.all_last;
+  if (loading) {
+    return <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-violet-400" /></div>;
+  }
+
+  const last = overview?.all_last;
+  const shown = current || last;
 
   return (
     <>
-        <div className="space-y-6">
-          {loading ? (
-            <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div>
-          ) : (
-            <>
-              <Card className={CARD_CLASS}>
-                <CardHeader className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between space-y-0">
-                  <div className="space-y-1.5">
-                    <CardTitle className="text-white flex items-center gap-2">
-                      <ListChecks className="w-5 h-5 text-violet-400" /> Check the whole AI SDR
-                    </CardTitle>
-                    <CardDescription className="text-white/50 max-w-2xl">
-                      Each check runs the automated tests for one part of the AI SDR on a separate, throwaway
-                      database, so nothing is emailed, no CRM is called and no real data is touched.
-                    </CardDescription>
-                    <div className="flex flex-wrap items-center gap-3 pt-1">
-                      <StatusBadge status={allLast?.status} />
-                      <Counts run={allLast} />
-                      {allLast ? <span className="text-xs text-white/40">{timeAgo(allLast.finished_at)}</span> : null}
-                      {allLast ? (
-                        <button type="button" className="text-xs text-violet-300 hover:underline"
-                          onClick={() => setViewing({ runId: allLast.id, suite: 'all', title: 'Everything' })}>
-                          View results
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                  <Button onClick={() => run('all')} disabled={busy} className="bg-violet-600 hover:bg-violet-500 text-white shrink-0">
-                    {starting === 'all' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <PlayCircle className="w-4 h-4 mr-2" />}
-                    Run all checks
-                  </Button>
-                </CardHeader>
-                {current ? (
-                  <CardContent className="pt-0">
-                    <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-3 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm text-white flex items-center gap-2">
-                          <Loader2 className="w-4 h-4 animate-spin text-violet-300" /> Running: {current.suite_title}
-                        </span>
-                        <button type="button" className="text-xs text-violet-300 hover:underline"
-                          onClick={() => setViewing({ runId: current.id, suite: current.suite, title: current.suite_title })}>
-                          Watch
-                        </button>
-                      </div>
-                      <Progress run={current} />
-                    </div>
-                  </CardContent>
-                ) : null}
-              </Card>
-
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {(overview?.suites || []).map((suite) => {
-                  const runningThis = current && (current.suite === suite.key || current.suite === 'all');
-                  return (
-                    <div key={suite.key} className={`${CARD_CLASS} rounded-xl p-4 flex flex-col gap-3 hover:border-violet-500/30 transition-colors`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="text-white font-semibold">{suite.title}</h3>
-                        <StatusBadge status={runningThis ? current.status : suite.last?.status} />
-                      </div>
-                      <p className="text-sm text-white/50 flex-1">{suite.description}</p>
-                      <div className="flex items-center gap-2 text-xs text-white/40 min-h-[1rem]">
-                        {suite.last && !runningThis ? (
-                          <>
-                            <Counts run={suite.last} />
-                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{timeAgo(suite.last.finished_at)}</span>
-                          </>
-                        ) : null}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={() => run(suite.key)} disabled={busy}
-                          className="bg-violet-600 hover:bg-violet-500 text-white">
-                          {starting === suite.key ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1.5" />}
-                          Run tests
-                        </Button>
-                        {suite.last ? (
-                          <Button size="sm" variant="outline" className="border-[var(--line-3)] text-white/80 bg-transparent"
-                            onClick={() => setViewing({ runId: suite.last.id, suite: suite.key, title: suite.title })}>
-                            View results
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <Card className={CARD_CLASS}>
-                <CardHeader>
-                  <CardTitle className="text-white text-base">Recent runs</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {(overview?.runs || []).length === 0 ? (
-                    <p className="text-sm text-white/50">No checks have been run yet.</p>
-                  ) : overview.runs.map((r) => (
-                    <button key={r.id} type="button"
-                      className={`${ROW_CLASS} w-full rounded-lg px-3 py-2 flex flex-wrap items-center gap-3 text-left`}
-                      onClick={() => setViewing({ runId: r.id, suite: r.suite, title: r.suite_title })}>
-                      <span className="text-sm text-white min-w-[12rem]">{r.suite_title}</span>
-                      <StatusBadge status={r.status} />
-                      <Counts run={r} />
-                      <span className="ml-auto text-xs text-white/40">
-                        {r.started_by ? `${r.started_by} · ` : ''}{timeAgo(r.created_at)}
-                      </span>
-                    </button>
-                  ))}
-                </CardContent>
-              </Card>
-            </>
-          )}
+      <div className={`${CARD_CLASS} rounded-xl p-4 sm:p-5 space-y-4`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <ListChecks className="w-5 h-5 text-violet-400" />
+            <StatusBadge status={current ? current.status : last?.status} />
+            {current ? (
+              <span className="text-sm text-white/70">Running the tests…</span>
+            ) : last ? (
+              <>
+                <Counts run={last} />
+                <span className="flex items-center gap-1 text-xs text-white/40"><Clock className="w-3 h-3" />{timeAgo(last.finished_at)}</span>
+              </>
+            ) : (
+              <span className="text-sm text-white/50">The tests have not been run yet.</span>
+            )}
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {shown ? (
+              <Button variant="outline" className="border-[var(--line-3)] text-white/80 bg-transparent" onClick={() => setViewingId(shown.id)}>
+                View results
+              </Button>
+            ) : null}
+            <Button onClick={runAll} disabled={Boolean(current) || starting} className="bg-violet-600 hover:bg-violet-500 text-white">
+              {starting || current ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <PlayCircle className="w-4 h-4 mr-2" />}
+              Run all tests
+            </Button>
+          </div>
         </div>
+        {current ? <Progress run={current} /> : null}
+      </div>
 
-      <Dialog open={Boolean(viewing)} onOpenChange={(open) => { if (!open) setViewing(null); }}>
+      <Dialog open={Boolean(viewingId)} onOpenChange={(open) => { if (!open) setViewingId(null); }}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto bg-[var(--panel-1)] border-[var(--line-2)]">
           <DialogHeader>
-            <DialogTitle className="text-white">{viewing?.title}</DialogTitle>
+            <DialogTitle className="text-white">Automated test results</DialogTitle>
             <DialogDescription className="text-white/50">
-              Click a failing test to see why it failed.
+              By area of the AI SDR. Open an area to see its tests; click a failing test to see why it failed.
             </DialogDescription>
           </DialogHeader>
-          {viewRun ? <RunResults run={viewRun} /> : (
+          {viewRun ? <RunResults run={viewRun} areas={overview?.suites} /> : (
             <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-violet-400" /></div>
           )}
         </DialogContent>

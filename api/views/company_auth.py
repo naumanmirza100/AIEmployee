@@ -7,7 +7,9 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from rest_framework.exceptions import ParseError
 from rest_framework.throttling import AnonRateThrottle
+import functools
 from django.core.cache import cache
 from django.db.models import F
 from django.shortcuts import get_object_or_404
@@ -54,8 +56,24 @@ def _send_html_email(subject, template_name, context, to_email, text_body):
 def _find_login_company_user(email):
     """Resolve the CompanyUser that would be used for login with this email.
     Mirrors login_company_user's lookup (most recently active when duplicated)."""
-    qs = CompanyUser.objects.filter(email=email).order_by('-last_login')
+    qs = CompanyUser.objects.filter(email__iexact=email).order_by('-last_login')
     return qs.first()
+
+
+def json_object_body(view):
+    """A public form's body must be a JSON object. Anything else (not JSON, a list) is the caller's mistake, a 400;
+    inside the view's own `except Exception` it came out as a 500 "Failed to …"."""
+    @functools.wraps(view)
+    def checked(request, *args, **kwargs):
+        try:
+            data = request.data
+        except ParseError:
+            data = None
+        if not isinstance(data, dict):
+            return Response({'status': 'error', 'message': 'The request body must be a JSON object.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return view(request, *args, **kwargs)
+    return checked
 
 
 class CompanyAuthThrottle(AnonRateThrottle):
@@ -125,6 +143,7 @@ def verify_registration_token(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([CompanyAuthThrottle])
+@json_object_body
 def register_company_user(request):
     """Register company account via token"""
     try:
@@ -322,6 +341,7 @@ def company_signup(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([CompanyAuthThrottle])
+@json_object_body
 def login_company_user(request):
     """Company login"""
     try:
@@ -337,7 +357,9 @@ def login_company_user(request):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Wrong passwords are counted on the account as well as per caller (CO-100).
-        email = str(email)
+        # Addresses are matched without case or surrounding spaces, as registration and the lockout treat them.
+        email = str(email).strip()
+        password = str(password)
         if sign_in.is_locked('dashboard', email):
             return Response({'status': 'error', 'message': sign_in.LOCKED_MESSAGE},
                             status=status.HTTP_429_TOO_MANY_REQUESTS)
@@ -346,16 +368,16 @@ def login_company_user(request):
         try:
             if company_id:
                 company = Company.objects.get(id=company_id)
-                company_user = CompanyUser.objects.get(company=company, email=email)
+                company_user = CompanyUser.objects.get(company=company, email__iexact=email)
             else:
                 # Use filter+order_by to handle duplicate emails across companies gracefully
                 # (picks the most recently active account)
-                qs = CompanyUser.objects.filter(email=email).order_by('-last_login')
+                qs = CompanyUser.objects.filter(email__iexact=email).order_by('-last_login')
                 if not qs.exists():
                     raise CompanyUser.DoesNotExist
                 company_user = qs.first()
                 company = company_user.company
-        except (CompanyUser.DoesNotExist, Company.DoesNotExist):
+        except (CompanyUser.DoesNotExist, Company.DoesNotExist, ValueError, TypeError):  # also a companyId that is no id
             sign_in.wrong_password('dashboard', email)
             return Response({
                 'status': 'error',
@@ -702,6 +724,7 @@ def _code_is_right(company_user, typed):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([CompanyAuthThrottle])
+@json_object_body
 def verify_reset_otp(request):
     """Step 2: verify the emailed OTP for the given email."""
     try:
@@ -738,6 +761,7 @@ def verify_reset_otp(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([CompanyAuthThrottle])
+@json_object_body
 def reset_password(request):
     """Step 3: with a valid OTP, set the new password and clear the OTP."""
     try:
