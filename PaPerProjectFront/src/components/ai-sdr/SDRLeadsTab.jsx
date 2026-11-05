@@ -603,6 +603,7 @@ function useDebounce(value, delay = 400) {
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const GEN_RUNS_KEY = 'sdr-lead-searches';
 
 // --------------------------------------------------------------------------
 // ICP Profile Panel
@@ -923,7 +924,12 @@ const SDRLeadsTab = () => {
   const [genIcpId, setGenIcpId] = useState('');
   const [icpProfiles, setIcpProfiles] = useState([]);
   const [generating, setGenerating] = useState(false);
-  const [genProgress, setGenProgress] = useState(null); // { created, total } while a run is in flight
+  // Lead searches running on the server: [{ jobId, icpName, total, created }]. The Generate dialog closes as soon as
+  // one has started, so the list can be used (and another ICP searched) meanwhile. Kept for the browser tab, so
+  // leaving the Leads page and coming back still shows them.
+  const [genRuns, setGenRuns] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem(GEN_RUNS_KEY) || '[]'); } catch (_) { return []; }
+  });
   const [copiedKey, setCopiedKey] = useState(null);
   const [showSetupGuide, setShowSetupGuide] = useState(null);
 
@@ -1138,21 +1144,22 @@ const SDRLeadsTab = () => {
     setShowGenModal(true);
   };
 
+  const apifyApprovalToast = (url) => toast({
+    title: 'Approve the Apify actor first',
+    description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
+    variant: 'destructive',
+    action: (
+      <ToastAction altText="Open Apify" onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>
+        Open Apify
+      </ToastAction>
+    ),
+  });
+
+  // Starts the search and closes the dialog: the search runs on the server, and its progress shows on the Leads
+  // page (genRuns) until it is done.
   const handleGenerate = async () => {
     setGenerating(true);
-    setGenProgress({ created: 0, total: genCount });
-    const apifyApprovalToast = (url) => toast({
-      title: 'Approve the Apify actor first',
-      description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
-      variant: 'destructive',
-      action: (
-        <ToastAction altText="Open Apify" onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>
-          Open Apify
-        </ToastAction>
-      ),
-    });
     try {
-      // Kick off the background job; the backend returns a job id immediately.
       const startResp = await researchLeads({
         count: genCount, source: genSource, icp_id: genIcpId || undefined, category: genCategory.trim() || undefined,
       });
@@ -1161,55 +1168,14 @@ const SDRLeadsTab = () => {
       if (!jobId) {
         throw Object.assign(new Error(started?.message || 'Could not start generation.'), { data: started });
       }
-
-      // Poll the job until it finishes (large Apify/Apollo runs can take minutes).
-      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-      let job = null;
-      for (let i = 0; i < 400; i++) { // ~20 min ceiling at 3s/poll
-        await sleep(3000);
-        let jobResp;
-        try { jobResp = await getResearchJob(jobId); } catch (_) { continue; }
-        job = (jobResp?.data ?? jobResp)?.job;
-        if (!job) continue;
-        setGenProgress({ created: job.leads_created || 0, total: genCount });
-        if (job.done) break;
-      }
-
-      if (!job || !job.done) {
-        toast({
-          title: 'Still generating…',
-          description: 'This run is taking a while. It keeps going in the background — refresh the list shortly.',
-        });
-        setShowGenModal(false);
-        setPage(1);
-        loadLeads({ page: 1 });
-        return;
-      }
-
-      if (job.state === 'failed') {
-        if (job.error_code === 'apify_approval_required' && job.approval_url) {
-          apifyApprovalToast(job.approval_url);
-        } else {
-          toast({ title: 'Generate failed', description: job.error_message || 'Lead generation failed.', variant: 'destructive' });
-        }
-        return;
-      }
-
-      const created = job.leads_created || 0;
-      const skipped = job.skipped_duplicates || 0;
-      toast({
-        title: created ? `${created} leads generated!` : 'No new leads found',
-        description: [
-          `Source: ${(job.source || genSource).toUpperCase()}`,
-          skipped ? `${skipped} duplicates skipped.` : '',
-          job.leads_queued ? `Qualifying ${job.leads_queued} in the background.` : '',
-        ].filter(Boolean).join(' '),
-      });
+      const icpName = icpProfiles.find(p => String(p.id) === String(genIcpId))?.name || '';
+      setGenRuns(runs => [...runs, { jobId, icpName, total: genCount, created: 0 }]);
       setShowGenModal(false);
       setGenCategory('');
-      setPage(1);
-      loadLeads({ page: 1 });
-      loadCategories();
+      toast({
+        title: `Finding ${genCount} leads${icpName ? ` for ${icpName}` : ''}`,
+        description: 'This runs in the background. Keep working; the leads appear in the list as they are found.',
+      });
     } catch (e) {
       const data = e?.data || e?.response?.data;
       if (data?.code === 'apify_approval_required') {
@@ -1219,9 +1185,56 @@ const SDRLeadsTab = () => {
       }
     } finally {
       setGenerating(false);
-      setGenProgress(null);
     }
   };
+
+  // Follow the background searches: every 3s ask each how far it is, show new leads as they arrive, and say how
+  // it went when it is done.
+  const genPollBusy = useRef(false);
+  useEffect(() => {
+    try { sessionStorage.setItem(GEN_RUNS_KEY, JSON.stringify(genRuns)); } catch (_) { /* only a convenience */ }
+    if (!genRuns.length) return undefined;
+    const id = setInterval(async () => {
+      if (genPollBusy.current) return;
+      genPollBusy.current = true;
+      try {
+        const results = await Promise.all(genRuns.map(run =>
+          getResearchJob(run.jobId).then(r => ({ run, job: (r?.data ?? r)?.job })).catch(e => ({ run, error: e }))));
+        let more = false;
+        let finished = false;
+        const keep = [];
+        for (const { run, job, error } of results) {
+          if (error?.status === 404) { finished = true; continue; }   // gone: nothing left to follow
+          if (!job) { keep.push(run); continue; }                       // a failed poll: try again next time
+          const created = job.leads_created || 0;
+          if (created > run.created) more = true;
+          if (!job.done) { keep.push({ ...run, created }); continue; }
+          finished = true;
+          const label = run.icpName ? ` for ${run.icpName}` : '';
+          if (job.state === 'failed') {
+            if (job.error_code === 'apify_approval_required' && job.approval_url) apifyApprovalToast(job.approval_url);
+            else toast({ title: `Lead search${label} failed`, description: job.error_message || 'Lead generation failed.', variant: 'destructive' });
+          } else {
+            const skipped = job.skipped_duplicates || 0;
+            toast({
+              title: created ? `${created} leads found${label}` : `No new leads found${label}`,
+              description: [
+                `Source: ${(job.source || '').toUpperCase()}`,
+                skipped ? `${skipped} duplicates skipped.` : '',
+                job.leads_queued ? `Qualifying ${job.leads_queued} in the background.` : '',
+              ].filter(Boolean).join(' '),
+            });
+          }
+        }
+        setGenRuns(keep);
+        if (more || finished) loadLeads({ quiet: true });
+        if (finished) { loadCategories(); loadIcps(); }
+      } finally {
+        genPollBusy.current = false;
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [genRuns, loadLeads, loadCategories, loadIcps]);
 
   // Import leads already generated in the Apify Console (works on the free plan,
   // which can't RUN paid actors via API but CAN read finished runs).
@@ -1569,8 +1582,15 @@ const SDRLeadsTab = () => {
         </div>
         {/* Background work in progress. A line of its own: as buttons in the row above, "Qualifying" and
             "Enriching" pushed Export onto a second line on the live site. */}
-        {(stats.qualifying > 0 || stats.enriching > 0) && (
+        {(stats.qualifying > 0 || stats.enriching > 0 || genRuns.length > 0) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 10, paddingTop: 10, borderTop: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
+            {genRuns.map(run => (
+              <span key={run.jobId} title="Leads are being found in the background; they appear in the list as they arrive."
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', color: '#34d399', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
+                <Loader2 size={12} className="animate-spin" />
+                Finding leads{run.icpName ? ` · ${run.icpName}` : ''} {run.created}/{run.total}
+              </span>
+            ))}
             {stats.qualifying > 0 && (
               <span title="Leads are being qualified in the background." style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
                 <Loader2 size={12} className="animate-spin" /> Qualifying {stats.qualifying.toLocaleString()}…
@@ -2781,7 +2801,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {generating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               {generating
-                ? (genProgress ? `Generating… ${genProgress.created}/${genProgress.total}` : 'Starting…')
+                ? 'Starting…'
                 : `Generate ${genCount} Leads`}
             </Button>
           </DialogFooter>
