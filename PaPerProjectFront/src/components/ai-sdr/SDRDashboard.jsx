@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   LayoutDashboard, Users, Mail, Calendar, BarChart3,
-  RefreshCw, Menu, Check, Settings, Sparkles, FlaskConical,
+  RefreshCw, Menu, Check, Settings, Sparkles,
 } from 'lucide-react';
 
 import SDROverviewTab from './SDROverviewTab';
@@ -21,7 +21,6 @@ import SDRAnalyticsTab from './SDRAnalyticsTab';
 import SDRCRMSyncTab from './SDRCRMSyncTab';
 import SDREmailAssistantTab from './SDREmailAssistantTab';
 import SDRSettingsTab from './SDRSettingsTab';
-import SDRTestsTab from './SDRTestsTab';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 
 const TAB_ITEMS = [
@@ -33,7 +32,6 @@ const TAB_ITEMS = [
   { value: 'email-assistant', icon: Sparkles,  label: 'Email Assistant' },
   { value: 'crm-sync',  icon: RefreshCw,       label: 'CRM Sync' },
   { value: 'settings',  icon: Settings,        label: 'Settings' },
-  { value: 'tests',     icon: FlaskConical,    label: 'Tests' },
 ];
 
 const PATH_TO_TAB = {
@@ -45,7 +43,6 @@ const PATH_TO_TAB = {
   'email-assistant': 'email-assistant',
   'crm-sync':'crm-sync',
   settings:  'settings',
-  tests:     'tests',
 };
 
 const TAB_TO_PATH = {
@@ -57,7 +54,6 @@ const TAB_TO_PATH = {
   'email-assistant': 'email-assistant',
   'crm-sync':'crm-sync',
   settings:  'settings',
-  tests:     'tests',
 };
 
 const SDRDashboard = () => {
@@ -117,9 +113,6 @@ const SDRDashboard = () => {
         </TabsContent>
         <TabsContent value="settings" className="mt-4">
           <SDRSettingsTab />
-        </TabsContent>
-        <TabsContent value="tests" className="mt-4">
-          <SDRTestsTab />
         </TabsContent>
       </Tabs>
     </div>

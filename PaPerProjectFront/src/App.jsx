@@ -39,7 +39,6 @@ import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import LoginPage from '@/pages/LoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import SuperAdminApiKeysPage from '@/pages/SuperAdminApiKeysPage';
-import SuperAdminSdrChecksPage from '@/pages/SuperAdminSdrChecksPage';
 import CompanyRegisterPage from '@/pages/CompanyRegisterPage';
 import CompanyLoginPage from '@/pages/CompanyLoginPage';
 import CompanySignupPage from '@/pages/CompanySignupPage';
@@ -126,14 +125,6 @@ import { useTranslation } from 'react-i18next';
               element={
                 <ProtectedRoute requireAdmin={true}>
                   <SuperAdminApiKeysPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/sdr-checks"
-              element={
-                <ProtectedRoute requireAdmin={true}>
-                  <SuperAdminSdrChecksPage />
                 </ProtectedRoute>
               }
             />
@@ -287,7 +278,6 @@ import { useTranslation } from 'react-i18next';
               <Route path="/ai-sdr/email-assistant" element={<SDRDashboard />} />
               <Route path="/ai-sdr/crm-sync" element={<SDRDashboard />} />
               <Route path="/ai-sdr/settings" element={<SDRDashboard />} />
-              <Route path="/ai-sdr/tests" element={<SDRDashboard />} />
 
               {/* AI Executive Meeting Assistant */}
               <Route path="/exec-meeting" element={<Navigate to="/exec-meeting/dashboard" replace />} />
