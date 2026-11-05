@@ -42,7 +42,6 @@ from api.views import hr_self_service
 from api.views import module_purchase
 from api.views import company_api_keys
 from api.views import admin_api_keys
-from api.views import sdr_checks
 from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
@@ -796,19 +795,7 @@ urlpatterns = [
     # Company picker for admin forms
     re_path(r'^admin/companies-list/?$', admin_api_keys.list_companies_simple, name='admin_list_companies'),  # GET
 
-    # Super Admin — run the AI SDR's automated tests and see which pass
-    re_path(r'^admin/sdr-checks/?$', sdr_checks.admin_overview, name='admin_sdr_checks'),  # GET
-    re_path(r'^admin/sdr-checks/run/?$', sdr_checks.admin_start, name='admin_sdr_checks_start'),  # POST {suite}
-    re_path(r'^admin/sdr-checks/runs/(?P<run_id>[0-9a-f-]+)/?$', sdr_checks.admin_run_detail, name='admin_sdr_checks_run'),  # GET ?suite=
-
     # AI SDR Agent endpoints
-    # Tests page (owner or admin): run the AI SDR's automated tests and see which pass
-    re_path(r'^sdr/checks/?$', sdr_checks.company_overview, name='sdr_checks'),  # GET
-    re_path(r'^sdr/checks/run/?$', sdr_checks.company_start, name='sdr_checks_start'),  # POST {suite}
-    re_path(r'^sdr/checks/runs/(?P<run_id>[0-9a-f-]+)/?$', sdr_checks.company_run_detail, name='sdr_checks_run'),  # GET ?suite=
-    # Tests page: health checks and live tests of the company's own AI SDR
-    re_path(r'^sdr/live-checks/?$', sdr_checks.live_catalog, name='sdr_live_checks'),  # GET
-    re_path(r'^sdr/live-checks/(?P<key>[a-z_]+)/run/?$', sdr_checks.live_run, name='sdr_live_checks_run'),  # POST {email?, campaign_id?}
     re_path(r'^sdr/scheduler-status/?$', sdr_api.sdr_scheduler_status, name='sdr_scheduler_status'),  # GET
     re_path(r'^sdr/leads/bulk-delete/?$', sdr_api.sdr_bulk_delete_leads, name='sdr_bulk_delete_leads'),  # POST
     re_path(r'^sdr/leads/bulk-restore/?$', sdr_api.sdr_bulk_restore_leads, name='sdr_bulk_restore_leads'),  # POST

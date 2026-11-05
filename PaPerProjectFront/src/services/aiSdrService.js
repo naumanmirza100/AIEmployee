@@ -757,21 +757,3 @@ export const retryCrmFailed = async () => {
   try { return await companyApi.post('/crm-sync/queue/retry/'); }
   catch (e) { console.error('CRM retry error:', e); throw e; }
 };
-
-// --------------------------------------------------------------------------
-// Tests page (owner or admin): run the AI SDR's automated tests on the server
-// --------------------------------------------------------------------------
-export const sdrChecksApi = {
-  getOverview: () => companyApi.get('/sdr/checks').then((r) => r.data),
-  // suite: a part's key, or 'all' for every AI SDR test.
-  startRun: (suite) => companyApi.post('/sdr/checks/run', { suite }).then((r) => r.data),
-  getRun: (runId, suite) =>
-    companyApi.get(`/sdr/checks/runs/${runId}${suite ? `?suite=${encodeURIComponent(suite)}` : ''}`).then((r) => r.data),
-};
-
-// Health checks and live tests of the company's own AI SDR (ai_sdr_agent/live_checks.py)
-export const sdrLiveChecksApi = {
-  getCatalog: () => companyApi.get('/sdr/live-checks').then((r) => r.data),
-  // body: { email?, campaign_id? } for the live tests that need them.
-  run: (key, body = {}) => companyApi.post(`/sdr/live-checks/${key}/run`, body).then((r) => r.data),
-};

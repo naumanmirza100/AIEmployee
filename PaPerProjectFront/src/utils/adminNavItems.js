@@ -12,7 +12,6 @@ import {
   History,
   Inbox,
   Bell,
-  FlaskConical,
 } from 'lucide-react';
 
 /**
@@ -23,10 +22,9 @@ import {
  * page instead of remounting the whole route — the sidebar itself never
  * unmounts, so nothing flashes or re-fetches on navigation.
  *
- * Two groups plus AI SDR Checks and Notifications, mirroring the company-side shell:
- *   Dashboard     → /admin/dashboard?tab=…
- *   API Keys      → /admin/api-keys?tab=…
- *   AI SDR Checks → /admin/sdr-checks (run the AI SDR's automated tests)
+ * Two groups plus Notifications, mirroring the company-side shell:
+ *   Dashboard  → /admin/dashboard?tab=…
+ *   API Keys   → /admin/api-keys?tab=…
  *
  * `pendingRequests` badges the API Keys group (and its Requests child) so the
  * admin can see outstanding key requests without opening the tab.
@@ -66,13 +64,6 @@ export const getAdminNavItems = (navigate, { pendingRequests = 0 } = {}) => [
       // lives on the group above rather than here.
       { label: 'Requests', icon: Inbox, path: '/admin/api-keys', tab: 'requests' },
     ],
-  },
-  {
-    label: 'AI SDR Checks',
-    icon: FlaskConical,
-    section: 'admin-sdr-checks',
-    basePath: '/admin/sdr-checks',
-    onClick: () => navigate('/admin/sdr-checks'),
   },
   {
     label: 'Notifications',
