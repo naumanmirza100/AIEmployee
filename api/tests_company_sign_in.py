@@ -287,7 +287,7 @@ class OnlyCompanyLoginsAreTakenTests(Base):
 
     def test_a_staff_token_is_not_a_company_login(self):
         key = self.user_token(self.staff)
-        for path in ('/api/company/profile', '/api/sdr/leads'):
+        for path in ('/api/company/profile', '/api/sdr/leads', '/api/sdr/checks'):
             reply = self.as_token(key).get(path)
             self.assertIn(reply.status_code, (401, 403), path)
             self.assertNotEqual(_json(reply).get('error'), 'subscription_required', path)
@@ -364,6 +364,31 @@ class AISDRNeedsTheAgentTests(Base):
         reply = self.as_token(key).get('/api/sdr/leads')
         self.assertIn(reply.status_code, (401, 403))
         self.assertIn('inactive', _json(reply)['detail'])
+
+
+class AISDRAdminScreensTests(Base):
+    """AI SDR -> Tests (/api/sdr/checks) is for an owner or admin; other roles are refused."""
+
+    def setUp(self):
+        super().setUp()
+        self.buy_ai_sdr()
+
+    def checks(self, role):
+        login = CompanyUser.objects.create(company=self.company, email=f'{role}@margalla.test', full_name=role,
+                                           role=role, password_hash=make_password(PASSWORD), is_active=True)
+        return self.as_token(self.token_for(login)).get('/api/sdr/checks')
+
+    def test_an_ordinary_login_is_refused(self):
+        for role in ('company_user', 'manager', 'project_manager'):
+            reply = self.checks(role)
+            self.assertEqual(reply.status_code, 403, role)
+            self.assertNotIn('data', _json(reply), role)
+
+    def test_an_owner_and_an_admin_get_in(self):
+        for role in ('owner', 'admin'):
+            reply = self.checks(role)
+            self.assertEqual(reply.status_code, 200, (role, reply.content[:300]))
+            self.assertIn('suites', _json(reply)['data'])
 
 
 class OtherSignInFormsTests(Base):
