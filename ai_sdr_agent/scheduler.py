@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 # ── Module-level state ───────────────────────────────────────────────────────
 _scheduler: BackgroundScheduler | None = None
+# When this process started its scheduler: a job waits a little before its first run (the health check needs this).
+_started_at: datetime.datetime | None = None
 _lock = threading.Lock()
 
 
@@ -258,7 +260,7 @@ def start_scheduler() -> None:
     Start the BackgroundScheduler. Idempotent — safe to call multiple times.
     If the scheduler is already running this is a no-op.
     """
-    global _scheduler
+    global _scheduler, _started_at
 
     with _lock:
         if _scheduler is not None and _scheduler.running:
@@ -313,6 +315,7 @@ def start_scheduler() -> None:
             )
 
         _scheduler.start()
+        _started_at = datetime.datetime.now(tz=datetime.timezone.utc)
 
         # Ensure clean shutdown when the Python process exits (Ctrl-C, SIGTERM, etc.)
         atexit.register(stop_scheduler)
@@ -350,7 +353,7 @@ def scheduler_status() -> dict:
     """
     s = _scheduler
     if s is None or not s.running:
-        return {"running": False, "jobs": []}
+        return {"running": False, "jobs": [], "started_at": None}
 
     jobs = []
     for job in s.get_jobs():
@@ -359,7 +362,7 @@ def scheduler_status() -> dict:
             "name": job.name,
             "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
         })
-    return {"running": True, "jobs": jobs}
+    return {"running": True, "jobs": jobs, "started_at": _started_at.isoformat() if _started_at else None}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

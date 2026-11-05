@@ -84,3 +84,5 @@ faiss-cpu==1.13.1
 google-api-python-client==2.198.0
 google-auth==2.55.2
 google-auth-httplib2==0.4.0
+# Browser tests of the AI SDR screens (ai_sdr_agent/tests_browser.py); then: playwright install chromium
+playwright==1.49.1

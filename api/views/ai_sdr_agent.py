@@ -40,7 +40,7 @@ from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
 from ai_sdr_agent.agents.email_assistant_agent import strip_quoted_reply
 from ai_sdr_agent.reply_actions import apply_reply_action as _apply_reply_action, handle_inbox_reply, read_inbox
 from ai_sdr_agent.agents.lead_validator import normalize_linkedin_url
-from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+from ai_sdr_agent.agents.outreach_agent import OnDoNotEmailList, OutreachAgent
 
 from contextlib import contextmanager
 
@@ -66,17 +66,29 @@ def _ensure_https(url: str) -> str:
 _EMAIL_RE = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
 
 
-def _validate_lead_input(full_name, email, linkedin_url, company_size) -> Optional[str]:
+def _validate_lead_input(full_name, email, linkedin_url, company_size, company_website='',
+                         require_name_or_email=True) -> Optional[str]:
     """Server-side validation for a manually-created lead. Mirrors the frontend
     checks so invalid data can't be saved by bypassing the UI. Returns an error
-    message string, or None when the input is valid.
+    message string, or None when the input is valid. An edit passes only the fields it changes, with
+    require_name_or_email=False (it checks that rule on the lead as it will be).
     """
+    if not all(isinstance(v, (str, type(None))) for v in (full_name, email, linkedin_url, company_website)):
+        return 'Name, email, LinkedIn and website must be text.'
     name = (full_name or '').strip()
     email = (email or '').strip()
     linkedin = (linkedin_url or '').strip()
 
-    if not name and not email:
+    if require_name_or_email and not name and not email:
         return 'Enter at least a name or a business email.'
+    # The columns hold 255 characters; a longer value was a database error on save.
+    if len(name) > 255 or len(email) > 255:
+        return 'A name or email can be at most 255 characters.'
+    if len(linkedin) > 500 or len(company_website or '') > 500:
+        return 'A LinkedIn or website address can be at most 500 characters.'
+    website_err = _validate_url_optional(company_website, 'Enter a valid website like https://company.com.')
+    if website_err:
+        return website_err
     if email and not _EMAIL_RE.match(email):
         return 'Enter a valid business email like jane@company.com.'
     if linkedin:
@@ -100,6 +112,32 @@ def _validate_url_optional(value, error_message) -> Optional[str]:
     if not host or '.' not in host or ' ' in host:
         return error_message
     return None
+
+
+def _whole_number(value, label, minimum=0, maximum=None) -> Optional[int]:
+    """A whole number from a request (an int or a digit string), None when left empty. Raises ValueError with a
+    message people can read: int('lots') reached the client as "invalid literal for int() with base 10"."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    text = str(value).strip()
+    if isinstance(value, bool) or not re.fullmatch(r'-?\d+', text):
+        raise ValueError(f'{label} must be a whole number.')
+    number = int(text)
+    if maximum is not None and not minimum <= number <= maximum:
+        raise ValueError(f'{label} must be between {minimum} and {maximum}.')
+    if number < minimum:
+        raise ValueError(f'{label} must be at least {minimum}.')
+    return number
+
+
+def _id_list(value, key='ids'):
+    """The list of ids a bulk request sends, as ints; ValueError when it is not one. ['abc'] reached the database
+    and came back as a 500."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(f'Provide a non-empty "{key}" list.')
+    if any(isinstance(v, bool) or not re.fullmatch(r'\d+', str(v).strip()) for v in value):
+        raise ValueError(f'"{key}" must be a list of lead numbers.')
+    return [int(str(v).strip()) for v in value]
 
 
 def _get_research_agent(company, company_user=None) -> LeadResearchAgent:
@@ -173,6 +211,12 @@ def _validate_mail_settings(d, campaign=None):
             return d[key]
         return getattr(campaign, key, default) if campaign else default
 
+    # Ports are checked even with no host: 'abc' without a host reached int() when saving, a 500.
+    for key, label in (('smtp_port', 'SMTP port'), ('imap_port', 'IMAP port')):
+        try:
+            _whole_number(d.get(key), label, 1, 65535)
+        except ValueError as exc:
+            return str(exc)
     try:
         smtp_err = validate_mail_server(_val('smtp_host'), _val('smtp_port') or 587, 'smtp')
         imap_err = validate_mail_server(_val('imap_host'), _val('imap_port') or 993, 'imap')
@@ -191,6 +235,56 @@ def _validate_mail_settings(d, campaign=None):
             d.get('smtp_password') or getattr(campaign, 'smtp_password', ''),
             _val('imap_host'), _val('imap_port') or 993) or None
     return None
+
+
+def _campaign_fields_error(d, creating=False) -> Optional[str]:
+    """What is wrong with a campaign's name, From address or start date, else None. A blank name, a From address
+    that is no address and a start date like 'next tuesday' were saved, or ended in a 500."""
+    if (creating or 'name' in d) and not str(d.get('name') or '').strip():
+        return 'Campaign name is required.'
+    from_email = str(d.get('from_email') or '').strip()
+    if from_email:
+        try:
+            validate_email(from_email)
+        except ValidationError:
+            return 'Enter a valid From email address, like you@company.com.'
+    if d.get('start_date'):
+        from datetime import date as _date
+        try:
+            _date.fromisoformat(str(d['start_date']))
+        except ValueError:
+            return 'Start date must be a date like 2026-12-01.'
+    return None
+
+
+def _step_fields(d, step=None) -> dict:
+    """The step fields sent, checked; ValueError with a message people can read. Delays and orders that were not
+    numbers ended in a 500, and negative delays, unknown types and empty emails were saved."""
+    clean = {}
+    step_type = d.get('step_type', step.step_type if step else 'email')
+    if 'step_type' in d or step is None:
+        if step_type not in dict(SDRCampaignStep.STEP_TYPE_CHOICES):
+            raise ValueError('Step type must be email or linkedin.')
+        clean['step_type'] = step_type
+    for key, label in (('subject_template', 'subject'), ('body_template', 'text')):
+        if key in d or step is None:
+            value = d.get(key)
+            value = '' if value is None else value
+            if not isinstance(value, str):
+                raise ValueError(f'The step {label} must be text.')
+            # A LinkedIn step has no subject; every step has its text.
+            if not value.strip() and (key == 'body_template' or step_type == 'email'):
+                raise ValueError(f'The step needs a {label}.')
+            clean[key] = value
+    if 'delay_days' in d:
+        days = _whole_number(d['delay_days'], 'Delay (days)', 0, 365)
+        if days is not None:
+            clean['delay_days'] = days
+    if 'step_order' in d:
+        order = _whole_number(d['step_order'], 'Step order', 1, 100)
+        if order is not None:
+            clean['step_order'] = order
+    return clean
 
 
 # --------------------------------------------------------------------------
@@ -348,21 +442,43 @@ def icp_profile(request):
     # POST — save / update
     try:
         data = request.data
+        # Checked before saving: 'high' as a threshold was a 500, and 150, -5, a warm bar above the hot one or a
+        # size range back to front were saved and made every score land in the wrong bucket.
+        try:
+            name = str(data.get('name', 'Default ICP') or '').strip() or 'Default ICP'
+            if len(name) > 255:
+                raise ValueError('The ICP name can be at most 255 characters.')
+            lists = {}
+            for key, label in (('industries', 'Industries'), ('job_titles', 'Job titles'),
+                               ('locations', 'Locations'), ('keywords', 'Keywords')):
+                lists[key] = data.get(key) or []
+                if not isinstance(lists[key], list):
+                    raise ValueError(f'{label} must be a list.')
+            size_min = _whole_number(data.get('company_size_min'), 'Minimum company size') or None
+            size_max = _whole_number(data.get('company_size_max'), 'Maximum company size') or None
+            if size_min and size_max and size_min > size_max:
+                raise ValueError('The minimum company size cannot be above the maximum.')
+            # Defaults must match SDRICPProfile model defaults (75 / 60) so
+            # hot/warm bucketing is consistent regardless of code path.
+            hot = _whole_number(data.get('hot_threshold', 75), 'The hot threshold', maximum=100)
+            warm = _whole_number(data.get('warm_threshold', 60), 'The warm threshold', maximum=100)
+            hot = 75 if hot is None else hot
+            warm = 60 if warm is None else warm
+            if warm > hot:
+                raise ValueError('The warm threshold cannot be above the hot threshold.')
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
+
         icp, _ = SDRIcpProfile.objects.update_or_create(
             company_user=company_user,
             is_active=True,
             defaults={
-                'name': data.get('name', 'Default ICP'),
-                'industries': data.get('industries', []),
-                'job_titles': data.get('job_titles', []),
-                'company_size_min': data.get('company_size_min') or None,
-                'company_size_max': data.get('company_size_max') or None,
-                'locations': data.get('locations', []),
-                'keywords': data.get('keywords', []),
-                # Defaults must match SDRICPProfile model defaults (75 / 60) so
-                # hot/warm bucketing is consistent regardless of code path.
-                'hot_threshold': int(data.get('hot_threshold', 75)),
-                'warm_threshold': int(data.get('warm_threshold', 60)),
+                'name': name,
+                'company_size_min': size_min,
+                'company_size_max': size_max,
+                'hot_threshold': hot,
+                'warm_threshold': warm,
+                **lists,
             },
         )
         return Response({'status': 'success', 'message': 'ICP saved.', 'data': _serialize_icp(icp)})
@@ -559,7 +675,7 @@ def leads_list(request):
         linkedin_input = (d.get('linkedin_url') or '').strip()
         size_input = d.get('company_size')
 
-        err = _validate_lead_input(full_name, email_input, linkedin_input, size_input)
+        err = _validate_lead_input(full_name, email_input, linkedin_input, size_input, d.get('company_website'))
         if err:
             return Response({'status': 'error', 'message': err}, status=400)
         try:
@@ -636,6 +752,22 @@ def lead_detail(request, lead_id):
     if request.method == 'PUT':
         try:
             d = request.data
+            # An edit is checked like a new lead: a bad email, a non-LinkedIn link or an unknown status were saved
+            # as sent, and 'lots' employees was a 500. Only the fields sent are checked, so an edit to the job
+            # title is not refused over a scraped value already on the lead.
+            err = _validate_lead_input(d.get('full_name'), d.get('email'), d.get('linkedin_url'),
+                                       d.get('company_size'), d.get('company_website'), require_name_or_email=False)
+            if not err:
+                after = {f: d[f] if f in d else getattr(lead, f) for f in ('full_name', 'first_name', 'last_name', 'email')}
+                name = after['full_name'] or f"{after['first_name'] or ''} {after['last_name'] or ''}"
+                if not str(name).strip() and not str(after['email'] or '').strip():
+                    err = 'Enter at least a name or a business email.'
+            if not err and 'status' in d and d['status'] not in dict(SDRLead.STATUS_CHOICES):
+                err = 'Unknown lead status.'
+            if err:
+                return Response({'status': 'error', 'message': err}, status=400)
+            if 'company_size' in d:
+                d = {**d, 'company_size': int(str(d['company_size']).strip()) if str(d['company_size'] or '').strip() else None}
             for field in [
                 'first_name', 'last_name', 'full_name', 'email', 'phone',
                 'job_title', 'company_name', 'company_industry',
@@ -1004,9 +1136,14 @@ def research_leads(request):
     import threading
     company_user = request.user
     try:
-        count = max(1, min(int(request.data.get('count', 20)), MAX_LEADS_PER_SEARCH))
+        # 'lots' as a count or an icp_id was a 500.
+        try:
+            count = _whole_number(request.data.get('count', 20), 'The number of leads', minimum=-10**9)
+            icp_id = _whole_number(request.data.get('icp_id'), 'The ICP')
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
+        count = max(1, min(20 if count is None else count, MAX_LEADS_PER_SEARCH))
         source = request.data.get('source', 'auto')
-        icp_id = request.data.get('icp_id')
         if icp_id:
             icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=icp_id).first()
         else:
@@ -1167,9 +1304,10 @@ def research_leads_batch_endpoint(request):
     Expects JSON: {'lead_ids': [1, 2, ...], 'campaign_id': Optional[int], 'force': bool}
     """
     company_user = request.user
-    lead_ids = request.data.get('lead_ids', [])
-    if not lead_ids or not isinstance(lead_ids, list):
-        return Response({'status': 'error', 'message': 'lead_ids must be a non-empty list of IDs.'}, status=400)
+    try:
+        lead_ids = _id_list(request.data.get('lead_ids'), 'lead_ids')
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=400)
 
     # Restrict to leads belonging to this user (capped at 50 per batch)
     owned_ids = list(SDRLead.all_objects.filter(company_user=company_user, pk__in=lead_ids[:50]).values_list('pk', flat=True))
@@ -1269,9 +1407,10 @@ def enrich_leads_batch_endpoint(request):
     Expects JSON: {'lead_ids': [1, 2, ...], 'force': bool, 'async': bool}
     """
     company_user = request.user
-    lead_ids = request.data.get('lead_ids', [])
-    if not lead_ids or not isinstance(lead_ids, list):
-        return Response({'status': 'error', 'message': 'lead_ids must be a non-empty list of IDs.'}, status=400)
+    try:
+        lead_ids = _id_list(request.data.get('lead_ids'), 'lead_ids')
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=400)
 
     owned_ids = list(SDRLead.all_objects.filter(company_user=company_user, pk__in=lead_ids[:50]).values_list('pk', flat=True))
     if not owned_ids:
@@ -1307,7 +1446,11 @@ def fetch_apify_leads(request):
     platform AI tokens are exhausted, so the import never fails on that)."""
     company_user = request.user
     try:
-        max_leads = min(int(request.data.get('count', 200)), 500)
+        try:   # 'all' as a count was a 500
+            max_leads = _whole_number(request.data.get('count', 200), 'The number of leads', minimum=-10**9)
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
+        max_leads = min(200 if max_leads is None else max_leads, 500)
         actor = request.data.get('actor')  # optional override
         icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
 
@@ -1466,7 +1609,16 @@ def import_leads_csv(request):
             return Response({'status': 'error', 'message': str(exc)}, status=400)
         category_cache: dict = {}
 
-        decoded = csv_file.read().decode('utf-8-sig')
+        # An Excel file or another binary upload was a 500 ("'utf-8' codec can't decode"), and an empty file
+        # answered "success".
+        try:
+            decoded = csv_file.read().decode('utf-8-sig')
+        except UnicodeDecodeError:
+            return Response({'status': 'error', 'message': 'That file is not a CSV. Save it as CSV (UTF-8) and '
+                                                           'upload it again.'}, status=400)
+        if not decoded.strip():
+            return Response({'status': 'error', 'message': 'The file is empty. Add a header row and one lead '
+                                                           'per row.'}, status=400)
         reader = csv.DictReader(io.StringIO(decoded))
 
         created = 0
@@ -1627,9 +1779,10 @@ def sdr_bulk_delete_leads(request):
     """
     company_user = request.user
     try:
-        ids = request.data.get('ids', [])
-        if not isinstance(ids, list) or not ids:
-            return Response({'status': 'error', 'message': 'Provide a non-empty "ids" list.'}, status=400)
+        try:
+            ids = _id_list(request.data.get('ids'))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
 
         # Safety: only delete leads that belong to this company_user.
         # Soft delete (mark hidden) so the client can offer an Undo. Capture the
@@ -1671,10 +1824,10 @@ def sdr_bulk_set_category(request):
     if request.data.get('all_matching') is True:
         qs = _apply_lead_filters(qs, request).order_by()
     else:
-        ids = request.data.get('ids', [])
-        if not isinstance(ids, list) or not ids:
-            return Response({'status': 'error', 'message': 'Provide a non-empty "ids" list, or "all_matching".'},
-                            status=400)
+        try:
+            ids = _id_list(request.data.get('ids'))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': f'{exc} Or send "all_matching".'}, status=400)
         qs = qs.filter(id__in=ids)
 
     updated = qs.update(category=category, updated_at=timezone.now())
@@ -1781,9 +1934,10 @@ def sdr_bulk_restore_leads(request):
     Only restores leads belonging to the authenticated company_user."""
     company_user = request.user
     try:
-        ids = request.data.get('ids', [])
-        if not isinstance(ids, list) or not ids:
-            return Response({'status': 'error', 'message': 'Provide a non-empty "ids" list.'}, status=400)
+        try:
+            ids = _id_list(request.data.get('ids'))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
 
         qs = SDRLead.all_objects.filter(company_user=company_user, id__in=ids, is_deleted=True)
         restored_count = qs.update(is_deleted=False, deleted_at=None)
@@ -2053,8 +2207,9 @@ def sdr_campaigns_list(request):
         start_date = d.get('start_date') or None  # ISO date string or None
 
         # ── Validation (mirrors the frontend; never trust the client) ─────────
-        if not (d.get('name') or '').strip():
-            return Response({'status': 'error', 'message': 'Campaign name is required.'}, status=400)
+        field_err = _campaign_fields_error(d, creating=True)
+        if field_err:
+            return Response({'status': 'error', 'message': field_err}, status=400)
         mail_err = _validate_mail_settings(d)
         if mail_err:
             return Response({'status': 'error', 'message': mail_err}, status=400)
@@ -2159,7 +2314,7 @@ def sdr_campaign_detail(request, campaign_id):
     if request.method == 'PUT':
         try:
             d = request.data
-            mail_err = _validate_mail_settings(d, campaign)
+            mail_err = _campaign_fields_error(d) or _validate_mail_settings(d, campaign)
             if mail_err:
                 return Response({'status': 'error', 'message': mail_err}, status=400)
             # Leads are enrolled: the campaign's mailbox can be changed but not taken away.
@@ -2326,6 +2481,11 @@ def sdr_assistant_write(request):
     prospect['notes'] = str(d.get('notes') or '')[:800]
     if not (prospect['name'] or prospect['company']):
         return Response({'status': 'error', 'message': "Type at least the prospect's name or company."}, status=400)
+    # An unknown kind or tone was quietly written as a professional first email.
+    if d.get('kind') and str(d['kind']) not in EmailAssistantAgent.EMAIL_KINDS:
+        return Response({'status': 'error', 'message': 'Choose the kind of email from the list.'}, status=400)
+    if d.get('tone') and str(d['tone']) not in EmailAssistantAgent.TONES:
+        return Response({'status': 'error', 'message': 'Choose the tone from the list.'}, status=400)
     sender, offer = _assistant_context(company_user, d)
     try:
         email_text = EmailAssistantAgent(company=company_user.company).write_email(
@@ -2451,14 +2611,18 @@ def sdr_campaign_steps(request, campaign_id):
     # POST — add a step
     try:
         d = request.data
+        try:
+            fields = _step_fields(d)
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
         step = SDRCampaignStep.objects.create(
             campaign=campaign,
-            step_order=d.get('step_order', campaign.steps.count() + 1),
-            step_type=d.get('step_type', 'email'),
-            delay_days=int(d.get('delay_days', 1)),
+            step_order=fields.get('step_order', campaign.steps.count() + 1),
+            step_type=fields['step_type'],
+            delay_days=fields.get('delay_days', 1),
             name=d.get('name', ''),
-            subject_template=d.get('subject_template', ''),
-            body_template=d.get('body_template', ''),
+            subject_template=fields['subject_template'],
+            body_template=fields['body_template'],
             ai_personalize=bool(d.get('ai_personalize', True)),
         )
         return Response({'status': 'success', 'data': _serialize_step(step)}, status=201)
@@ -2491,13 +2655,14 @@ def sdr_campaign_step_detail(request, campaign_id, step_id):
     # PUT
     try:
         d = request.data
-        for field in ['step_type', 'name', 'subject_template', 'body_template']:
-            if field in d:
-                setattr(step, field, d[field])
-        if 'step_order' in d:
-            step.step_order = int(d['step_order'])
-        if 'delay_days' in d:
-            step.delay_days = int(d['delay_days'])
+        try:
+            fields = _step_fields(d, step)
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
+        if 'name' in d:
+            step.name = d['name']
+        for field, value in fields.items():
+            setattr(step, field, value)
         if 'ai_personalize' in d:
             step.ai_personalize = bool(d['ai_personalize'])
         step.save()
@@ -2575,6 +2740,10 @@ def sdr_enroll_leads(request, campaign_id):
         lead_ids = request.data.get('lead_ids', [])
         if not lead_ids:
             return Response({'status': 'error', 'message': 'No lead_ids provided.'}, status=400)
+        try:
+            lead_ids = _id_list(lead_ids, 'lead_ids')     # ['abc'] reached the database: a 500
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=400)
 
         # Require explicit SMTP credentials — never fall back to global Django email settings
         if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
@@ -2736,6 +2905,11 @@ def sdr_mark_replied(request, campaign_id, enrollment_id):
     try:
         d = request.data
         reply_content = d.get('reply_content', '')
+        if reply_content is None:
+            reply_content = ''
+        if not isinstance(reply_content, str):
+            # A list or number reached the reply reader and came back as a 500.
+            return Response({'status': 'error', 'message': 'The reply must be text.'}, status=400)
         campaign = enrollment.campaign
         lead = enrollment.lead
 
@@ -2869,6 +3043,13 @@ def sdr_reset_enrollment(request, campaign_id, enrollment_id):
         enrollment = SDRCampaignEnrollment.objects.get(id=enrollment_id, campaign=campaign)
     except SDRCampaignEnrollment.DoesNotExist:
         return Response({'status': 'error', 'message': 'Enrollment not found.'}, status=404)
+
+    # Someone who asked to stop, or whose address bounced, is not put back into the emails.
+    from ai_sdr_agent.agents.outreach_agent import is_email_suppressed
+    if enrollment.status in ('unsubscribed', 'bounced') or is_email_suppressed(company_user, enrollment.lead.email):
+        return Response({'status': 'error', 'message': (
+            f'{enrollment.lead.display_name} unsubscribed or their address bounced, so they cannot be '
+            'put back into the campaign.')}, status=400)
 
     enrollment.status = 'active'
     enrollment.current_step = 0
@@ -3168,6 +3349,8 @@ def sdr_meetings_list(request):
             status=fields.get('status', 'pending'),
             is_manual=True,
         )
+        if new['status'] == 'scheduled' and new['scheduled_at'] and new['scheduled_at'] <= timezone.now():
+            return Response({'status': 'error', 'message': 'A booked call cannot be in the past.'}, status=400)
         if _takes_time(new['status'], new['scheduled_at']):
             with _host_booking(company_user, new['scheduled_at'], new['duration_minutes']):
                 meeting = SDRMeeting.objects.create(**new)
@@ -3309,29 +3492,32 @@ def sdr_confirm_meeting(request, meeting_id):
 
     try:
         d = request.data
-        scheduled_at = d.get('scheduled_at')
-        if not scheduled_at:
+        if not d.get('scheduled_at'):
             return Response({'status': 'error', 'message': 'scheduled_at is required.'}, status=400)
+        # The same checks as editing a meeting: a time that is no date, or a length that is no number, was a 500.
+        fields, error = _clean_meeting_fields({k: d[k] for k in ('scheduled_at', 'duration_minutes') if d.get(k)})
+        if error:
+            return Response({'status': 'error', 'message': error}, status=400)
+        scheduled_at = fields['scheduled_at']
+        if scheduled_at <= timezone.now():
+            return Response({'status': 'error', 'message': 'The meeting time must be in the future.'}, status=400)
 
-        # Parse ISO string to datetime if needed
-        if isinstance(scheduled_at, str):
-            from django.utils.dateparse import parse_datetime
-            parsed = parse_datetime(scheduled_at)
-            if parsed is None:
-                from datetime import datetime
-                parsed = datetime.fromisoformat(scheduled_at.replace('Z', '+00:00'))
-            scheduled_at = parsed
+        # Use browser timezone for formatting the proposed time in the email
+        # so the lead sees the same time the SDR picked in the UI
+        browser_tz = d.get('browser_timezone', '') or meeting.lead_timezone or 'UTC'
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(str(browser_tz))
+        except Exception:  # ZoneInfoNotFoundError, or a name that is no path
+            return Response({'status': 'error', 'message': f'Unknown time zone: {browser_tz}.'}, status=400)
 
         meeting.scheduled_at = scheduled_at
-        if d.get('duration_minutes'):
-            meeting.duration_minutes = int(d['duration_minutes'])
+        if 'duration_minutes' in fields:
+            meeting.duration_minutes = fields['duration_minutes']
         if d.get('notes'):
             meeting.notes = d['notes']
 
         send_approval = str(d.get('send_approval', 'false')).lower() in ('true', '1', 'yes')
-        # Use browser timezone for formatting the proposed time in the email
-        # so the lead sees the same time the SDR picked in the UI
-        browser_tz = d.get('browser_timezone', '') or meeting.lead_timezone or 'UTC'
         if meeting.lead_timezone != browser_tz and browser_tz != 'UTC':
             meeting.lead_timezone = browser_tz
 
@@ -3497,6 +3683,7 @@ _LINK_EXPIRED_PAGE = dict(
     title='Link expired',
     heading='This link is no longer valid',
     message='The meeting link is invalid or has expired. Please reply to the original email and we will help you reschedule.',
+    status=404,
 )
 
 
@@ -3514,7 +3701,7 @@ def sdr_meeting_lead_approve(request, approval_token):
         meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
             approval_token=approval_token
         )
-    except SDRMeeting.DoesNotExist:
+    except (SDRMeeting.DoesNotExist, ValidationError):  # a token that is no UUID was a 500
         return _approval_result_page(**_LINK_EXPIRED_PAGE)
 
     if request.method == 'GET':
@@ -3668,13 +3855,8 @@ def sdr_meeting_lead_suggest(request, approval_token):
     graceful self-contained fallback when no frontend URL is set)."""
     try:
         meeting = SDRMeeting.objects.get(approval_token=approval_token)
-    except SDRMeeting.DoesNotExist:
-        return _approval_result_page(
-            ok=False, accent='#dc2626',
-            title='Link expired',
-            heading='This link is no longer valid',
-            message='The meeting link is invalid or has expired. Please reply to the original email and we will help you reschedule.',
-        )
+    except (SDRMeeting.DoesNotExist, ValidationError):
+        return _approval_result_page(**_LINK_EXPIRED_PAGE)
 
     # GET must not change state: email scanners pre-fetch links, and downgrading
     # the meeting here would make the "Yes" link stop working. The booking page
@@ -3712,6 +3894,9 @@ def sdr_send_meeting_reminder(request, meeting_id):
 
     if not meeting.enrollment or not meeting.enrollment.campaign:
         return Response({'status': 'error', 'message': 'Meeting has no associated campaign/SMTP.'}, status=400)
+    # A reminder of a call with no time said "TBD"; of a cancelled one, it reminded the lead of nothing.
+    if meeting.status != 'scheduled' or not meeting.scheduled_at:
+        return Response({'status': 'error', 'message': 'Only a booked call with a time can be reminded.'}, status=400)
 
     campaign = meeting.enrollment.campaign
     try:
@@ -3722,6 +3907,9 @@ def sdr_send_meeting_reminder(request, meeting_id):
         return Response({'status': 'success', 'message': 'Reminder sent.', 'data': _serialize_meeting(meeting)})
     except KeyServiceError:
         raise
+    except OnDoNotEmailList:
+        return Response({'status': 'error', 'message': 'This lead is on the do-not-email list; no reminder was sent.'},
+                        status=409)
     except Exception as exc:
         logger.error("Send reminder error for meeting %s: %s", meeting.id, exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -4022,6 +4210,14 @@ def sdr_agent_settings(request):
     data = request.data
     changed = False
 
+    # A key sent as a number was a 500 ("'int' object has no attribute 'strip'"); one longer than its column
+    # was a database error.
+    for key, limit in (('apollo_api_key', 500), ('apify_api_token', 500), ('apify_actor_id', 255)):
+        if key in data and not isinstance(data[key], (str, type(None))):
+            return Response({'status': 'error', 'message': f'{key} must be text.'}, status=400)
+        if key in data and len((data[key] or '').strip()) > limit:
+            return Response({'status': 'error', 'message': f'{key} can be at most {limit} characters.'}, status=400)
+
     if 'apollo_api_key' in data:
         sdr_settings.apollo_api_key = (data['apollo_api_key'] or '').strip()
         changed = True
@@ -4082,7 +4278,7 @@ def sdr_booking_info(request, token):
         meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
             booking_token=token
         )
-    except SDRMeeting.DoesNotExist:
+    except (SDRMeeting.DoesNotExist, ValidationError):
         return Response({'error': 'Booking link not found.'}, status=404)
 
     if _booking_link_expired(meeting):
@@ -4210,7 +4406,7 @@ def sdr_booking_confirm(request, token):
         meeting = SDRMeeting.objects.select_related(
             'lead', 'enrollment__campaign'
         ).get(booking_token=token)
-    except SDRMeeting.DoesNotExist:
+    except (SDRMeeting.DoesNotExist, ValidationError):
         return Response({'error': 'Booking link not found.'}, status=404)
 
     if _booking_link_expired(meeting):   # S8
