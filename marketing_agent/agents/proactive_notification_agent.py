@@ -382,16 +382,19 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         
         # Check for zero engagement: All emails sent but no replies or clicks
         if total_sent >= 10:  # Only check if significant number of emails sent
-            emails_clicked = email_sends.filter(status='clicked').count()
-            emails_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
-            
+            # Opens and clicks are the shared figures above. This block still read `email_sends`, which the move to
+            # those figures (29 Oct) removed, so it failed for every campaign and these two alerts never came.
+            from marketing_agent.services.campaign_numbers import SENT, campaign_sends
+            oldest_email = (campaign_sends(campaign).filter(status__in=SENT, sent_at__isnull=False)
+                            .order_by('sent_at').first())
+
             # Check for replies (using Reply model)
             replies_count = Reply.objects.filter(campaign=campaign).count()
-            
-            # If no clicks AND no replies after sending multiple emails
-            if emails_clicked == 0 and replies_count == 0 and total_sent >= 5:
+
+            # If no opens, clicks or replies after sending multiple emails. Opens are left to the alert below, which
+            # this one used to take every time (a campaign with opens was told "no engagement" instead).
+            if emails_opened == 0 and emails_clicked == 0 and replies_count == 0 and total_sent >= 5:
                 # Check if emails were sent at least 24 hours ago (give time for engagement)
-                oldest_email = email_sends.order_by('sent_at').first()
                 if oldest_email and oldest_email.sent_at:
                     hours_since_first = (timezone.now() - oldest_email.sent_at).total_seconds() / 3600
                     if hours_since_first >= 24:  # At least 24 hours since first email
@@ -424,7 +427,6 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             
             # If emails opened but no clicks and no replies
             elif emails_opened > 0 and emails_clicked == 0 and replies_count == 0 and total_sent >= 8:
-                oldest_email = email_sends.order_by('sent_at').first()
                 if oldest_email and oldest_email.sent_at:
                     hours_since_first = (timezone.now() - oldest_email.sent_at).total_seconds() / 3600
                     if hours_since_first >= 48:  # At least 48 hours since first email

@@ -101,3 +101,121 @@ jobs:
             cd /opt/AIEmployee
             git pull
             bash scripts/deploy.sh
+
+  # The website (PaPerProjectFront) lives on the Hostinger web hosting, not on the VPS. It used to be built on a
+  # laptop and uploaded by hand as frontend-dist.zip. This job does the same after every deploy that succeeded:
+  # it builds the screens from this very commit, waits until the server answers the API level they need, uploads
+  # them, and checks payperproject.com serves the new build. Its order keeps the release rule: server first,
+  # screens after, from code equal to main.
+  #
+  # It needs the hosting's login as repository secrets (Settings > Secrets and variables > Actions):
+  #   HOSTING_FTP_HOST      ftp://<ftp host> for an FTP account made for public_html (encrypted: the upload
+  #                         refuses to send the password in the clear), or sftp://<ssh host>:65002
+  #   HOSTING_FTP_USER
+  #   HOSTING_FTP_PASSWORD
+  #   HOSTING_FTP_DIR       the site's folder after logging in, e.g. public_html (leave unset if it is the
+  #                         login's own folder, as with an FTP account made for public_html)
+  # Until they are set, the job builds and checks only, and says so.
+  website:
+    name: Website (build, then upload to the hosting)
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: website-upload
+      cancel-in-progress: false
+    env:
+      FTP_HOST: ${{ secrets.HOSTING_FTP_HOST }}
+      FTP_USER: ${{ secrets.HOSTING_FTP_USER }}
+      LFTP_PASSWORD: ${{ secrets.HOSTING_FTP_PASSWORD }}
+      FTP_DIR: ${{ secrets.HOSTING_FTP_DIR }}
+      SITE: https://payperproject.com
+      API: https://api.payperproject.com/api
+    defaults:
+      run:
+        working-directory: PaPerProjectFront
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: PaPerProjectFront/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # .env.production (in git) points the build at api.payperproject.com.
+      - name: Build
+        run: npm run build
+
+      - name: Check the build
+        run: |
+          set -e
+          test -f dist/index.html
+          test -f dist/.htaccess
+          BUNDLE=$(grep -o 'assets/index-[^"]*\.js' dist/index.html | head -1)
+          test -n "$BUNDLE"
+          grep -q 'api.payperproject.com' "dist/$BUNDLE"
+          if grep -q 'localhost:8000' "dist/$BUNDLE"; then echo "::error::The build points at localhost"; exit 1; fi
+          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+          echo "Built $BUNDLE, $(find dist -type f | wc -l) files"
+
+      # Screens that need a newer server than the live one would tell every visitor the site is out of date.
+      - name: Wait until the server answers the API level these screens need
+        run: |
+          NEED=$(grep -oE 'REQUIRED_API_LEVEL = [0-9]+' src/config/apiLevel.js | grep -oE '[0-9]+$')
+          for i in $(seq 1 30); do
+            HAVE=$(curl -s -m 15 "$API/version" | grep -oE '"api_level": *[0-9]+' | grep -oE '[0-9]+$' || true)
+            echo "server: ${HAVE:-no answer}, screens need: $NEED"
+            if [ -n "$HAVE" ] && [ "$HAVE" -ge "$NEED" ]; then exit 0; fi
+            sleep 20
+          done
+          echo "::error::The server never reached API level $NEED, so the website was not uploaded."
+          exit 1
+
+      - name: No hosting login yet
+        if: env.LFTP_PASSWORD == ''
+        run: echo "::notice::HOSTING_FTP_* secrets are not set. The website was built and checked, not uploaded; upload it by hand."
+
+      # New files first and index.html last, so a visitor never gets a page whose scripts aren't there yet.
+      # Nothing is deleted: a tab opened before the upload still loads its old chunks, and the hosting's other
+      # files stay as they are.
+      - name: Upload
+        if: env.LFTP_PASSWORD != ''
+        run: |
+          set -e
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp > /dev/null
+          cat > /tmp/upload.lftp <<LFTP
+          set cmd:fail-exit true
+          set net:max-retries 3
+          set net:timeout 30
+          set ftp:ssl-force true
+          set ftp:ssl-protect-data true
+          set ssl:verify-certificate false
+          set sftp:auto-confirm yes
+          open --env-password -u "$FTP_USER" "$FTP_HOST"
+          cd "${FTP_DIR:-.}"
+          cls -1 index.html
+          mirror --reverse --no-perms --only-missing --parallel=4 dist/assets assets
+          mirror --reverse --no-perms --parallel=4 --exclude-glob index.html --exclude ^assets/ dist .
+          put dist/.htaccess -o .htaccess
+          put dist/index.html -o index.html
+          bye
+          LFTP
+          lftp -f /tmp/upload.lftp
+          rm -f /tmp/upload.lftp
+
+      - name: Check payperproject.com serves the new build
+        if: env.LFTP_PASSWORD != ''
+        run: |
+          for i in $(seq 1 12); do
+            if curl -s -m 15 "$SITE/" | grep -q "$BUNDLE" && \
+               [ "$(curl -s -o /dev/null -w '%{http_code}' -m 30 "$SITE/$BUNDLE")" = "200" ]; then
+              echo "payperproject.com serves $BUNDLE"; exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::payperproject.com does not serve $BUNDLE after the upload."
+          exit 1
