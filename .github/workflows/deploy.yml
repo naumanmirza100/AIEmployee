@@ -109,7 +109,8 @@ jobs:
   # screens after, from code equal to main.
   #
   # It needs the hosting's login as repository secrets (Settings > Secrets and variables > Actions):
-  #   HOSTING_FTP_HOST      sftp://<ssh host>:65002 when the plan has SSH (preferred), else ftp://<ftp host>
+  #   HOSTING_FTP_HOST      ftp://<ftp host> for an FTP account made for public_html (encrypted: the upload
+  #                         refuses to send the password in the clear), or sftp://<ssh host>:65002
   #   HOSTING_FTP_USER
   #   HOSTING_FTP_PASSWORD
   #   HOSTING_FTP_DIR       the site's folder after logging in, e.g. public_html (leave unset if it is the
@@ -190,7 +191,8 @@ jobs:
           set cmd:fail-exit true
           set net:max-retries 3
           set net:timeout 30
-          set ftp:ssl-allow true
+          set ftp:ssl-force true
+          set ftp:ssl-protect-data true
           set ssl:verify-certificate false
           set sftp:auto-confirm yes
           open --env-password -u "$FTP_USER" "$FTP_HOST"
