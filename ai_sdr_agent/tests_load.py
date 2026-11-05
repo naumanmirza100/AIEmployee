@@ -9,6 +9,7 @@ import csv
 import io
 import statistics
 import time
+import unittest
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -36,6 +37,12 @@ def seed(company_user, leads=300, campaigns=5):
         SDRCampaign.objects.create(company_user=company_user, name=f'Campaign {i}', status='active')
 
 
+# The test settings' database is one in-memory SQLite connection, which the live test server shares between all its
+# request threads. Twenty at once break it ("bad parameter or other API misuse"), and the requests come back 403 or
+# 500 though the code is right. The live site runs MySQL/MariaDB, a connection per thread; measure there.
+@unittest.skipIf(connection.vendor == 'sqlite',
+                 'needs a database that takes many connections at once (MySQL or MariaDB, as the live site has); the '
+                 'in-memory SQLite test database is one connection shared by every request thread')
 class ConcurrentRequestsTests(LiveServerTestCase):
     """Many people using the AI SDR at once, through the real server, middleware and sign-in."""
 
