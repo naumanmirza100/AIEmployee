@@ -21,6 +21,7 @@ from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.db.utils import OperationalError, ProgrammingError
 from django.utils import timezone
 
 from ai_sdr_agent.models import (
@@ -151,17 +152,34 @@ SCHEDULER_JOBS = [
 ]
 
 
+def _scheduler_started_at():
+    """When the scheduler in this process started, or None when it does not run here."""
+    from django.utils.dateparse import parse_datetime
+    from ai_sdr_agent.scheduler import scheduler_status
+    started = scheduler_status().get('started_at')
+    return parse_datetime(started) if started else None
+
+
 def check_scheduler(company_user, params):
-    now = timezone.now()
+    now, started = timezone.now(), _scheduler_started_at()
     last = dict(SDRJobLock.objects.filter(name__in=[j[0] for j in SCHEDULER_JOBS]).values_list('name', 'last_run_at'))
-    late, details = [], []
+    late, starting, details = [], [], []
     for name, label, every in SCHEDULER_JOBS:
-        ran = last.get(name)
-        if not ran or now - ran > timedelta(seconds=max(every * 3, 900)):
+        ran, allowed = last.get(name), timedelta(seconds=max(every * 3, 900))
+        if not ran or now - ran > allowed:
+            # Just after a restart each job waits a little before its first run; its last run is from before.
+            if started and now - started < allowed and (not ran or ran < started):
+                starting.append(label)
+                details.append(f'{label}: first run since the restart {_ago(started)} is due shortly '
+                               f'(last ran {_ago(ran)}).')
+                continue
             late.append(label)
         details.append(f'{label}: last ran {_ago(ran)} (runs every {every // 60} min).')
     if late:
         return _result(FAILED, f"The scheduler hasn't run lately: {', '.join(late)}.", details)
+    if starting:
+        return _result(PASSED, 'The scheduler is running; it restarted recently and some jobs have yet to run.',
+                       details)
     return _result(PASSED, 'The scheduler is running.', details)
 
 
@@ -452,6 +470,10 @@ def run(key, company_user, params):
         outcome = check['fn'](company_user, params or {})
     except CheckProblem as problem:
         outcome = _result(FAILED, str(problem))
+    except (OperationalError, ProgrammingError) as exc:
+        # A missing table or column: this server's database is behind the code, not the check broken.
+        outcome = _result(FAILED, "This server's database is missing changes the code needs: run "
+                                  '"python manage.py migrate".', [f'{type(exc).__name__}: {exc}'])
     except Exception as exc:  # noqa: BLE001 — a broken check is a result, not a 500
         logger.exception('AI SDR live check %s failed', key)
         outcome = _result(FAILED, f'The check itself broke: {type(exc).__name__}: {exc}')

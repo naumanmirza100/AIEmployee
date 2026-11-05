@@ -170,6 +170,25 @@ class HealthTests(LiveChecksBase):
         self.assertEqual(result['status'], 'failed')
         self.assertIn('Reading replies', result['summary'])
 
+    def fresh_jobs_but_enrichment_ran_37_minutes_ago(self):
+        for name, _label, _every in live_checks.SCHEDULER_JOBS:
+            SDRJobLock.objects.create(name=name, locked_until=timezone.now(), last_run_at=timezone.now())
+        SDRJobLock.objects.filter(name='enrich_queue').update(last_run_at=timezone.now() - timedelta(minutes=37))
+
+    def test_just_after_a_restart_a_job_yet_to_run_is_not_late(self):
+        self.fresh_jobs_but_enrichment_ran_37_minutes_ago()
+        with mock.patch.object(live_checks, '_scheduler_started_at', return_value=timezone.now() - timedelta(minutes=1)):
+            result = self.run_check('scheduler').data['data']
+        self.assertEqual(result['status'], 'passed')
+        self.assertIn('restarted recently', result['summary'])
+
+    def test_long_after_a_restart_a_job_that_stopped_is_late(self):
+        self.fresh_jobs_but_enrichment_ran_37_minutes_ago()
+        with mock.patch.object(live_checks, '_scheduler_started_at', return_value=timezone.now() - timedelta(hours=2)):
+            result = self.run_check('scheduler').data['data']
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('Enriching leads', result['summary'])
+
     def test_a_mailbox_that_cannot_log_in_fails_and_nothing_is_sent(self):
         with mock.patch('ai_sdr_agent.agents.outreach_agent.try_mailbox_logins',
                         return_value='Authentication failed') as logins, \
