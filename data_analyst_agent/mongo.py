@@ -252,6 +252,17 @@ def fields_of(docs, max_columns=150) -> list:
     return columns
 
 
+def _list_collections(db) -> list:
+    """The database's collections and views, unfiltered: system.* is left out by the caller. Atlas's free clusters
+    (M0) refused a {"$not": {"$regex": ...}} filter here ("can't get regex from filter doc not a regex", 7 Nov 2026),
+    and an older server may not know authorizedCollections, so the plainest form is the fallback."""
+    from pymongo.errors import OperationFailure
+    try:
+        return list(db.list_collections(authorizedCollections=True, nameOnly=True))
+    except OperationFailure:
+        return [{'name': name, 'type': 'collection'} for name in db.list_collection_names()]
+
+
 def _sample(collection) -> list:
     try:
         return list(collection.aggregate([{'$sample': {'size': SAMPLE_SIZE}}], maxTimeMS=SAMPLE_TIMEOUT_MS))
@@ -267,8 +278,7 @@ def read_tables(source) -> list:
     started = time.monotonic()
     try:
         db = _database(client, source)
-        listed = [c for c in db.list_collections(filter={'name': {'$not': {'$regex': r'^system\.'}}},
-                                                 authorizedCollections=True, nameOnly=True)]
+        listed = [c for c in _list_collections(db) if not str(c.get('name', '')).startswith('system.')]
         out = []
         for item in sorted(listed, key=lambda c: c['name'])[:connectors.MAX_TABLES]:
             name = item['name']

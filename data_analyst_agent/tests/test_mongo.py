@@ -58,7 +58,10 @@ class FakeDatabase:
         return FakeCollection(self.client, name)
 
     def list_collections(self, **kwargs):
-        return [{'name': name, 'type': 'collection'} for name in self.client.data]
+        # Like Atlas's free clusters, which refused a filter here: "can't get regex from filter doc not a regex".
+        if 'filter' in kwargs:
+            raise OperationFailure("can't get regex from filter doc not a regex", 2)
+        return [{'name': name, 'type': 'collection'} for name in [*self.client.data, 'system.views']]
 
     def command(self, command):
         actions = list(self.client.actions)
