@@ -680,6 +680,12 @@ class SDRLeadResearchJob(models.Model):
     leads_created = models.IntegerField(default=0)
     leads_qualified = models.IntegerField(default=0)
     error_message = models.TextField(blank=True)
+    # An Apify search's run, kept so its leads are saved as they come and a search whose thread died (a restart, a
+    # lost connection) picks up the same paid run where it left off instead of losing it.
+    apify_run_id = models.CharField(max_length=64, blank=True)
+    apify_dataset_id = models.CharField(max_length=64, blank=True)
+    items_read = models.IntegerField(default=0)        # how far into the run's dataset the leads are saved
+    heartbeat_at = models.DateTimeField(null=True, blank=True)   # the search thread's last sign of life
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)

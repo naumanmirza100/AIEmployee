@@ -132,6 +132,20 @@ def _run_send_due_steps():
         _close_db()
 
 
+@singleton_job('resume_research', ttl_seconds=300, min_interval_seconds=60)
+def _run_resume_research():
+    # Lead searches whose thread died go on with their Apify run, so the leads already paid for are not lost.
+    try:
+        from api.views.ai_sdr_agent import resume_orphaned_research_jobs
+        resumed = resume_orphaned_research_jobs()
+        if resumed:
+            logger.info("SDR resume_research → resumed %d search(es)", resumed)
+    except Exception as exc:
+        logger.exception("SDR resume_research crashed: %s", exc)
+    finally:
+        _close_db()
+
+
 @singleton_job('qualify_queue', ttl_seconds=900, min_interval_seconds=90)
 def _run_qualify_queue():
     try:
@@ -291,6 +305,7 @@ def start_scheduler() -> None:
         jobs = [
             ('send_due_steps',    _run_send_due_steps,     300,    30),
             ('qualify_queue',     _run_qualify_queue,      120,    45),
+            ('resume_research',   _run_resume_research,    120,    50),
             ('enrich_queue',      _run_enrich_queue,        180,    75),
             ('check_inbox',       _run_check_inbox,         300,    60),
             ('auto_start',        _run_auto_start,          900,    90),

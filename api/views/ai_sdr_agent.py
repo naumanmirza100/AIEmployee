@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import threading
 from datetime import timedelta
 from typing import Optional
 
@@ -34,7 +35,7 @@ from ai_sdr_agent.models import (
     SDRAgentSettings, SDRReplyDraft,
 )
 from ai_sdr_agent.agents.lead_research_agent import (
-    ApifyApprovalRequired, LeadResearchAgent, NoLeadSource, apify_actor_page_url,
+    ApifyApprovalRequired, ApifyUnreachable, LeadResearchAgent, NoLeadSource, apify_actor_page_url,
 )
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
 from ai_sdr_agent.agents.email_assistant_agent import strip_quoted_reply
@@ -637,6 +638,16 @@ def _apply_lead_filters(qs, request):
 
 
 _PHONE_CHARS = set('0123456789 ()-.+/')
+# The export writes a phone as ="+441159254169" so Excel keeps it as text; the import takes that back to the number.
+_EXCEL_TEXT_CELL = re.compile(r'^="([0-9 ()\-.+/]*)"$')
+
+
+def _phone_cell(text: str) -> str:
+    """A phone number for the CSV export. As a bare value Excel reads +441159254169 as a number: it drops the + and
+    shows 4.41159E+11. ="..." makes it text. Only a cell made of phone characters gets this, so it runs nothing."""
+    if text and set(text) <= _PHONE_CHARS and any(c.isdigit() for c in text):
+        return f'="{text}"'
+    return _no_formula(text)
 
 
 def _no_formula(text: str) -> str:
@@ -690,7 +701,8 @@ def sdr_leads_export(request):
     def _rows():
         yield writer.writerow([header for _, header in columns])
         for lead in qs.iterator(chunk_size=1000):
-            yield writer.writerow([_val(getattr(lead, field, '')) for field, _ in columns])
+            yield writer.writerow([_phone_cell(lead.phone) if field == 'phone' else _val(getattr(lead, field, ''))
+                                   for field, _ in columns])
 
     resp = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
     resp['Content-Disposition'] = 'attachment; filename="sdr-leads-export.csv"'
@@ -1004,18 +1016,192 @@ MAX_LEADS_PER_SEARCH = 1000
 RESEARCH_JOB_STALE_AFTER = timedelta(minutes=90)
 
 
+# A search whose thread stopped beating this long ago (a restart, a deploy) is picked up again by resume_research,
+# on the same Apify run, from the dataset items it had read. A run is not followed for more than a day.
+RESEARCH_HEARTBEAT_STALE = timedelta(minutes=3)
+RESEARCH_RESUME_GIVE_UP = timedelta(hours=24)
+
+
 def _settle_stale_job(job):
-    """A job still "running" past RESEARCH_JOB_STALE_AFTER is marked failed, so the screen stops waiting for it."""
-    if job.status != 'running' or not job.started_at or timezone.now() - job.started_at < RESEARCH_JOB_STALE_AFTER:
+    """A job still "running" past RESEARCH_JOB_STALE_AFTER is ended, so the screen stops waiting for it. A job with
+    an Apify run is resumed instead (resume_orphaned_research_jobs) and only ended past RESEARCH_RESUME_GIVE_UP."""
+    limit = RESEARCH_RESUME_GIVE_UP if job.apify_run_id else RESEARCH_JOB_STALE_AFTER
+    if job.status != 'running' or not job.started_at or timezone.now() - job.started_at < limit:
         return job
     params = job.search_params or {}
     params['error_code'] = 'interrupted'
     job.search_params = params
-    job.status = 'failed'
-    job.error_message = 'The search was cut short, most likely by a server restart. Please start it again.'
     job.completed_at = timezone.now()
+    if job.leads_created:
+        # The leads it saved are kept: the search ended early, it did not fail.
+        job.status = 'completed'
+        params['stopped_reason'] = 'The search was cut short, most likely by a server restart.'
+    else:
+        job.status = 'failed'
+        job.error_message = 'The search was cut short, most likely by a server restart. Please start it again.'
     job.save(update_fields=['search_params', 'status', 'error_message', 'completed_at'])
     return job
+
+
+def _existing_lead_keys(company_user) -> dict:
+    """What the user's leads are known by, to catch duplicates: LinkedIn URL (the most reliable — essential for
+    no-email sources like the Google scraper, where company often doesn't parse), email, name+company, name."""
+    keys = {'linkedin': set(), 'email': set(), 'name_company': set(), 'name': set()}
+    for em, fn, cn, li in SDRLead.objects.filter(company_user=company_user).values_list(
+            'email', 'full_name', 'company_name', 'linkedin_url'):
+        if em:
+            keys['email'].add(em.lower())
+        if fn and cn:
+            keys['name_company'].add((fn.lower().strip(), cn.lower().strip()))
+        if fn:
+            keys['name'].add(fn.lower().strip())
+        nli = normalize_linkedin_url(li)
+        if nli:
+            keys['linkedin'].add(nli)
+    return keys
+
+
+def _save_found_leads(job, raw_leads, keys, default_source) -> tuple:
+    """Save a batch of a search's leads as new leads, skipping duplicates of ``keys`` (which it adds to); returns
+    (created, skipped). Each is queued for enrichment; scoring waits for the Qualify button."""
+    from ai_sdr_agent.agents.lead_validator import validate_lead
+
+    created = skipped = 0
+    for ld in raw_leads:
+        full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
+        lead_email = (ld.get('email') or '').strip().lower()
+        company_name = (ld.get('company_name') or '').strip()
+        linkedin = normalize_linkedin_url(ld.get('linkedin_url'))
+
+        # ── Reject leads with no name and no company (totally empty) ──
+        if not full_name.strip() and not company_name:
+            skipped += 1
+            continue
+
+        # ── Duplicate guard — linkedin > email > name+company > name ──
+        if linkedin and linkedin in keys['linkedin']:
+            skipped += 1
+            continue
+        if lead_email and lead_email in keys['email']:
+            skipped += 1
+            continue
+        name_company_key = (full_name.lower().strip(), company_name.lower().strip())
+        if full_name and company_name and name_company_key in keys['name_company']:
+            skipped += 1
+            continue
+        # No email/company (Google scraper) → fall back to name-only so
+        # the same profile scraped twice isn't inserted again.
+        name_key = full_name.lower().strip()
+        if not lead_email and not company_name and not linkedin and name_key and name_key in keys['name']:
+            skipped += 1
+            continue
+
+        # Track all keys for intra-batch dedup
+        if linkedin:
+            keys['linkedin'].add(linkedin)
+        if lead_email:
+            keys['email'].add(lead_email)
+        if full_name and company_name:
+            keys['name_company'].add(name_company_key)
+        if name_key:
+            keys['name'].add(name_key)
+
+        validation = validate_lead({**ld, 'full_name': full_name})
+        SDRLead.objects.create(
+            company_user=job.company_user,
+            icp_profile=job.icp_profile,
+            first_name=ld.get('first_name', ''),
+            last_name=ld.get('last_name', ''),
+            full_name=full_name,
+            email=lead_email or ld.get('email', ''),
+            phone=ld.get('phone', ''),
+            job_title=ld.get('job_title', ''),
+            seniority_level=ld.get('seniority_level', ''),
+            department=ld.get('department', ''),
+            company_name=ld.get('company_name', ''),
+            company_domain=ld.get('company_domain', ''),
+            company_industry=ld.get('company_industry', ''),
+            company_size=ld.get('company_size') or None,
+            company_size_range=ld.get('company_size_range', ''),
+            company_location=ld.get('company_location', ''),
+            company_technologies=ld.get('company_technologies', []),
+            linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
+            company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
+            company_website=_ensure_https(ld.get('company_website', '')),
+            recent_news=ld.get('recent_news', []),
+            buying_signals=ld.get('buying_signals', []),
+            apollo_id=ld.get('apollo_id', ''),
+            raw_data=ld.get('raw_data', {}),
+            source=ld.get('source') or default_source,
+            status='new',
+            confidence_score=validation['confidence_score'],
+            data_quality_flags=validation['data_quality_flags'],
+            # Not queued for qualification: that waits for the Qualify button. Enriched in the background.
+            enrichment_status='pending',
+            enrichment_queued_at=timezone.now(),
+        )
+        created += 1
+    return created, skipped
+
+
+class _JobTracker:
+    """Saves a search's leads as they are found and keeps its job row current (see LeadResearchAgent.search_leads),
+    so an interrupted search keeps every lead it had already paid for."""
+
+    def __init__(self, job, default_source):
+        self.job = job
+        self.default_source = default_source
+        self.keys = _existing_lead_keys(job.company_user)
+        self.skipped = 0
+        self.source = None
+
+    def run_started(self, run_id, dataset_id):
+        self.job.apify_run_id, self.job.apify_dataset_id = run_id, dataset_id or ''
+        self.job.heartbeat_at = timezone.now()
+        self.job.save(update_fields=['apify_run_id', 'apify_dataset_id', 'heartbeat_at'])
+
+    def heartbeat(self):
+        self.job.heartbeat_at = timezone.now()
+        self.job.save(update_fields=['heartbeat_at'])
+
+    def found(self, leads, items_read):
+        created, skipped = _save_found_leads(self.job, leads, self.keys, self.default_source)
+        self.skipped += skipped
+        self.source = self.source or next((ld.get('source') for ld in leads if ld.get('source')), None)
+        self.job.leads_created += created
+        self.job.total_found += len(leads)
+        fields = ['leads_created', 'total_found', 'heartbeat_at']
+        if items_read is not None:
+            self.job.items_read = items_read
+            fields.append('items_read')
+        self.job.heartbeat_at = timezone.now()
+        # Never search_params here: the Stop button writes stop_requested into it meanwhile.
+        self.job.save(update_fields=fields)
+
+    def should_stop(self) -> bool:
+        params = SDRLeadResearchJob.objects.filter(pk=self.job.pk).values_list('search_params', flat=True).first()
+        return bool((params or {}).get('stop_requested'))
+
+
+def resume_orphaned_research_jobs() -> int:
+    """Pick up Apify searches whose thread died (a restart, a deploy, Apify out of reach for a while): each goes on
+    with the same run from the dataset items it had read, so nothing is bought twice. Run by the scheduler."""
+    now = timezone.now()
+    orphans = (SDRLeadResearchJob.objects.filter(status='running').exclude(apify_run_id='')
+               .filter(Q(heartbeat_at__lt=now - RESEARCH_HEARTBEAT_STALE) | Q(heartbeat_at__isnull=True)))
+    resumed = 0
+    for job in orphans:
+        if _settle_stale_job(job).status != 'running':
+            continue
+        # Claimed by moving its heartbeat: another process looking at the same moment finds it beating.
+        if not SDRLeadResearchJob.objects.filter(pk=job.pk, status='running', heartbeat_at=job.heartbeat_at) \
+                .update(heartbeat_at=now):
+            continue
+        logger.info("Research job %s: resuming Apify run %s from item %s", job.pk, job.apify_run_id, job.items_read)
+        threading.Thread(target=_execute_research_job, args=(job.pk,), name=f"sdr-research-job-{job.pk}",
+                         daemon=True).start()
+        resumed += 1
+    return resumed
 
 
 def _execute_research_job(job_id):
@@ -1026,11 +1212,10 @@ def _execute_research_job(job_id):
 
     A run of up to MAX_LEADS_PER_SEARCH leads can take minutes — far longer than an HTTP request
     should block — so ``research_leads`` returns immediately and this does the
-    actual Apollo/Apify search + lead creation + qualification queueing out of
-    band. It must NEVER raise out of the thread; every failure is written to the
-    job row instead.
+    actual Apollo/Apify search out of band. Leads are saved batch by batch as the provider finds them
+    (_JobTracker), so a search cut short keeps what it found. A job that already has an Apify run (its thread died)
+    goes on with that run. It must NEVER raise out of the thread; every failure is written to the job row instead.
     """
-    from ai_sdr_agent.agents.lead_validator import validate_lead
     from django.db import close_old_connections
 
     job = (SDRLeadResearchJob.objects
@@ -1040,17 +1225,26 @@ def _execute_research_job(job_id):
     if not job:
         return
 
+    def _fresh_params():
+        # The Stop button may have written to search_params since the job was read.
+        return SDRLeadResearchJob.objects.filter(pk=job.pk).values_list('search_params', flat=True).first() or {}
+
     def _fail(exc, code=None):
-        params = job.search_params or {}
+        params = _fresh_params()
         if code:
             params['error_code'] = code
         if isinstance(exc, ApifyApprovalRequired):
             params['approval_url'] = exc.approval_url
             params['actor'] = exc.actor
-        job.search_params = params
-        job.status = 'failed'
-        job.error_message = str(exc)
         job.completed_at = timezone.now()
+        if job.leads_created:
+            # Leads were saved before it went wrong: they are kept, and the search ended early.
+            params['stopped_reason'] = str(exc)
+            job.status = 'completed'
+        else:
+            job.status = 'failed'
+            job.error_message = str(exc)
+        job.search_params = params
         job.save()
 
     try:
@@ -1061,135 +1255,29 @@ def _execute_research_job(job_id):
         source = params.get('source', 'auto')
 
         researcher = _get_research_agent(company_user.company, company_user=company_user)
-        raw_leads = researcher.search_leads(icp, count=count, source=source)
+        tracker = _JobTracker(job, researcher.source_label)
+        if job.apify_run_id:
+            researcher.follow_apify_run(icp, count, job.apify_run_id, job.apify_dataset_id, tracker=tracker,
+                                        offset=job.items_read)
+        else:
+            researcher.search_leads(icp, count=count, source=source, tracker=tracker)
 
-        created = 0
-        created_ids = []
-        skipped_dupes = 0
-
-        # Pre-load existing keys to catch dupes. LinkedIn URL is the most
-        # reliable (unique per profile) — essential for no-email sources like
-        # the Google scraper, where company often doesn't parse and name+company
-        # dedup misses. Also track email, name+company, and name-only.
-        existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list(
-            'email', 'full_name', 'company_name', 'linkedin_url'
-        )
-        existing_emails_lower = set()
-        existing_name_company = set()
-        existing_linkedin = set()
-        existing_names = set()
-
-        _norm_li = normalize_linkedin_url
-
-        for em, fn, cn, li in existing_leads_qs:
-            if em:
-                existing_emails_lower.add(em.lower())
-            if fn and cn:
-                existing_name_company.add((fn.lower().strip(), cn.lower().strip()))
-            if fn:
-                existing_names.add(fn.lower().strip())
-            nli = _norm_li(li)
-            if nli:
-                existing_linkedin.add(nli)
-
-        for ld in raw_leads:
-            full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
-            lead_email = (ld.get('email') or '').strip().lower()
-            company_name = (ld.get('company_name') or '').strip()
-            linkedin = _norm_li(ld.get('linkedin_url'))
-
-            # ── Reject leads with no name and no company (totally empty) ──
-            if not full_name.strip() and not company_name:
-                skipped_dupes += 1
-                continue
-
-            # ── Duplicate guard — linkedin > email > name+company > name ──
-            if linkedin and linkedin in existing_linkedin:
-                skipped_dupes += 1
-                continue
-            if lead_email and lead_email in existing_emails_lower:
-                skipped_dupes += 1
-                continue
-            name_company_key = (full_name.lower().strip(), company_name.lower().strip())
-            if full_name and company_name and name_company_key in existing_name_company:
-                skipped_dupes += 1
-                continue
-            # No email/company (Google scraper) → fall back to name-only so
-            # the same profile scraped twice isn't inserted again.
-            name_key = full_name.lower().strip()
-            if not lead_email and not company_name and not linkedin and name_key and name_key in existing_names:
-                skipped_dupes += 1
-                continue
-
-            # Track all keys for intra-batch dedup
-            if linkedin:
-                existing_linkedin.add(linkedin)
-            if lead_email:
-                existing_emails_lower.add(lead_email)
-            if full_name and company_name:
-                existing_name_company.add(name_company_key)
-            if name_key:
-                existing_names.add(name_key)
-            # ─────────────────────────────────────────────────────────────
-
-            validation = validate_lead({**ld, 'full_name': full_name})
-
-            new_lead = SDRLead.objects.create(
-                company_user=company_user,
-                icp_profile=icp,
-                first_name=ld.get('first_name', ''),
-                last_name=ld.get('last_name', ''),
-                full_name=full_name,
-                email=lead_email or ld.get('email', ''),
-                phone=ld.get('phone', ''),
-                job_title=ld.get('job_title', ''),
-                seniority_level=ld.get('seniority_level', ''),
-                department=ld.get('department', ''),
-                company_name=ld.get('company_name', ''),
-                company_domain=ld.get('company_domain', ''),
-                company_industry=ld.get('company_industry', ''),
-                company_size=ld.get('company_size') or None,
-                company_size_range=ld.get('company_size_range', ''),
-                company_location=ld.get('company_location', ''),
-                company_technologies=ld.get('company_technologies', []),
-                linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
-                company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
-                company_website=_ensure_https(ld.get('company_website', '')),
-                recent_news=ld.get('recent_news', []),
-                buying_signals=ld.get('buying_signals', []),
-                apollo_id=ld.get('apollo_id', ''),
-                raw_data=ld.get('raw_data', {}),
-                source=ld.get('source') or researcher.source_label,
-                status='new',
-                confidence_score=validation['confidence_score'],
-                data_quality_flags=validation['data_quality_flags'],
-            )
-            created += 1
-            created_ids.append(new_lead.pk)
-
-            # Surface incremental progress to the polling UI without hammering
-            # the DB on every single insert.
-            if created % 50 == 0:
-                job.leads_created = created
-                job.total_found = len(raw_leads)
-                job.save(update_fields=['leads_created', 'total_found'])
-
-        # The new leads are not queued for qualification: that waits for the Qualify button.
-        # Auto-enrich the newly discovered leads in the background too.
-        SDRLead.objects.filter(pk__in=created_ids, enrichment_status='none').update(
-            enrichment_status='pending', enrichment_queued_at=timezone.now())
-
-        params['skipped_duplicates'] = skipped_dupes
+        params = _fresh_params()
+        params['skipped_duplicates'] = params.get('skipped_duplicates', 0) + tracker.skipped
+        if researcher.stop_reason:
+            params['stopped_reason'] = researcher.stop_reason
         job.search_params = params
         job.status = 'completed'
-        job.total_found = len(raw_leads)
-        job.leads_created = created
         job.leads_qualified = 0
         # The provider that answered: with both keys, "apollo" was written even for an Apify run.
-        job.source = next((ld.get('source') for ld in raw_leads if ld.get('source')), job.source)
+        job.source = tracker.source or job.source
         job.completed_at = timezone.now()
         job.save()
 
+    except ApifyUnreachable as exc:
+        # The run goes on on Apify's side and its leads are paid for: the job stays "running" and resume_research
+        # picks it up when Apify answers again (its heartbeat has stopped).
+        logger.warning("Research job %s: %s — left for resume_research", job_id, exc)
     except ApifyApprovalRequired as exc:
         # Not a server error: the user has to approve the actor once on Apify.
         _fail(exc, code='apify_approval_required')
@@ -1302,6 +1390,10 @@ def research_job_status(request, job_id):
             'total_found': job.total_found,
             'leads_created': job.leads_created,
             'skipped_duplicates': params.get('skipped_duplicates', 0),
+            # Ended early (stopped, the run failed or timed out): the leads it found are saved all the same.
+            'partial': bool(params.get('stopped_reason')),
+            'stopped_reason': params.get('stopped_reason', ''),
+            'stopping': job.status == 'running' and bool(params.get('stop_requested')),
             'source': job.source,
             'error_message': job.error_message,
             'error_code': params.get('error_code'),
@@ -1312,6 +1404,38 @@ def research_job_status(request, job_id):
         },
         'stats': _lead_stats(company_user),
     })
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_job_stop(request, job_id):
+    """Stop a running search: its Apify run is aborted so nothing more is charged, and the leads found so far are
+    kept. The search's thread sees the request within a few seconds; a search with no thread left is ended here."""
+    company_user = request.user
+    job = SDRLeadResearchJob.objects.filter(company_user=company_user, pk=job_id).first()
+    if not job:
+        return Response({'status': 'error', 'message': 'Research job not found.'}, status=404)
+    if job.status != 'running':
+        return Response({'status': 'error', 'message': 'This search has already finished.'}, status=400)
+    params = job.search_params or {}
+    params['stop_requested'] = True
+    SDRLeadResearchJob.objects.filter(pk=job.pk).update(search_params=params)
+
+    alive = job.heartbeat_at and timezone.now() - job.heartbeat_at < RESEARCH_HEARTBEAT_STALE
+    if not alive:
+        if job.apify_run_id:
+            # Its thread is gone: one that sees the stop at once aborts the run and saves its last leads.
+            threading.Thread(target=_execute_research_job, args=(job.pk,), name=f"sdr-research-job-{job.pk}",
+                             daemon=True).start()
+        else:
+            params['stopped_reason'] = 'Stopped'
+            SDRLeadResearchJob.objects.filter(pk=job.pk).update(
+                search_params=params, status='completed' if job.leads_created else 'failed',
+                error_message='' if job.leads_created else 'Stopped before any lead was found.',
+                completed_at=timezone.now())
+    return Response({'status': 'success',
+                     'message': f'Stopping — the {job.leads_created} lead(s) found so far are kept.'})
 
 
 @api_view(['GET', 'POST'])
@@ -1776,7 +1900,8 @@ def import_leads_csv(request):
                     last_name=last_name,
                     full_name=full_name,
                     email=row_email,
-                    phone=pick('phone'),
+                    # A file this export wrote has ="+44..." for a phone (see _phone_cell): the number inside.
+                    phone=_EXCEL_TEXT_CELL.sub(r'\1', pick('phone')),
                     job_title=pick('job_title'),
                     company_name=company_name,
                     company_industry=pick('company_industry') or file_industry,

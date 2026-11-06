@@ -605,6 +605,11 @@ class ImportCsvTests(LeadApiBase):
         self.assertEqual(r.data['code'], 'too_many_rows')
         self.assertEqual(SDRLead.objects.count(), 0)
 
+    def test_a_phone_from_our_own_export_comes_back_as_the_number(self):
+        r = self.upload(self.rows(['Name', 'Email', 'Phone'], ['A', 'a@x.example', '="+441159254169"']))
+        self.assertEqual(r.data['created'], 1, r.data)
+        self.assertEqual(SDRLead.objects.get(email='a@x.example').phone, '+441159254169')
+
     def test_the_dialogs_industry_fills_only_rows_without_one(self):
         r = self.upload(self.rows(['Name', 'Email', 'Industry'], ['A', 'a@x.example', 'Law'], ['B', 'b@x.example', '']),
                         industry='Education')
@@ -641,7 +646,8 @@ class ExportCsvTests(LeadApiBase):
         SDRLead.objects.create(company_user=self.cu, email='f@acme.com', full_name='=HYPERLINK("http://x")',
                                phone='+1 555 0100')
         row = self.export()[1]
-        self.assertEqual((row[0], row[2]), ('\'=HYPERLINK("http://x")', '+1 555 0100'))
+        # The phone as text for Excel (see _phone_cell), not a number it would show as 1.5550E+10.
+        self.assertEqual((row[0], row[2]), ('\'=HYPERLINK("http://x")', '="+1 555 0100"'))
 
 
 # ==========================================================================

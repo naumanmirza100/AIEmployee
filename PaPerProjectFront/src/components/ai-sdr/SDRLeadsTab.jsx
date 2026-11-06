@@ -19,7 +19,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, exportAllLeadsCsv, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
-  researchLead, getLeadResearch, researchLeads, getResearchJob, fetchApifyLeads, listIcpProfiles,
+  researchLead, getLeadResearch, researchLeads, getResearchJob, stopResearchJob, fetchApifyLeads, listIcpProfiles,
   createIcpProfile, updateIcpProfile, setDefaultIcpProfile, deleteIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads, updateLead,
@@ -1223,6 +1223,18 @@ const SDRLeadsTab = () => {
     }
   };
 
+  // Stop a search: its Apify run is aborted, so nothing more is charged; the leads found so far stay.
+  const handleStopSearch = async (run) => {
+    setGenRuns(runs => runs.map(r => r.jobId === run.jobId ? { ...r, stopping: true } : r));
+    try {
+      const resp = await stopResearchJob(run.jobId);
+      toast({ title: 'Stopping the search', description: resp?.message || 'The leads found so far are kept.' });
+    } catch (e) {
+      setGenRuns(runs => runs.map(r => r.jobId === run.jobId ? { ...r, stopping: false } : r));
+      toast({ title: 'Could not stop the search', description: e?.message, variant: 'destructive' });
+    }
+  };
+
   // Follow the background searches: every 3s ask each how far it is, show new leads as they arrive, and say how
   // it went when it is done.
   const genPollBusy = useRef(false);
@@ -1243,7 +1255,7 @@ const SDRLeadsTab = () => {
           if (!job) { keep.push(run); continue; }                       // a failed poll: try again next time
           const created = job.leads_created || 0;
           if (created > run.created) more = true;
-          if (!job.done) { keep.push({ ...run, created }); continue; }
+          if (!job.done) { keep.push({ ...run, created, stopping: job.stopping }); continue; }
           finished = true;
           const label = run.icpName ? ` for ${run.icpName}` : '';
           if (job.state === 'failed') {
@@ -1252,8 +1264,12 @@ const SDRLeadsTab = () => {
           } else {
             const skipped = job.skipped_duplicates || 0;
             toast({
-              title: created ? `${created} leads found${label}` : `No new leads found${label}`,
+              title: job.partial
+                ? `${created} of ${run.total} leads found${label}`
+                : created ? `${created} leads found${label}` : `No new leads found${label}`,
               description: [
+                // Ended early (stopped, or the run failed or timed out): what it found is saved all the same.
+                job.partial ? `${job.stopped_reason === 'Stopped' ? 'Stopped.' : `The search ended early: ${job.stopped_reason}.`} The ${created} found are saved.` : '',
                 `Source: ${(job.source || '').toUpperCase()}`,
                 skipped ? `${skipped} duplicates skipped.` : '',
                 created ? 'Click Qualify to score them.' : '',
@@ -1636,7 +1652,13 @@ const SDRLeadsTab = () => {
               <span key={run.jobId} title="Leads are being found in the background; they appear in the list as they arrive."
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', color: '#34d399', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
                 <Loader2 size={12} className="animate-spin" />
-                Finding leads{run.icpName ? ` · ${run.icpName}` : ''} {run.created}/{run.total}
+                {run.stopping ? 'Stopping' : 'Finding leads'}{run.icpName ? ` · ${run.icpName}` : ''} {run.created}/{run.total}
+                {!run.stopping && (
+                  <button onClick={() => handleStopSearch(run)} title="Stop this search: the leads found so far are kept, and nothing more is charged."
+                    style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, marginLeft: 2, cursor: 'pointer', color: '#34d399' }}>
+                    <X size={12} />
+                  </button>
+                )}
               </span>
             ))}
             {stats.qualifying > 0 && (

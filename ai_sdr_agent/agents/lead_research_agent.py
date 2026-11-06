@@ -29,6 +29,15 @@ APOLLO_SEARCH_URL = "https://api.apollo.io/api/v1/mixed_people/api_search"
 APIFY_BASE = "https://api.apify.com/v2"
 APIFY_POLL_ATTEMPTS = 60  # 5 seconds apart: 5 minutes for every APIFY_LEADS_PER_POLL_WINDOW leads asked for
 APIFY_LEADS_PER_POLL_WINDOW = 200
+APIFY_READ_PAGE = 250             # dataset items read at a time while a run goes on
+APIFY_RUN_GRACE_SECONDS = 300     # past the run's own time limit before we give up on it ourselves
+APIFY_UNREACHABLE_SECONDS = 600   # Apify unreachable this long: the search is left for resume_research
+
+
+def apify_run_budget_seconds(count: int) -> int:
+    """How long an Apify search may run: 5 minutes for every 200 leads asked for (25 for 1,000). Apify is given it
+    as the run's own time limit, so a run we lose track of still stops."""
+    return APIFY_POLL_ATTEMPTS * 5 * max(1, -(-count // APIFY_LEADS_PER_POLL_WINDOW))
 APOLLO_PAGE_SIZE = 100    # the most Apollo's search returns per page
 
 
@@ -91,6 +100,11 @@ NO_SOURCE_MESSAGE = (
 
 class NoLeadSource(ValueError):
     """Neither an Apollo nor an Apify key is set, so there is nothing to search: the person adds one."""
+
+
+class ApifyUnreachable(ValueError):
+    """Apify could not be reached for APIFY_UNREACHABLE_SECONDS. The run goes on on Apify's side and its leads are
+    paid for, so the search is not failed: resume_research picks it up again once Apify answers."""
 
 # Default Apify actor — Google Search scraper (free, no Bright Data needed)
 DEFAULT_APIFY_ACTOR = "apify/google-search-scraper"
@@ -440,22 +454,28 @@ class LeadResearchAgent:
                 })
         return results
 
-    def search_leads(self, icp_profile, count: int = 20, source: str = 'auto') -> list[dict]:
-        """Return a list of raw lead dicts for the given ICP profile."""
+    def search_leads(self, icp_profile, count: int = 20, source: str = 'auto', tracker=None) -> list[dict]:
+        """Return a list of raw lead dicts for the given ICP profile.
+
+        ``tracker`` (optional) is told about the leads as they are found, so they can be saved before the search
+        ends: ``found(leads, items_read)`` for each batch, ``run_started(run_id, dataset_id)`` when an Apify run
+        starts, ``heartbeat()`` while it runs, and ``should_stop()`` is asked between polls. ``stop_reason`` on
+        this agent then says why a search ended early (None when it ran to the end)."""
+        self.stop_reason = None
         if source == 'apify':
             if not self.apify_token:
                 raise NoLeadSource(
                     'Apify API token not configured. '
                     'Go to SDR Agent → Settings and enter your Apify API token.'
                 )
-            return dedupe_leads(self._search_apify(icp_profile, count))
+            return dedupe_leads(self._search_apify(icp_profile, count, tracker=tracker))
         if source == 'apollo':
             if not self.apollo_api_key:
                 raise NoLeadSource(
                     'Apollo API key not configured. '
                     'Go to SDR Agent → Settings and enter your Apollo.io API key.'
                 )
-            return dedupe_leads(self._search_apollo(icp_profile, count))
+            return dedupe_leads(self._search_apollo(icp_profile, count, tracker=tracker))
         if source in ('ai', 'ai_generated'):
             raise NoLeadSource(
                 'AI-generated leads are no longer available: they were invented people, not real prospects. '
@@ -475,9 +495,9 @@ class LeadResearchAgent:
         failures = []
         for name, search in providers:
             try:
-                leads = dedupe_leads(search(icp_profile, count))
-            except ApifyApprovalRequired:
-                raise  # Only the user can fix this, and the UI shows them the link
+                leads = dedupe_leads(search(icp_profile, count, tracker=tracker))
+            except (ApifyApprovalRequired, ApifyUnreachable):
+                raise  # Only the user can fix the first, and the UI shows them the link; the second is resumed
             except ValueError as exc:
                 logger.warning("Lead search: %s failed, trying the next source: %s", name, exc)
                 failures.append(f"{name}: {exc}")
@@ -510,7 +530,7 @@ class LeadResearchAgent:
     # Apollo.io
     # ------------------------------------------------------------------
 
-    def _search_apollo(self, icp, count: int) -> list[dict]:
+    def _search_apollo(self, icp, count: int, tracker=None) -> list[dict]:
         headers = {
             "Cache-Control": "no-cache",
             "X-Api-Key": self.apollo_api_key,
@@ -543,16 +563,26 @@ class LeadResearchAgent:
 
         logger.info("Apollo search params: %s", params)
         # One page holds at most 100 people: ask for the next until there are enough, or Apollo has no more.
-        people: list = []
-        while len(people) < count:
-            page = self._apollo_page(params, headers)
-            people.extend(page)
+        leads: list = []
+        while len(leads) < count:
+            try:
+                page = self._apollo_page(params, headers)
+            except ValueError as exc:
+                if not leads:
+                    raise
+                # The pages already found are kept: the search ends early instead of failing.
+                logger.warning("Apollo page %d failed after %d people: %s", params["page"], len(leads), exc)
+                self.stop_reason = f'Apollo stopped answering after {len(leads)} leads: {exc}'
+                break
+            parsed = [self._parse_apollo_person(p) for p in page][:count - len(leads)]
+            leads.extend(parsed)
+            if tracker and parsed:
+                tracker.found(parsed, None)
             if len(page) < params["per_page"]:
                 break
             params["page"] += 1
-        people = people[:count]
-        logger.info("Apollo returned %d people over %d page(s)", len(people), params["page"])
-        return [self._parse_apollo_person(p) for p in people]
+        logger.info("Apollo returned %d people over %d page(s)", len(leads), params["page"])
+        return leads
 
     def _apollo_page(self, params: dict, headers: dict) -> list:
         """One page of Apollo's people search."""
@@ -628,8 +658,17 @@ class LeadResearchAgent:
     # Apify
     # ------------------------------------------------------------------
 
-    def _search_apify(self, icp, count: int) -> list[dict]:
-        """Run Apify actor (async) and return mapped leads."""
+    def _search_apify(self, icp, count: int, tracker=None) -> list[dict]:
+        """Run the Apify actor and return its leads. With a ``tracker`` they are handed over batch by batch while
+        the run goes on (see search_leads), so an interruption keeps the ones already paid for."""
+        run_id, dataset_id = self.start_apify_run(icp, count)
+        if tracker:
+            tracker.run_started(run_id, dataset_id)
+        return self.follow_apify_run(icp, count, run_id, dataset_id, tracker=tracker)
+
+    def start_apify_run(self, icp, count: int) -> tuple:
+        """Start the actor; (run_id, dataset_id). The run is capped on Apify's side (maxItems, timeout), so even a
+        run we lose track of never charges for more than was asked."""
         actor_id = self.apify_actor.replace('/', '~')
         actor_input = self._build_apify_input(icp, count)
 
@@ -641,9 +680,11 @@ class LeadResearchAgent:
             # and retry — so an out-of-vocabulary ICP value never fails the run
             # (works for ANY actor + ANY enum field, not just this one).
             run_resp = None
+            # In the URL, not params=: the token stays out of it either way (it is a header).
+            limits = f"maxItems={count}&timeout={apify_run_budget_seconds(count)}"
             for _attempt in range(4):
                 run_resp = requests.post(
-                    f"{APIFY_BASE}/acts/{actor_id}/runs",
+                    f"{APIFY_BASE}/acts/{actor_id}/runs?{limits}",
                     json=actor_input,
                     headers=_apify_headers(self.apify_token),
                     timeout=30,
@@ -675,56 +716,129 @@ class LeadResearchAgent:
                 logger.error("Apify 400 for actor '%s' input=%s -> %s", self.apify_actor, actor_input, body)
                 raise ValueError(f"Apify rejected the request: {body}")
             run_resp.raise_for_status()
-            run_id = run_resp.json().get('data', {}).get('id')
+            data = run_resp.json().get('data', {})
+            run_id = data.get('id')
             if not run_id:
                 raise ValueError("Apify did not return a run ID")
+        except requests.RequestException as exc:
+            logger.error("Apify request error: %s", exc)
+            raise ValueError(f"Apify request failed: {exc}") from exc
+        logger.info("Apify: run started id=%s", run_id)
+        return run_id, data.get('defaultDatasetId') or ''
 
-            logger.info("Apify: run started id=%s — polling for completion", run_id)
+    def follow_apify_run(self, icp, count: int, run_id: str, dataset_id: str = '', tracker=None,
+                         offset: int = 0) -> list[dict]:
+        """Wait for an Apify run, reading its new leads every 5 seconds while it goes on, and return them.
 
-            # Step 2: Poll until finished: 5 minutes for every 200 leads asked for (25 for 1,000)
-            poll_attempts = APIFY_POLL_ATTEMPTS * max(1, -(-count // APIFY_LEADS_PER_POLL_WINDOW))
-            for _ in range(poll_attempts):
-                time.sleep(5)
-                status_resp = requests.get(
-                    f"{APIFY_BASE}/actor-runs/{run_id}",
-                    headers=_apify_headers(self.apify_token),
-                    timeout=15,
-                )
-                if status_resp.status_code == 429 or status_resp.status_code >= 500:
-                    continue  # A failed poll says nothing about the run; ask again
-                status_resp.raise_for_status()
-                run_data = status_resp.json().get('data', {})
-                status = run_data.get('status', '')
-                logger.info("Apify: run=%s status=%s", run_id, status)
+        Used for a new run and to pick up a search whose thread died (``offset``: the dataset items already read).
+        A request that fails is tried again (5 s, then up to 30 s apart): the run goes on on Apify's side and its
+        id is known, so waiting loses nothing. When the run ends early (failed, timed out, stopped) the leads read
+        so far are returned and ``stop_reason`` says why; with none it raises as before."""
+        self.stop_reason = None
+        budget = apify_run_budget_seconds(count) + APIFY_RUN_GRACE_SECONDS
+        leads: list = []
+        waited = unreachable_for = 0
+        delay = 5
+        status = detail = ''
+        headers = _apify_headers(self.apify_token)
+
+        def take(batch):
+            batch = batch[:max(0, count - len(leads))]
+            leads.extend(batch)
+            return batch
+
+        def read(final=False):
+            """Read the dataset from ``offset``: one page while the run goes on, everything once it has ended."""
+            nonlocal offset
+            while dataset_id and len(leads) < count:
+                resp = requests.get(f"{APIFY_BASE}/datasets/{dataset_id}/items",
+                                    params={'offset': offset, 'limit': APIFY_READ_PAGE, 'clean': 'true'},
+                                    headers=headers, timeout=30)
+                resp.raise_for_status()
+                items = resp.json()
+                if not isinstance(items, list):
+                    items = []
+                _raise_for_error_items(items, self.apify_actor)
+                offset += len(items)
+                batch = take(self._apify_items_to_leads(items, icp))
+                if tracker and (batch or items):
+                    tracker.found(batch, offset)
+                if not final or len(items) < APIFY_READ_PAGE:
+                    return
+
+        def stop_early(reason):
+            """The run ended before it found everything: keep what it found, say why."""
+            if not leads:
+                raise ValueError(reason)
+            self.stop_reason = reason
+            logger.warning("Apify run=%s: %s (%d leads kept)", run_id, reason, len(leads))
+
+        try:
+            while True:
+                if tracker and tracker.should_stop():
+                    self.abort_apify_run(run_id)
+                    read(final=True)
+                    self.stop_reason = 'Stopped'
+                    break
+                time.sleep(delay)
+                waited += delay
+                try:
+                    status_resp = requests.get(f"{APIFY_BASE}/actor-runs/{run_id}", headers=headers, timeout=15)
+                    if status_resp.status_code == 429 or status_resp.status_code >= 500:
+                        raise requests.ConnectionError(f'Apify answered {status_resp.status_code}')
+                    status_resp.raise_for_status()
+                    run_data = status_resp.json().get('data', {})
+                    status = run_data.get('status', '')
+                    detail = run_data.get('statusMessage') or ''
+                    dataset_id = dataset_id or run_data.get('defaultDatasetId') or ''
+                    if tracker:
+                        tracker.heartbeat()
+                    finished = status in ('SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT')
+                    read(final=finished)
+                    unreachable_for, delay = 0, 5
+                except requests.RequestException as exc:
+                    # A failed request says nothing about the run: ask again, a little later each time.
+                    unreachable_for += delay
+                    logger.warning("Apify run=%s: request failed (%ss unreachable): %s", run_id, unreachable_for, exc)
+                    if unreachable_for >= APIFY_UNREACHABLE_SECONDS:
+                        raise ApifyUnreachable(
+                            f"Apify could not be reached for {unreachable_for // 60} minutes: {exc}") from exc
+                    delay = min(30, delay * 2)
+                    continue
+                logger.info("Apify: run=%s status=%s leads=%d", run_id, status, len(leads))
                 if status == 'SUCCEEDED':
                     break
                 if status in ('FAILED', 'ABORTED', 'TIMED-OUT'):
-                    detail = run_data.get('statusMessage') or ''
-                    raise ValueError(f"Apify run failed with status: {status}. {detail}".strip())
-            else:
-                # An abandoned run keeps spending the user's credit
-                requests.post(f"{APIFY_BASE}/actor-runs/{run_id}/abort",
-                              headers=_apify_headers(self.apify_token), timeout=10)
-                raise ValueError(f"Apify run timed out after {poll_attempts * 5 // 60} minutes")
-
-            # Step 3: Fetch dataset items
-            dataset_id = run_data.get('defaultDatasetId')
-            items_resp = requests.get(
-                f"{APIFY_BASE}/datasets/{dataset_id}/items",
-                params={'limit': count, 'clean': 'true'},
-                headers=_apify_headers(self.apify_token),
-                timeout=30,
-            )
-            items_resp.raise_for_status()
-            items = items_resp.json()
-            if not isinstance(items, list):
-                items = []
-            _raise_for_error_items(items, self.apify_actor)
-
+                    stop_early(f"Apify run failed with status: {status}. {detail}".strip())
+                    break
+                if waited >= budget:
+                    # An abandoned run keeps spending the user's credit
+                    try:
+                        read(final=True)
+                    except requests.RequestException:
+                        pass
+                    self.abort_apify_run(run_id)
+                    stop_early(f"Apify run timed out after {waited // 60} minutes")
+                    break
+        except ApifyUnreachable:
+            raise
         except requests.RequestException as exc:
             logger.error("Apify request error: %s", exc)
             raise ValueError(f"Apify request failed: {exc}") from exc
 
+        logger.info("Apify: run=%s ended with %d leads", run_id, len(leads))
+        return leads
+
+    def abort_apify_run(self, run_id: str):
+        """Stop a run so it charges nothing more. Best effort: a run we cannot reach stops at its own time limit."""
+        try:
+            requests.post(f"{APIFY_BASE}/actor-runs/{run_id}/abort",
+                          headers=_apify_headers(self.apify_token), timeout=10)
+        except requests.RequestException as exc:
+            logger.warning("Apify: could not abort run=%s: %s", run_id, exc)
+
+    def _apify_items_to_leads(self, items, icp) -> list[dict]:
+        """Leads from a page of dataset items."""
         # Flatten: a google-search-scraper item holds MANY organicResults (each a
         # separate lead), so expand those instead of keeping only the first.
         leads = []
@@ -741,8 +855,7 @@ class LeadResearchAgent:
                 lead = self._parse_apify_item(item)
                 if lead:
                     leads.append(lead)
-        logger.info("Apify: got %d raw items → %d leads parsed", len(items), len(leads))
-        return leads[:count]
+        return leads
 
     def fetch_apify_runs(self, max_leads: int = 200, actor: str = None) -> list[dict]:
         """Import leads from the user's EXISTING Apify runs (created via the Apify

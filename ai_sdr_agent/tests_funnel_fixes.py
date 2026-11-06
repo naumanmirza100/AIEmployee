@@ -236,7 +236,14 @@ class LeadsExportAllTests(SDRBase):
         body = self._csv({})
         self.assertIn('"\'=HYPERLINK(""http://bad.example"",""Click"")"', body)
         self.assertIn('\'-2+3+cmd', body)
-        self.assertIn(',+92 300 1234567,', body)
+        # Excel showed a bare +441159254169 as 4.41159E+11 (6 Nov 2026): ="..." keeps it as text.
+        self.assertIn(',"=""+92 300 1234567""",', body)
+
+    def test_a_phone_cell_is_text_only_when_it_holds_a_phone(self):
+        self.assertEqual(views._phone_cell('447789223569'), '="447789223569"')
+        self.assertEqual(views._phone_cell(''), '')
+        self.assertEqual(views._phone_cell('=1+1'), "'=1+1")          # not a phone: the formula guard as before
+        self.assertEqual(views._phone_cell('ext. 12'), 'ext. 12')
 
 
 class BookingConfirmSyncsToCrmTests(SDRBase):

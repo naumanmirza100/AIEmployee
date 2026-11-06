@@ -317,6 +317,16 @@ export const researchLeads = async ({ count = 20, source = 'auto', icp_id } = {}
   }
 };
 
+/** Stop a running search: its Apify run is aborted, and the leads found so far are kept. */
+export const stopResearchJob = async (jobId) => {
+  try {
+    return await companyApi.post(`/sdr/leads/research/jobs/${jobId}/stop/`);
+  } catch (error) {
+    console.error('Stop research job error:', error);
+    throw error;
+  }
+};
+
 /** Poll a background lead-discovery job started by researchLeads. */
 export const getResearchJob = async (jobId) => {
   try {
