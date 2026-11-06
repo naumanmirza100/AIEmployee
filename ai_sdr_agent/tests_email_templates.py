@@ -231,3 +231,79 @@ class HtmlPartTests(Base):
 
     def test_campaign_emails_stay_plain_only(self):
         self.assertEqual([p.get_content_type() for p in self.smtp_message().get_payload()], ['text/plain'])
+
+
+class ReadyMadeTemplateTests(Base):
+    """Ready-made templates (ai_sdr_agent/email_presets.py): ready but for what the sender offers, which they fill in."""
+
+    def test_they_are_offered_with_the_template_list(self):
+        presets = self.call(views.sdr_email_templates).data['presets']
+        self.assertEqual({p['key'] for p in presets}, {'dental_medical', 'education', 'real_estate'})
+        for p in presets:
+            self.assertTrue(p['html'].strip() and p['subject'] and p['accent'], p['key'])
+
+    def test_only_their_your_parts_are_left_to_fill_in(self):
+        from ai_sdr_agent.email_presets import PRESETS
+        for p in PRESETS:
+            left = unknown_variables(p['subject'], p['html'])
+            self.assertTrue(left, p['key'])
+            self.assertTrue(all(x.startswith('[Your ') for x in left), (p['key'], left))   # no unknown {variable}
+            self.assertIn('{unsubscribe_url}', p['html'])
+
+    def test_one_left_unfilled_is_not_sent_and_filled_in_it_is(self):
+        from ai_sdr_agent.email_presets import PRESETS
+        import re
+        self.lead('a@x.example')
+        preset = PRESETS[0]
+        t = self.template(html=preset['html'], subject=preset['subject'])
+        body = {'template_id': t.id, 'campaign_id': self.campaign.id, 'industry': 'Dentistry'}
+        r = self.call(views.sdr_email_sends, 'post', body)
+        self.assertEqual((r.status_code, r.data['code']), (400, 'unknown_variables'))
+        self.assertIn('[Your booking link]', r.data['unknown_variables'])
+        t.html = re.sub(r'\[Your [^\]]+\]', 'Our clinic software', preset['html'])
+        t.save()
+        self.assertEqual(self.call(views.sdr_email_sends, 'post', body).status_code, 201)
+
+    def test_a_your_part_is_found_but_an_outlook_comment_is_not(self):
+        self.assertEqual(unknown_variables('<!--[if mso]>x<![endif]--> [Your offer] [note]'), ['[Your offer]'])
+
+
+class OneCompanyTests(Base):
+    """Sending to the leads at one company, instead of a whole industry."""
+
+    def start(self, **data):
+        body = {'template_id': self.template().id, 'campaign_id': self.campaign.id}
+        body.update(data)
+        return self.call(views.sdr_email_sends, 'post', body)
+
+    def test_only_that_companys_leads_get_it(self):
+        a = SDRLead.objects.create(company_user=self.cu, email='a@smile.example', full_name='A', company_name='Smile Line')
+        SDRLead.objects.create(company_user=self.cu, email='b@smile.example', full_name='B', company_name='smile line')
+        SDRLead.objects.create(company_user=self.cu, email='c@other.example', full_name='C', company_name='Other Co')
+        r = self.start(company='Smile Line')
+        self.assertEqual((r.status_code, r.data['will_send']), (201, 2), r.data)
+        send = SDREmailSend.objects.get()
+        self.assertEqual((send.company, send.industry), ('Smile Line', ''))
+        self.assertEqual(set(send.recipients.values_list('email', flat=True)), {'a@smile.example', 'b@smile.example'})
+
+    def test_an_industry_or_a_company_not_both_or_neither(self):
+        self.lead('a@x.example')
+        self.assertEqual(self.start().status_code, 400)
+        self.assertEqual(self.start(industry='Dentistry', company='Smile <Co>').status_code, 400)
+
+    def test_companies_are_searched_with_their_emailable_lead_counts_and_only_mine(self):
+        for e in ('a@s.example', 'b@s.example'):
+            SDRLead.objects.create(company_user=self.cu, email=e, full_name=e, company_name='Smile Line')
+        SDRLead.objects.create(company_user=self.cu, email='', full_name='No mail', company_name='Smile Line')
+        SDRLead.objects.create(company_user=self.cu, email='x@o.example', full_name='X', company_name='Other Co')
+        SDRLead.objects.create(company_user=self.outsider(), email='t@s.example', full_name='T', company_name='Smile Theirs')
+        req = self.rf.get('/x', {'q': 'smile'})
+        force_authenticate(req, user=self.cu)
+        self.assertEqual(views.sdr_lead_companies(req).data['data'], [{'name': 'Smile Line', 'lead_count': 2}])
+
+    def test_preview_uses_a_lead_at_the_company(self):
+        SDRLead.objects.create(company_user=self.cu, email='k@s.example', first_name='Kiran', full_name='Kiran',
+                               company_name='Smile Line')
+        self.lead('other@x.example')
+        r = self.call(views.sdr_email_template_preview, 'post', {'html': '<p>Hi {first_name}</p>', 'company': 'Smile Line'})
+        self.assertEqual(r.data['lead']['email'], 'k@s.example')

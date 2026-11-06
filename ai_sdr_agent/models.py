@@ -718,7 +718,7 @@ class SDREmailTemplate(models.Model):
 
 
 class SDREmailSend(models.Model):
-    """One template sent to the leads of one industry through one campaign's mailbox. Its subject and HTML are kept
+    """One template sent to the leads of one industry, or of one company, through one campaign's mailbox. Its subject and HTML are kept
     as they were when it was started, so editing the template does not change a send that is going out. The
     scheduler sends its recipients a few at a time, within the mailbox's limits it shares with the campaigns."""
     STATUS_CHOICES = [('sending', 'Sending'), ('done', 'Done'), ('stopped', 'Stopped')]
@@ -728,7 +728,9 @@ class SDREmailSend(models.Model):
                                  related_name='sends')
     campaign = models.ForeignKey(SDRCampaign, on_delete=models.SET_NULL, null=True, blank=True,
                                  related_name='email_sends')   # whose mailbox it goes out through
+    # Who it goes to: the leads of an industry, or the leads at one company (one of the two).
     industry = models.CharField(max_length=255, blank=True)
+    company = models.CharField(max_length=255, blank=True)
     template_name = models.CharField(max_length=200, blank=True)
     subject = models.CharField(max_length=500, blank=True)
     html = models.TextField(blank=True)

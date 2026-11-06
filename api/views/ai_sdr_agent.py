@@ -4746,13 +4746,16 @@ def _email_template_fields(d) -> tuple:
 @permission_classes([IsCompanyUserOnly])
 def sdr_email_templates(request):
     """GET: the user's templates (no HTML: the list does not need it). POST {name, subject, html}: a new one."""
+    from ai_sdr_agent.email_presets import PRESETS
     from ai_sdr_agent.email_templates import STARTER_HTML, VARIABLES
     company_user = request.user
     if request.method == 'GET':
         return Response({'status': 'success',
                          'data': [_serialize_email_template(t, with_html=False)
                                   for t in SDREmailTemplate.objects.filter(company_user=company_user)],
-                         'variables': [f'{{{v}}}' for v in VARIABLES], 'starter_html': STARTER_HTML})
+                         'variables': [f'{{{v}}}' for v in VARIABLES], 'starter_html': STARTER_HTML,
+                         # Ready-made templates: opened in the editor as a new template of the user's own.
+                         'presets': PRESETS})
     fields, error = _email_template_fields(request.data)
     if error:
         return Response({'status': 'error', 'message': error}, status=400)
@@ -4781,10 +4784,26 @@ def sdr_email_template_detail(request, template_id):
     return Response({'status': 'success', 'data': _serialize_email_template(t)})
 
 
-def _industry_leads(company_user, industry):
-    """The user's leads of that industry (any capitalisation) that have an email address."""
-    return (SDRLead.objects.filter(company_user=company_user, company_industry__iexact=industry)
-            .exclude(email='').order_by('id'))
+def _audience_leads(company_user, industry='', company=''):
+    """The user's leads with an email address of that industry, or at that company (any capitalisation)."""
+    qs = SDRLead.objects.filter(company_user=company_user).exclude(email='')
+    if company:
+        return qs.filter(company_name__iexact=company).order_by('id')
+    return qs.filter(company_industry__iexact=industry).order_by('id')
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_lead_companies(request):
+    """Companies the user has leads with an email at, for sending to one company: ?q= matches part of the name.
+    The 20 with the most such leads first, each with how many."""
+    q = ' '.join(request.GET.get('q', '').split())
+    qs = SDRLead.objects.filter(company_user=request.user).exclude(email='').exclude(company_name='')
+    if q:
+        qs = qs.filter(company_name__icontains=q)
+    rows = qs.values('company_name').annotate(n=Count('id')).order_by('-n', 'company_name')[:20]
+    return Response({'status': 'success', 'data': [{'name': r['company_name'], 'lead_count': r['n']} for r in rows]})
 
 
 @api_view(['POST'])
@@ -4792,8 +4811,9 @@ def _industry_leads(company_user, industry):
 @permission_classes([IsCompanyUserOnly])
 def sdr_email_template_preview(request):
     """A template as one lead will see it: the editor's subject and HTML (saved or not) with a real lead's details —
-    of ``industry`` if given, else the user's latest leads; a sample lead when there are none. ``campaign_id``
-    (optional) fills the sender's details. Body: {subject, html, industry?, campaign_id?, lead_index?}."""
+    of ``industry`` or at ``company`` if given, else the user's latest leads; a sample lead when there are none.
+    ``campaign_id`` (optional) fills the sender's details. Body: {subject, html, industry?, company?, campaign_id?,
+    lead_index?}."""
     from ai_sdr_agent.email_templates import render, unknown_variables
 
     company_user = request.user
@@ -4801,12 +4821,13 @@ def sdr_email_template_preview(request):
     subject = d.get('subject') if isinstance(d.get('subject'), str) else ''
     html = d.get('html') if isinstance(d.get('html'), str) else ''
     industry = ' '.join(str(d.get('industry') or '').split())
+    company = ' '.join(str(d.get('company') or '').split())
     campaign = None
     if str(d.get('campaign_id') or '').isdigit():
         campaign = SDRCampaign.objects.filter(company_user=company_user, pk=int(d['campaign_id'])).first()
     campaign = campaign or SDRCampaign.objects.filter(company_user=company_user).order_by('-id').first()
 
-    pool = _industry_leads(company_user, industry) if industry else \
+    pool = _audience_leads(company_user, industry, company) if (industry or company) else \
         SDRLead.objects.filter(company_user=company_user).exclude(email='').order_by('-created_at')
     leads = list(pool[:20])
     try:
@@ -4833,7 +4854,7 @@ def _mailbox_ready(campaign) -> bool:
 def _serialize_email_send(send: SDREmailSend) -> dict:
     counts = dict(send.recipients.values_list('status').annotate(n=Count('id')))
     return {
-        'id': send.id, 'status': send.status, 'industry': send.industry,
+        'id': send.id, 'status': send.status, 'industry': send.industry, 'company': send.company,
         'template_id': send.template_id, 'template_name': send.template_name, 'subject': send.subject,
         'campaign_id': send.campaign_id, 'campaign_name': send.campaign.name if send.campaign else '',
         'counts': {k: counts.get(k, 0) for k in ('queued', 'sent', 'skipped', 'failed')},
@@ -4848,7 +4869,8 @@ def _serialize_email_send(send: SDREmailSend) -> dict:
 @permission_classes([IsCompanyUserOnly])
 def sdr_email_sends(request):
     """GET: the user's sends, newest first, and the campaign mailboxes they can go out through (with what is left of
-    today's limit). POST {template_id, campaign_id, industry, dry_run?}: send the template to the industry's leads.
+    today's limit). POST {template_id, campaign_id, industry | company, dry_run?}: send the template to the leads of
+    an industry, or to the leads at one company.
     With dry_run, only the numbers: who would get it, who would be skipped and why. The scheduler sends it a few
     at a time (send_email_sends_impl)."""
     from ai_sdr_agent.email_templates import unknown_variables
@@ -4875,6 +4897,8 @@ def sdr_email_sends(request):
     campaign = SDRCampaign.objects.filter(company_user=company_user, pk=d.get('campaign_id') or 0).first() \
         if str(d.get('campaign_id') or '').isdigit() else None
     industry = ' '.join(str(d.get('industry') or '').split())
+    company = ' '.join(str(d.get('company') or '').split())
+    audience = f'{company}' if company else f'{industry}'
     if not template:
         return Response({'status': 'error', 'message': 'Choose one of your templates.'}, status=400)
     if not campaign:
@@ -4883,17 +4907,18 @@ def sdr_email_sends(request):
     if not _mailbox_ready(campaign):
         return Response({'status': 'error', 'message': f'The campaign "{campaign.name}" has no mailbox set up yet: '
                                                        'add its SMTP settings first.'}, status=400)
-    if not industry:
-        return Response({'status': 'error', 'message': 'Choose the industry of the leads to send it to.'}, status=400)
+    if bool(industry) == bool(company):
+        return Response({'status': 'error', 'message': 'Choose who to send it to: an industry, or one company.'},
+                        status=400)
     if not template.html.strip():
         return Response({'status': 'error', 'message': 'The template is empty.'}, status=400)
     unknown = unknown_variables(template.subject, template.html)
     if unknown:
         return Response({'status': 'error', 'code': 'unknown_variables', 'unknown_variables': unknown,
-                         'message': f'The template has {", ".join(unknown)}, which no lead has a value for. '
-                                    'Fix it before sending.'}, status=400)
+                         'message': f'The template still has {", ".join(unknown)}: fill '
+                                    f'{"it" if len(unknown) == 1 else "them"} in before sending.'}, status=400)
 
-    leads = list(_industry_leads(company_user, industry))
+    leads = list(_audience_leads(company_user, industry, company))
     blocked = blocked_among(company_user.company, [l.email for l in leads])
     seen, rows = set(), []
     for lead in leads:
@@ -4909,17 +4934,17 @@ def sdr_email_sends(request):
     if d.get('dry_run') is True:
         return Response({'status': 'success', **summary})
     if not will_send:
-        return Response({'status': 'error', 'message': f'No lead of "{industry}" can be emailed.', **summary},
+        return Response({'status': 'error', 'message': f'No lead of "{audience}" can be emailed.', **summary},
                         status=400)
 
     send = SDREmailSend.objects.create(
-        company_user=company_user, template=template, campaign=campaign, industry=industry,
+        company_user=company_user, template=template, campaign=campaign, industry=industry, company=company,
         template_name=template.name, subject=template.subject, html=template.html)
     SDREmailSendRecipient.objects.bulk_create([
         SDREmailSendRecipient(send=send, lead=lead, email=addr, status='skipped' if skip else 'queued', error=skip)
         for lead, addr, skip in rows])
     return Response({'status': 'success', 'data': _serialize_email_send(send), **summary,
-                     'message': f'Sending to {will_send} lead(s) of "{industry}" — a few at a time, within the '
+                     'message': f'Sending to {will_send} lead(s) of "{audience}" — a few at a time, within the '
                                 "mailbox's daily limit."}, status=201)
 
 

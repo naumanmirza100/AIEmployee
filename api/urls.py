@@ -832,6 +832,7 @@ urlpatterns = [
     re_path(r'^sdr/email-templates/preview/?$', sdr_api.sdr_email_template_preview, name='sdr_email_template_preview'),  # POST
     re_path(r'^sdr/email-templates/(?P<template_id>\d+)/?$', sdr_api.sdr_email_template_detail, name='sdr_email_template_detail'),  # GET, PUT, DELETE
     re_path(r'^sdr/email-sends/?$', sdr_api.sdr_email_sends, name='sdr_email_sends'),  # GET, POST
+    re_path(r'^sdr/lead-companies/?$', sdr_api.sdr_lead_companies, name='sdr_lead_companies'),  # GET ?q=
     re_path(r'^sdr/email-sends/(?P<send_id>\d+)/?$', sdr_api.sdr_email_send_detail, name='sdr_email_send_detail'),  # GET
     re_path(r'^sdr/email-sends/(?P<send_id>\d+)/stop/?$', sdr_api.sdr_email_send_stop, name='sdr_email_send_stop'),  # POST
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/steps/(?P<step_id>\d+)/?$', sdr_api.sdr_campaign_step_detail, name='sdr_campaign_step_detail'),  # PUT, DELETE

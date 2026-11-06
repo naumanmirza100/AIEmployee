@@ -798,4 +798,6 @@ export const listEmailSends = sdrCall('List email sends', () => companyApi.get('
 /** { template_id, campaign_id, industry, dry_run? } — dry_run only counts who would get it. */
 export const startEmailSend = sdrCall('Start email send', (data) => companyApi.post('/sdr/email-sends/', data));
 export const getEmailSend = sdrCall('Get email send', (id) => companyApi.get(`/sdr/email-sends/${id}/`));
+/** Companies you have leads with an email at, matching ?q= (part of the name), with how many. */
+export const listLeadCompanies = sdrCall('List lead companies', (q = '') => companyApi.get(`/sdr/lead-companies/${q ? `?q=${encodeURIComponent(q)}` : ''}`));
 export const stopEmailSend = sdrCall('Stop email send', (id) => companyApi.post(`/sdr/email-sends/${id}/stop/`));

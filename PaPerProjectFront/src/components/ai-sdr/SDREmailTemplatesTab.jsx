@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus, Edit2, Copy, Trash2, Send, Loader2, ChevronLeft, ChevronRight, AlertTriangle, Check, X,
   FileCode, Mail, Square, ChevronDown, ChevronUp, Wand2,
+  Bold, Italic, Underline, Link2, Unlink, List, Undo2, Redo2, Code2, Type,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -11,6 +12,7 @@ import SdrSelect from './SdrSelect';
 import {
   listEmailTemplates, getEmailTemplate, createEmailTemplate, updateEmailTemplate, deleteEmailTemplate,
   previewEmailTemplate, listEmailSends, startEmailSend, getEmailSend, stopEmailSend, listLeadIndustries,
+  listLeadCompanies,
 } from '@/services/aiSdrService';
 
 // Your own HTML emails: write a template, see it with a real lead, and send it to the leads of one industry
@@ -60,19 +62,158 @@ const EmailFrame = ({ subject, html, loading, height = 560 }) => (
 );
 
 // --------------------------------------------------------------------------
+// One company: a search box over the companies you have leads with an email at.
+// --------------------------------------------------------------------------
+const CompanyPicker = ({ value, onChange }) => {
+  const [query, setQuery] = useState(value);
+  const [options, setOptions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => { setQuery(value); }, [value]);
+  useEffect(() => {
+    if (!open) return undefined;
+    let live = true;
+    setLoading(true);
+    const id = setTimeout(() => {
+      listLeadCompanies(query === value ? '' : query)
+        .then(r => { if (live) setOptions(r?.data || []); })
+        .catch(() => { if (live) setOptions([]); })
+        .finally(() => { if (live) setLoading(false); });
+    }, 250);
+    return () => { live = false; clearTimeout(id); };
+  }, [query, open]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) { setOpen(false); setQuery(value); } };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open, value]);
+
+  return (
+    <div ref={boxRef} style={{ position: 'relative' }}>
+      <input value={query} onChange={e => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+        placeholder="Search a company…" style={inputStyle} />
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60, maxHeight: 280, overflowY: 'auto',
+          background: 'var(--sfc-14082a, #160d26)', border: '1px solid var(--line-1)', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.45)', padding: 4 }}>
+          {loading && !options.length ? (
+            <div style={{ padding: 12, display: 'flex', justifyContent: 'center' }}><Loader2 size={14} className="animate-spin" style={{ color: '#a78bfa' }} /></div>
+          ) : !options.length ? (
+            <div style={{ padding: '9px 10px', color: '#6b7280', fontSize: 13 }}>No company with an emailable lead matches.</div>
+          ) : options.map(o => (
+            <button key={o.name} onClick={() => { onChange(o.name); setQuery(o.name); setOpen(false); }}
+              style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '7px 10px', border: 'none', borderRadius: 7, cursor: 'pointer', textAlign: 'left',
+                background: o.name === value ? 'rgba(168,85,247,0.15)' : 'transparent', color: 'var(--text-soft)', fontSize: 13 }}
+              onMouseEnter={e => { if (o.name !== value) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+              onMouseLeave={e => { if (o.name !== value) e.currentTarget.style.background = 'transparent'; }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>
+              <span style={{ color: '#6b7280', fontSize: 12, flexShrink: 0 }}>{o.lead_count} lead{o.lead_count === 1 ? '' : 's'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --------------------------------------------------------------------------
+// Visual editor: the template shown as the email looks, to click into and type, with a small toolbar. Variables
+// stay as {first_name} here (the preview beside it fills them in). It writes back the same HTML the code view shows.
+// --------------------------------------------------------------------------
+const toolBtn = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 28, background: 'none', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'hsl(var(--pt-d1d5db))' };
+
+const VisualEditor = React.forwardRef(({ html, onChange }, ref) => {
+  const frameRef = useRef(null);
+  const lastEmitted = useRef(null);
+
+  const doc = () => frameRef.current?.contentDocument;
+  const emit = () => {
+    const d = doc();
+    if (!d?.documentElement) return;
+    const doctype = d.doctype ? '<!DOCTYPE html>\n' : '';
+    const out = doctype + d.documentElement.outerHTML;
+    lastEmitted.current = out;
+    onChange(out);
+  };
+
+  // Load the HTML into the frame, unless it is what this editor just wrote (that would move the cursor).
+  useEffect(() => {
+    if (html === lastEmitted.current) return;
+    const d = doc();
+    if (!d) return;
+    d.open();
+    d.write(html || '<!DOCTYPE html><html><body style="font-family:Helvetica,Arial,sans-serif;font-size:15px;"><p>Start writing your email here…</p></body></html>');
+    d.close();
+    d.designMode = 'on';
+    lastEmitted.current = html;
+    d.addEventListener('input', emit);
+    // Links do nothing while editing.
+    d.addEventListener('click', e => { if (e.target.closest && e.target.closest('a')) e.preventDefault(); });
+  }, [html]);
+
+  const run = (command, value = null) => {
+    const d = doc();
+    if (!d) return;
+    frameRef.current.contentWindow.focus();
+    d.execCommand(command, false, value);
+    emit();
+  };
+
+  // A link: edit the one the cursor is in (a button's link too), or make the selected text one.
+  const editLink = () => {
+    const d = doc();
+    if (!d) return;
+    const sel = frameRef.current.contentWindow.getSelection();
+    let node = sel?.anchorNode;
+    while (node && node.nodeName !== 'A' && node !== d.body) node = node.parentNode;
+    const current = node?.nodeName === 'A' ? node.getAttribute('href') : '';
+    const url = window.prompt('Link address (or a variable like {unsubscribe_url}):', current || 'https://');
+    if (url === null) return;
+    if (node?.nodeName === 'A') { node.setAttribute('href', url.trim()); emit(); } else if (url.trim()) run('createLink', url.trim());
+  };
+
+  React.useImperativeHandle(ref, () => ({ insertText: (t) => run('insertText', t) }));
+
+  return (
+    <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, padding: 4, background: 'hsl(var(--sfr-1e0a32) / 0.6)', borderBottom: '1px solid var(--line-1)' }}>
+        <button title="Bold" onMouseDown={e => e.preventDefault()} onClick={() => run('bold')} style={toolBtn}><Bold size={14} /></button>
+        <button title="Italic" onMouseDown={e => e.preventDefault()} onClick={() => run('italic')} style={toolBtn}><Italic size={14} /></button>
+        <button title="Underline" onMouseDown={e => e.preventDefault()} onClick={() => run('underline')} style={toolBtn}><Underline size={14} /></button>
+        <button title="Heading" onMouseDown={e => e.preventDefault()} onClick={() => run('formatBlock', 'h2')} style={toolBtn}><Type size={14} /></button>
+        <button title="Bullet list" onMouseDown={e => e.preventDefault()} onClick={() => run('insertUnorderedList')} style={toolBtn}><List size={14} /></button>
+        <span style={{ width: 1, background: 'var(--line-1)', margin: '4px 3px' }} />
+        <button title="Add or edit a link (also a button's link)" onMouseDown={e => e.preventDefault()} onClick={editLink} style={toolBtn}><Link2 size={14} /></button>
+        <button title="Remove link" onMouseDown={e => e.preventDefault()} onClick={() => run('unlink')} style={toolBtn}><Unlink size={14} /></button>
+        <span style={{ width: 1, background: 'var(--line-1)', margin: '4px 3px' }} />
+        <button title="Undo" onMouseDown={e => e.preventDefault()} onClick={() => run('undo')} style={toolBtn}><Undo2 size={14} /></button>
+        <button title="Redo" onMouseDown={e => e.preventDefault()} onClick={() => run('redo')} style={toolBtn}><Redo2 size={14} /></button>
+      </div>
+      {/* Same origin so the page can edit it; no scripts in it run. */}
+      <iframe ref={frameRef} title="Visual editor" sandbox="allow-same-origin" style={{ width: '100%', height: 520, border: 'none', display: 'block', background: '#ffffff' }} />
+    </div>
+  );
+});
+
+// --------------------------------------------------------------------------
 // Template editor: HTML on the left, the live preview with a real lead on the right.
 // --------------------------------------------------------------------------
 const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, onCancel }) => {
   const { toast } = useToast();
   const [draft, setDraft] = useState({ name: initial?.name || '', subject: initial?.subject || '', html: initial?.html || '' });
   const [saving, setSaving] = useState(false);
-  const [previewIndustry, setPreviewIndustry] = useState('');
+  const [previewIndustry, setPreviewIndustry] = useState(initial?.previewIndustry || '');
   const [leadIndex, setLeadIndex] = useState(0);
   const [preview, setPreview] = useState(null);
   const [previewing, setPreviewing] = useState(false);
   const htmlRef = useRef(null);
   const subjectRef = useRef(null);
+  const visualRef = useRef(null);
   const focused = useRef('html');
+  // Visual (click into the email and type) or the HTML code: the same template either way.
+  const [mode, setMode] = useState('visual');
 
   // Refresh the preview shortly after typing stops.
   useEffect(() => {
@@ -89,6 +230,7 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
 
   const insert = (token) => {
     const field = focused.current;
+    if (field === 'html' && mode === 'visual') { visualRef.current?.insertText(token); return; }
     const el = (field === 'subject' ? subjectRef : htmlRef).current;
     const cur = draft[field] || '';
     const start = el?.selectionStart ?? cur.length;
@@ -149,12 +291,27 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-              <label style={{ ...labelStyle, marginBottom: 0 }}>HTML</label>
+              <div style={{ display: 'flex', border: '1px solid var(--line-1)', borderRadius: 7, overflow: 'hidden' }}>
+                {[['visual', 'Visual', Type], ['code', 'HTML code', Code2]].map(([k, l, Icon]) => (
+                  <button key={k} onClick={() => setMode(k)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', fontSize: 12, border: 'none', cursor: 'pointer',
+                    background: mode === k ? 'rgba(168,85,247,0.2)' : 'transparent', color: mode === k ? 'hsl(var(--pt-c084fc))' : '#9ca3af', fontWeight: mode === k ? 600 : 400 }}>
+                    <Icon size={12} /> {l}
+                  </button>
+                ))}
+              </div>
               <button onClick={() => { if (!draft.html.trim() || window.confirm('Replace the HTML with the starter layout?')) setDraft(d => ({ ...d, html: starterHtml })); }}
                 style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#a78bfa', fontSize: 12 }}>
                 <Wand2 size={12} /> Start from a simple layout
               </button>
             </div>
+            {mode === 'visual' ? (
+              <div onFocusCapture={() => { focused.current = 'html'; }} onMouseDown={() => { focused.current = 'html'; }}>
+                <VisualEditor ref={visualRef} html={draft.html} onChange={html => setDraft(d => ({ ...d, html }))} />
+                <p style={{ color: '#6b7280', fontSize: 11, margin: '6px 0 0' }}>
+                  Click into the email and type. Select text for bold, links and lists; click a button and use the link tool to change where it goes.
+                </p>
+              </div>
+            ) : (
             <textarea ref={htmlRef} value={draft.html} spellCheck={false} onFocus={() => { focused.current = 'html'; }}
               onChange={e => setDraft(d => ({ ...d, html: e.target.value }))}
               onKeyDown={e => {
@@ -166,6 +323,7 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
               }}
               placeholder={'<p>Hi {first_name},</p>\n<p>...</p>\n<p><a href="{unsubscribe_url}">Unsubscribe</a></p>'}
               style={{ ...inputStyle, minHeight: 420, resize: 'vertical', fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre', tabSize: 2 }} />
+            )}
             <p style={{ color: '#6b7280', fontSize: 11, margin: '6px 0 0' }}>
               Without {'{unsubscribe_url}'} in it, an unsubscribe link and your campaign's postal address are added at the bottom.
             </p>
@@ -195,7 +353,7 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
           {unknown.length > 0 && (
             <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: 'hsl(var(--pt-fbbf24))', fontSize: 12 }}>
               <AlertTriangle size={11} style={{ display: 'inline', marginRight: 4 }} />
-              {unknown.join(', ')} {unknown.length === 1 ? 'is not a variable' : 'are not variables'}: no lead has a value for {unknown.length === 1 ? 'it' : 'them'}. Fix before sending.
+              Still to fill in before this can be sent: {unknown.join(', ')}
             </div>
           )}
           <EmailFrame subject={preview?.subject} html={preview?.html} loading={previewing} />
@@ -211,6 +369,7 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
 const SDREmailTemplatesTab = () => {
   const { toast } = useToast();
   const [templates, setTemplates] = useState([]);
+  const [presets, setPresets] = useState([]);
   const [variables, setVariables] = useState([]);
   const [starterHtml, setStarterHtml] = useState('');
   const [industries, setIndustries] = useState([]);
@@ -221,7 +380,13 @@ const SDREmailTemplatesTab = () => {
   const [deleting, setDeleting] = useState(null);
 
   // Send panel
+  const [sendTo, setSendTo] = useState('industry');      // 'industry' | 'company'
   const [sendIndustry, setSendIndustry] = useState('');
+  const [sendCompany, setSendCompany] = useState('');
+  // Who it goes to, as the API takes it, and as it reads in sentences.
+  const audience = sendTo === 'company' ? { company: sendCompany } : { industry: sendIndustry };
+  const audienceValue = sendTo === 'company' ? sendCompany : sendIndustry;
+  const audienceLabel = sendTo === 'company' ? `at ${sendCompany}` : `of ${sendIndustry}`;
   const [sendTemplate, setSendTemplate] = useState('');
   const [sendCampaign, setSendCampaign] = useState('');
   const [summary, setSummary] = useState(null);
@@ -231,10 +396,12 @@ const SDREmailTemplatesTab = () => {
   const [starting, setStarting] = useState(false);
   const [openSend, setOpenSend] = useState(null);        // a send's id, with its recipients shown
   const [openSendData, setOpenSendData] = useState(null);
+  const [templateVersion, setTemplateVersion] = useState(0);   // a saved edit refreshes the send summary
 
   const loadTemplates = useCallback(async () => {
     const r = await listEmailTemplates();
     setTemplates(r?.data || []);
+    setPresets(r?.presets || []);
     setVariables(r?.variables || []);
     setStarterHtml(r?.starter_html || '');
   }, []);
@@ -261,19 +428,19 @@ const SDREmailTemplatesTab = () => {
   useEffect(() => {
     setSummary(null);
     setSendPreview(null);
-    if (!sendIndustry || !sendTemplate || !sendCampaign) return undefined;
+    if (!audienceValue || !sendTemplate || !sendCampaign) return undefined;
     let live = true;
     setSummaryLoading(true);
-    const body = { template_id: Number(sendTemplate), campaign_id: Number(sendCampaign), industry: sendIndustry };
+    const body = { template_id: Number(sendTemplate), campaign_id: Number(sendCampaign), ...audience };
     Promise.all([
       startEmailSend({ ...body, dry_run: true }).then(r => r?.data ?? r).catch(e => ({ error: apiErrorMessage(e, 'Could not count the leads.') })),
       getEmailTemplate(Number(sendTemplate)).then(r => r?.data ?? r)
-        .then(t => previewEmailTemplate({ subject: t.subject, html: t.html, industry: sendIndustry, campaign_id: Number(sendCampaign) }))
+        .then(t => previewEmailTemplate({ subject: t.subject, html: t.html, ...audience, campaign_id: Number(sendCampaign) }))
         .then(r => r?.data ?? r).catch(() => null),
     ]).then(([s, p]) => { if (live) { setSummary(s); setSendPreview(p); } })
       .finally(() => { if (live) setSummaryLoading(false); });
     return () => { live = false; };
-  }, [sendIndustry, sendTemplate, sendCampaign]);
+  }, [sendTo, sendIndustry, sendCompany, sendTemplate, sendCampaign, templateVersion]);
 
   const handleDuplicate = async (t) => {
     try {
@@ -285,8 +452,8 @@ const SDREmailTemplatesTab = () => {
       toast({ title: 'Could not duplicate', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
     }
   };
-  const handleEdit = async (t) => {
-    try { setEditing((await getEmailTemplate(t.id))?.data); } catch (e) {
+  const handleEdit = async (t, selectAfterSave = false) => {
+    try { setEditing({ ...(await getEmailTemplate(t.id))?.data, selectAfterSave }); } catch (e) {
       toast({ title: 'Could not open the template', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
     }
   };
@@ -306,10 +473,10 @@ const SDREmailTemplatesTab = () => {
   const handleStart = async () => {
     setStarting(true);
     try {
-      const r = await startEmailSend({ template_id: Number(sendTemplate), campaign_id: Number(sendCampaign), industry: sendIndustry });
+      const r = await startEmailSend({ template_id: Number(sendTemplate), campaign_id: Number(sendCampaign), ...audience });
       toast({ title: 'Sending started', description: r?.message });
       setConfirming(false);
-      setSendTemplate(''); setSendIndustry('');
+      setSendTemplate(''); setSendIndustry(''); setSendCompany('');
       loadSends();
     } catch (e) {
       toast({ title: 'Could not start the send', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
@@ -336,10 +503,41 @@ const SDREmailTemplatesTab = () => {
 
   if (editing) {
     return (
-      <TemplateEditor initial={editing.id ? editing : null} variables={variables} starterHtml={starterHtml} industries={industries}
-        onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); loadTemplates(); }} />
+      <TemplateEditor initial={editing} variables={variables} starterHtml={starterHtml} industries={industries}
+        onCancel={() => setEditing(null)}
+        onSaved={(t) => {
+          // Opened from the send panel's dropdown: back there with it chosen.
+          if (editing.selectAfterSave && t?.id) setSendTemplate(String(t.id));
+          setTemplateVersion(v => v + 1);
+          setEditing(null);
+          loadTemplates();
+        }} />
     );
   }
+
+  // A ready-made template opens in the editor as a new one of your own, previewed with a lead of a matching industry.
+  const usePreset = (p, selectAfterSave = false) => {
+    const wanted = (p.industries || []).map(i => i.toLowerCase());
+    const match = industries.find(i => wanted.includes(i.name.toLowerCase()))
+      || industries.find(i => i.name.toLowerCase() === sendIndustry.toLowerCase());
+    setEditing({ name: p.name, subject: p.subject, html: p.html, previewIndustry: match?.name || '', selectAfterSave });
+  };
+
+  // The send panel's template choices: your saved templates, then the ready-made ones. A ready-made one has parts to
+  // fill in first, so choosing it opens it in the editor; saved, it comes back here chosen.
+  const PRESET_PREFIX = 'preset:';
+  const templateOptions = [
+    ...templates.map(t => ({ value: String(t.id), label: t.name })),
+    ...presets.map(p => ({ value: PRESET_PREFIX + p.key, label: `Ready-made: ${p.name} — fill in & save first` })),
+  ];
+  const chooseTemplate = (v) => {
+    if (v.startsWith(PRESET_PREFIX)) {
+      const p = presets.find(x => PRESET_PREFIX + x.key === v);
+      if (p) usePreset(p, true);
+      return;
+    }
+    setSendTemplate(v);
+  };
 
   const readyMailboxes = mailboxes.filter(m => m.ready);
   const mailbox = mailboxes.find(m => String(m.campaign_id) === sendCampaign);
@@ -378,6 +576,34 @@ const SDREmailTemplatesTab = () => {
         )}
       </div>
 
+      {/* Ready-made */}
+      {presets.length > 0 && (
+        <div style={{ ...cardStyle, padding: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <Wand2 size={17} color="#a855f7" />
+            <h3 style={{ margin: 0, color: 'var(--text-soft)', fontSize: 16, fontWeight: 700 }}>Ready-made templates</h3>
+          </div>
+          <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 14px' }}>
+            Designed for an industry and ready to go: open one, fill in the parts in [square brackets] with what you offer, and save it as your own.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+            {presets.map(p => (
+              <div key={p.key} style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ height: 6, background: p.accent || '#7c3aed' }} />
+                <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                  <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{p.name}</div>
+                  <div style={{ color: '#6b7280', fontSize: 12, lineHeight: 1.5, flex: 1 }}>{p.description}</div>
+                  <div style={{ color: '#9ca3af', fontSize: 11, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Subject: {p.subject}</div>
+                  <Button onClick={() => usePreset(p)} variant="outline" style={{ ...ghostBtn, marginTop: 6, justifyContent: 'center', color: 'hsl(var(--pt-c084fc))', borderColor: 'rgba(168,85,247,0.35)' }}>
+                    <Edit2 size={13} /> Use this
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Send */}
       <div style={{ ...cardStyle, padding: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -386,14 +612,42 @@ const SDREmailTemplatesTab = () => {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
           <div>
-            <label style={labelStyle}>1. Industry</label>
-            <SdrSelect value={sendIndustry} onChange={setSendIndustry} style={inputStyle} placeholder="Choose an industry"
-              options={industries.map(i => ({ value: i.name, label: `${i.name} (${i.lead_count})` }))} />
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>1. Send to</label>
+              {/* An industry's leads, or the leads at one company. */}
+              <div style={{ marginLeft: 'auto', display: 'flex', border: '1px solid var(--line-1)', borderRadius: 7, overflow: 'hidden' }}>
+                {[['industry', 'An industry'], ['company', 'One company']].map(([k, l]) => (
+                  <button key={k} onClick={() => setSendTo(k)} style={{ padding: '2px 9px', fontSize: 11, border: 'none', cursor: 'pointer',
+                    background: sendTo === k ? 'rgba(168,85,247,0.2)' : 'transparent', color: sendTo === k ? 'hsl(var(--pt-c084fc))' : '#6b7280', fontWeight: sendTo === k ? 600 : 400 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {sendTo === 'company' ? (
+              <CompanyPicker value={sendCompany} onChange={setSendCompany} />
+            ) : (
+              <SdrSelect value={sendIndustry} onChange={setSendIndustry} style={inputStyle} placeholder="Choose an industry"
+                options={industries.map(i => ({ value: i.name, label: `${i.name} (${i.lead_count})` }))} />
+            )}
           </div>
           <div>
             <label style={labelStyle}>2. Template</label>
-            <SdrSelect value={sendTemplate} onChange={setSendTemplate} style={inputStyle} placeholder={templates.length ? 'Choose a template' : 'Create a template first'}
-              options={templates.map(t => ({ value: String(t.id), label: t.name }))} />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <SdrSelect value={sendTemplate} onChange={chooseTemplate} style={inputStyle}
+                  placeholder={templates.length ? 'Choose a template' : presets.length ? 'Choose a ready-made template' : 'Create a template first'}
+                  options={templateOptions.length ? templateOptions : [{ value: '__none__', label: 'No templates yet — create one above', disabled: true }]} />
+              </div>
+              {/* Change the chosen template before sending: saved, the summary and preview below show the change. */}
+              {sendTemplate && (
+                <button title="Edit this template" onClick={() => handleEdit({ id: Number(sendTemplate) }, true)}
+                  style={{ ...iconBtn, padding: '0 10px', gap: 4, fontSize: 12, color: 'hsl(var(--pt-c084fc))', borderColor: 'rgba(168,85,247,0.35)' }}>
+                  <Edit2 size={13} /> Edit
+                </button>
+              )}
+            </div>
+            {!templates.length && presets.length > 0 && (
+              <p style={{ color: '#6b7280', fontSize: 11, margin: '4px 0 0' }}>A ready-made one opens in the editor: fill in the [square brackets], save, and it's ready to send.</p>
+            )}
           </div>
           <div>
             <label style={labelStyle}>3. Send from (a campaign's mailbox)</label>
@@ -422,7 +676,7 @@ const SDREmailTemplatesTab = () => {
                 <>
                   <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.25)' }}>
                     <div style={{ color: '#34d399', fontSize: 22, fontWeight: 700 }}>{summary.will_send.toLocaleString()}</div>
-                    <div style={{ color: 'var(--text-soft)', fontSize: 13 }}>lead{summary.will_send === 1 ? '' : 's'} of {sendIndustry} will get this email</div>
+                    <div style={{ color: 'var(--text-soft)', fontSize: 13 }}>lead{summary.will_send === 1 ? '' : 's'} {audienceLabel} will get this email</div>
                     {summary.skipped > 0 && (
                       <div style={{ color: '#f59e0b', fontSize: 12, marginTop: 4 }}>{summary.skipped} skipped: on the do-not-email list, or bounced before</div>
                     )}
@@ -467,7 +721,7 @@ const SDREmailTemplatesTab = () => {
             <div key={s.id} style={{ borderTop: '1px solid hsl(var(--surface-invert) / 0.05)', padding: '10px 2px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{s.template_name || 'Template'} → {s.industry}</div>
+                  <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{s.template_name || 'Template'} → {s.company || s.industry}</div>
                   <div style={{ color: '#6b7280', fontSize: 12 }}>{fmtDate(s.created_at)} · from {s.campaign_name || 'a deleted campaign'}</div>
                 </div>
                 <span style={{ color: st.color, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -511,7 +765,7 @@ const SDREmailTemplatesTab = () => {
           <DialogHeader><DialogTitle style={{ color: 'var(--text-soft)' }}>Send this email?</DialogTitle></DialogHeader>
           <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, lineHeight: 1.6, margin: 0 }}>
             <strong style={{ color: 'var(--text-soft)' }}>{templates.find(t => String(t.id) === sendTemplate)?.name}</strong> to{' '}
-            <strong style={{ color: 'var(--text-soft)' }}>{summary?.will_send?.toLocaleString()} lead{summary?.will_send === 1 ? '' : 's'}</strong> of {sendIndustry},
+            <strong style={{ color: 'var(--text-soft)' }}>{summary?.will_send?.toLocaleString()} lead{summary?.will_send === 1 ? '' : 's'}</strong> {audienceLabel},
             from {mailbox?.from_email}. Emails that have gone out can't be taken back; you can stop the rest at any time.
           </p>
           <DialogFooter>

@@ -15,12 +15,18 @@ VARIABLES = (
 _PLACEHOLDER = re.compile(r'\{([a-z_]+)\}')
 
 
+# A part of a ready-made template (ai_sdr_agent/email_presets.py) still to be written: "[Your offer in one sentence]".
+_TO_FILL_IN = re.compile(r'\[(?:Your|your) [^\]\n]{1,120}\]')
+
+
 def unknown_variables(*texts) -> list:
-    """The {placeholders} in ``texts`` that are not variables: they would reach the lead as typed."""
-    found = set()
+    """What in ``texts`` would reach the lead as typed: {placeholders} that are not variables, and the
+    "[Your ...]" parts of a ready-made template not yet filled in. A template with any of them is not sent."""
+    found, to_fill = set(), []
     for text in texts:
         found.update(m for m in _PLACEHOLDER.findall(text or '') if m not in VARIABLES)
-    return sorted(f'{{{m}}}' for m in found)
+        to_fill += [m for m in _TO_FILL_IN.findall(text or '') if m not in to_fill]
+    return sorted(f'{{{m}}}' for m in found) + to_fill
 
 
 def lead_values(lead, campaign, unsubscribe_url: str = '') -> dict:
