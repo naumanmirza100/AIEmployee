@@ -8,8 +8,11 @@
    UNION and the like allowed), with nothing anywhere inside it that writes, changes structure, locks, or reaches
    outside the query (files, other servers, sleeping, sequences).
 
-They are the first of three layers: the session is also read-only (connectors.py), and the company is asked for a
-read-only database user.
+3. MongoDB (`check_pipeline`): the AI's aggregation must be one {"collection", "pipeline"} whose every stage only reads,
+   with nothing at any depth that writes ($out, $merge) or runs JavaScript ($function, $accumulator, $where, $code).
+
+They are the first of three layers: the session is also read-only (connectors.py; for MongoDB only aggregate() is ever
+called, mongo.py), and the company is asked for a read-only database user.
 """
 import ipaddress
 import socket
@@ -109,3 +112,104 @@ def check_sql(sql: str, kind: str) -> str:
         if isinstance(node, (exp.Func, exp.Anonymous)) and _function_name(node) in _FORBIDDEN_FUNCTIONS:
             raise Refused(f'The function {_function_name(node)}() is not allowed.')
     return text
+
+
+# ---- 3. MongoDB aggregations (6 Nov 2026) ---------------------------------------------------------------------------
+
+#: The stages a question's aggregation may use: each only reads. Anything else is refused, $out and $merge (which
+#: write), and the stages that read the server rather than the data ($currentOp, $listSessions...) among them.
+ALLOWED_STAGES = {
+    '$match', '$project', '$addFields', '$set', '$unset', '$group', '$sort', '$limit', '$skip', '$count', '$unwind',
+    '$lookup', '$graphLookup', '$unionWith', '$facet', '$bucket', '$bucketAuto', '$sortByCount', '$replaceRoot',
+    '$replaceWith', '$sample', '$setWindowFields', '$densify', '$fill', '$redact', '$geoNear',
+}
+#: Never anywhere in it, at any depth: writing, and JavaScript run on the server.
+FORBIDDEN_KEYS = {'$out', '$merge', '$function', '$accumulator', '$where', '$code'}
+MAX_STAGES = 40
+MAX_QUERY_CHARS = 20000
+
+
+def _check_collection(name, collections):
+    if not isinstance(name, str) or not name.strip():
+        raise Refused('The query must name the collection it reads.')
+    if name.startswith('system.') or '$' in name or '\x00' in name:
+        raise Refused(f'The collection "{name}" may not be read.')
+    if collections and name not in collections:
+        raise Refused(f'There is no collection "{name}". Use one of the collections listed.')
+
+
+def _check_stages(pipeline, collections, depth=0, counted=None):
+    counted = counted if counted is not None else [0]
+    if not isinstance(pipeline, list):
+        raise Refused('The pipeline must be a list of stages.')
+    if depth > 3:
+        raise Refused('The query nests pipelines too deeply.')
+    for stage in pipeline:
+        counted[0] += 1
+        if counted[0] > MAX_STAGES:
+            raise Refused(f'The query has more than {MAX_STAGES} stages.')
+        if not isinstance(stage, dict) or len(stage) != 1:
+            raise Refused('Each stage must be one {"$stage": ...}.')
+        name, body = next(iter(stage.items()))
+        if name not in ALLOWED_STAGES:
+            raise Refused(f'The stage {name} is not allowed: only stages that read are run.')
+        if name in ('$lookup', '$graphLookup'):
+            if not isinstance(body, dict):
+                raise Refused(f'{name} must be a document.')
+            _check_collection(body.get('from'), collections)
+            if 'pipeline' in body:
+                _check_stages(body['pipeline'], collections, depth + 1, counted)
+        elif name == '$unionWith':
+            target = body.get('coll') if isinstance(body, dict) else body
+            _check_collection(target, collections)
+            if isinstance(body, dict) and 'pipeline' in body:
+                _check_stages(body['pipeline'], collections, depth + 1, counted)
+        elif name == '$facet':
+            if not isinstance(body, dict):
+                raise Refused('$facet must be a document of pipelines.')
+            for inner in body.values():
+                _check_stages(inner, collections, depth + 1, counted)
+
+
+def _check_values(value):
+    """Nothing that writes or runs JavaScript, at any depth (a $function can hide in any expression)."""
+    from bson.code import Code
+    if isinstance(value, Code):
+        raise Refused('JavaScript is not allowed in a query.')
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            if key in FORBIDDEN_KEYS:
+                raise Refused(f'Only reading is allowed: the query contains {key}.')
+            _check_values(inner)
+    elif isinstance(value, list):
+        for inner in value:
+            _check_values(inner)
+
+
+def check_pipeline(text: str, collections=None) -> str:
+    """`text`, if it is one read-only aggregation {"collection": ..., "pipeline": [...]} on this database; else
+    Refused. `collections`: the database's collection names, when known."""
+    from bson import json_util
+    raw = str(text or '').strip()
+    if not raw:
+        raise Refused('There was no query to run.')
+    if len(raw) > MAX_QUERY_CHARS:
+        raise Refused('The query is too long.')
+    try:
+        query = json_util.loads(raw)
+    except Exception:
+        raise Refused('The query could not be read: it must be JSON, {"collection": "...", "pipeline": [...]}.')
+    if not isinstance(query, dict) or set(query) != {'collection', 'pipeline'}:
+        raise Refused('The query must be {"collection": "...", "pipeline": [...]}, nothing else.')
+    names = set(collections or ())
+    _check_collection(query['collection'], names)
+    _check_values(query['pipeline'])
+    _check_stages(query['pipeline'], names)
+    return raw
+
+
+def check_query(text: str, kind: str, collections=None) -> str:
+    """The check for this kind of database: an aggregation for MongoDB, SQL for the others."""
+    if kind == 'mongodb':
+        return check_pipeline(text, collections)
+    return check_sql(text, kind)

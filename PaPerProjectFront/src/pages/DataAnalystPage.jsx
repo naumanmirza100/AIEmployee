@@ -16,8 +16,9 @@ import { getAgentNavItems } from '@/utils/agentNavItems';
 
 /**
  * /data-analyst: the AI Data Analyst. Questions in plain words, answered read-only from the company's own database
- * (PostgreSQL, MySQL / MariaDB, or an uploaded SQLite file). Only the question, its answer and its SQL are kept; the
- * rows come with the answer and are run again when a question is reopened (plan: MDS/01-Plan/week-45).
+ * (PostgreSQL, MySQL / MariaDB, MongoDB, or an uploaded SQLite file). Only the question, its answer and its query
+ * are kept; the rows come with the answer and are run again when a question is reopened (plan: MDS/01-Plan/week-45).
+ * MongoDB (6 Nov 2026): a connection string; the AI writes one read-only aggregation instead of SQL.
  */
 const TABS = [
   { key: 'ask', label: 'Ask' },
@@ -83,7 +84,7 @@ function Answer({ item, onRun, onCsv }) {
       </div>
       {item.sql && (
         <details className="mt-2">
-          <summary className="cursor-pointer text-xs text-violet-300">The SQL that ran</summary>
+          <summary className="cursor-pointer text-xs text-violet-300">{item.query_kind === 'mongodb' ? 'The MongoDB query that ran' : 'The SQL that ran'}</summary>
           <pre className="mt-2 overflow-x-auto rounded-lg bg-background p-3 text-xs text-foreground">{item.sql}</pre>
         </details>
       )}
@@ -159,7 +160,7 @@ function AskTab({ sources, onAsked }) {
       <div className={`${panel} mx-auto mt-6 max-w-xl p-6 text-center`}>
         <Database className="mx-auto mb-3 h-10 w-10 text-violet-400" />
         <h2 className="text-lg font-semibold text-foreground">No database to ask yet</h2>
-        <p className="mt-1 text-sm text-muted-foreground">An owner or admin adds one under Databases: a PostgreSQL or MySQL connection, or a SQLite file.</p>
+        <p className="mt-1 text-sm text-muted-foreground">An owner or admin adds one under Databases: a PostgreSQL, MySQL or MongoDB connection, or a SQLite file.</p>
       </div>
     );
   }
@@ -215,7 +216,10 @@ function AskTab({ sources, onAsked }) {
 const READ_ONLY_USER = {
   postgres: "CREATE USER pp_reader WITH PASSWORD 'a long password';\nGRANT CONNECT ON DATABASE your_db TO pp_reader;\nGRANT USAGE ON SCHEMA public TO pp_reader;\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO pp_reader;\nALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO pp_reader;",
   mysql: "CREATE USER 'pp_reader'@'%' IDENTIFIED BY 'a long password';\nGRANT SELECT ON your_db.* TO 'pp_reader'@'%';",
+  mongodb: "MongoDB Atlas: Database Access > Add New Database User > Built-in Role: Only read any database.\nYour own server (mongosh):\nuse admin\ndb.createUser({ user: 'pp_reader', pwd: 'a long password', roles: [{ role: 'read', db: 'your_db' }] })",
 };
+
+const KINDS = [['postgres', 'PostgreSQL'], ['mysql', 'MySQL / MariaDB'], ['mongodb', 'MongoDB'], ['sqlite', 'SQLite file']];
 
 function AddDatabase({ setup, logins, onAdded }) {
   const [mode, setMode] = useState('postgres');
@@ -236,9 +240,11 @@ function AddDatabase({ setup, logins, onAdded }) {
     try {
       const res = mode === 'sqlite'
         ? await analyst.uploadSqlite(file, shared)
-        : await analyst.addConnection(useString
-          ? { ...shared, connection_string: form.connection_string }
-          : { ...shared, kind: mode, host: form.host, port: form.port, database: form.database, username: form.username, password: form.password, use_ssl: form.use_ssl });
+        : mode === 'mongodb'
+          ? await analyst.addConnection({ ...shared, kind: 'mongodb', connection_string: form.connection_string, database: form.database })
+          : await analyst.addConnection(useString
+            ? { ...shared, connection_string: form.connection_string }
+            : { ...shared, kind: mode, host: form.host, port: form.port, database: form.database, username: form.username, password: form.password, use_ssl: form.use_ssl });
       const ok = res?.data?.status === 'ready';
       setMessage({ ok, text: ok ? res.message : (res?.data?.last_error || res.message) });
       onAdded?.();
@@ -254,7 +260,7 @@ function AddDatabase({ setup, logins, onAdded }) {
     <form onSubmit={submit} className={`${panel} space-y-4 p-5`} data-testid="analyst-add">
       <h3 className="text-base font-semibold text-foreground">Add a database</h3>
       <div className="flex flex-wrap gap-2">
-        {[['postgres', 'PostgreSQL'], ['mysql', 'MySQL / MariaDB'], ['sqlite', 'SQLite file']].map(([key, label]) => (
+        {KINDS.map(([key, label]) => (
           <Button key={key} type="button" size="sm" variant={mode === key ? 'default' : 'outline'} onClick={() => setMode(key)}>{label}</Button>
         ))}
       </div>
@@ -269,9 +275,19 @@ function AddDatabase({ setup, logins, onAdded }) {
         <>
           <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-3 text-xs text-violet-100">
             <p className="flex items-center gap-1 font-semibold"><ShieldCheck className="h-4 w-4" /> Before you connect</p>
-            <p className="mt-1">Allow our server's address <b data-testid="analyst-server-ip">{setup?.server_ip || '—'}</b> in your database's firewall, and give us a user that can only read. For example:</p>
+            {mode === 'mongodb'
+              ? <p className="mt-1">Allow our server's address <b data-testid="analyst-server-ip">{setup?.server_ip || '—'}</b> (in MongoDB Atlas: Network Access, Add IP Address), and give us a user that can only read:</p>
+              : <p className="mt-1">Allow our server's address <b data-testid="analyst-server-ip">{setup?.server_ip || '—'}</b> in your database's firewall, and give us a user that can only read. For example:</p>}
             <pre className="mt-2 overflow-x-auto rounded bg-background/60 p-2 text-[11px] text-foreground">{READ_ONLY_USER[mode]}</pre>
           </div>
+          {mode === 'mongodb' ? (
+            <div className="space-y-3">
+              <input className={field} placeholder="mongodb+srv://pp_reader:password@cluster0.abcde.mongodb.net/your_db"
+                value={form.connection_string} onChange={set('connection_string')} aria-label="Connection string" data-testid="analyst-mongo-string" />
+              <input className={field} placeholder="Database name, if the string has none" value={form.database} onChange={set('database')} aria-label="Database" />
+              <p className="text-xs text-muted-foreground">The AI reads a sample of each collection to learn its fields; it keeps their names and types, never a value.</p>
+            </div>
+          ) : (<>
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input type="checkbox" checked={useString} onChange={(e) => setUseString(e.target.checked)} /> Paste a connection string instead
           </label>
@@ -288,6 +304,7 @@ function AddDatabase({ setup, logins, onAdded }) {
               <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={form.use_ssl} onChange={set('use_ssl')} /> Require an encrypted connection (SSL)</label>
             </div>
           )}
+          </>)}
         </>
       )}
       <label className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -309,7 +326,7 @@ function AddDatabase({ setup, logins, onAdded }) {
         </div>
       )}
       {message && <p className={`text-sm ${message.ok ? 'text-emerald-300' : 'text-red-300'}`} data-testid="analyst-add-message">{message.text}</p>}
-      <Button type="submit" disabled={busy || (mode === 'sqlite' && !file)}>
+      <Button type="submit" disabled={busy || (mode === 'sqlite' && !file) || (mode === 'mongodb' && !form.connection_string.trim())}>
         {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />} Add and test
       </Button>
     </form>
@@ -352,7 +369,7 @@ function DatabasesTab({ setup, sources, reload }) {
               </div>
               <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${s.status === 'ready' ? 'bg-emerald-500/15 text-emerald-300' : s.status === 'failed' ? 'bg-red-500/15 text-red-300' : 'bg-muted text-muted-foreground'}`}>
                 {s.status === 'ready' ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                {s.status === 'ready' ? `Ready · ${s.tables_count} tables` : s.status === 'failed' ? 'Could not connect' : 'Not tested'}
+                {s.status === 'ready' ? `Ready · ${s.tables_count} ${s.kind === 'mongodb' ? 'collections' : 'tables'}` : s.status === 'failed' ? 'Could not connect' : 'Not tested'}
               </span>
             </div>
             {s.last_error && <p className="mt-2 text-sm text-red-300">{s.last_error}</p>}
@@ -366,7 +383,7 @@ function DatabasesTab({ setup, sources, reload }) {
             {setup?.can_manage && (
               <div className="mt-3 flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => test(s)} disabled={!!busy}>
-                  {busy === `t${s.id}` ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />} Test and read tables
+                  {busy === `t${s.id}` ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />} {s.kind === 'mongodb' ? 'Test and read collections' : 'Test and read tables'}
                 </Button>
                 <Button size="sm" variant="outline" className="text-red-300" onClick={() => remove(s)} disabled={!!busy}>
                   <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
