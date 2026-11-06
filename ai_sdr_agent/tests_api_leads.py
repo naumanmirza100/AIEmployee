@@ -1,5 +1,5 @@
 """API tests for the SDR lead endpoints: the ICP, the lead list and lead detail, soft delete and restore (one and
-in bulk), categories, CSV import and export, qualification, enrichment, research, the Apify fetch and the SDR key
+in bulk), industries, CSV import and export, qualification, enrichment, research, the Apify fetch and the SDR key
 settings. Each endpoint is checked for refused input (with a readable message, never a crash), for keeping one
 login's and one company's data away from another, for refusing callers who are not signed-in company users, and
 for doing the right thing in the database when the input is good. No outside service is called."""
@@ -13,7 +13,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from ai_sdr_agent.models import (
-    SDRAgentSettings, SDRIcpProfile, SDRLead, SDRLeadCategory, SDRLeadResearchJob,
+    SDRAgentSettings, SDRIcpProfile, SDRLead, SDRLeadResearchJob,
 )
 from ai_sdr_agent.tests import SDRBase
 from api.views import ai_sdr_agent as views
@@ -73,8 +73,8 @@ class OnlySignedInCompanyUsersGetInTests(LeadApiBase):
             (views.lead_detail, 'get', {'lead_id': lead.id}), (views.lead_detail, 'delete', {'lead_id': lead.id}),
             (views.restore_lead, 'post', {'lead_id': lead.id}),
             (views.sdr_bulk_delete_leads, 'post', {}), (views.sdr_bulk_restore_leads, 'post', {}),
-            (views.sdr_bulk_set_category, 'post', {}),
-            (views.sdr_lead_categories, 'get', {}), (views.sdr_lead_category_detail, 'delete', {'category_id': 1}),
+            (views.sdr_bulk_set_industry, 'post', {}),
+            (views.sdr_lead_industries, 'get', {}), (views.sdr_rename_lead_industry, 'post', {}),
             (views.import_leads_csv, 'post', {}), (views.sdr_leads_export, 'get', {}),
             (views.qualify_all_leads, 'post', {}), (views.qualify_lead, 'post', {'lead_id': lead.id}),
             (views.enrich_lead_endpoint, 'post', {'lead_id': lead.id}), (views.enrich_leads_batch_endpoint, 'post', {}),
@@ -233,9 +233,6 @@ class CreatingALeadTests(LeadApiBase):
         self.their_lead(email='shared@corp.example')
         self.assertEqual(self.create(full_name='Mine', email='shared@corp.example').status_code, 201)
 
-    def test_another_companys_category_id_is_refused(self):
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.create(full_name='Bob', category=cat.id))
 
 
 # ==========================================================================
@@ -340,10 +337,12 @@ class LeadDetailTests(LeadApiBase):
         lead.refresh_from_db()
         self.assertEqual(lead.status, 'new')
 
-    def test_an_update_to_another_companys_category_is_refused(self):
+    def test_the_industry_is_tidied_and_an_over_long_one_refused(self):
         lead = self.make_lead()
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.put(lead, category=cat.id))
+        self.assertEqual(self.put(lead, company_industry='  Dental   Care ').status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.company_industry, 'Dental Care')
+        self.assertRefused(self.put(lead, company_industry='x' * 256))
 
     def test_patch_is_not_allowed(self):
         self.assertEqual(self.call(views.lead_detail, 'patch', data={'job_title': 'x'},
@@ -455,87 +454,87 @@ class BulkRestoreLeadsTests(LeadApiBase):
 
 
 # ==========================================================================
-# Categories
+# Industries
 # ==========================================================================
 
-class CategoryEndpointsTests(LeadApiBase):
-    def test_a_new_category_is_made_and_listed_with_its_lead_count(self):
-        r = self.call(views.sdr_lead_categories, 'post', data={'name': '  Dentistry  '})
-        self.assertEqual((r.status_code, r.data['data']['name']), (201, 'Dentistry'))
-        self.make_lead(category_id=r.data['data']['id'])
-        data = self.call(views.sdr_lead_categories).data['data']
-        self.assertEqual([(c['name'], c['lead_count']) for c in data], [('Dentistry', 1)])
+class IndustryEndpointsTests(LeadApiBase):
+    def test_industries_are_listed_with_their_lead_counts_ignoring_case(self):
+        self.make_lead(email='a@x.example', company_industry='Dental')
+        self.make_lead(email='b@x.example', company_industry='Dental')
+        self.make_lead(email='c@x.example', company_industry='dental')
+        self.make_lead(email='d@x.example', company_industry='Law')
+        self.make_lead(email='e@x.example')
+        self.make_lead(email='gone@x.example', company_industry='Law', is_deleted=True)
+        self.their_lead(company_industry='Theirs')
+        r = self.call(views.sdr_lead_industries)
+        self.assertEqual([(i['name'], i['lead_count']) for i in r.data['data']], [('Dental', 3), ('Law', 1)])
+        self.assertEqual(r.data['no_industry'], 1)
 
-    def test_an_empty_or_blank_name_is_refused(self):
-        for name in ('', '   ', None):
-            with self.subTest(name=name):
-                self.assertRefused(self.call(views.sdr_lead_categories, 'post', data={'name': name}))
-        self.assertFalse(SDRLeadCategory.objects.exists())
+    def test_the_filter_matches_the_industry_in_any_case_and_none(self):
+        dental = self.make_lead(email='a@x.example', company_industry='Dental')
+        self.make_lead(email='b@x.example', company_industry='Law')
+        blank = self.make_lead(email='c@x.example')
+        ids = lambda q: [l['id'] for l in self.call(views.leads_list, path=f'/x{q}').data['data']]
+        self.assertEqual(ids('?industry=dental'), [dental.id])
+        self.assertEqual(ids('?industry=none'), [blank.id])
 
-    def test_an_over_long_name_is_refused(self):
-        self.assertRefused(self.call(views.sdr_lead_categories, 'post', data={'name': 'x' * 101}))
+    def test_renaming_changes_every_lead_with_it_and_only_mine(self):
+        a = self.make_lead(email='a@x.example', company_industry='Hospital & Health Care')
+        b = self.make_lead(email='b@x.example', company_industry='hospital & health care')
+        other = self.make_lead(email='c@x.example', company_industry='Law')
+        theirs = self.their_lead(company_industry='Hospital & Health Care')
+        r = self.call(views.sdr_rename_lead_industry, 'post',
+                      data={'from': 'Hospital & Health Care', 'to': ' Healthcare '})
+        self.assertEqual((r.status_code, r.data['updated']), (200, 2), r.data)
+        got = {l.pk: l.company_industry for l in SDRLead.all_objects.filter(pk__in=[a.pk, b.pk, other.pk, theirs.pk])}
+        self.assertEqual(got, {a.pk: 'Healthcare', b.pk: 'Healthcare', other.pk: 'Law',
+                               theirs.pk: 'Hospital & Health Care'})
 
-    def test_another_companys_categories_are_not_listed(self):
-        SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertEqual(self.call(views.sdr_lead_categories).data['data'], [])
-
-    def test_another_companys_category_cannot_be_renamed_or_deleted(self):
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'put', data={'name': 'X'},
-                                     category_id=cat.id), 404)
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'delete', category_id=cat.id), 404)
-        cat.refresh_from_db()
-        self.assertEqual(cat.name, 'Theirs')
-
-    def test_renaming_to_a_name_already_used_is_refused(self):
-        SDRLeadCategory.objects.create(company_user=self.cu, name='Law')
-        cat = SDRLeadCategory.objects.create(company_user=self.cu, name='Dental')
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'put', data={'name': 'law'},
-                                     category_id=cat.id))
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'put', data={'name': '  '},
-                                     category_id=cat.id))
-
-    def test_deleting_a_category_keeps_its_leads_uncategorised(self):
-        cat = SDRLeadCategory.objects.create(company_user=self.cu, name='Dental')
-        lead = self.make_lead(category=cat)
-        self.assertEqual(self.call(views.sdr_lead_category_detail, 'delete', category_id=cat.id).status_code, 200)
-        lead.refresh_from_db()
-        self.assertIsNone(lead.category_id)
-
-    def test_an_unknown_category_is_not_found(self):
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'delete', category_id=999999), 404)
+    def test_a_rename_needs_both_names_and_an_industry_in_use(self):
+        self.make_lead(company_industry='Law')
+        for data in ({'from': 'Law', 'to': '  '}, {'from': '', 'to': 'X'}, {}):
+            with self.subTest(data):
+                self.assertRefused(self.call(views.sdr_rename_lead_industry, 'post', data=data))
+        self.assertRefused(self.call(views.sdr_rename_lead_industry, 'post', data={'from': 'Nope', 'to': 'X'}), 404)
+        self.assertRefused(self.call(views.sdr_rename_lead_industry, 'post', data={'from': 'Law', 'to': 'x' * 256}))
 
 
-class BulkSetCategoryTests(LeadApiBase):
+class BulkSetIndustryTests(LeadApiBase):
     def bulk(self, data, path='/x'):
-        return self.call(views.sdr_bulk_set_category, 'post', path=path, data=data)
+        return self.call(views.sdr_bulk_set_industry, 'post', path=path, data=data)
 
-    def test_only_my_listed_leads_are_moved(self):
+    def test_only_my_listed_leads_are_changed(self):
         a, b = self.make_lead(email='a@acme.com'), self.make_lead(email='b@acme.com')
         theirs = self.their_lead()
-        r = self.bulk({'category': 'Dental', 'ids': [a.id, theirs.id]})
+        r = self.bulk({'industry': ' Dental ', 'ids': [a.id, theirs.id]})
         self.assertEqual((r.status_code, r.data['updated']), (200, 1))
-        self.assertEqual(SDRLead.objects.get(pk=a.pk).category.name, 'Dental')
-        self.assertIsNone(SDRLead.objects.get(pk=b.pk).category_id)
-        self.assertIsNone(SDRLead.objects.get(pk=theirs.pk).category_id)
+        self.assertEqual(SDRLead.objects.get(pk=a.pk).company_industry, 'Dental')
+        self.assertEqual(SDRLead.objects.get(pk=b.pk).company_industry, '')
+        self.assertEqual(SDRLead.all_objects.get(pk=theirs.pk).company_industry, '')
 
     def test_all_matching_follows_the_filter(self):
         hot = self.make_lead(email='h@acme.com', temperature='hot')
-        self.make_lead(email='c@acme.com', temperature='cold')
-        r = self.bulk({'category': 'Hot ones', 'all_matching': True}, path='/x?temperature=hot')
+        cold = self.make_lead(email='c@acme.com', temperature='cold')
+        r = self.bulk({'industry': 'Hot ones', 'all_matching': True}, path='/x?temperature=hot')
         self.assertEqual(r.data['updated'], 1)
-        self.assertEqual(SDRLead.objects.get(pk=hot.pk).category.name, 'Hot ones')
+        self.assertEqual((SDRLead.objects.get(pk=hot.pk).company_industry,
+                          SDRLead.objects.get(pk=cold.pk).company_industry), ('Hot ones', ''))
+
+    def test_a_blank_industry_clears_it(self):
+        lead = self.make_lead(company_industry='Law')
+        self.assertEqual(self.bulk({'industry': '', 'ids': [lead.id]}).data['updated'], 1)
+        self.assertEqual(SDRLead.objects.get(pk=lead.pk).company_industry, '')
 
     def test_no_ids_is_refused(self):
-        for data in ({'category': 'X'}, {'category': 'X', 'ids': []}, {'category': 'X', 'ids': 'all'}):
+        for data in ({'industry': 'X'}, {'industry': 'X', 'ids': []}, {'industry': 'X', 'ids': 'all'}):
             with self.subTest(data):
                 self.assertRefused(self.bulk(data))
 
-    def test_an_unknown_category_id_is_refused(self):
-        self.assertRefused(self.bulk({'category': 999999, 'ids': [self.make_lead().id]}))
+    def test_an_over_long_industry_is_refused(self):
+        self.assertRefused(self.bulk({'industry': 'x' * 256, 'ids': [self.make_lead().id]}))
 
     def test_ids_that_are_not_numbers_are_refused_not_a_crash(self):
-        self.assertRefused(self.bulk({'category': 'X', 'ids': ['abc']}))
+        self.assertRefused(self.bulk({'industry': 'X', 'ids': ['abc']}))
 
 
 # ==========================================================================
@@ -606,9 +605,15 @@ class ImportCsvTests(LeadApiBase):
         self.assertEqual(r.data['code'], 'too_many_rows')
         self.assertEqual(SDRLead.objects.count(), 0)
 
-    def test_another_companys_category_id_is_refused(self):
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.upload(self.rows(['Name'], ['A']), category=str(cat.id)))
+    def test_the_dialogs_industry_fills_only_rows_without_one(self):
+        r = self.upload(self.rows(['Name', 'Email', 'Industry'], ['A', 'a@x.example', 'Law'], ['B', 'b@x.example', '']),
+                        industry='Education')
+        self.assertEqual(r.data['created'], 2, r.data)
+        self.assertEqual((SDRLead.objects.get(email='a@x.example').company_industry,
+                          SDRLead.objects.get(email='b@x.example').company_industry), ('Law', 'Education'))
+
+    def test_an_over_long_industry_is_refused(self):
+        self.assertRefused(self.upload(self.rows(['Name'], ['A']), industry='x' * 256))
         self.assertEqual(SDRLead.objects.count(), 0)
 
 
@@ -944,11 +949,6 @@ class ResearchNewLeadsTests(LeadApiBase):
     def test_an_icp_id_that_is_not_a_number_is_refused(self):
         self.icp()
         self.assertRefused(self.start({'icp_id': 'abc'})[0])
-
-    def test_another_companys_category_is_refused(self):
-        self.icp()
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.start({'category': cat.id})[0])
 
 
 class ResearchJobStatusAndSourcesTests(LeadApiBase):
