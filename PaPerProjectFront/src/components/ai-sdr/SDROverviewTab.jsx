@@ -625,7 +625,7 @@ export default function SDROverviewTab() {
           GENERATE LEADS MODAL
           ================================================================ */}
       <Dialog open={showGenModal} onOpenChange={setShowGenModal}>
-        <DialogContent style={{ background:'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)',border:'1px solid var(--line-1)',color:'var(--text-soft)',maxWidth:480 }}>
+        <DialogContent style={{ background:'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)',border:'1px solid var(--line-1)',color:'var(--text-soft)',maxWidth:480, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color:'var(--text-soft)',display:'flex',alignItems:'center',gap:8 }}>
               <Zap size={18} color="#a855f7" /> Generate Leads Automatically

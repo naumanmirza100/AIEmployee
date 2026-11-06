@@ -840,7 +840,7 @@ const SDROutreachTab = () => {
 
         {/* Delete Campaign Confirmation */}
         <Dialog open={!!deleteConfirm} onOpenChange={open => { if (!open) setDeleteConfirm(null); }}>
-          <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', borderRadius: 14, maxWidth: 420 }}>
+          <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', borderRadius: 14, maxWidth: 420, maxHeight: '90vh', overflowY: 'auto' }}>
             <DialogHeader>
               <DialogTitle style={{ color: 'var(--text-soft)', fontSize: 16 }}>Delete Campaign?</DialogTitle>
             </DialogHeader>
@@ -1821,6 +1821,7 @@ const SDROutreachTab = () => {
             <DialogContent style={{
               background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-14082c))',
               border: '1px solid var(--line-1)', maxWidth: 560, color: 'var(--text-soft)',
+              maxHeight: '90vh', overflowY: 'auto',
             }}>
               <DialogHeader>
                 <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 16 }}>
@@ -1933,7 +1934,7 @@ const SDROutreachTab = () => {
 
       {/* Clear Leads — checkbox selection dialog */}
       <Dialog open={clearLeadsConfirm} onOpenChange={(o) => { setClearLeadsConfirm(o); if (!o) setClearSelected([]); }}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', borderRadius: 14, maxWidth: 480 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', borderRadius: 14, maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-soft)', fontSize: 16 }}>Remove Leads from Campaign</DialogTitle>
           </DialogHeader>

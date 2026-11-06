@@ -23,7 +23,7 @@ import {
   createIcpProfile, updateIcpProfile, setDefaultIcpProfile, deleteIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads, updateLead,
-  listLeadCategories, renameLeadCategory, deleteLeadCategory, bulkSetLeadCategory,
+  listLeadIndustries, renameLeadIndustry, bulkSetLeadIndustry,
 } from '@/services/aiSdrService';
 
 // --------------------------------------------------------------------------
@@ -186,8 +186,7 @@ const EXPORT_COLUMNS = [
   { key: 'phone',              label: 'Phone' },
   { key: 'job_title',          label: 'Job Title' },
   { key: 'company_name',       label: 'Company' },
-  { key: 'category',           label: 'Industry Category' },
-  { key: 'company_industry',   label: 'Company Industry' },
+  { key: 'company_industry',   label: 'Industry' },
   { key: 'company_size',       label: 'Company Size' },
   { key: 'company_location',   label: 'Location' },
   { key: 'score',              label: 'Score' },
@@ -210,6 +209,14 @@ async function exportToExcel(leads, filename = 'leads') {
   XLSX.utils.book_append_sheet(wb, ws, 'Leads');
   XLSX.writeFile(wb, `${filename}.xlsx`);
 }
+
+// PDF column widths in mm. With Sr# (10) they fill the 269mm between the margins of a landscape A4 page; each is at
+// least as wide as its header, so no word is broken mid-way ("Loc/atio/n").
+const PDF_COLUMN_WIDTHS = {
+  full_name: 26, email: 40, phone: 22, job_title: 30, company_name: 28, company_industry: 28,
+  company_size: 18, company_location: 31, score: 14, temperature: 22,
+};
+const PDF_NUMERIC = new Set(['company_size', 'score']);
 
 async function exportToPdf(leads, filename = 'leads') {
   const { default: jsPDF } = await import('jspdf');
@@ -243,7 +250,11 @@ async function exportToPdf(leads, filename = 'leads') {
     styles: { fontSize: 8, cellPadding: { top: 3, bottom: 3, left: 4, right: 4 }, textColor: [30, 30, 30], fillColor: [255, 255, 255], lineColor: [220, 220, 220], lineWidth: 0.25, overflow: 'linebreak' },
     headStyles: { fillColor: [124, 58, 237], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5, halign: 'left' },
     alternateRowStyles: { fillColor: [248, 245, 255] },
-    columnStyles: { 0: { cellWidth: 12, halign: 'right' }, 1: { cellWidth: 30 }, 2: { cellWidth: 40 }, 3: { cellWidth: 22 }, 4: { cellWidth: 28 }, 5: { cellWidth: 26 }, 6: { cellWidth: 24 }, 7: { cellWidth: 24 }, 8: { cellWidth: 14 }, 9: { cellWidth: 26 }, 10: { cellWidth: 12 } },
+    // Widths by column key, not position: dropping a column shifted every width after it onto its neighbour.
+    columnStyles: Object.fromEntries([
+      [0, { cellWidth: 10, halign: 'right' }],
+      ...columns.map((c, i) => [i + 1, { cellWidth: PDF_COLUMN_WIDTHS[c.key], ...(PDF_NUMERIC.has(c.key) ? { halign: 'right' } : {}) }]),
+    ]),
     margin: { left: 14, right: 14 },
     didDrawPage: (data) => {
       const pageCount = doc.internal.getNumberOfPages();
@@ -311,7 +322,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
       >
         {LabelIcon && <LabelIcon size={13} style={{ color: value ? selected?.color : '#6b7280' }} />}
         {value && selected?.dot && <span style={{ width: 8, height: 8, borderRadius: '50%', background: selected.color, flexShrink: 0, display: 'inline-block' }} />}
-        <span style={{ flex: 1, textAlign: 'left' }}>{value ? selected?.label : label}</span>
+        <span style={{ flex: 1, textAlign: 'left', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }} title={value ? selected?.label : undefined}>{value ? selected?.label : label}</span>
         <ChevronDown size={12} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
       </button>
 
@@ -321,7 +332,9 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
           background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))',
           border: '1px solid var(--line-1)', borderRadius: 11,
           boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
-          minWidth: '100%', width: 'max-content', overflow: 'hidden',
+          minWidth: '100%', width: 'max-content', maxWidth: 'min(360px, 90vw)',
+          // A long list (one option per industry) scrolls instead of running off the screen.
+          maxHeight: 320, overflowY: 'auto', overflowX: 'hidden',
         }}>
           {options.map((opt, idx) => {
             const isSel = opt.key === value;
@@ -353,22 +366,21 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
 };
 
 // --------------------------------------------------------------------------
-// Category picker — one of the user's industry categories, or a new one typed
-// in. `value` is a category name ('' = none); the server makes a new name into
-// a category on first use, so nothing here is a fixed list.
+// Industry picker — one of the industries the user's leads already have, or a
+// new one typed in. `value` is an industry name ('' = none).
 // --------------------------------------------------------------------------
-const NEW_CATEGORY = '__new__';
+const NEW_INDUSTRY = '__new__';
 
-const CategoryPicker = ({ categories, value, onChange, emptyLabel = 'No category' }) => {
-  const match = categories.find(c => c.name.toLowerCase() === (value || '').trim().toLowerCase());
+const IndustryPicker = ({ industries, value, onChange, emptyLabel = 'No industry' }) => {
+  const match = industries.find(i => i.name.toLowerCase() === (value || '').trim().toLowerCase());
   const [typing, setTyping] = useState(!!value && !match);
 
   if (typing) {
     return (
       <div style={{ display: 'flex', gap: 6 }}>
-        <input autoFocus value={value} maxLength={100} onChange={e => onChange(e.target.value)}
-          placeholder="New category, e.g. Educational Institutes" style={inputStyle} />
-        <button type="button" title="Pick from your categories" onClick={() => { setTyping(false); onChange(''); }}
+        <input autoFocus value={value} maxLength={255} onChange={e => onChange(e.target.value)}
+          placeholder="New industry, e.g. Educational Institutes" style={inputStyle} />
+        <button type="button" title="Pick from your industries" onClick={() => { setTyping(false); onChange(''); }}
           style={{ flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, cursor: 'pointer', color: '#6b7280' }}>
           <X size={14} />
         </button>
@@ -378,12 +390,12 @@ const CategoryPicker = ({ categories, value, onChange, emptyLabel = 'No category
   return (
     <SdrSelect value={match ? match.name : ''} style={inputStyle}
       onChange={v => {
-        if (v === NEW_CATEGORY) { setTyping(true); onChange(''); } else onChange(v);
+        if (v === NEW_INDUSTRY) { setTyping(true); onChange(''); } else onChange(v);
       }}
       options={[
         { value: '', label: emptyLabel },
-        ...categories.map(c => ({ value: c.name, label: c.name })),
-        { value: NEW_CATEGORY, label: '+ Add new category…' },
+        ...industries.map(i => ({ value: i.name, label: i.name })),
+        { value: NEW_INDUSTRY, label: '+ Type a new industry…' },
       ]} />
   );
 };
@@ -406,81 +418,61 @@ const IcpPicker = ({ icps, value, onChange, label = 'Score these leads with' }) 
 };
 
 // --------------------------------------------------------------------------
-// Manage categories — rename (e.g. tidy a provider's "Hospital & Health Care")
-// or delete one; a deleted category's leads stay, with no category.
+// Manage industries — rename one on every lead that has it (e.g. tidy a
+// provider's "Hospital & Health Care"); renaming to one in use merges the two.
 // --------------------------------------------------------------------------
-const CategoryManagerDialog = ({ open, onOpenChange, categories, onChanged }) => {
+const IndustryManagerDialog = ({ open, onOpenChange, industries, onChanged }) => {
   const { toast } = useToast();
-  const [editingId, setEditingId] = useState(null);
+  const [editing, setEditing] = useState(null);   // the industry name being renamed
   const [draft, setDraft] = useState('');
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-  const [busyId, setBusyId] = useState(null);
+  const [busy, setBusy] = useState(null);
 
-  useEffect(() => { if (!open) { setEditingId(null); setConfirmDeleteId(null); } }, [open]);
+  useEffect(() => { if (!open) setEditing(null); }, [open]);
 
-  const rename = async (cat) => {
-    if (!draft.trim() || draft.trim() === cat.name) { setEditingId(null); return; }
-    setBusyId(cat.id);
+  const rename = async (name) => {
+    if (!draft.trim() || draft.trim() === name) { setEditing(null); return; }
+    setBusy(name);
     try {
-      await renameLeadCategory(cat.id, draft.trim());
-      setEditingId(null);
+      const resp = await renameLeadIndustry(name, draft.trim());
+      setEditing(null);
+      toast({ title: resp?.message || 'Industry renamed' });
       onChanged();
     } catch (e) {
       toast({ title: 'Could not rename', description: e?.message, variant: 'destructive' });
-    } finally { setBusyId(null); }
-  };
-
-  const remove = async (cat) => {
-    setBusyId(cat.id);
-    try {
-      await deleteLeadCategory(cat.id);
-      setConfirmDeleteId(null);
-      toast({ title: `Deleted "${cat.name}"`, description: 'Its leads are kept, with no category.' });
-      onChanged();
-    } catch (e) {
-      toast({ title: 'Could not delete', description: e?.message, variant: 'destructive' });
-    } finally { setBusyId(null); }
+    } finally { setBusy(null); }
   };
 
   const iconBtn = { display: 'flex', alignItems: 'center', padding: 6, background: 'none', border: 'none', cursor: 'pointer' };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 520 }}>
+      <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
         <DialogHeader>
           <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Tag size={18} color="#a855f7" /> Lead categories
+            <Tag size={18} color="#a855f7" /> Lead industries
           </DialogTitle>
         </DialogHeader>
-        {categories.length === 0 ? (
+        {industries.length === 0 ? (
           <p style={{ color: '#6b7280', fontSize: 13, padding: '8px 0' }}>
-            No categories yet. They're made from the industry as leads come in, or when you pick "Add new category" anywhere.
+            No industries yet. They come from the leads: the provider's industry, the CSV's Industry column, or the one you type in.
           </p>
         ) : (
           <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, maxHeight: '55vh', overflowY: 'auto' }}>
-            {categories.map(cat => (
-              <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
-                {editingId === cat.id ? (
-                  <input autoFocus value={draft} maxLength={100} onChange={e => setDraft(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') rename(cat); if (e.key === 'Escape') setEditingId(null); }}
+            {industries.map(ind => (
+              <div key={ind.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
+                {editing === ind.name ? (
+                  <input autoFocus value={draft} maxLength={255} onChange={e => setDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') rename(ind.name); if (e.key === 'Escape') setEditing(null); }}
                     style={{ ...inputStyle, padding: '5px 10px', fontSize: 13 }} />
                 ) : (
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ind.name}</span>
                 )}
-                <span style={{ color: '#6b7280', fontSize: 12, whiteSpace: 'nowrap' }}>{cat.lead_count ?? 0} leads</span>
-                {busyId === cat.id ? <Loader2 size={14} className="animate-spin" style={{ color: '#6b7280', margin: 6 }} />
-                  : editingId === cat.id ? (
-                    <button title="Save" onClick={() => rename(cat)} style={{ ...iconBtn, color: 'hsl(var(--pt-4ade80))' }}><Check size={14} /></button>
-                  ) : confirmDeleteId === cat.id ? (
-                    <>
-                      <button onClick={() => remove(cat)} style={{ ...iconBtn, color: '#f87171', fontSize: 12, fontWeight: 600 }}>Delete</button>
-                      <button onClick={() => setConfirmDeleteId(null)} style={{ ...iconBtn, color: '#6b7280', fontSize: 12 }}>Keep</button>
-                    </>
+                <span style={{ color: '#6b7280', fontSize: 12, whiteSpace: 'nowrap' }}>{ind.lead_count ?? 0} leads</span>
+                {busy === ind.name ? <Loader2 size={14} className="animate-spin" style={{ color: '#6b7280', margin: 6 }} />
+                  : editing === ind.name ? (
+                    <button title="Save" onClick={() => rename(ind.name)} style={{ ...iconBtn, color: 'hsl(var(--pt-4ade80))' }}><Check size={14} /></button>
                   ) : (
-                    <>
-                      <button title="Rename" onClick={() => { setEditingId(cat.id); setDraft(cat.name); setConfirmDeleteId(null); }} style={{ ...iconBtn, color: '#9ca3af' }}><Pencil size={13} /></button>
-                      <button title="Delete" onClick={() => { setConfirmDeleteId(cat.id); setEditingId(null); }} style={{ ...iconBtn, color: '#f87171' }}><Trash2 size={13} /></button>
-                    </>
+                    <button title="Rename on every lead" onClick={() => { setEditing(ind.name); setDraft(ind.name); }} style={{ ...iconBtn, color: '#9ca3af' }}><Pencil size={13} /></button>
                   )}
               </div>
             ))}
@@ -919,7 +911,7 @@ const SDRLeadsTab = () => {
   const [filterTemp, setFilterTemp] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSource, setFilterSource] = useState('');
-  const [filterCategory, setFilterCategory] = useState('');   // '' all, 'none', or a category id
+  const [filterIndustry, setFilterIndustry] = useState('');   // '' all, 'none', or an industry name
   const [filterEnrichment, setFilterEnrichment] = useState(''); // '' all, done, not, in_progress, failed
   const [filterIcp, setFilterIcp] = useState('');               // '' all, 'none', or an ICP id
   const [sortBy, setSortBy] = useState('score_desc');
@@ -927,17 +919,15 @@ const SDRLeadsTab = () => {
   const [newLeadIcpId, setNewLeadIcpId] = useState('');
   const [csvIcpId, setCsvIcpId] = useState('');
 
-  // Industry categories (made from the data as leads come in, or typed in by hand).
-  const [categories, setCategories] = useState([]);
-  const [uncategorizedCount, setUncategorizedCount] = useState(0);
-  const [newLeadCategory, setNewLeadCategory] = useState('');
-  const [csvCategory, setCsvCategory] = useState('');
-  const [genCategory, setGenCategory] = useState('');
-  const [bulkCategory, setBulkCategory] = useState('');
-  const [bulkCategorySaving, setBulkCategorySaving] = useState(false);
+  // The industries the leads have (each lead's company_industry), for the filter and the pickers.
+  const [industries, setIndustries] = useState([]);
+  const [noIndustryCount, setNoIndustryCount] = useState(0);
+  const [csvIndustry, setCsvIndustry] = useState('');
+  const [bulkIndustry, setBulkIndustry] = useState('');
+  const [bulkIndustrySaving, setBulkIndustrySaving] = useState(false);
   const [allMatching, setAllMatching] = useState(false);   // the bulk action covers every lead the filters match
-  const [detailCategory, setDetailCategory] = useState('');
-  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [detailIndustry, setDetailIndustry] = useState('');
+  const [showIndustryManager, setShowIndustryManager] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
@@ -981,7 +971,7 @@ const SDRLeadsTab = () => {
         temperature: opts.temperature ?? filterTemp,
         status:      opts.status      ?? filterStatus,
         source:      opts.source      ?? filterSource,
-        category:    opts.category    ?? filterCategory,
+        industry:    opts.industry    ?? filterIndustry,
         enrichment:  opts.enrichment  ?? filterEnrichment,
         icp:         opts.icp         ?? filterIcp,
         sort:       opts.sort        ?? sortBy,
@@ -1015,20 +1005,20 @@ const SDRLeadsTab = () => {
       // The latest load ends the spinner, quiet or not: a refresh that overtook a full load must not leave it on.
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [search, filterTemp, filterStatus, filterSource, filterCategory, filterEnrichment, filterIcp, sortBy, page, pageSize, toast]);
+  }, [search, filterTemp, filterStatus, filterSource, filterIndustry, filterEnrichment, filterIcp, sortBy, page, pageSize, toast]);
 
-  const loadCategories = useCallback(async () => {
+  const loadIndustries = useCallback(async () => {
     try {
-      const resp = await listLeadCategories();
-      setCategories(resp?.data || []);
-      setUncategorizedCount(resp?.uncategorized || 0);
-    } catch (_) { /* the pickers just show no categories */ }
+      const resp = await listLeadIndustries();
+      setIndustries(resp?.data || []);
+      setNoIndustryCount(resp?.no_industry || 0);
+    } catch (_) { /* the pickers just show no industries */ }
   }, []);
 
   // The login's ICPs, for the ICP panel, the filter and the ICP pickers in Generate / Import / Add lead.
   const loadIcps = useCallback(async () => { setIcpProfiles(await listIcpProfiles()); }, []);
 
-  useEffect(() => { loadLeads(); loadCategories(); loadIcps(); }, []);
+  useEffect(() => { loadLeads(); loadIndustries(); loadIcps(); }, []);
 
   // While leads are being qualified or enriched in the background, poll every
   // 12s so scores and enriched fields appear on their own. Stops once both
@@ -1041,63 +1031,68 @@ const SDRLeadsTab = () => {
 
   useEffect(() => {
     setPage(1);
-    loadLeads({ page: 1, search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, enrichment: filterEnrichment, icp: filterIcp, sort: sortBy, page_size: pageSize });
-  }, [search, filterTemp, filterStatus, filterSource, filterCategory, filterEnrichment, filterIcp, sortBy, pageSize]);
+    loadLeads({ page: 1, search, temperature: filterTemp, status: filterStatus, source: filterSource, industry: filterIndustry, enrichment: filterEnrichment, icp: filterIcp, sort: sortBy, page_size: pageSize });
+  }, [search, filterTemp, filterStatus, filterSource, filterIndustry, filterEnrichment, filterIcp, sortBy, pageSize]);
 
   const goToPage = useCallback((p) => { setPage(p); loadLeads({ page: p }); }, [loadLeads]);
 
-  // The Filters panel's count; the category and ICP filters sit outside the panel.
+  // The Filters panel's count; the industry and ICP filters sit outside the panel.
   const activeFiltersCount = [filterTemp, filterStatus, filterSource, filterEnrichment].filter(Boolean).length;
-  const anyFilter = activeFiltersCount > 0 || !!filterCategory || !!filterIcp;
-  const clearAllFilters = () => { setFilterTemp(''); setFilterStatus(''); setFilterSource(''); setFilterCategory(''); setFilterEnrichment(''); setFilterIcp(''); };
-  // The list's current filters, for actions that cover every matching lead (bulk category, Export ALL).
-  const currentFilters = { search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, enrichment: filterEnrichment, icp: filterIcp };
+  const anyFilter = activeFiltersCount > 0 || !!filterIndustry || !!filterIcp;
+  const clearAllFilters = () => { setFilterTemp(''); setFilterStatus(''); setFilterSource(''); setFilterIndustry(''); setFilterEnrichment(''); setFilterIcp(''); };
+  // The list's current filters, for actions that cover every matching lead (bulk industry, Export ALL).
+  const currentFilters = { search, temperature: filterTemp, status: filterStatus, source: filterSource, industry: filterIndustry, enrichment: filterEnrichment, icp: filterIcp };
 
-  // After a change that can add categories or move leads between them.
-  const refreshAfterCategoryChange = () => { loadLeads(); loadCategories(); };
+  // After a change that can add industries or move leads between them.
+  const refreshAfterIndustryChange = () => { loadLeads(); loadIndustries(); };
 
-  const handleBulkSetCategory = async () => {
-    setBulkCategorySaving(true);
+  const handleBulkSetIndustry = async () => {
+    setBulkIndustrySaving(true);
     try {
-      const resp = await bulkSetLeadCategory({
-        category: bulkCategory.trim() || null,
+      const resp = await bulkSetLeadIndustry({
+        industry: bulkIndustry.trim(),
         ...(allMatching ? { filters: currentFilters } : { ids: [...selectedIds] }),
       });
-      toast({ title: resp?.message || 'Category updated' });
-      setBulkCategory('');
-      refreshAfterCategoryChange();
+      toast({ title: resp?.message || 'Industry updated' });
+      setBulkIndustry('');
+      refreshAfterIndustryChange();
     } catch (e) {
-      toast({ title: 'Could not change the category', description: e?.message, variant: 'destructive' });
-    } finally { setBulkCategorySaving(false); }
+      toast({ title: 'Could not change the industry', description: e?.message, variant: 'destructive' });
+    } finally { setBulkIndustrySaving(false); }
   };
 
-  // Filtering by a category that was just deleted would show an empty list: go back to all.
+  // Filtering by an industry no lead has any more (renamed, or its last lead moved) would show an empty list: go
+  // back to all.
   useEffect(() => {
-    if (filterCategory && filterCategory !== 'none' && !categories.some(c => String(c.id) === filterCategory)) {
-      setFilterCategory('');
+    if (filterIndustry && filterIndustry !== 'none'
+        && !industries.some(i => i.name.toLowerCase() === filterIndustry.toLowerCase())) {
+      setFilterIndustry('');
     }
-  }, [categories]);
+  }, [industries]);
   // Likewise for a deleted ICP.
   useEffect(() => {
     if (filterIcp && filterIcp !== 'none' && !icpProfiles.some(i => String(i.id) === filterIcp)) setFilterIcp('');
   }, [icpProfiles]);
 
-  // A closed import dialog forgets its category, so the next file starts on Automatic.
-  useEffect(() => { if (!csvImport) setCsvCategory(''); }, [csvImport]);
+  // A closed import dialog forgets its industry, so the next file starts with none.
+  useEffect(() => { if (!csvImport) setCsvIndustry(''); }, [csvImport]);
 
   // The detail panel's picker follows whichever lead is open.
-  useEffect(() => { setDetailCategory(selectedLead?.category || ''); }, [selectedLead?.id, selectedLead?.category]);
+  useEffect(() => { setDetailIndustry(selectedLead?.company_industry || ''); }, [selectedLead?.id, selectedLead?.company_industry]);
 
-  const handleSaveDetailCategory = async () => {
+  const handleSaveDetailIndustry = async () => {
     if (!selectedLead) return;
     try {
-      const resp = await updateLead(selectedLead.id, { category: detailCategory.trim() || null });
+      const resp = await updateLead(selectedLead.id, { company_industry: detailIndustry.trim() });
       const updated = resp?.data;
-      if (updated) setSelectedLead(prev => ({ ...prev, ...updated }));
-      toast({ title: updated?.category ? `Moved to "${updated.category}"` : 'Category removed' });
-      refreshAfterCategoryChange();
+      if (updated) {
+        setSelectedLead(prev => ({ ...prev, ...updated }));
+        setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+      }
+      toast({ title: updated?.company_industry ? `Industry set to "${updated.company_industry}"` : 'Industry cleared' });
+      refreshAfterIndustryChange();
     } catch (e) {
-      toast({ title: 'Could not change the category', description: e?.message, variant: 'destructive' });
+      toast({ title: 'Could not change the industry', description: e?.message, variant: 'destructive' });
     }
   };
   const allPageIds = leads.map(l => l.id);
@@ -1193,7 +1188,7 @@ const SDRLeadsTab = () => {
     setGenerating(true);
     try {
       const startResp = await researchLeads({
-        count: genCount, source: genSource, icp_id: genIcpId || undefined, category: genCategory.trim() || undefined,
+        count: genCount, source: genSource, icp_id: genIcpId || undefined,
       });
       const started = startResp?.data ?? startResp;
       const jobId = started?.job_id;
@@ -1203,7 +1198,6 @@ const SDRLeadsTab = () => {
       const icpName = icpProfiles.find(p => String(p.id) === String(genIcpId))?.name || '';
       setGenRuns(runs => [...runs, { jobId, icpName, total: genCount, created: 0 }]);
       setShowGenModal(false);
-      setGenCategory('');
       toast({
         title: `Finding ${genCount} leads${icpName ? ` for ${icpName}` : ''}`,
         description: 'This runs in the background. Keep working; the leads appear in the list as they are found.',
@@ -1253,20 +1247,20 @@ const SDRLeadsTab = () => {
               description: [
                 `Source: ${(job.source || '').toUpperCase()}`,
                 skipped ? `${skipped} duplicates skipped.` : '',
-                job.leads_queued ? `Qualifying ${job.leads_queued} in the background.` : '',
+                created ? 'Click Qualify to score them.' : '',
               ].filter(Boolean).join(' '),
             });
           }
         }
         setGenRuns(keep);
         if (more || finished) loadLeads({ quiet: true });
-        if (finished) { loadCategories(); loadIcps(); }
+        if (finished) { loadIndustries(); loadIcps(); }
       } finally {
         genPollBusy.current = false;
       }
     }, 3000);
     return () => clearInterval(id);
-  }, [genRuns, loadLeads, loadCategories, loadIcps]);
+  }, [genRuns, loadLeads, loadIndustries, loadIcps]);
 
   // Import leads already generated in the Apify Console (works on the free plan,
   // which can't RUN paid actors via API but CAN read finished runs).
@@ -1274,7 +1268,7 @@ const SDRLeadsTab = () => {
   const handleFetchApify = async () => {
     setFetchingApify(true);
     try {
-      const resp = await fetchApifyLeads({ count: 200, category: genCategory.trim() || undefined });
+      const resp = await fetchApifyLeads({ count: 200 });
       const created = resp?.data?.leads_created ?? resp?.leads_created ?? 0;
       const skipped = resp?.data?.skipped_duplicates ?? resp?.skipped_duplicates ?? 0;
       toast({
@@ -1282,10 +1276,9 @@ const SDRLeadsTab = () => {
         description: skipped ? `${skipped} duplicates skipped.` : (resp?.message || resp?.data?.message || ''),
       });
       setShowGenModal(false);
-      setGenCategory('');
       setPage(1);
       loadLeads({ page: 1 });
-      loadCategories();
+      loadIndustries();
     } catch (e) {
       toast({ title: 'Fetch failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
     } finally { setFetchingApify(false); }
@@ -1430,20 +1423,37 @@ const SDRLeadsTab = () => {
     } finally { setQualifyingId(null); }
   };
 
-  // Qualify all currently-unscored leads (e.g. ones auto-qualify skipped when
-  // AI tokens ran out). Backend batches up to 50 per call.
+  // New leads aren't qualified on their own: these buttons put unscored leads in the background queue, which
+  // scores them in small batches. Scored leads are skipped. With the ICP filter on, only that ICP's leads.
   const [qualifyingAll, setQualifyingAll] = useState(false);
+  const [bulkQualifying, setBulkQualifying] = useState(false);
+  const qualifyQueued = (resp) => {
+    const n = resp?.queued ?? resp?.data?.queued ?? 0;
+    toast(n
+      ? { title: `Queued ${n} lead${n === 1 ? '' : 's'} for qualification`, description: resp?.message }
+      : { title: 'Nothing to qualify', description: 'Those leads are already scored or already being qualified.' });
+    loadLeads();
+    loadIcps();
+  };
   const handleQualifyAll = async () => {
     setQualifyingAll(true);
     try {
-      const resp = await qualifyAllLeads();
-      const n = resp?.queued ?? resp?.data?.queued ?? 0;
-      toast({ title: `Queued ${n} lead${n === 1 ? '' : 's'} for qualification`, description: resp?.message });
-      loadLeads();
+      qualifyQueued(await qualifyAllLeads(filterIcp ? { filters: { icp: filterIcp } } : undefined));
     } catch (e) {
       toast({ title: 'Qualify failed', description: e?.message, variant: 'destructive' });
     } finally { setQualifyingAll(false); }
   };
+  const handleBulkQualify = async () => {
+    setBulkQualifying(true);
+    try {
+      qualifyQueued(await qualifyAllLeads(allMatching ? { filters: currentFilters } : { ids: [...selectedIds] }));
+    } catch (e) {
+      toast({ title: 'Qualify failed', description: e?.message, variant: 'destructive' });
+    } finally { setBulkQualifying(false); }
+  };
+  // What the top button would queue: that ICP's unscored leads when the ICP filter is on, else all of them.
+  const toQualify = filterIcp ? (stats.unqueued_icp ?? 0) : stats.unqueued;
+  const filterIcpName = filterIcp === 'none' ? 'no ICP' : icpProfiles.find(i => String(i.id) === filterIcp)?.name;
 
   const handleAddLead = async () => {
     // ── Validation ──────────────────────────────────────────────────────────
@@ -1482,17 +1492,15 @@ const SDRLeadsTab = () => {
       await createLead({
         ...newLead,
         company_size: newLead.company_size ? parseInt(newLead.company_size) : null,
-        category: newLeadCategory.trim() || null,   // none picked → the Industry typed in decides
         ...(newLeadIcpId ? { icp_id: newLeadIcpId } : {}),   // none picked → the default ICP
       });
       setShowAddModal(false);
       setNewLead(BLANK_LEAD);
-      setNewLeadCategory('');
       setNewLeadIcpId('');
       toast({ title: 'Lead added' });
       setPage(1);
       loadLeads({ page: 1 });
-      loadCategories();
+      loadIndustries();
     } catch (e) {
       toast({ title: 'Add failed', description: e.message, variant: 'destructive' });
     } finally { setAddingLead(false); }
@@ -1534,16 +1542,15 @@ const SDRLeadsTab = () => {
     if (!csvImport?.file) return;
     setCsvImporting(true);
     try {
-      const resp = await importLeadsFromCSV(csvImport.file, csvCategory.trim(), csvIcpId);
+      const resp = await importLeadsFromCSV(csvImport.file, csvIndustry.trim(), csvIcpId);
       // Refused rows are listed with their reasons: 5 seconds was too short to read them (AI SDR film, 30 Oct).
       toast({ title: `Imported ${resp.created} leads`, description: resp.message,
         ...(resp.refused?.length ? { duration: 15000 } : {}) });
       setCsvImport(null);
-      setCsvCategory('');
       setCsvIcpId('');
       setPage(1);
       loadLeads({ page: 1 });
-      loadCategories();
+      loadIndustries();
     } catch (err) {
       toast({ title: 'Import failed', description: err?.message, variant: 'destructive' });
     } finally { setCsvImporting(false); }
@@ -1598,12 +1605,12 @@ const SDRLeadsTab = () => {
             <Upload size={14} /> Import CSV
           </Button>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
-          {/* Only for unscored leads the queue won't reach on its own (never queued, or failed for good);
-              queued leads are already covered by the "Qualifying…" status below. */}
-          {stats.unqueued > 0 && (
-            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`${stats.unqueued} unscored lead${stats.unqueued === 1 ? ' is' : 's are'} not in the qualification queue (never queued, or qualification failed). Add ${stats.unqueued === 1 ? 'it' : 'them'} to the queue.`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
+          {/* Unscored leads not yet in the queue (new, or failed for good); queued leads are covered by the
+              "Qualifying…" status below. With the ICP filter on, that ICP's leads only. */}
+          {toQualify > 0 && (
+            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`Score ${toQualify} unscored lead${toQualify === 1 ? '' : 's'}${filterIcpName ? ` (${filterIcpName})` : ''} with AI in the background. Scored leads are skipped.`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
               {qualifyingAll ? <Loader2 size={15} className="animate-spin" /> : <Brain size={15} />}
-              Qualify {stats.unqueued} more
+              Qualify {toQualify.toLocaleString()} unscored{filterIcpName ? ` · ${filterIcpName}` : ''}
             </Button>
           )}
           <div style={{ marginLeft: 'auto' }}>
@@ -1653,16 +1660,19 @@ const SDRLeadsTab = () => {
             </button>
           )}
           <div style={{ width: 1, height: 20, background: 'var(--line-1)' }} />
-          {/* File the selection under a category (pick one, type a new one, or "No category" to clear). */}
+          {/* Set the selection's industry (pick one, type a new one, or "No industry" to clear it). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Tag size={13} style={{ color: '#a78bfa', flexShrink: 0 }} />
             <div style={{ width: 220 }}>
-              <CategoryPicker categories={categories} value={bulkCategory} onChange={setBulkCategory} emptyLabel="No category (clear)" />
+              <IndustryPicker industries={industries} value={bulkIndustry} onChange={setBulkIndustry} emptyLabel="No industry (clear)" />
             </div>
-            <button onClick={handleBulkSetCategory} disabled={bulkCategorySaving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.35)', color: 'hsl(var(--pt-a78bfa))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
-              {bulkCategorySaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Set category
+            <button onClick={handleBulkSetIndustry} disabled={bulkIndustrySaving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.35)', color: 'hsl(var(--pt-a78bfa))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {bulkIndustrySaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Set industry
             </button>
           </div>
+          <button onClick={handleBulkQualify} disabled={bulkQualifying} title="Score the selected unscored leads with AI in the background. Scored leads are skipped." style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {bulkQualifying ? <Loader2 size={13} className="animate-spin" /> : <Brain size={13} />} Qualify selected
+          </button>
           {/* Delete works on ticked leads only, never on "all matching". */}
           {!allMatching && (
             <button onClick={() => setShowBulkDeleteConfirm(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', fontSize: 13, fontWeight: 600 }}>
@@ -1697,15 +1707,15 @@ const SDRLeadsTab = () => {
                 { key: 'none', label: 'No ICP (older leads)', color: '#9ca3af' },
               ]} />
           )}
-          {/* Industry category: the main way to keep one industry's leads apart from another's. */}
-          <FilterDropdown label="All categories" value={filterCategory} onChange={setFilterCategory} icon={Tag}
+          {/* The lead's industry: the main way to keep one industry's leads apart from another's. */}
+          <FilterDropdown label="All industries" value={filterIndustry} onChange={setFilterIndustry} icon={Tag}
             options={[
-              { key: '', label: 'All categories', color: '#6b7280' },
-              ...categories.map(c => ({ key: String(c.id), label: `${c.name} (${c.lead_count ?? 0})`, color: '#a78bfa' })),
-              { key: 'none', label: `No category (${uncategorizedCount})`, color: '#9ca3af' },
+              { key: '', label: 'All industries', color: '#6b7280' },
+              ...industries.map(i => ({ key: i.name, label: `${i.name} (${i.lead_count ?? 0})`, color: '#a78bfa' })),
+              { key: 'none', label: `No industry (${noIndustryCount})`, color: '#9ca3af' },
             ]}
           />
-          <button onClick={() => setShowCategoryManager(true)} title="Rename or delete categories"
+          <button onClick={() => setShowIndustryManager(true)} title="Rename industries"
             style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
             <Pencil size={13} />
           </button>
@@ -1920,11 +1930,11 @@ const SDRLeadsTab = () => {
                             style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: ENRICHMENT_DOT[lead.enrichment_status].color }} />
                         )}
                       </div>
-                      {lead.category && (
-                        <span title={`Show only "${lead.category}" leads`}
-                          onClick={e => { e.stopPropagation(); setFilterCategory(String(lead.category_id)); }}
+                      {lead.company_industry && (
+                        <span title={`Show only "${lead.company_industry}" leads`}
+                          onClick={e => { e.stopPropagation(); setFilterIndustry(lead.company_industry); }}
                           style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, marginRight: 4, padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600, background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)', color: 'hsl(var(--pt-a78bfa))', whiteSpace: 'nowrap', cursor: 'pointer' }}>
-                          <Tag size={9} /> {lead.category}
+                          <Tag size={9} /> {lead.company_industry}
                         </span>
                       )}
                     </td>
@@ -1987,7 +1997,7 @@ const SDRLeadsTab = () => {
                       <div style={{ display: 'flex', gap: 6 }}>
                         {lead.score == null ? (
                           // Unscored → prominent amber "Qualify" so the user can
-                          // score leads that auto-qualify skipped (e.g. AI tokens out).
+                          // score this one lead now instead of through the queue.
                           <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Qualify this lead with AI" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 6, padding: '5px 9px', cursor: 'pointer', color: 'hsl(var(--pt-fbbf24))', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
                             {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <><Brain size={12} /> Qualify</>}
                           </button>
@@ -2056,17 +2066,17 @@ const SDRLeadsTab = () => {
               </button>
             </div>
 
-            {/* Industry category: move this lead to another category, or a new one. */}
+            {/* The lead's industry: change it to another one, or type a new one. */}
             <div style={{ marginBottom: 20 }}>
               <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Tag size={11} /> Industry category
+                <Tag size={11} /> Industry
               </h4>
               <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <CategoryPicker key={selectedLead.id} categories={categories} value={detailCategory} onChange={setDetailCategory} />
+                  <IndustryPicker key={selectedLead.id} industries={industries} value={detailIndustry} onChange={setDetailIndustry} />
                 </div>
-                {detailCategory.trim().toLowerCase() !== (selectedLead.category || '').toLowerCase() && (
-                  <Button onClick={handleSaveDetailCategory} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, height: 38 }}>
+                {detailIndustry.trim().toLowerCase() !== (selectedLead.company_industry || '').toLowerCase() && (
+                  <Button onClick={handleSaveDetailIndustry} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, height: 38 }}>
                     Save
                   </Button>
                 )}
@@ -2493,7 +2503,7 @@ const SDRLeadsTab = () => {
 
       {/* Bulk Delete Dialog */}
       <Dialog open={showBulkDeleteConfirm} onOpenChange={setShowBulkDeleteConfirm}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Trash2 size={18} /> Confirm Delete
@@ -2515,7 +2525,7 @@ const SDRLeadsTab = () => {
 
       {/* Single Delete Confirmation Dialog */}
       <Dialog open={!!pendingDeleteLead} onOpenChange={(open) => { if (!open) setPendingDeleteLead(null); }}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Trash2 size={18} /> Confirm Delete
@@ -2539,7 +2549,7 @@ const SDRLeadsTab = () => {
 
       {/* CSV Import Preview Modal */}
       <Dialog open={!!csvImport} onOpenChange={(open) => { if (!open && !csvImporting) setCsvImport(null); }}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 760 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 760, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Upload size={18} color="#a855f7" /> Import leads from CSV
@@ -2633,9 +2643,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                 <p style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>Showing first 10 of {csvImport.total}. All will be imported.</p>
               )}
               <div style={{ marginTop: 12 }}>
-                <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>Category for these leads</label>
-                <CategoryPicker categories={categories} value={csvCategory} onChange={setCsvCategory}
-                  emptyLabel="Automatic (each row's Industry column)" />
+                <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>Industry for rows without one (optional)</label>
+                <IndustryPicker industries={industries} value={csvIndustry} onChange={setCsvIndustry}
+                  emptyLabel="None (each row's Industry column only)" />
               </div>
               <div style={{ marginTop: 12 }}>
                 <IcpPicker icps={icpProfiles} value={csvIcpId} onChange={setCsvIcpId} />
@@ -2670,7 +2680,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
       {/* Add Lead Modal */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 560 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-soft)' }}>Add Lead Manually</DialogTitle>
           </DialogHeader>
@@ -2692,11 +2702,6 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                 <input type={type || 'text'} placeholder={p} value={newLead[k]} onChange={e => setNewLead(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} />
               </div>
             ))}
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 4 }}>Category</label>
-              <CategoryPicker categories={categories} value={newLeadCategory} onChange={setNewLeadCategory}
-                emptyLabel="Automatic (from the Industry above)" />
-            </div>
             {icpProfiles.length > 1 && (
               <div style={{ gridColumn: '1 / -1' }}>
                 <IcpPicker icps={icpProfiles} value={newLeadIcpId} onChange={setNewLeadIcpId} label="Score this lead with" />
@@ -2704,7 +2709,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); setNewLeadCategory(''); }} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); }} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleAddLead} disabled={addingLead} style={{ background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {addingLead ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
               Add Lead
@@ -2715,7 +2720,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
       {/* Generate Leads Modal */}
       <Dialog open={showGenModal} onOpenChange={setShowGenModal}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 480 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Zap size={18} color="#a855f7" /> Generate Leads
@@ -2790,18 +2795,6 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               </div>
             )}
 
-            {/* Category the new leads are filed under */}
-            <div>
-              <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>Category</label>
-              <CategoryPicker categories={categories} value={genCategory} onChange={setGenCategory}
-                emptyLabel="Automatic (the industry you search for)" />
-              <p style={{ color: '#6b7280', fontSize: 11, marginTop: 4 }}>
-                Automatic files each lead under the ICP industry it matches{(() => {
-                  const ind = icpProfiles.find(p => String(p.id) === String(genIcpId))?.industries || [];
-                  return ind.length ? ` (${ind.join(', ')})` : '';
-                })()}. Apify runs you fetch go under each lead's own industry.
-              </p>
-            </div>
 
             {/* Count */}
             <div>
@@ -2844,8 +2837,8 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
         </DialogContent>
       </Dialog>
 
-      <CategoryManagerDialog open={showCategoryManager} onOpenChange={setShowCategoryManager}
-        categories={categories} onChanged={refreshAfterCategoryChange} />
+      <IndustryManagerDialog open={showIndustryManager} onOpenChange={setShowIndustryManager}
+        industries={industries} onChanged={refreshAfterIndustryChange} />
 
       {/* Setup Guide Modal */}
       <Dialog open={!!showSetupGuide} onOpenChange={() => setShowSetupGuide(null)}>
