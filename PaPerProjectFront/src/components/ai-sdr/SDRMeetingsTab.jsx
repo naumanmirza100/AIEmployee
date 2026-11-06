@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import SdrSelect from './SdrSelect';
 import {
   Calendar, CheckCircle2, XCircle, AlertCircle, RefreshCw, Send,
   Sparkles, Bell, Loader2, CalendarCheck, ChevronLeft, ChevronRight,
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import {
   listMeetings, listCampaigns, confirmMeeting, sendMeetingReminder,
   generateMeetingPrep, resendSchedulingEmail, updateMeeting, checkAllReplies,
@@ -102,7 +104,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
         }}
       >
         {LabelIcon && <LabelIcon size={13} style={{ color: value ? selected?.color : '#6b7280' }} />}
-        <span style={{ flex: 1, textAlign: 'left' }}>{value ? selected?.label : label}</span>
+        <span style={{ flex: 1, textAlign: 'left', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }} title={value ? selected?.label : undefined}>{value ? selected?.label : label}</span>
         <ChevronDown size={12} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
       </button>
 
@@ -112,7 +114,9 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
           background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))',
           border: '1px solid var(--line-1)', borderRadius: 11,
           boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
-          minWidth: '100%', width: 'max-content', overflow: 'hidden',
+          minWidth: '100%', width: 'max-content', maxWidth: 'min(360px, 90vw)',
+          // A long list (one option per category) scrolls instead of running off the screen.
+          maxHeight: 320, overflowY: 'auto', overflowX: 'hidden',
           animation: 'fadeDown 0.12s ease',
         }}>
           {options.map((opt, idx) => {
@@ -527,12 +531,8 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
           <div>
             <label style={lbl}>Duration</label>
-            <select value={duration} onChange={e => setDuration(e.target.value)}
-              style={{ ...inp, height: 42, appearance: 'none', WebkitAppearance: 'none', paddingRight: 32,
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center', cursor: 'pointer' }}>
-              {['15','30','45','60','90'].map(d => <option key={d} value={d}>{d} min</option>)}
-            </select>
+            <SdrSelect value={String(duration)} onChange={setDuration} style={{ ...inp, height: 42 }}
+              options={['15','30','45','60','90'].map(d => ({ value: d, label: `${d} min` }))} />
           </div>
           <div>
             <label style={lbl}>Time</label>
@@ -1144,13 +1144,12 @@ const SDRMeetingsTab = () => {
             })()}
 
             {/* Page size */}
-            <select
-              value={pageSize}
-              onChange={e => setPageSize(Number(e.target.value))}
-              style={{ ...inp, cursor: 'pointer', padding: '7px 10px', fontSize: 13, width: 'auto' }}
-            >
-              {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
-            </select>
+            <SdrSelect
+              value={String(pageSize)}
+              onChange={v => setPageSize(Number(v))}
+              style={{ ...inp, padding: '7px 10px', fontSize: 13, width: 'auto' }}
+              options={PAGE_SIZE_OPTIONS.map(n => ({ value: String(n), label: `${n} / page` }))}
+            />
 
             {/* Refresh */}
             <button onClick={() => load()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>

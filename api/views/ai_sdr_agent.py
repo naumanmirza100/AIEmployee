@@ -19,6 +19,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
@@ -28,11 +29,10 @@ from rest_framework.response import Response
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from ai_sdr_agent.models import (
-    SDRIcpProfile, SDRLead, SDRLeadCategory, SDRLeadResearchJob,
+    SDRIcpProfile, SDRLead, SDRLeadResearchJob,
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
     SDRAgentSettings, SDRReplyDraft,
 )
-from ai_sdr_agent import categories as lead_categories
 from ai_sdr_agent.agents.lead_research_agent import (
     ApifyApprovalRequired, LeadResearchAgent, NoLeadSource, apify_actor_page_url,
 )
@@ -350,8 +350,9 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'status': lead.status,
         'qualification_status': lead.qualification_status,
         'source': lead.source,
-        'category_id': lead.category_id,
-        'category': lead.category.name if lead.category_id else '',
+        # The ICP this lead is scored with (none: older leads, scored with the default ICP).
+        'icp_id': lead.icp_profile_id,
+        'icp_name': lead.icp_profile.name if lead.icp_profile_id else '',
         'research_status': lead.research_status,
         'research_profile': raw.get('research_profile'),
         'enrichment_status': enr_status,
@@ -363,20 +364,15 @@ def _serialize_lead(lead: SDRLead) -> dict:
     }
 
 
-def _resolve_category(company_user, value):
-    """The category picked by hand in a request: a category id, a name (made on first use, so a new category can
-    be typed straight into the picker), or nothing (None — the lead's industry decides, see categories.py).
-    Raises ValueError for an id that is not this user's, or a name that is too long."""
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return None
-    if isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit()):
-        cat = SDRLeadCategory.objects.filter(company_user=company_user, pk=int(value)).first()
-        if not cat:
-            raise ValueError('That category was not found.')
-        return cat
-    if len(' '.join(str(value).split())) > lead_categories.MAX_NAME:
-        raise ValueError(f'A category name can be at most {lead_categories.MAX_NAME} characters.')
-    return lead_categories.get_or_create_category(company_user, value)
+INDUSTRY_MAX = 255   # SDRLead.company_industry's length
+
+
+def _clean_industry(value) -> str:
+    """An industry typed or picked in the screens: one space between words. ValueError when it is too long."""
+    name = ' '.join(str(value or '').split())
+    if len(name) > INDUSTRY_MAX:
+        raise ValueError(f'An industry can be at most {INDUSTRY_MAX} characters.')
+    return name
 
 
 def _serialize_icp(icp: SDRIcpProfile) -> dict:
@@ -416,11 +412,65 @@ def _lead_stats(company_user) -> dict:
 # ICP Profile
 # ==========================================================================
 
+def _icp_fields(data) -> dict:
+    """The ICP form's fields, checked. Raises ValueError with a message for the user."""
+    # Checked before saving: 'high' as a threshold was a 500, and 150, -5, a warm bar above the hot one or a
+    # size range back to front were saved and made every score land in the wrong bucket.
+    name = str(data.get('name', 'Default ICP') or '').strip() or 'Default ICP'
+    if len(name) > 255:
+        raise ValueError('The ICP name can be at most 255 characters.')
+    lists = {}
+    for key, label in (('industries', 'Industries'), ('job_titles', 'Job titles'),
+                       ('locations', 'Locations'), ('keywords', 'Keywords')):
+        lists[key] = data.get(key) or []
+        if not isinstance(lists[key], list):
+            raise ValueError(f'{label} must be a list.')
+    size_min = _whole_number(data.get('company_size_min'), 'Minimum company size') or None
+    size_max = _whole_number(data.get('company_size_max'), 'Maximum company size') or None
+    if size_min and size_max and size_min > size_max:
+        raise ValueError('The minimum company size cannot be above the maximum.')
+    # Defaults must match SDRICPProfile model defaults (75 / 60) so
+    # hot/warm bucketing is consistent regardless of code path.
+    hot = _whole_number(data.get('hot_threshold', 75), 'The hot threshold', maximum=100)
+    warm = _whole_number(data.get('warm_threshold', 60), 'The warm threshold', maximum=100)
+    hot = 75 if hot is None else hot
+    warm = 60 if warm is None else warm
+    if warm > hot:
+        raise ValueError('The warm threshold cannot be above the hot threshold.')
+    return {'name': name, 'company_size_min': size_min, 'company_size_max': size_max,
+            'hot_threshold': hot, 'warm_threshold': warm, **lists}
+
+
+def _icp_waiting(icp) -> int:
+    """This ICP's leads waiting in or going through the qualification queue."""
+    return SDRLead.objects.filter(icp_profile=icp, qualification_status__in=['pending', 'processing']).count()
+
+
+def _serialize_icp_with_counts(icp) -> dict:
+    return {**_serialize_icp(icp), 'waiting': _icp_waiting(icp),
+            'lead_count': SDRLead.objects.filter(icp_profile=icp).count()}
+
+
+def _picked_icp(company_user, value):
+    """The ICP picked in a dialog (an id), else the login's default ICP, else None. Raises ValueError for an id
+    that is not one of this login's ICPs."""
+    if value is None or str(value).strip() == '':
+        return SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+    icp = None
+    if str(value).strip().isdigit():
+        icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=int(str(value).strip())).first()
+    if not icp:
+        raise ValueError('That ICP was not found.')
+    return icp
+
+
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def icp_profile(request):
-    """GET → return all ICPs (list). POST → upsert ICP."""
+    """GET → the default ICP (`data`) and all of the login's ICPs (`all`, each with its waiting and total leads).
+    POST → save an ICP: with `id` that ICP, with `new: true` a new one (the default only if it is the first),
+    with neither the default ICP (what the single-ICP screens send)."""
     company_user = request.user
 
     if request.method == 'GET':
@@ -428,10 +478,11 @@ def icp_profile(request):
             icps = SDRIcpProfile.objects.filter(company_user=company_user).order_by('-is_active', '-updated_at')
             if not icps.exists():
                 return Response({'status': 'success', 'data': None, 'all': []})
+            default = icps.filter(is_active=True).first()
             return Response({
                 'status': 'success',
-                'data': _serialize_icp(icps.filter(is_active=True).first()),
-                'all': [_serialize_icp(i) for i in icps],
+                'data': _serialize_icp(default) if default else None,
+                'all': [_serialize_icp_with_counts(i) for i in icps],
             })
         except KeyServiceError:
             raise
@@ -442,51 +493,75 @@ def icp_profile(request):
     # POST — save / update
     try:
         data = request.data
-        # Checked before saving: 'high' as a threshold was a 500, and 150, -5, a warm bar above the hot one or a
-        # size range back to front were saved and made every score land in the wrong bucket.
         try:
-            name = str(data.get('name', 'Default ICP') or '').strip() or 'Default ICP'
-            if len(name) > 255:
-                raise ValueError('The ICP name can be at most 255 characters.')
-            lists = {}
-            for key, label in (('industries', 'Industries'), ('job_titles', 'Job titles'),
-                               ('locations', 'Locations'), ('keywords', 'Keywords')):
-                lists[key] = data.get(key) or []
-                if not isinstance(lists[key], list):
-                    raise ValueError(f'{label} must be a list.')
-            size_min = _whole_number(data.get('company_size_min'), 'Minimum company size') or None
-            size_max = _whole_number(data.get('company_size_max'), 'Maximum company size') or None
-            if size_min and size_max and size_min > size_max:
-                raise ValueError('The minimum company size cannot be above the maximum.')
-            # Defaults must match SDRICPProfile model defaults (75 / 60) so
-            # hot/warm bucketing is consistent regardless of code path.
-            hot = _whole_number(data.get('hot_threshold', 75), 'The hot threshold', maximum=100)
-            warm = _whole_number(data.get('warm_threshold', 60), 'The warm threshold', maximum=100)
-            hot = 75 if hot is None else hot
-            warm = 60 if warm is None else warm
-            if warm > hot:
-                raise ValueError('The warm threshold cannot be above the hot threshold.')
+            fields = _icp_fields(data)
         except ValueError as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=400)
 
-        icp, _ = SDRIcpProfile.objects.update_or_create(
-            company_user=company_user,
-            is_active=True,
-            defaults={
-                'name': name,
-                'company_size_min': size_min,
-                'company_size_max': size_max,
-                'hot_threshold': hot,
-                'warm_threshold': warm,
-                **lists,
-            },
-        )
-        return Response({'status': 'success', 'message': 'ICP saved.', 'data': _serialize_icp(icp)})
+        icp_id = data.get('id')
+        if icp_id is not None and str(icp_id).strip() != '':
+            icp = None
+            if str(icp_id).strip().isdigit():
+                icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=int(str(icp_id).strip())).first()
+            if not icp:
+                return Response({'status': 'error', 'message': 'ICP not found.'}, status=404)
+            for key, value in fields.items():
+                setattr(icp, key, value)
+            icp.save()
+        elif data.get('new') in (True, 'true', '1', 1):
+            first = not SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).exists()
+            icp = SDRIcpProfile.objects.create(company_user=company_user, is_active=first, **fields)
+        else:
+            icp, _ = SDRIcpProfile.objects.update_or_create(
+                company_user=company_user, is_active=True, defaults=fields)
+        return Response({'status': 'success', 'message': 'ICP saved.', 'data': _serialize_icp_with_counts(icp)})
     except KeyServiceError:
         raise
     except Exception as exc:
         logger.error("Save ICP error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def icp_detail(request, icp_id):
+    """Delete an ICP. Not the default (another must be made the default first), and not while its leads are
+    waiting to be scored with it. Its scored leads keep their scores; they just no longer name an ICP."""
+    icp = SDRIcpProfile.objects.filter(company_user=request.user, pk=icp_id).first()
+    if not icp:
+        return Response({'status': 'error', 'message': 'ICP not found.'}, status=404)
+    if icp.is_active:
+        return Response({'status': 'error', 'message':
+                         'This is your default ICP. Make another ICP the default first, then delete this one.'},
+                        status=409)
+    waiting = _icp_waiting(icp)
+    if waiting:
+        noun = 'leads are' if waiting != 1 else 'lead is'
+        return Response({'status': 'error', 'message':
+                         f'{waiting:,} {noun} still being scored with this ICP. Delete it once they are done.'},
+                        status=409)
+    icp.delete()
+    return Response({'status': 'success', 'message': 'ICP deleted.'})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def icp_make_default(request, icp_id):
+    """Make this ICP the default. Leads already found for another ICP keep being scored with theirs."""
+    company_user = request.user
+    icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=icp_id).first()
+    if not icp:
+        return Response({'status': 'error', 'message': 'ICP not found.'}, status=404)
+    with transaction.atomic():
+        SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).exclude(pk=icp.pk).update(
+            is_active=False)
+        if not icp.is_active:
+            icp.is_active = True
+            icp.save(update_fields=['is_active', 'updated_at'])
+    return Response({'status': 'success', 'message': f'"{icp.name}" is now your default ICP.',
+                     'data': _serialize_icp_with_counts(icp)})
 
 
 # ==========================================================================
@@ -507,7 +582,7 @@ _LEAD_SORT_MAP = {
 
 def _apply_lead_filters(qs, request):
     """Apply the leads-list filters (search / temperature / status / source /
-    category / enrichment / sort) to a queryset. Shared by the paginated list and the CSV export so the
+    industry / enrichment / sort) to a queryset. Shared by the paginated list and the CSV export so the
     export respects whatever the user is currently looking at."""
     search = request.GET.get('search', '').strip()
     if search:
@@ -530,12 +605,18 @@ def _apply_lead_filters(qs, request):
     source_f = request.GET.get('source', '').strip()
     if source_f:
         qs = qs.filter(source=source_f)
-    # 'none' = leads not filed under any industry category; a number = that category.
-    category_f = request.GET.get('category', '').strip()
-    if category_f == 'none':
-        qs = qs.filter(category__isnull=True)
-    elif category_f.isdigit():
-        qs = qs.filter(category_id=int(category_f))
+    # The lead's own industry: 'none' = leads with no industry, else that industry (any capitalisation).
+    industry_f = ' '.join(request.GET.get('industry', '').split())
+    if industry_f == 'none':
+        qs = qs.filter(company_industry='')
+    elif industry_f:
+        qs = qs.filter(company_industry__iexact=industry_f)
+    # 'none' = leads with no ICP of their own; a number = leads found for (and scored with) that ICP.
+    icp_f = request.GET.get('icp', '').strip()
+    if icp_f == 'none':
+        qs = qs.filter(icp_profile__isnull=True)
+    elif icp_f.isdigit():
+        qs = qs.filter(icp_profile_id=int(icp_f))
     # Enrichment progress, apart from the pipeline status. Leads enriched before the field existed only
     # record it in raw_data (see _serialize_lead), so they count as enriched, not as never enriched.
     enrichment_f = request.GET.get('enrichment', '').strip()
@@ -579,13 +660,12 @@ def sdr_leads_export(request):
 
     company_user = request.user
     qs = _apply_lead_filters(
-        SDRLead.objects.filter(company_user=company_user).select_related('category'), request)
+        SDRLead.objects.filter(company_user=company_user), request)
 
     columns = [
         ('full_name', 'Name'), ('email', 'Email'), ('phone', 'Phone'),
         ('job_title', 'Title'), ('seniority_level', 'Seniority'),
-        ('category', 'Industry Category'),
-        ('company_name', 'Company'), ('company_industry', 'Company Industry'),
+        ('company_name', 'Company'), ('company_industry', 'Industry'),
         ('company_size', 'Company Size'), ('company_location', 'Location'),
         ('company_website', 'Website'), ('linkedin_url', 'LinkedIn'),
         ('score', 'Score'), ('temperature', 'Temperature'),
@@ -627,7 +707,7 @@ def leads_list(request):
         try:
             # Same filters as the export, so "Export ALL" gives exactly what the list shows.
             qs = _apply_lead_filters(
-                SDRLead.objects.filter(company_user=company_user).select_related('category'), request)
+                SDRLead.objects.filter(company_user=company_user).select_related('icp_profile'), request)
 
             # The Enroll dialog leaves out leads already in that campaign (CO-146).
             not_in = request.GET.get('not_in_campaign', '').strip()
@@ -646,10 +726,18 @@ def leads_list(request):
             page_obj    = paginator.get_page(page)
 
             leads = [_serialize_lead(l) for l in page_obj.object_list]
+            stats = _lead_stats(company_user)
+            # With the ICP filter on, "Qualify all" covers that ICP's leads only: its own count of them.
+            icp_f = request.GET.get('icp', '').strip()
+            if icp_f == 'none' or icp_f.isdigit():
+                unscored = SDRLead.objects.filter(company_user=company_user, score__isnull=True)
+                unscored = (unscored.filter(icp_profile__isnull=True) if icp_f == 'none'
+                            else unscored.filter(icp_profile_id=int(icp_f)))
+                stats['unqueued_icp'] = unscored.exclude(qualification_status__in=['pending', 'processing']).count()
             return Response({
                 'status':     'success',
                 'data':       leads,
-                'stats':      _lead_stats(company_user),
+                'stats':      stats,
                 'pagination': {
                     'page':        page_obj.number,
                     'page_size':   page_size,
@@ -679,7 +767,7 @@ def leads_list(request):
         if err:
             return Response({'status': 'error', 'message': err}, status=400)
         try:
-            category = _resolve_category(company_user, d.get('category'))
+            icp = _picked_icp(company_user, d.get('icp_id'))
         except ValueError as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=400)
         # ─────────────────────────────────────────────────────────────────────
@@ -712,14 +800,11 @@ def leads_list(request):
             company_location=d.get('company_location', ''),
             linkedin_url=d.get('linkedin_url', ''),
             company_website=d.get('company_website', ''),
-            # Picked in the form; else the Industry typed in.
-            category=category or lead_categories.category_for_lead(company_user, None, d.get('company_industry')),
+            # Scored with the ICP picked in the form (default preselected), whatever becomes the default later.
+            icp_profile=icp,
             source='manual',
             status='new',
-            # Queue for background qualification so manually-added leads get
-            # scored automatically like research/CSV leads.
-            qualification_status='pending',
-            qualification_queued_at=timezone.now(),
+            # Not queued for qualification: that waits for the Qualify button.
             # Auto-enrich new leads in the background too (contact/company fields).
             enrichment_status='pending',
             enrichment_queued_at=timezone.now(),
@@ -776,9 +861,9 @@ def lead_detail(request, lead_id):
             ]:
                 if field in d:
                     setattr(lead, field, d[field])
-            if 'category' in d:
+            if 'company_industry' in d:
                 try:
-                    lead.category = _resolve_category(company_user, d['category'])
+                    lead.company_industry = _clean_industry(d['company_industry'])
                 except ValueError as exc:
                     return Response({'status': 'error', 'message': str(exc)}, status=400)
             lead.save()
@@ -805,11 +890,13 @@ def qualify_lead(request, lead_id):
     company_user = request.user
     try:
         lead = SDRLead.objects.get(id=lead_id, company_user=company_user)
-        icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+        # The lead's own ICP, else the default one.
+        icp = lead.scoring_icp()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
         result = _get_qualification_agent(company_user.company).qualify_lead(lead, icp)
+        lead.icp_profile = icp
         lead.score = result['score']
         lead.temperature = result['temperature']
         lead.score_breakdown = result.get('score_breakdown', {})
@@ -841,19 +928,35 @@ def qualify_lead(request, lead_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def qualify_all_leads(request):
-    """Queue all unscored leads for background qualification (token-safe)."""
+    """Queue unscored leads for background qualification (token-safe).
+
+    New leads are not queued on their own; this is the button that does it.
+    Body: {} for every unscored lead, {"ids": [1, 2, ...]} for the ticked leads, or {"all_matching": true}
+    for every lead the list's filters match (in the query string, as for the list). Scored leads are skipped.
+    """
     company_user = request.user
     try:
         icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
-        # Put every unscored lead (that isn't already qualifying) into the queue.
+        leads = SDRLead.objects.filter(company_user=company_user)
+        if request.data.get('all_matching') is True:
+            leads = _apply_lead_filters(leads, request).order_by()
+        elif request.data.get('ids') is not None:
+            try:
+                leads = leads.filter(id__in=_id_list(request.data.get('ids')))
+            except ValueError as exc:
+                return Response({'status': 'error', 'message': str(exc)}, status=400)
+
+        # Put the unscored ones (that aren't already qualifying) into the queue.
         # The scheduler drains it in small batches, retrying failures — so this
         # never blocks or exhausts tokens in one shot.
-        queued = SDRLead.objects.filter(
-            company_user=company_user, score__isnull=True,
-        ).exclude(qualification_status__in=['pending', 'processing']).update(
+        to_queue = leads.filter(score__isnull=True).exclude(qualification_status__in=['pending', 'processing'])
+        # Leads with no ICP of their own are scored with today's default, even if another becomes the default
+        # before the queue reaches them.
+        to_queue.filter(icp_profile__isnull=True).update(icp_profile=icp)
+        queued = to_queue.update(
             qualification_status='pending', qualification_queued_at=timezone.now(),
             qualification_attempts=0, qualification_error='',
         )
@@ -954,12 +1057,6 @@ def _execute_research_job(job_id):
         params = job.search_params or {}
         count = int(params.get('count', 20))
         source = params.get('source', 'auto')
-        # A category picked in the Generate dialog files every lead under it; else each lead goes under the
-        # industry searched for (categories.py). A picked one deleted meanwhile falls back the same way.
-        picked_category = SDRLeadCategory.objects.filter(
-            company_user=company_user, pk=params.get('category_id') or 0).first()
-        searched_industries = (icp.industries if icp else None) or params.get('industries') or []
-        category_cache: dict = {}
 
         researcher = _get_research_agent(company_user.company, company_user=company_user)
         raw_leads = researcher.search_leads(icp, count=count, source=source)
@@ -1038,8 +1135,6 @@ def _execute_research_job(job_id):
             new_lead = SDRLead.objects.create(
                 company_user=company_user,
                 icp_profile=icp,
-                category=picked_category or lead_categories.category_for_lead(
-                    company_user, searched_industries, ld.get('company_industry'), category_cache),
                 first_name=ld.get('first_name', ''),
                 last_name=ld.get('last_name', ''),
                 full_name=full_name,
@@ -1077,21 +1172,12 @@ def _execute_research_job(job_id):
                 job.total_found = len(raw_leads)
                 job.save(update_fields=['leads_created', 'total_found'])
 
-        # Queue ONLY the leads created by this run for background
-        # qualification — the scheduler drains the queue in small batches so
-        # AI tokens aren't exhausted in one burst, and retries failures
-        # automatically. Scoping to created_ids avoids sweeping up unrelated
-        # pre-existing unscored leads (e.g. CSV/manual imports).
-        queued = SDRLead.objects.filter(
-            pk__in=created_ids, score__isnull=True, qualification_status='none',
-        ).update(qualification_status='pending', qualification_queued_at=timezone.now())
-
+        # The new leads are not queued for qualification: that waits for the Qualify button.
         # Auto-enrich the newly discovered leads in the background too.
         SDRLead.objects.filter(pk__in=created_ids, enrichment_status='none').update(
             enrichment_status='pending', enrichment_queued_at=timezone.now())
 
         params['skipped_duplicates'] = skipped_dupes
-        params['leads_queued'] = queued
         job.search_params = params
         job.status = 'completed'
         job.total_found = len(raw_leads)
@@ -1150,11 +1236,6 @@ def research_leads(request):
             icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
-        try:
-            category = _resolve_category(company_user, request.data.get('category'))
-        except ValueError as exc:
-            return Response({'status': 'error', 'message': str(exc)}, status=400)
-
         # Fast, deterministic pre-flight: if no provider key is configured there
         # is nothing to search, so fail immediately (no job, no made-up leads)
         # rather than starting a background job that is doomed. Network/approval
@@ -1174,8 +1255,7 @@ def research_leads(request):
             # The provider asked; a failed run keeps it. 'auto' tries Apollo first, and a fallback to Apify
             # replaces this when the job finishes.
             source=source if source in ('apollo', 'apify') else researcher.source_label,
-            search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count, 'source': source,
-                           'category_id': category.pk if category else None},
+            search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count, 'source': source},
             started_at=timezone.now(),
         )
 
@@ -1219,7 +1299,6 @@ def research_job_status(request, job_id):
             'done': job.status in ('completed', 'failed'),
             'total_found': job.total_found,
             'leads_created': job.leads_created,
-            'leads_queued': params.get('leads_queued', 0),
             'skipped_duplicates': params.get('skipped_duplicates', 0),
             'source': job.source,
             'error_message': job.error_message,
@@ -1461,11 +1540,6 @@ def fetch_apify_leads(request):
             return Response({'status': 'error', 'code': 'no_lead_source',
                              'message': 'Add your own Apify API token in SDR Agent → Settings to fetch your runs.'},
                             status=400)
-        try:
-            category = _resolve_category(company_user, request.data.get('category'))
-        except ValueError as exc:
-            return Response({'status': 'error', 'message': str(exc)}, status=400)
-        category_cache: dict = {}
         researcher = _get_research_agent(company_user.company, company_user=company_user)
         raw_leads = researcher.fetch_apify_runs(max_leads=max_leads, actor=actor)
         if not raw_leads:
@@ -1544,35 +1618,23 @@ def fetch_apify_leads(request):
                 buying_signals=ld.get('buying_signals', []),
                 apollo_id=ld.get('apollo_id', ''),
                 raw_data=ld.get('raw_data', {}),
-                # Runs fetched as they are have no search here to go by: the lead's own industry.
-                category=category or lead_categories.category_for_lead(
-                    company_user, None, ld.get('company_industry'), category_cache),
                 source='apify',
                 status='new',
                 confidence_score=validation['confidence_score'],
                 data_quality_flags=validation['data_quality_flags'],
-                # Queue for background qualification instead of scoring inline —
-                # a synchronous loop here blocked the request for minutes and hit
-                # AI token limits. The scheduler drains the queue in small batches.
-                qualification_status='pending',
-                qualification_queued_at=timezone.now(),
+                # Not queued for qualification: that waits for the Qualify button.
                 enrichment_status='pending',
                 enrichment_queued_at=timezone.now(),
             )
             created += 1
 
-        queued = created  # every imported lead is queued for qualification
-
         msg = f'Imported {created} leads from Apify'
-        if queued:
-            msg += '. Qualifying them in the background — scores will appear shortly'
         if skipped:
             msg += f'. Skipped {skipped} duplicates'
         return Response({
             'status': 'success',
             'message': msg + '.',
             'leads_created': created,
-            'leads_queued': queued,
             'skipped_duplicates': skipped,
             'stats': _lead_stats(company_user),
         })
@@ -1601,13 +1663,13 @@ def import_leads_csv(request):
         csv_file = request.FILES.get('file')
         if not csv_file:
             return Response({'status': 'error', 'message': 'No file provided.'}, status=400)
-        # A category picked in the import dialog files every lead in the file under it; else each row goes under
-        # its own Industry column.
+        # An industry typed in the import dialog fills it in for the rows whose Industry column is empty.
         try:
-            category = _resolve_category(company_user, request.data.get('category'))
+            file_industry = _clean_industry(request.data.get('industry'))
+            # Every lead in the file is scored with the ICP picked in the dialog (default preselected).
+            icp = _picked_icp(company_user, request.data.get('icp_id'))
         except ValueError as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=400)
-        category_cache: dict = {}
 
         # An Excel file or another binary upload was a 500 ("'utf-8' codec can't decode"), and an empty file
         # answered "success".
@@ -1715,19 +1777,15 @@ def import_leads_csv(request):
                     phone=pick('phone'),
                     job_title=pick('job_title'),
                     company_name=company_name,
-                    company_industry=pick('company_industry'),
+                    company_industry=pick('company_industry') or file_industry,
                     company_size=company_size,
                     company_location=pick('company_location'),
                     linkedin_url=pick('linkedin_url'),
                     company_website=pick('company_website'),
-                    category=category or lead_categories.category_for_lead(
-                        company_user, None, pick('company_industry'), category_cache),
+                    icp_profile=icp,
                     source='csv_import',
                     status='new',
-                    # Queue for background qualification so imported leads get
-                    # scored automatically instead of sitting permanently unscored.
-                    qualification_status='pending',
-                    qualification_queued_at=timezone.now(),
+                    # Not queued for qualification: that waits for the Qualify button.
                     enrichment_status='pending',
                     enrichment_queued_at=timezone.now(),
                 )
@@ -1743,8 +1801,6 @@ def import_leads_csv(request):
         msg += '.'
         if refused:
             msg += f' Not imported: {"; ".join(refused[:5])}' + (f'; and {len(refused) - 5} more' if len(refused) > 5 else '') + '.'
-        if created:
-            msg += ' Qualifying them in the background — scores will appear shortly.'
         if created == 0 and not errors and not refused:
             msg = ('No leads imported — check the CSV has a header row with columns like '
                    'full_name / email / company_name (any capitalisation).')
@@ -1806,17 +1862,16 @@ def sdr_bulk_delete_leads(request):
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
-def sdr_bulk_set_category(request):
-    """File many leads under one category, or take them out of theirs.
+def sdr_bulk_set_industry(request):
+    """Set the industry of many leads at once, or clear it.
 
-    Body: {"category": <id | name | null>, "ids": [1, 2, ...]} for the ticked leads, or
-    {"category": ..., "all_matching": true} for every lead the list's filters match (they come in the query string,
-    as for the list) — so a 1,000-lead import is filed in one go, not 25 at a time.
-    A name not used before makes a new category; null or '' leaves the leads uncategorised.
+    Body: {"industry": "Dentistry", "ids": [1, 2, ...]} for the ticked leads, or
+    {"industry": ..., "all_matching": true} for every lead the list's filters match (they come in the query string,
+    as for the list) — so a 1,000-lead import is labelled in one go, not 25 at a time. '' or null clears it.
     """
     company_user = request.user
     try:
-        category = _resolve_category(company_user, request.data.get('category'))
+        industry = _clean_industry(request.data.get('industry'))
     except ValueError as exc:
         return Response({'status': 'error', 'message': str(exc)}, status=400)
 
@@ -1830,80 +1885,65 @@ def sdr_bulk_set_category(request):
             return Response({'status': 'error', 'message': f'{exc} Or send "all_matching".'}, status=400)
         qs = qs.filter(id__in=ids)
 
-    updated = qs.update(category=category, updated_at=timezone.now())
+    updated = qs.update(company_industry=industry, updated_at=timezone.now())
     return Response({
         'status': 'success',
         'updated': updated,
-        'category': _serialize_category(category) if category else None,
-        'message': (f'Moved {updated} lead(s) to "{category.name}".' if category
-                    else f'Removed the category from {updated} lead(s).'),
+        'industry': industry,
+        'message': (f'Set the industry of {updated} lead(s) to "{industry}".' if industry
+                    else f'Cleared the industry of {updated} lead(s).'),
     })
 
 
 # ==========================================================================
-# Lead categories (the industry each batch of leads was gathered for)
+# Lead industries (the filter's list, and renaming one across every lead)
 # ==========================================================================
 
-def _serialize_category(cat: SDRLeadCategory, lead_count=None) -> dict:
-    data = {'id': cat.id, 'name': cat.name}
-    if lead_count is not None:
-        data['lead_count'] = lead_count
-    return data
-
-
-@api_view(['GET', 'POST'])
+@api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
-def sdr_lead_categories(request):
-    """GET: the user's categories with how many (not deleted) leads each holds, and how many leads have none.
-    POST {"name": ...}: add a category (or return the existing one of that name)."""
+def sdr_lead_industries(request):
+    """The industries the user's (not deleted) leads have, with how many leads each, and how many have none.
+    "Dental" and "dental" are one industry; it is named the way most of its leads spell it."""
     company_user = request.user
-    if request.method == 'POST':
-        name = request.data.get('name')
-        if not lead_categories.clean_name(name):
-            return Response({'status': 'error', 'message': 'Enter a category name.'}, status=400)
-        try:
-            cat = _resolve_category(company_user, str(name))
-        except ValueError as exc:
-            return Response({'status': 'error', 'message': str(exc)}, status=400)
-        return Response({'status': 'success', 'data': _serialize_category(cat)}, status=201)
-
-    cats = (SDRLeadCategory.objects.filter(company_user=company_user)
-            .annotate(n=Count('leads', filter=Q(leads__is_deleted=False))))
+    leads = SDRLead.objects.filter(company_user=company_user)
+    groups: dict = {}
+    for row in (leads.exclude(company_industry='').values('company_industry')
+                .annotate(n=Count('id')).order_by()):
+        key = row['company_industry'].lower()
+        g = groups.setdefault(key, {'name': row['company_industry'], 'lead_count': 0, 'top': 0})
+        g['lead_count'] += row['n']
+        if row['n'] > g['top']:
+            g['name'], g['top'] = row['company_industry'], row['n']
+    data = sorted(({'name': g['name'], 'lead_count': g['lead_count']} for g in groups.values()),
+                  key=lambda g: g['name'].lower())
     return Response({
         'status': 'success',
-        'data': [_serialize_category(c, c.n) for c in cats],
-        'uncategorized': SDRLead.objects.filter(company_user=company_user, category__isnull=True).count(),
+        'data': data,
+        'no_industry': leads.filter(company_industry='').count(),
     })
 
 
-@api_view(['PUT', 'DELETE'])
+@api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
-def sdr_lead_category_detail(request, category_id):
-    """PUT {"name": ...}: rename. DELETE: remove the category; its leads stay, uncategorised."""
+def sdr_rename_lead_industry(request):
+    """Rename an industry on every one of the user's leads that has it (any capitalisation), e.g. to tidy a
+    provider's "Hospital & Health Care". Renaming to an industry already in use merges the two.
+    Body: {"from": "Hospital & Health Care", "to": "Healthcare"}."""
     company_user = request.user
-    cat = SDRLeadCategory.objects.filter(company_user=company_user, pk=category_id).first()
-    if not cat:
-        return Response({'status': 'error', 'message': 'Category not found.'}, status=404)
-
-    if request.method == 'DELETE':
-        cat.delete()
-        return Response({'status': 'success', 'message': f'Deleted the category "{cat.name}".'})
-
-    name = lead_categories.clean_name(request.data.get('name'))
-    if not name:
-        return Response({'status': 'error', 'message': 'Enter a category name.'}, status=400)
-    if len(' '.join(str(request.data.get('name')).split())) > lead_categories.MAX_NAME:
-        return Response({'status': 'error',
-                         'message': f'A category name can be at most {lead_categories.MAX_NAME} characters.'},
-                        status=400)
-    if SDRLeadCategory.objects.filter(company_user=company_user, name__iexact=name).exclude(pk=cat.pk).exists():
-        return Response({'status': 'error', 'message': f'You already have a category called "{name}".'},
-                        status=400)
-    cat.name = name
-    cat.save(update_fields=['name'])
-    return Response({'status': 'success', 'data': _serialize_category(cat)})
+    try:
+        old, new = _clean_industry(request.data.get('from')), _clean_industry(request.data.get('to'))
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=400)
+    if not old or not new:
+        return Response({'status': 'error', 'message': 'Enter the industry to rename and its new name.'}, status=400)
+    updated = SDRLead.objects.filter(company_user=company_user, company_industry__iexact=old).update(
+        company_industry=new, updated_at=timezone.now())
+    if not updated:
+        return Response({'status': 'error', 'message': f'No leads have the industry "{old}".'}, status=404)
+    return Response({'status': 'success', 'updated': updated, 'industry': new,
+                     'message': f'Renamed "{old}" to "{new}" on {updated} lead(s).'})
 
 
 # ==========================================================================

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import SdrSelect from './SdrSelect';
 import {
   Users, Flame, Thermometer, Snowflake, Mail, Calendar,
   MessageSquare, TrendingUp, TrendingDown, Minus, RefreshCw,
@@ -233,8 +234,19 @@ export default function SDROverviewTab() {
     setGenerating(true);
     try {
       const resp = await researchLeads({ count: genCount, source: genSource, icp_id: genIcpId || undefined });
-      const created = resp?.data?.leads_created ?? resp?.leads_created ?? '?';
-      toast({ title: `✅ ${created} leads generated!`, description: `Source: ${genSource.toUpperCase()}` });
+      // The search runs on the server; the answer is its job, not leads. The Leads page follows it (its
+      // "Finding leads" chip) from the same list it keeps for its own searches.
+      const started = resp?.data ?? resp;
+      const icpName = icpProfiles.find(p => String(p.id) === String(genIcpId))?.name || '';
+      if (started?.job_id) {
+        try {
+          const runs = JSON.parse(sessionStorage.getItem('sdr-lead-searches') || '[]');
+          runs.push({ jobId: started.job_id, icpName, total: genCount, created: 0 });
+          sessionStorage.setItem('sdr-lead-searches', JSON.stringify(runs));
+        } catch (_) { /* only the progress chip is lost */ }
+      }
+      toast({ title: `Finding ${genCount} leads${icpName ? ` for ${icpName}` : ''}`,
+        description: 'This runs in the background; follow it on the Leads page.' });
       setShowGenModal(false);
       await load();
     } catch (e) {
@@ -613,7 +625,7 @@ export default function SDROverviewTab() {
           GENERATE LEADS MODAL
           ================================================================ */}
       <Dialog open={showGenModal} onOpenChange={setShowGenModal}>
-        <DialogContent style={{ background:'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)',border:'1px solid var(--line-1)',color:'var(--text-soft)',maxWidth:480 }}>
+        <DialogContent style={{ background:'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)',border:'1px solid var(--line-1)',color:'var(--text-soft)',maxWidth:480, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color:'var(--text-soft)',display:'flex',alignItems:'center',gap:8 }}>
               <Zap size={18} color="#a855f7" /> Generate Leads Automatically
@@ -661,9 +673,8 @@ export default function SDROverviewTab() {
             {icpProfiles.length > 1 && (
               <div>
                 <label style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12,display:'block',marginBottom:6 }}>ICP Profile</label>
-                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle }}>
-                  {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active?' (Active)':''}</option>)}
-                </select>
+                <SdrSelect value={String(genIcpId)} onChange={setGenIcpId} style={{ ...inputStyle }}
+                  options={icpProfiles.map(p => ({ value: String(p.id), label: `${p.name}${p.is_active ? ' (Default)' : ''}` }))} />
               </div>
             )}
             {icpProfiles.length === 1 && (

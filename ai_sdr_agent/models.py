@@ -30,6 +30,9 @@ class SDRIcpProfile(models.Model):
     hot_threshold = models.IntegerField(default=75)   # score >= hot_threshold → Hot
     warm_threshold = models.IntegerField(default=60)  # score >= warm_threshold → Warm
 
+    # The login's default ICP: exactly one per login. It is preselected in the Generate / Import / Add dialogs,
+    # scores leads that have no ICP of their own, and is the one auto-research runs on. A lead found for another
+    # ICP is still scored by that one (SDRLead.scoring_icp).
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -39,29 +42,6 @@ class SDRIcpProfile(models.Model):
 
     def __str__(self):
         return f"{self.company_user} — {self.name}"
-
-
-class SDRLeadCategory(models.Model):
-    """The industry a batch of leads was gathered for ("Dentistry", "Educational Institutes"). Leads from a
-    dentistry search and an education search landed in one list with nothing to tell them apart; filed under a
-    category they can be filtered and exported apart. Categories come from the data, never a fixed list: a search
-    files its leads under the industry searched for, an import under each lead's own industry
-    (ai_sdr_agent/categories.py). Names are unique per user, case-insensitively (checked in get_or_create)."""
-    company_user = models.ForeignKey(
-        'core.CompanyUser', on_delete=models.CASCADE, related_name='sdr_lead_categories'
-    )
-    name = models.CharField(max_length=100)
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'sdr_lead_category'
-        ordering = ['name']
-        constraints = [
-            models.UniqueConstraint(fields=['company_user', 'name'], name='sdr_lead_category_unique_name'),
-        ]
-
-    def __str__(self):
-        return self.name
 
 
 class SDRLeadManager(models.Manager):
@@ -109,11 +89,6 @@ class SDRLead(models.Model):
     icp_profile = models.ForeignKey(
         'SDRIcpProfile', on_delete=models.SET_NULL, null=True, blank=True
     )
-    # The industry the user filed this lead under (see SDRLeadCategory); deleting a category leaves its leads
-    # uncategorised.
-    category = models.ForeignKey(
-        'SDRLeadCategory', on_delete=models.SET_NULL, null=True, blank=True, related_name='leads'
-    )
 
     # Identity
     first_name = models.CharField(max_length=255, blank=True)
@@ -130,6 +105,7 @@ class SDRLead(models.Model):
     # Company
     company_name = models.CharField(max_length=255, blank=True)
     company_domain = models.CharField(max_length=255, blank=True)
+    # The lead's one industry: from the provider or the CSV, editable in the screens; the Leads tab filters on it.
     company_industry = models.CharField(max_length=255, blank=True)
     company_size = models.IntegerField(null=True, blank=True)
     company_size_range = models.CharField(max_length=100, blank=True)
@@ -259,6 +235,14 @@ class SDRLead(models.Model):
             if started and timezone.now() - started > self.RESEARCH_STALE_AFTER:
                 return 'failed'
         return status
+
+    def scoring_icp(self):
+        """The ICP this lead is scored against: the one it was found or imported for, else (older leads, which
+        have none) the login's default ICP, else None. A lead never follows the default once it has its own, so
+        leads for one ICP can wait in the queue while another becomes the default and gets leads of its own."""
+        if self.icp_profile_id:
+            return self.icp_profile
+        return SDRIcpProfile.objects.filter(company_user_id=self.company_user_id, is_active=True).first()
 
     def set_status_from_score(self):
         """After scoring: hot or warm is Qualified, cold stays New. Scoring every lead "qualified" put a cold lead

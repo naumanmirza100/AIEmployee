@@ -67,16 +67,13 @@ SUITES = [
         'description': 'Scoring leads against the ICP, hot / warm / cold status, the qualification queue and '
                        'its retries.',
         'labels': [
-            f'{_FUN}.AutoResearchQueuesQualificationTests', f'{_FUN}.StatusFollowsTheScoreTests',
+            f'{_FUN}.AutoResearchLeavesQualificationToTheButtonTests', f'{_FUN}.StatusFollowsTheScoreTests',
             f'{_FUN}.ScoreReconcileTests', f'{_R29}.ScoringQueueTests', f'{_RES}.ConfidenceTests',
             f'{_T}.LifecycleTests.test_qualify_queue_retries_stuck_and_keeps_lead_status',
             f'{_T}.LifecycleTests.test_qualify_queue_without_icp_fails_once_with_reason',
-            'ai_sdr_agent.tests_lead_categories.OneLeadTests.'
-            'test_qualifying_one_lead_takes_it_out_of_the_queue_and_clears_an_old_failure',
-            'ai_sdr_agent.tests_lead_categories.OneLeadTests.'
-            'test_qualify_more_counts_unscored_leads_the_queue_will_not_pick_up',
             f'{_RES}.LeadResearchTestCase.test_downstream_qualification_compatibility',
             f'{_RES}.ValidatorTests.test_ai_generated_record_cannot_score_well', f'{_LEADS}.IcpProfileTests', f'{_LEADS}.QualifyAllLeadsTests', f'{_LEADS}.QualifyOneLeadTests',
+            f'{_LEADS}.SeveralIcpsTests', f'{_LEADS}.IcpOfNewLeadsTests', f'{_LEADS}.ScoredWithItsOwnIcpTests',
         ],
     },
     {
@@ -91,14 +88,16 @@ SUITES = [
         ],
     },
     {
+        # The key stays 'categories' so runs saved before leads were filed by industry still find their part.
         'key': 'categories',
-        'title': 'Leads: list, import, export & categories',
-        'description': 'Filing leads under the industry they were found for, filtering, re-filing and CSV export.',
+        'title': 'Leads: list, import, export & industries',
+        'description': "Each lead's industry (filtering, setting it in bulk, renaming it), the category-to-industry "
+                       'migration, the other list filters and CSV export.',
         'labels': [
-            'ai_sdr_agent.tests_lead_categories', f'{_FUN}.LeadsExportAllTests', f'{_LEADS}.CreatingALeadTests',
+            'ai_sdr_agent.tests_lead_industries', f'{_FUN}.LeadsExportAllTests', f'{_LEADS}.CreatingALeadTests',
             f'{_LEADS}.ListingLeadsTests', f'{_LEADS}.LeadDetailTests', f'{_LEADS}.RestoreLeadTests',
-            f'{_LEADS}.BulkDeleteLeadsTests', f'{_LEADS}.BulkRestoreLeadsTests', f'{_LEADS}.CategoryEndpointsTests',
-            f'{_LEADS}.BulkSetCategoryTests', f'{_LEADS}.ImportCsvTests', f'{_LEADS}.ExportCsvTests',
+            f'{_LEADS}.BulkDeleteLeadsTests', f'{_LEADS}.BulkRestoreLeadsTests', f'{_LEADS}.IndustryEndpointsTests',
+            f'{_LEADS}.BulkSetIndustryTests', f'{_LEADS}.ImportCsvTests', f'{_LEADS}.ExportCsvTests',
         ],
     },
     {

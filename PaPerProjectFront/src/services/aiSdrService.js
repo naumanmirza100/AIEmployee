@@ -64,11 +64,17 @@ export const saveIcpProfile = async (data) => {
   }
 };
 
+// Several ICPs: each lead is scored with the ICP it was found for; the default one is preselected in the dialogs.
+export const createIcpProfile = (data) => saveIcpProfile({ ...data, new: true });
+export const updateIcpProfile = (id, data) => saveIcpProfile({ ...data, id });
+export const setDefaultIcpProfile = async (id) => companyApi.post(`/sdr/icp/${id}/default/`);
+export const deleteIcpProfile = async (id) => companyApi.delete(`/sdr/icp/${id}/`);
+
 // --------------------------------------------------------------------------
 // Leads — CRUD
 // --------------------------------------------------------------------------
 export const listLeads = async ({
-  search = '', temperature = '', status = '', source = '', category = '', enrichment = '',
+  search = '', temperature = '', status = '', source = '', industry = '', enrichment = '', icp = '',
   sort = 'score_desc', page = 1, page_size = 25, not_in_campaign = '',
 } = {}) => {
   try {
@@ -78,8 +84,9 @@ export const listLeads = async ({
     if (temperature) params.set('temperature', temperature);
     if (status)      params.set('status', status);
     if (source)      params.set('source', source);
-    if (category)    params.set('category', category);   // a category id, or 'none'
+    if (industry)    params.set('industry', industry);   // an industry name, or 'none'
     if (enrichment)  params.set('enrichment', enrichment); // done / not / in_progress / failed
+    if (icp)         params.set('icp', icp);               // an ICP id, or 'none'
     if (sort)        params.set('sort', sort);
     params.set('page', page);
     params.set('page_size', page_size);
@@ -94,14 +101,15 @@ export const listLeads = async ({
  * Export ALL leads matching the current filters as a CSV blob (server-side, no
  * pagination) so thousands of leads can be exported in one download.
  */
-export const exportAllLeadsCsv = async ({ search = '', temperature = '', status = '', source = '', category = '', enrichment = '', sort = 'score_desc' } = {}) => {
+export const exportAllLeadsCsv = async ({ search = '', temperature = '', status = '', source = '', industry = '', enrichment = '', icp = '', sort = 'score_desc' } = {}) => {
   const params = {};
   if (search)      params.search = search;
   if (temperature) params.temperature = temperature;
   if (status)      params.status = status;
   if (source)      params.source = source;
-  if (category)    params.category = category;
+  if (industry)    params.industry = industry;
   if (enrichment)  params.enrichment = enrichment;
+  if (icp)         params.icp = icp;
   if (sort)        params.sort = sort;
   // The filters go in the URL: companyApi.get drops a `params` option on a blob request, so "Export ALL" used to
   // export every lead whatever the filters said.
@@ -111,49 +119,40 @@ export const exportAllLeadsCsv = async ({ search = '', temperature = '', status 
 };
 
 // --------------------------------------------------------------------------
-// Lead categories — the industry each batch of leads was gathered for.
-// A category can be given by id or by name; a new name makes a new category.
+// Lead industries — each lead's company_industry, which the Leads tab filters on.
 // --------------------------------------------------------------------------
-export const listLeadCategories = async () => {
+export const listLeadIndustries = async () => {
   try {
-    return await companyApi.get('/sdr/lead-categories/');
+    return await companyApi.get('/sdr/lead-industries/');
   } catch (error) {
-    console.error('List lead categories error:', error);
+    console.error('List lead industries error:', error);
     throw error;
   }
 };
 
-export const renameLeadCategory = async (id, name) => {
+/** Rename an industry on every lead that has it (renaming to one already in use merges the two). */
+export const renameLeadIndustry = async (from, to) => {
   try {
-    return await companyApi.put(`/sdr/lead-categories/${id}/`, { name });
+    return await companyApi.post('/sdr/lead-industries/rename/', { from, to });
   } catch (error) {
-    console.error('Rename lead category error:', error);
-    throw error;
-  }
-};
-
-export const deleteLeadCategory = async (id) => {
-  try {
-    return await companyApi.delete(`/sdr/lead-categories/${id}/`);
-  } catch (error) {
-    console.error('Delete lead category error:', error);
+    console.error('Rename lead industry error:', error);
     throw error;
   }
 };
 
 /**
- * File leads under a category (null clears it). Pass `ids` for the ticked
- * leads, or `filters` (the list's current filters) to file every matching lead.
+ * Set the industry of many leads ('' clears it). Pass `ids` for the ticked
+ * leads, or `filters` (the list's current filters) for every matching lead.
  */
-export const bulkSetLeadCategory = async ({ category, ids, filters } = {}) => {
+export const bulkSetLeadIndustry = async ({ industry, ids, filters } = {}) => {
   try {
     if (filters) {
       const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
-      return await companyApi.post(`/sdr/leads/bulk-category/${query ? `?${query}` : ''}`, { category, all_matching: true });
+      return await companyApi.post(`/sdr/leads/bulk-industry/${query ? `?${query}` : ''}`, { industry, all_matching: true });
     }
-    return await companyApi.post('/sdr/leads/bulk-category/', { category, ids });
+    return await companyApi.post('/sdr/leads/bulk-industry/', { industry, ids });
   } catch (error) {
-    console.error('Bulk set lead category error:', error);
+    console.error('Bulk set lead industry error:', error);
     throw error;
   }
 };
@@ -233,9 +232,15 @@ export const qualifyLead = async (id) => {
   }
 };
 
-export const qualifyAllLeads = async () => {
+// No argument: every unscored lead. { ids }: the ticked leads. { filters }: every lead the list's filters match.
+// Scored leads are skipped either way.
+export const qualifyAllLeads = async ({ ids, filters } = {}) => {
   try {
-    return await companyApi.post('/sdr/leads/qualify-all/');
+    if (filters) {
+      const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
+      return await companyApi.post(`/sdr/leads/qualify-all/${query ? `?${query}` : ''}`, { all_matching: true });
+    }
+    return await companyApi.post('/sdr/leads/qualify-all/', ids ? { ids } : {});
   } catch (error) {
     console.error('Qualify all leads error:', error);
     throw error;
@@ -301,11 +306,10 @@ export const researchLeadsBatch = async (leadIds, data = {}) => {
 // Research (Apollo.io or Apify discovery) — starts a background job and
 // returns { job_id, ... }. Poll getResearchJob(jobId) for progress/result.
 // --------------------------------------------------------------------------
-export const researchLeads = async ({ count = 20, source = 'auto', icp_id, category } = {}) => {
+export const researchLeads = async ({ count = 20, source = 'auto', icp_id } = {}) => {
   try {
     const body = { count, source };
     if (icp_id) body.icp_id = icp_id;
-    if (category) body.category = category;   // else the leads go under the industry searched for
     return await companyApi.post('/sdr/leads/research/', body);
   } catch (error) {
     console.error('Research leads error:', error);
@@ -324,11 +328,10 @@ export const getResearchJob = async (jobId) => {
 };
 
 /** Import leads already generated in the Apify Console (works on the free plan). */
-export const fetchApifyLeads = async ({ count = 200, actor, category } = {}) => {
+export const fetchApifyLeads = async ({ count = 200, actor } = {}) => {
   try {
     const body = { count };
     if (actor) body.actor = actor;
-    if (category) body.category = category;
     return await companyApi.post('/sdr/leads/fetch-apify/', body);
   } catch (error) {
     console.error('Fetch Apify leads error:', error);
@@ -348,14 +351,16 @@ export const getResearchSources = async () => {
 // --------------------------------------------------------------------------
 // CSV Import — uses raw fetch to send multipart/form-data
 // --------------------------------------------------------------------------
-export const importLeadsFromCSV = async (file, category = '') => {
+export const importLeadsFromCSV = async (file, industry = '', icpId = '') => {
   try {
     const token = localStorage.getItem('company_auth_token');
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
     const formData = new FormData();
     formData.append('file', file);
-    // Optional: files every row under this category; else each row goes under its Industry column.
-    if (category) formData.append('category', category);
+    // Optional: the industry of the rows whose Industry column is empty.
+    if (industry) formData.append('industry', industry);
+    // The ICP every row is scored with; the server uses the default one when it is left out.
+    if (icpId) formData.append('icp_id', icpId);
 
     const resp = await fetch(`${baseUrl}/sdr/leads/import/`, {
       method: 'POST',

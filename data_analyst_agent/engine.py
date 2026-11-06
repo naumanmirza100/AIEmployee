@@ -7,6 +7,9 @@
 4. Write the answer from the result's first rows (an AI call), unless the source keeps rows from the AI; every number
    in it is checked against those rows (the Company Assistant's check).
 5. Store the question, answer, SQL, column names and row count. Never a row.
+
+MongoDB (6 Nov 2026): the same steps, with an aggregation {"collection", "pipeline"} in place of the SQL, written from
+the collections' fields and checked by guards.check_pipeline.
 """
 import json
 import logging
@@ -20,8 +23,8 @@ from core.api_key_service import KeyServiceError
 from core.assistant.engine import unchecked_numbers
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 
-from . import connectors
-from .guards import Refused, check_sql
+from . import connectors, mongo
+from .guards import Refused, check_query
 from .models import DataQuestion, DataSource
 
 logger = logging.getLogger(__name__)
@@ -41,7 +44,8 @@ ASK_SECONDS = 50
 
 _Fact = namedtuple('_Fact', 'text')
 _THOUSANDS = re.compile(r'(?<=\d)[,  ](?=\d{3}(?!\d))')
-DIALECT_NAMES = {'postgres': 'PostgreSQL', 'mysql': 'MySQL/MariaDB', 'sqlite': 'SQLite', 'mssql': 'Microsoft SQL Server'}
+DIALECT_NAMES = {'postgres': 'PostgreSQL', 'mysql': 'MySQL/MariaDB', 'sqlite': 'SQLite', 'mssql': 'Microsoft SQL Server',
+                 'mongodb': 'MongoDB'}
 
 
 class AnalystAI(BaseAgent):
@@ -129,6 +133,35 @@ Rules:
 
 Return only JSON: {{"sql": "...", "ask_back": ""}}"""
 
+_MONGO = """You write one read-only MongoDB aggregation, to answer a question about a company's own data.
+
+Today is {today}.
+
+Collections (only these exist; each with its fields and their types, read from a sample of its documents; a dotted name
+is a nested field, array<...> a list; an objectId field other than _id usually holds the _id of a document in another
+collection):
+{tables}
+
+{history}Question: {question}
+{previous}
+Rules:
+- One aggregation on one collection: "collection" is its name, "pipeline" its stages. Join another collection with
+  $lookup, its "from" one of the collections listed. Only stages that read: never $out or $merge, never JavaScript
+  ($function, $accumulator, $where).
+- Asked to change data (delete, update, add, cancel, fix records): write no query. Put in "ask_back": "I only read your
+  database, so I can't change it." and leave "pipeline" empty.
+- Return the figures the question is about as fields, named plainly (a count, a total, an average, a share), not only
+  names. For "which ... the most / least / top", return the top 5 with their figures, in order, so the answer can say
+  by how much.
+- Use only the fields listed, spelled exactly. Leave _id out unless it is asked for ({{"$project": {{"_id": 0, ...}}}}).
+- Write a date as {{"$date": "2026-10-01T00:00:00Z"}} and an ObjectId as {{"$oid": "..."}}.
+- A list gets at most 200 documents ($limit 200) unless the question asks for everything.
+- Work dates out from today ("last month", "this year").
+- When the collections can't answer it, or it is too unclear to write a query for, put one short sentence for the
+  person in "ask_back" (what is missing, or what to make clear) and leave "pipeline" empty.
+
+Return only JSON: {{"collection": "...", "pipeline": [...], "ask_back": ""}}"""
+
 _ANSWER = """You answer a question from the result of a query that just ran on the company's own database.
 
 Question: {question}
@@ -170,7 +203,27 @@ def _choose_tables(ai, source, question, history) -> list:
     return chosen[:TABLES_CHOSEN] or tables[:TABLES_WITHOUT_CHOOSING]
 
 
+def _write_aggregation(ai, source, question, history, tables, previous='') -> dict:
+    prompt = _MONGO.format(today=timezone.localdate().isoformat(), history=history, question=question,
+                           previous=previous, tables='\n'.join(_table_text(t) for t in tables) or '(none)')
+    out = _json(ai._call_llm(prompt=prompt, system_prompt='You write MongoDB aggregations. Output only one JSON object.',
+                             temperature=0, max_tokens=1500, json_mode=True))
+    ask_back = str(out.get('ask_back') or '').strip()[:500]
+    collection, pipeline = str(out.get('collection') or '').strip(), out.get('pipeline')
+    if ask_back and not pipeline:
+        return {'sql': '', 'ask_back': ask_back}
+    text = mongo.query_text(collection, pipeline) if collection and isinstance(pipeline, list) else ''
+    return {'sql': text, 'ask_back': ask_back}
+
+
+def collections(source: DataSource) -> set:
+    """A MongoDB source's collection names, as read (a query may only read and join these)."""
+    return {t['name'] for t in source.tables or []} if source.kind == DataSource.KIND_MONGO else set()
+
+
 def _write_sql(ai, source, question, history, tables, previous='') -> dict:
+    if source.kind == DataSource.KIND_MONGO:
+        return _write_aggregation(ai, source, question, history, tables, previous)
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
                          tables='\n'.join(_table_text(t) for t in tables) or '(none)', history=history,
                          question=question, previous=previous,
@@ -215,7 +268,7 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
             record.save()
             return _reply(record, rows=[])
         try:
-            sql = check_sql(written['sql'], source.kind)
+            sql = check_query(written['sql'], source.kind, collections(source))
             result = connectors.run(source, sql)
             break
         except Refused as exc:
@@ -262,6 +315,7 @@ def _reply(record: DataQuestion, rows, more=False) -> dict:
             'answer': record.answer, 'sql': record.sql, 'columns': record.columns, 'rows': rows,
             'row_count': record.row_count, 'more_rows': bool(more or record.truncated), 'flagged': record.flagged,
             'status': record.status, 'error': record.error, 'duration_ms': record.duration_ms,
+            'query_kind': 'mongodb' if record.source.kind == DataSource.KIND_MONGO else 'sql',
             'created_at': record.created_at.isoformat() if record.created_at else None}
 
 

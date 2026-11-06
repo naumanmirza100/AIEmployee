@@ -576,7 +576,6 @@ def auto_research_leads_impl(leads_per_run: int = 10):
 
     from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRLeadResearchJob
     from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
-    from ai_sdr_agent.categories import category_for_lead
 
     researcher = LeadResearchAgent()
     total_created = 0
@@ -602,7 +601,6 @@ def auto_research_leads_impl(leads_per_run: int = 10):
 
             raw_leads = researcher.search_leads(icp, count=leads_per_run, source='apify')
             created = 0
-            category_cache: dict = {}
 
             for ld in raw_leads:
                 email = ld.get('email', '').strip().lower()
@@ -627,8 +625,6 @@ def auto_research_leads_impl(leads_per_run: int = 10):
                     company_user=company_user,
                     icp_profile=icp,
                     # Filed under the industry searched for, like a search started from the screen.
-                    category=category_for_lead(
-                        company_user, icp.industries, ld.get('company_industry'), category_cache),
                     first_name=ld.get('first_name', ''),
                     last_name=ld.get('last_name', ''),
                     full_name=full_name,
@@ -647,12 +643,7 @@ def auto_research_leads_impl(leads_per_run: int = 10):
                     source='apify',
                     temperature='cold',
                     status='new',
-                    # Queue for background qualification, exactly like the
-                    # manual/CSV/Apollo creation paths do — otherwise these
-                    # auto-discovered leads default to qualification_status='none'
-                    # and the qualifier never scores them.
-                    qualification_status='pending',
-                    qualification_queued_at=tz.now(),
+                    # Not queued for qualification: that waits for the Qualify button.
                     enrichment_status='pending',
                     enrichment_queued_at=tz.now(),
                 )
@@ -1014,7 +1005,8 @@ def qualify_queue_impl():
         company = Company.objects.filter(pk=row['company_user__company_id']).first()
         if company is None or not _has_sdr_access(company, access_cache):
             continue                    # a lapsed plan: its leads wait, and take nobody's place
-        batch += list(queued.filter(company_user__company=company).select_related('company_user__company')
+        batch += list(queued.filter(company_user__company=company)
+                      .select_related('company_user__company', 'icp_profile')
                       .order_by('qualification_queued_at', 'created_at')
                       [:min(QUALIFY_BATCH_SIZE, QUALIFY_CEILING - len(batch))])
     if not batch:
@@ -1022,9 +1014,10 @@ def qualify_queue_impl():
 
     qualified = 0
     failed = 0
-    # Cache one agent + active ICP per company; skip companies whose key is out.
+    # Cache one agent + default ICP per login; skip companies whose key is out. Each lead is scored with its own
+    # ICP (the one it was found for); the default only scores leads that have none (SDRLead.scoring_icp).
     agents: dict = {}
-    icps: dict = {}
+    default_icps: dict = {}
     blocked_companies: set = set()
 
     for lead in batch:
@@ -1035,11 +1028,15 @@ def qualify_queue_impl():
         try:
             if cu_id not in agents:
                 agents[cu_id] = _get_qualification_agent(company)
-                icps[cu_id] = SDRIcpProfile.objects.filter(
-                    company_user=lead.company_user, is_active=True
-                ).first()
+            icp = lead.icp_profile
+            if icp is None:
+                if cu_id not in default_icps:
+                    default_icps[cu_id] = SDRIcpProfile.objects.filter(
+                        company_user=lead.company_user, is_active=True
+                    ).first()
+                icp = default_icps[cu_id]
 
-            if icps[cu_id] is None:
+            if icp is None:
                 # Nothing to score against - fail once with a clear reason instead
                 # of raising on every tick. "Qualify all" re-queues it after an ICP exists.
                 lead.qualification_status = 'failed'
@@ -1054,7 +1051,8 @@ def qualify_queue_impl():
             lead.qualification_status = 'processing'
             lead.save(update_fields=['qualification_status', 'updated_at'])
 
-            result = agents[cu_id].qualify_lead(lead, icps[cu_id])
+            result = agents[cu_id].qualify_lead(lead, icp)
+            lead.icp_profile = icp   # a lead that had none records the default that scored it
             lead.score = result['score']
             lead.temperature = result['temperature']
             lead.score_breakdown = result.get('score_breakdown', {})

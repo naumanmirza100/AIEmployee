@@ -13,6 +13,9 @@ pyodbc>=4.0
 # MySQL / MariaDB (set DB_ENGINE=mysql) — Hostinger deployment
 mysqlclient==2.2.8
 sentence-transformers>=3.0.0
+# The CPU build of this version is installed first by the Dockerfile (the server has no GPU); pinned, so a rebuild
+# can't move it (6 Nov 2026)
+torch==2.15.0
 
 
 # Environment
@@ -86,3 +89,7 @@ google-auth==2.55.2
 google-auth-httplib2==0.4.0
 # Browser tests of the AI SDR screens (ai_sdr_agent/tests_browser.py); then: playwright install chromium
 playwright==1.49.1
+# AI Data Analyst: MongoDB databases (6 Nov 2026). dnspython reads mongodb+srv:// service records; both pinned, so a
+# rebuild can't move them (kombu, 3 Nov 2026)
+pymongo==4.15.5
+dnspython==2.7.0

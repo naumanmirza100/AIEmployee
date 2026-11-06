@@ -1,5 +1,5 @@
 """API tests for the SDR lead endpoints: the ICP, the lead list and lead detail, soft delete and restore (one and
-in bulk), categories, CSV import and export, qualification, enrichment, research, the Apify fetch and the SDR key
+in bulk), industries, CSV import and export, qualification, enrichment, research, the Apify fetch and the SDR key
 settings. Each endpoint is checked for refused input (with a readable message, never a crash), for keeping one
 login's and one company's data away from another, for refusing callers who are not signed-in company users, and
 for doing the right thing in the database when the input is good. No outside service is called."""
@@ -13,7 +13,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from ai_sdr_agent.models import (
-    SDRAgentSettings, SDRIcpProfile, SDRLead, SDRLeadCategory, SDRLeadResearchJob,
+    SDRAgentSettings, SDRIcpProfile, SDRLead, SDRLeadResearchJob,
 )
 from ai_sdr_agent.tests import SDRBase
 from api.views import ai_sdr_agent as views
@@ -68,12 +68,13 @@ class OnlySignedInCompanyUsersGetInTests(LeadApiBase):
         lead = self.make_lead()
         return [
             (views.icp_profile, 'get', {}), (views.icp_profile, 'post', {}),
+            (views.icp_detail, 'delete', {'icp_id': 1}), (views.icp_make_default, 'post', {'icp_id': 1}),
             (views.leads_list, 'get', {}), (views.leads_list, 'post', {}),
             (views.lead_detail, 'get', {'lead_id': lead.id}), (views.lead_detail, 'delete', {'lead_id': lead.id}),
             (views.restore_lead, 'post', {'lead_id': lead.id}),
             (views.sdr_bulk_delete_leads, 'post', {}), (views.sdr_bulk_restore_leads, 'post', {}),
-            (views.sdr_bulk_set_category, 'post', {}),
-            (views.sdr_lead_categories, 'get', {}), (views.sdr_lead_category_detail, 'delete', {'category_id': 1}),
+            (views.sdr_bulk_set_industry, 'post', {}),
+            (views.sdr_lead_industries, 'get', {}), (views.sdr_rename_lead_industry, 'post', {}),
             (views.import_leads_csv, 'post', {}), (views.sdr_leads_export, 'get', {}),
             (views.qualify_all_leads, 'post', {}), (views.qualify_lead, 'post', {'lead_id': lead.id}),
             (views.enrich_lead_endpoint, 'post', {'lead_id': lead.id}), (views.enrich_leads_batch_endpoint, 'post', {}),
@@ -176,14 +177,15 @@ class CreatingALeadTests(LeadApiBase):
     def create(self, **data):
         return self.call(views.leads_list, 'post', data=data)
 
-    def test_a_valid_lead_is_saved_lower_cased_and_queued_for_scoring_and_enrichment(self):
+    def test_a_valid_lead_is_saved_lower_cased_and_queued_for_enrichment_not_scoring(self):
         r = self.create(full_name='Jane Doe', email='Jane@Corp.Example', company_size='40',
                         linkedin_url='https://www.linkedin.com/in/jane')
         self.assertEqual(r.status_code, 201, r.data)
         lead = SDRLead.objects.get(pk=r.data['data']['id'])
         self.assertEqual((lead.email, lead.source, lead.company_size, lead.company_user_id),
                          ('jane@corp.example', 'manual', 40, self.cu.id))
-        self.assertEqual((lead.qualification_status, lead.enrichment_status), ('pending', 'pending'))
+        # Scoring waits for the Qualify button.
+        self.assertEqual((lead.qualification_status, lead.enrichment_status), ('none', 'pending'))
 
     def test_a_name_alone_is_enough(self):
         self.assertEqual(self.create(full_name='Only Name').status_code, 201)
@@ -231,9 +233,6 @@ class CreatingALeadTests(LeadApiBase):
         self.their_lead(email='shared@corp.example')
         self.assertEqual(self.create(full_name='Mine', email='shared@corp.example').status_code, 201)
 
-    def test_another_companys_category_id_is_refused(self):
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.create(full_name='Bob', category=cat.id))
 
 
 # ==========================================================================
@@ -338,10 +337,12 @@ class LeadDetailTests(LeadApiBase):
         lead.refresh_from_db()
         self.assertEqual(lead.status, 'new')
 
-    def test_an_update_to_another_companys_category_is_refused(self):
+    def test_the_industry_is_tidied_and_an_over_long_one_refused(self):
         lead = self.make_lead()
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.put(lead, category=cat.id))
+        self.assertEqual(self.put(lead, company_industry='  Dental   Care ').status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.company_industry, 'Dental Care')
+        self.assertRefused(self.put(lead, company_industry='x' * 256))
 
     def test_patch_is_not_allowed(self):
         self.assertEqual(self.call(views.lead_detail, 'patch', data={'job_title': 'x'},
@@ -453,87 +454,87 @@ class BulkRestoreLeadsTests(LeadApiBase):
 
 
 # ==========================================================================
-# Categories
+# Industries
 # ==========================================================================
 
-class CategoryEndpointsTests(LeadApiBase):
-    def test_a_new_category_is_made_and_listed_with_its_lead_count(self):
-        r = self.call(views.sdr_lead_categories, 'post', data={'name': '  Dentistry  '})
-        self.assertEqual((r.status_code, r.data['data']['name']), (201, 'Dentistry'))
-        self.make_lead(category_id=r.data['data']['id'])
-        data = self.call(views.sdr_lead_categories).data['data']
-        self.assertEqual([(c['name'], c['lead_count']) for c in data], [('Dentistry', 1)])
+class IndustryEndpointsTests(LeadApiBase):
+    def test_industries_are_listed_with_their_lead_counts_ignoring_case(self):
+        self.make_lead(email='a@x.example', company_industry='Dental')
+        self.make_lead(email='b@x.example', company_industry='Dental')
+        self.make_lead(email='c@x.example', company_industry='dental')
+        self.make_lead(email='d@x.example', company_industry='Law')
+        self.make_lead(email='e@x.example')
+        self.make_lead(email='gone@x.example', company_industry='Law', is_deleted=True)
+        self.their_lead(company_industry='Theirs')
+        r = self.call(views.sdr_lead_industries)
+        self.assertEqual([(i['name'], i['lead_count']) for i in r.data['data']], [('Dental', 3), ('Law', 1)])
+        self.assertEqual(r.data['no_industry'], 1)
 
-    def test_an_empty_or_blank_name_is_refused(self):
-        for name in ('', '   ', None):
-            with self.subTest(name=name):
-                self.assertRefused(self.call(views.sdr_lead_categories, 'post', data={'name': name}))
-        self.assertFalse(SDRLeadCategory.objects.exists())
+    def test_the_filter_matches_the_industry_in_any_case_and_none(self):
+        dental = self.make_lead(email='a@x.example', company_industry='Dental')
+        self.make_lead(email='b@x.example', company_industry='Law')
+        blank = self.make_lead(email='c@x.example')
+        ids = lambda q: [l['id'] for l in self.call(views.leads_list, path=f'/x{q}').data['data']]
+        self.assertEqual(ids('?industry=dental'), [dental.id])
+        self.assertEqual(ids('?industry=none'), [blank.id])
 
-    def test_an_over_long_name_is_refused(self):
-        self.assertRefused(self.call(views.sdr_lead_categories, 'post', data={'name': 'x' * 101}))
+    def test_renaming_changes_every_lead_with_it_and_only_mine(self):
+        a = self.make_lead(email='a@x.example', company_industry='Hospital & Health Care')
+        b = self.make_lead(email='b@x.example', company_industry='hospital & health care')
+        other = self.make_lead(email='c@x.example', company_industry='Law')
+        theirs = self.their_lead(company_industry='Hospital & Health Care')
+        r = self.call(views.sdr_rename_lead_industry, 'post',
+                      data={'from': 'Hospital & Health Care', 'to': ' Healthcare '})
+        self.assertEqual((r.status_code, r.data['updated']), (200, 2), r.data)
+        got = {l.pk: l.company_industry for l in SDRLead.all_objects.filter(pk__in=[a.pk, b.pk, other.pk, theirs.pk])}
+        self.assertEqual(got, {a.pk: 'Healthcare', b.pk: 'Healthcare', other.pk: 'Law',
+                               theirs.pk: 'Hospital & Health Care'})
 
-    def test_another_companys_categories_are_not_listed(self):
-        SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertEqual(self.call(views.sdr_lead_categories).data['data'], [])
-
-    def test_another_companys_category_cannot_be_renamed_or_deleted(self):
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'put', data={'name': 'X'},
-                                     category_id=cat.id), 404)
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'delete', category_id=cat.id), 404)
-        cat.refresh_from_db()
-        self.assertEqual(cat.name, 'Theirs')
-
-    def test_renaming_to_a_name_already_used_is_refused(self):
-        SDRLeadCategory.objects.create(company_user=self.cu, name='Law')
-        cat = SDRLeadCategory.objects.create(company_user=self.cu, name='Dental')
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'put', data={'name': 'law'},
-                                     category_id=cat.id))
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'put', data={'name': '  '},
-                                     category_id=cat.id))
-
-    def test_deleting_a_category_keeps_its_leads_uncategorised(self):
-        cat = SDRLeadCategory.objects.create(company_user=self.cu, name='Dental')
-        lead = self.make_lead(category=cat)
-        self.assertEqual(self.call(views.sdr_lead_category_detail, 'delete', category_id=cat.id).status_code, 200)
-        lead.refresh_from_db()
-        self.assertIsNone(lead.category_id)
-
-    def test_an_unknown_category_is_not_found(self):
-        self.assertRefused(self.call(views.sdr_lead_category_detail, 'delete', category_id=999999), 404)
+    def test_a_rename_needs_both_names_and_an_industry_in_use(self):
+        self.make_lead(company_industry='Law')
+        for data in ({'from': 'Law', 'to': '  '}, {'from': '', 'to': 'X'}, {}):
+            with self.subTest(data):
+                self.assertRefused(self.call(views.sdr_rename_lead_industry, 'post', data=data))
+        self.assertRefused(self.call(views.sdr_rename_lead_industry, 'post', data={'from': 'Nope', 'to': 'X'}), 404)
+        self.assertRefused(self.call(views.sdr_rename_lead_industry, 'post', data={'from': 'Law', 'to': 'x' * 256}))
 
 
-class BulkSetCategoryTests(LeadApiBase):
+class BulkSetIndustryTests(LeadApiBase):
     def bulk(self, data, path='/x'):
-        return self.call(views.sdr_bulk_set_category, 'post', path=path, data=data)
+        return self.call(views.sdr_bulk_set_industry, 'post', path=path, data=data)
 
-    def test_only_my_listed_leads_are_moved(self):
+    def test_only_my_listed_leads_are_changed(self):
         a, b = self.make_lead(email='a@acme.com'), self.make_lead(email='b@acme.com')
         theirs = self.their_lead()
-        r = self.bulk({'category': 'Dental', 'ids': [a.id, theirs.id]})
+        r = self.bulk({'industry': ' Dental ', 'ids': [a.id, theirs.id]})
         self.assertEqual((r.status_code, r.data['updated']), (200, 1))
-        self.assertEqual(SDRLead.objects.get(pk=a.pk).category.name, 'Dental')
-        self.assertIsNone(SDRLead.objects.get(pk=b.pk).category_id)
-        self.assertIsNone(SDRLead.objects.get(pk=theirs.pk).category_id)
+        self.assertEqual(SDRLead.objects.get(pk=a.pk).company_industry, 'Dental')
+        self.assertEqual(SDRLead.objects.get(pk=b.pk).company_industry, '')
+        self.assertEqual(SDRLead.all_objects.get(pk=theirs.pk).company_industry, '')
 
     def test_all_matching_follows_the_filter(self):
         hot = self.make_lead(email='h@acme.com', temperature='hot')
-        self.make_lead(email='c@acme.com', temperature='cold')
-        r = self.bulk({'category': 'Hot ones', 'all_matching': True}, path='/x?temperature=hot')
+        cold = self.make_lead(email='c@acme.com', temperature='cold')
+        r = self.bulk({'industry': 'Hot ones', 'all_matching': True}, path='/x?temperature=hot')
         self.assertEqual(r.data['updated'], 1)
-        self.assertEqual(SDRLead.objects.get(pk=hot.pk).category.name, 'Hot ones')
+        self.assertEqual((SDRLead.objects.get(pk=hot.pk).company_industry,
+                          SDRLead.objects.get(pk=cold.pk).company_industry), ('Hot ones', ''))
+
+    def test_a_blank_industry_clears_it(self):
+        lead = self.make_lead(company_industry='Law')
+        self.assertEqual(self.bulk({'industry': '', 'ids': [lead.id]}).data['updated'], 1)
+        self.assertEqual(SDRLead.objects.get(pk=lead.pk).company_industry, '')
 
     def test_no_ids_is_refused(self):
-        for data in ({'category': 'X'}, {'category': 'X', 'ids': []}, {'category': 'X', 'ids': 'all'}):
+        for data in ({'industry': 'X'}, {'industry': 'X', 'ids': []}, {'industry': 'X', 'ids': 'all'}):
             with self.subTest(data):
                 self.assertRefused(self.bulk(data))
 
-    def test_an_unknown_category_id_is_refused(self):
-        self.assertRefused(self.bulk({'category': 999999, 'ids': [self.make_lead().id]}))
+    def test_an_over_long_industry_is_refused(self):
+        self.assertRefused(self.bulk({'industry': 'x' * 256, 'ids': [self.make_lead().id]}))
 
     def test_ids_that_are_not_numbers_are_refused_not_a_crash(self):
-        self.assertRefused(self.bulk({'category': 'X', 'ids': ['abc']}))
+        self.assertRefused(self.bulk({'industry': 'X', 'ids': ['abc']}))
 
 
 # ==========================================================================
@@ -552,13 +553,13 @@ class ImportCsvTests(LeadApiBase):
         w.writerows(rows)
         return buf.getvalue()
 
-    def test_good_rows_are_imported_and_queued(self):
+    def test_good_rows_are_imported_and_not_queued_for_scoring(self):
         r = self.upload(self.rows(['Full Name', 'E-mail', 'Company', 'Employees'],
                                   ['Ann', 'ANN@corp.example', 'Corp', '1,200'], ['Ben', 'ben@corp.example', '', '']))
         self.assertEqual((r.status_code, r.data['created']), (200, 2), r.data)
         ann = SDRLead.objects.get(email='ann@corp.example')
         self.assertEqual((ann.source, ann.company_size, ann.company_user_id, ann.qualification_status),
-                         ('csv_import', 1200, self.cu.id, 'pending'))
+                         ('csv_import', 1200, self.cu.id, 'none'))
 
     def test_no_file_is_refused(self):
         self.assertRefused(self.call(views.import_leads_csv, 'post', data={}, fmt='multipart'))
@@ -604,9 +605,15 @@ class ImportCsvTests(LeadApiBase):
         self.assertEqual(r.data['code'], 'too_many_rows')
         self.assertEqual(SDRLead.objects.count(), 0)
 
-    def test_another_companys_category_id_is_refused(self):
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.upload(self.rows(['Name'], ['A']), category=str(cat.id)))
+    def test_the_dialogs_industry_fills_only_rows_without_one(self):
+        r = self.upload(self.rows(['Name', 'Email', 'Industry'], ['A', 'a@x.example', 'Law'], ['B', 'b@x.example', '']),
+                        industry='Education')
+        self.assertEqual(r.data['created'], 2, r.data)
+        self.assertEqual((SDRLead.objects.get(email='a@x.example').company_industry,
+                          SDRLead.objects.get(email='b@x.example').company_industry), ('Law', 'Education'))
+
+    def test_an_over_long_industry_is_refused(self):
+        self.assertRefused(self.upload(self.rows(['Name'], ['A']), industry='x' * 256))
         self.assertEqual(SDRLead.objects.count(), 0)
 
 
@@ -670,6 +677,47 @@ class QualifyAllLeadsTests(LeadApiBase):
         self.make_lead()
         self.call(views.qualify_all_leads, 'post')
         self.assertEqual(self.call(views.qualify_all_leads, 'post').data['queued'], 0)
+
+    def test_selected_leads_only_and_scored_ones_are_skipped(self):
+        self.icp()
+        picked = self.make_lead(email='picked@acme.com')
+        scored = self.make_lead(email='scored@acme.com', score=80, temperature='hot', qualification_status='done')
+        left = self.make_lead(email='left@acme.com')
+        theirs = self.their_lead()
+        r = self.call(views.qualify_all_leads, 'post', data={'ids': [picked.id, scored.id, theirs.id]})
+        self.assertEqual((r.status_code, r.data['queued']), (200, 1), r.data)
+        got = {l.pk: l.qualification_status
+               for l in SDRLead.all_objects.filter(pk__in=[picked.pk, scored.pk, left.pk, theirs.pk])}
+        self.assertEqual(got, {picked.pk: 'pending', scored.pk: 'done', left.pk: 'none', theirs.pk: 'none'})
+
+    def test_all_matching_with_the_icp_filter_queues_that_icps_leads_only(self):
+        dentistry = self.icp(name='Dentistry')
+        saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False, job_titles=['CEO'])
+        d = self.make_lead(email='d@x.example', icp_profile=dentistry)
+        s = self.make_lead(email='s@x.example', icp_profile=saas)
+        r = self.call(views.qualify_all_leads, 'post', path=f'/x?icp={saas.id}', data={'all_matching': True})
+        self.assertEqual(r.data['queued'], 1, r.data)
+        self.assertEqual((SDRLead.objects.get(pk=s.pk).qualification_status,
+                          SDRLead.objects.get(pk=d.pk).qualification_status), ('pending', 'none'))
+        self.assertEqual(SDRLead.objects.get(pk=s.pk).icp_profile_id, saas.id)   # still scored with its own ICP
+
+    def test_bad_ids_are_refused(self):
+        self.icp()
+        for ids in ([], 'all', ['abc']):
+            with self.subTest(ids):
+                self.assertRefused(self.call(views.qualify_all_leads, 'post', data={'ids': ids}))
+
+    def test_the_list_counts_unscored_leads_of_the_filtered_icp(self):
+        dentistry = self.icp(name='Dentistry')
+        saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False, job_titles=['CEO'])
+        self.make_lead(email='d@x.example', icp_profile=dentistry)
+        self.make_lead(email='s1@x.example', icp_profile=saas)
+        self.make_lead(email='s2@x.example', icp_profile=saas, qualification_status='pending')
+        self.make_lead(email='n@x.example')
+        stats = lambda q: self.call(views.leads_list, path=f'/x{q}').data['stats']
+        self.assertEqual(stats(f'?icp={saas.id}')['unqueued_icp'], 1)
+        self.assertEqual(stats('?icp=none')['unqueued_icp'], 1)
+        self.assertNotIn('unqueued_icp', stats(''))
 
 
 class QualifyOneLeadTests(LeadApiBase):
@@ -902,11 +950,6 @@ class ResearchNewLeadsTests(LeadApiBase):
         self.icp()
         self.assertRefused(self.start({'icp_id': 'abc'})[0])
 
-    def test_another_companys_category_is_refused(self):
-        self.icp()
-        cat = SDRLeadCategory.objects.create(company_user=self.outsider, name='Theirs')
-        self.assertRefused(self.start({'category': cat.id})[0])
-
 
 class ResearchJobStatusAndSourcesTests(LeadApiBase):
     def test_my_job_can_be_polled(self):
@@ -992,3 +1035,193 @@ class SdrSettingsTests(LeadApiBase):
 
     def test_a_key_that_is_not_text_is_refused_not_a_crash(self):
         self.assertRefused(self.call(views.sdr_agent_settings, 'post', data={'apollo_api_key': 12345}))
+
+
+# ==========================================================================
+# Several ICPs: each lead is scored with the ICP it was found for
+# ==========================================================================
+
+class SeveralIcpsTests(LeadApiBase):
+    """A login keeps several ICPs; one is the default. Leads waiting to be scored for one ICP are not scored with
+    another when that one is made the default, so new leads can be found for a second ICP meanwhile."""
+
+    def new_icp(self, name, **data):
+        r = self.call(views.icp_profile, 'post', data={'new': True, 'name': name, 'industries': [name], **data})
+        self.assertEqual(r.status_code, 200, r.data)
+        return SDRIcpProfile.objects.get(pk=r.data['data']['id'])
+
+    def defaults(self):
+        return list(SDRIcpProfile.objects.filter(company_user=self.cu, is_active=True).values_list('name', flat=True))
+
+    def test_the_first_new_icp_is_the_default_and_later_ones_are_not(self):
+        dentistry = self.new_icp('Dentistry')
+        saas = self.new_icp('SaaS')
+        self.assertTrue(dentistry.is_active)
+        self.assertFalse(saas.is_active)
+        got = self.call(views.icp_profile).data
+        self.assertEqual(got['data']['name'], 'Dentistry')
+        self.assertEqual([i['name'] for i in got['all']], ['Dentistry', 'SaaS'])
+
+    def test_making_one_the_default_leaves_exactly_one_default(self):
+        self.new_icp('Dentistry')
+        saas = self.new_icp('SaaS')
+        r = self.call(views.icp_make_default, 'post', icp_id=saas.id)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.defaults(), ['SaaS'])
+
+    def test_saving_with_an_id_edits_that_icp_only(self):
+        dentistry = self.new_icp('Dentistry')
+        saas = self.new_icp('SaaS')
+        r = self.call(views.icp_profile, 'post', data={'id': saas.id, 'name': 'SaaS EU', 'locations': ['Germany']})
+        self.assertEqual(r.status_code, 200, r.data)
+        saas.refresh_from_db()
+        dentistry.refresh_from_db()
+        self.assertEqual((saas.name, saas.locations, saas.is_active), ('SaaS EU', ['Germany'], False))
+        self.assertEqual(dentistry.name, 'Dentistry')
+
+    def test_saving_without_an_id_still_edits_the_default(self):
+        """What the screens from before several ICPs send, while a deploy is half done."""
+        self.new_icp('Dentistry')
+        self.new_icp('SaaS')
+        self.call(views.icp_profile, 'post', data={'name': 'Dental clinics'})
+        self.assertEqual(sorted(SDRIcpProfile.objects.values_list('name', flat=True)), ['Dental clinics', 'SaaS'])
+        self.assertEqual(self.defaults(), ['Dental clinics'])
+
+    def test_another_logins_icp_cannot_be_edited_made_default_or_deleted(self):
+        theirs = self.icp(owner=self.outsider, name='Theirs')
+        self.assertRefused(self.call(views.icp_profile, 'post', data={'id': theirs.id, 'name': 'Mine now'}), 404)
+        self.assertRefused(self.call(views.icp_make_default, 'post', icp_id=theirs.id), 404)
+        self.assertRefused(self.call(views.icp_detail, 'delete', icp_id=theirs.id), 404)
+        theirs.refresh_from_db()
+        self.assertEqual((theirs.name, theirs.is_active), ('Theirs', True))
+
+    def test_the_default_icp_cannot_be_deleted(self):
+        dentistry = self.new_icp('Dentistry')
+        self.assertRefused(self.call(views.icp_detail, 'delete', icp_id=dentistry.id), 409)
+        self.assertTrue(SDRIcpProfile.objects.filter(pk=dentistry.pk).exists())
+
+    def test_an_icp_with_leads_waiting_cannot_be_deleted_and_says_how_many(self):
+        self.new_icp('SaaS')
+        dentistry = self.new_icp('Dentistry')
+        self.make_lead(email='a@d.example', icp_profile=dentistry, qualification_status='pending')
+        self.make_lead(email='b@d.example', icp_profile=dentistry, qualification_status='processing')
+        r = self.call(views.icp_detail, 'delete', icp_id=dentistry.id)
+        self.assertRefused(r, 409)
+        self.assertIn('2 leads', r.data['message'])
+        waiting = {i['name']: i['waiting'] for i in self.call(views.icp_profile).data['all']}
+        self.assertEqual(waiting, {'SaaS': 0, 'Dentistry': 2})
+
+    def test_deleting_an_icp_keeps_its_scored_leads_and_their_scores(self):
+        self.new_icp('SaaS')
+        dentistry = self.new_icp('Dentistry')
+        lead = self.make_lead(icp_profile=dentistry, score=70, temperature='warm', qualification_status='done')
+        r = self.call(views.icp_detail, 'delete', icp_id=dentistry.id)
+        self.assertEqual(r.status_code, 200, r.data)
+        lead.refresh_from_db()
+        self.assertEqual((lead.icp_profile_id, lead.score), (None, 70))
+
+    def test_the_lead_list_names_each_leads_icp_and_filters_by_it(self):
+        dentistry = self.new_icp('Dentistry')
+        saas = self.new_icp('SaaS')
+        self.make_lead(email='d@x.example', icp_profile=dentistry)
+        self.make_lead(email='s@x.example', icp_profile=saas)
+        self.make_lead(email='n@x.example')
+
+        def emails(**params):
+            r = self.call(views.leads_list, data=params)
+            return {lead['email']: lead['icp_name'] for lead in r.data['data']}
+        self.assertEqual(emails(icp=dentistry.id), {'d@x.example': 'Dentistry'})
+        self.assertEqual(emails(icp='none'), {'n@x.example': ''})
+        self.assertEqual(len(emails()), 3)
+
+
+class IcpOfNewLeadsTests(LeadApiBase):
+    """A lead added by hand or imported records the ICP picked in the dialog, else the default one."""
+
+    def setUp(self):
+        super().setUp()
+        self.dentistry = self.icp(name='Dentistry')
+        self.saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False)
+
+    def add(self, **extra):
+        return self.call(views.leads_list, 'post', data={'full_name': 'Ann', 'email': 'ann@corp.example', **extra})
+
+    def import_csv(self, **extra):
+        f = SimpleUploadedFile('l.csv', b'Name,Email\nAnn,ann@corp.example\n', content_type='text/csv')
+        return self.call(views.import_leads_csv, 'post', data={'file': f, **extra}, fmt='multipart')
+
+    def test_a_lead_added_by_hand_gets_the_picked_icp(self):
+        self.assertEqual(self.add(icp_id=self.saas.id).status_code, 201)
+        self.assertEqual(SDRLead.objects.get().icp_profile, self.saas)
+
+    def test_a_lead_added_by_hand_without_a_pick_gets_the_default(self):
+        self.add()
+        self.assertEqual(SDRLead.objects.get().icp_profile, self.dentistry)
+
+    def test_an_import_gets_the_picked_icp(self):
+        self.assertEqual(self.import_csv(icp_id=self.saas.id).status_code, 200)
+        self.assertEqual(SDRLead.objects.get().icp_profile, self.saas)
+
+    def test_an_import_without_a_pick_gets_the_default(self):
+        self.import_csv()
+        self.assertEqual(SDRLead.objects.get().icp_profile, self.dentistry)
+
+    def test_another_logins_icp_is_refused_and_nothing_is_created(self):
+        theirs = self.icp(owner=self.outsider)
+        for r in (self.add(icp_id=theirs.id), self.import_csv(icp_id=theirs.id), self.add(icp_id='abc')):
+            self.assertRefused(r)
+        self.assertFalse(SDRLead.objects.exists())
+
+    def test_qualify_all_pins_leads_without_an_icp_to_todays_default(self):
+        mine = self.make_lead()
+        found_for_saas = self.make_lead(email='s@x.example', icp_profile=self.saas)
+        self.call(views.qualify_all_leads, 'post')
+        mine.refresh_from_db()
+        found_for_saas.refresh_from_db()
+        self.assertEqual((mine.icp_profile, found_for_saas.icp_profile), (self.dentistry, self.saas))
+
+
+class ScoredWithItsOwnIcpTests(LeadApiBase):
+    """The queue and the Qualify button score a lead with its own ICP; the default only scores leads without one."""
+
+    def setUp(self):
+        super().setUp()
+        self.dentistry = self.icp(name='Dentistry')
+        self.saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False)
+        self.agent = mock.Mock()
+        self.agent.qualify_lead.return_value = {'score': 80, 'temperature': 'hot'}
+
+    def run_queue(self):
+        from ai_sdr_agent.tasks import qualify_queue_impl
+        with mock.patch('api.views.ai_sdr_agent._get_qualification_agent', return_value=self.agent):
+            qualify_queue_impl()
+
+    def scored_with(self):
+        return {call.args[0].email: call.args[1].name for call in self.agent.qualify_lead.call_args_list}
+
+    def test_waiting_leads_keep_their_icp_when_another_becomes_the_default(self):
+        self.make_lead(email='d@x.example', icp_profile=self.dentistry, qualification_status='pending')
+        self.call(views.icp_make_default, 'post', icp_id=self.saas.id)
+        self.make_lead(email='s@x.example', icp_profile=self.saas, qualification_status='pending')
+        self.make_lead(email='n@x.example', qualification_status='pending')
+        self.run_queue()
+        self.assertEqual(self.scored_with(), {'d@x.example': 'Dentistry', 's@x.example': 'SaaS',
+                                              'n@x.example': 'SaaS'})
+        # The lead without an ICP now records the one that scored it.
+        self.assertEqual(SDRLead.objects.get(email='n@x.example').icp_profile, self.saas)
+        self.assertEqual(SDRLead.objects.filter(qualification_status='done').count(), 3)
+
+    def test_an_edit_to_an_icp_applies_to_its_waiting_leads_only(self):
+        self.make_lead(email='d@x.example', icp_profile=self.dentistry, qualification_status='pending')
+        self.make_lead(email='s@x.example', icp_profile=self.saas, qualification_status='pending')
+        self.call(views.icp_profile, 'post', data={'id': self.dentistry.id, 'name': 'Dental clinics',
+                                                   'industries': ['Dental clinics']})
+        self.run_queue()
+        self.assertEqual(self.scored_with(), {'d@x.example': 'Dental clinics', 's@x.example': 'SaaS'})
+
+    def test_the_qualify_button_uses_the_leads_own_icp(self):
+        lead = self.make_lead(icp_profile=self.saas)
+        with mock.patch.object(views, '_get_qualification_agent', return_value=self.agent):
+            r = self.call(views.qualify_lead, 'post', lead_id=lead.id)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.scored_with(), {lead.email: 'SaaS'})

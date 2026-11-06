@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import SdrSelect from './SdrSelect';
 import {
   RefreshCw, Plus, Trash2, CheckCircle2, XCircle, Wifi, WifiOff,
   AlertCircle, Loader2, ChevronDown, ChevronUp, Users, Mail,
@@ -333,19 +334,17 @@ function DealsRow({ integration, label, onRefresh }) {
           {pipelines === null ? <Loader2 size={14} className="animate-spin" /> : (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {pipelines.length > 1 && (
-                <select data-testid="crm-deals-pipeline" style={select} value={pick.pipeline_id}
-                  onChange={(e) => {
-                    const p = pipelines.find((x) => x.id === e.target.value);
-                    setPick({ pipeline_id: e.target.value, stage_id: p?.stages?.[0]?.id || '' });
-                  }}>
-                  {pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                </select>
+                <SdrSelect data-testid="crm-deals-pipeline" style={select} value={pick.pipeline_id}
+                  onChange={(v) => {
+                    const p = pipelines.find((x) => x.id === v);
+                    setPick({ pipeline_id: v, stage_id: p?.stages?.[0]?.id || '' });
+                  }}
+                  options={pipelines.map((p) => ({ value: p.id, label: p.label }))} />
               )}
               {stages.length > 0 && (
-                <select data-testid="crm-deals-stage" style={select} value={pick.stage_id}
-                  onChange={(e) => setPick((x) => ({ ...x, stage_id: e.target.value }))}>
-                  {stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                </select>
+                <SdrSelect data-testid="crm-deals-stage" style={select} value={pick.stage_id}
+                  onChange={(v) => setPick((x) => ({ ...x, stage_id: v }))}
+                  options={stages.map((s) => ({ value: s.id, label: s.label }))} />
               )}
               <button type="button" data-testid="crm-deals-save" onClick={() => save(true)}
                 disabled={saving || !pick.stage_id} style={{ ...btnSecondary, padding: '5px 12px' }}>

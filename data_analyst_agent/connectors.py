@@ -5,7 +5,8 @@ layers (guards.check_sql comes first; the company's read-only user is the third)
   * PostgreSQL: default_transaction_read_only and statement_timeout, set as the connection opens;
   * MySQL/MariaDB: SET SESSION TRANSACTION READ ONLY and an execution time limit, LOCAL INFILE off;
   * SQLite: the file opened read-only and immutable, interrupted after the time limit, extensions never loaded.
-Whatever happens, the transaction is rolled back.
+Whatever happens, the transaction is rolled back. MongoDB has its own module (mongo.py): only aggregate(), with a
+time limit.
 """
 import datetime
 import decimal
@@ -114,30 +115,45 @@ def _value(v):
 
 def friendly_error(exc) -> str:
     """The database's own words, first line, without the driver's long tail, with what to do where it's clear."""
+    if exc.__class__.__name__ in ('ServerSelectionTimeoutError', 'AutoReconnect', 'NetworkTimeout'):
+        # MongoDB's own message lists every server it tried, with the whole topology: too long, and the same advice.
+        return ("Could not reach the MongoDB server in time. (Allow our server's address in the database's firewall: "
+                'in MongoDB Atlas, under Network Access.)')
     text = str(getattr(exc, 'orig', None) or exc).strip().splitlines()
     message = (text[0] if text else exc.__class__.__name__)[:400]
+    if exc.__class__.__name__ == 'OperationFailure':
+        message = message.split(', full error:')[0]
     lowered = ' '.join(text).lower()
     if 'does not support ssl' in lowered or 'ssl connection is required' in lowered and 'not' in lowered:
         message += ' (This server has no encrypted connection: untick "Require an encrypted connection".)'
-    elif 'password authentication failed' in lowered or 'access denied' in lowered:
+    elif ('password authentication failed' in lowered or 'access denied' in lowered or 'bad auth' in lowered
+          or 'authentication failed' in lowered):
         message += ' (Check the user and password.)'
+    elif 'not authorized' in lowered:
+        message += ' (This user may not read it: give it the read role on the database.)'
     elif 'timeout' in lowered and 'connect' in lowered:
         message += " (Our server couldn't reach it: allow our address in the database's firewall.)"
     return message
 
 
 _TIMED_OUT = ('statement timeout', 'max_statement_time', 'maximum statement execution time', 'execution was interrupted',
-              'lost connection to mysql server during query')
+              'lost connection to mysql server during query', 'exceeded time limit', 'maxtimemsexpired')
 
 
 def timed_out(exc) -> bool:
-    """The database stopped the query at our time limit (PostgreSQL, MySQL, MariaDB, or SQLite's progress check)."""
+    """The database stopped the query at our time limit (PostgreSQL, MySQL, MariaDB, MongoDB's maxTimeMS, or SQLite's
+    progress check)."""
+    if exc.__class__.__name__ == 'ExecutionTimeout':
+        return True
     text = str(getattr(exc, 'orig', None) or exc).lower()
     return any(words in text for words in _TIMED_OUT) or text.strip() == 'interrupted'
 
 
 def run(source: DataSource, sql: str, max_rows: int = MAX_ROWS) -> dict:
     """Run one already-checked query read-only. {"columns", "rows", "truncated", "duration_ms"}."""
+    if source.kind == DataSource.KIND_MONGO:
+        from . import mongo
+        return mongo.run(source, sql, max_rows)
     engine = _engine(source)
     started = time.monotonic()
     try:
@@ -242,6 +258,9 @@ def _read_information_schema(conn, kind) -> list:
 def read_tables(source: DataSource) -> list:
     """Tables and views with their columns, types and keys: never a value. PostgreSQL reads with each statement on
     its own, so one refused statement can't abort the rest; the session stays read-only."""
+    if source.kind == DataSource.KIND_MONGO:
+        from . import mongo
+        return mongo.read_tables(source)
     engine = _engine(source)
     try:
         with engine.connect() as raw:
@@ -268,6 +287,12 @@ def can_write(source: DataSource):
     """Whether the database user could change data, as far as can be told; None when it can't be told."""
     if source.kind == DataSource.KIND_SQLITE:
         return False            # opened read-only and immutable
+    if source.kind == DataSource.KIND_MONGO:
+        from . import mongo
+        try:
+            return mongo.can_write(source)
+        except Exception:
+            return None
     engine = _engine(source)
     try:
         with engine.connect() as conn:
