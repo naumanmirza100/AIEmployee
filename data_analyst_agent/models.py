@@ -28,9 +28,11 @@ class DataSource(models.Model):
     CONNECTION_KINDS = (KIND_POSTGRES, KIND_MYSQL, KIND_MONGO)
 
     STATUS_NEW = 'new'
+    STATUS_LOADING = 'loading'
     STATUS_READY = 'ready'
     STATUS_FAILED = 'failed'
-    STATUS_CHOICES = [(STATUS_NEW, 'Not tested yet'), (STATUS_READY, 'Ready'), (STATUS_FAILED, 'Could not connect')]
+    STATUS_CHOICES = [(STATUS_NEW, 'Not tested yet'), (STATUS_LOADING, 'Loading the dump'), (STATUS_READY, 'Ready'),
+                      (STATUS_FAILED, 'Could not connect')]
 
     company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='data_sources')
     created_by = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
@@ -50,10 +52,14 @@ class DataSource(models.Model):
     #: MongoDB: the connection options kept from its string (authSource, authMechanism, replicaSet), nothing else.
     options = models.JSONField(default=dict, blank=True)
 
-    # An uploaded SQLite file: kept under LOCAL_STORAGE_ROOT/data_analyst, never served, deleted with the source
+    # An uploaded SQLite file: kept under LOCAL_STORAGE_ROOT/data_analyst, never served, deleted with the source. An
+    # uploaded .sql dump is kept there only until it has been read into a SQLite copy (dumps.py), then deleted.
     file_path = models.CharField(max_length=500, blank=True, default='')
     file_name = models.CharField(max_length=255, blank=True, default='')
     file_size = models.BigIntegerField(null=True, blank=True)
+    #: A .sql dump read into the SQLite copy (7 Nov 2026): its dialect and name, the tables and rows read, the statements
+    #: skipped, the problems met, and the keys the dump added by ALTER TABLE. Never a value of the data.
+    load_report = models.JSONField(default=dict, blank=True)
 
     #: Whether the AI sees the first rows of a result to write its answer. Off: it writes only the SQL, and the
     #: answer is the table itself.
