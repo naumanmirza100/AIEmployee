@@ -76,14 +76,15 @@ class ResearchJobSourceTests(SDRBase):
             response = views.research_leads(request)
         return SDRLeadResearchJob.objects.get(pk=response.data['job_id'])
 
-    def test_one_search_finds_at_most_200_leads(self):
-        # 1,500 was one click away, each lead costing the company's credits (4 Nov 2026).
-        self.assertEqual(self._start(1500).search_params['count'], 200)
+    def test_one_search_finds_at_most_1000_leads(self):
+        # 1,500 was one click away (4 Nov 2026), then 200 was too few (6 Nov 2026); the dialog confirms above 200.
+        self.assertEqual(self._start(1500).search_params['count'], 1000)
+        self.assertEqual(self._start(1000).search_params['count'], 1000)
         self.assertEqual(self._start(50).search_params['count'], 50)
 
     def test_a_search_cut_short_by_a_restart_stops_saying_running(self):
         job = self._start(20)
-        job.started_at = timezone.now() - timedelta(minutes=31)
+        job.started_at = timezone.now() - views.RESEARCH_JOB_STALE_AFTER - timedelta(minutes=1)
         job.save(update_fields=['started_at'])
         request = APIRequestFactory().get('/x')
         force_authenticate(request, user=self.cu)

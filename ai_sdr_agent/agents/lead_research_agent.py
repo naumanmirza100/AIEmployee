@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 # surname; contact details need Apollo's enrichment endpoints. https://docs.apollo.io/reference/people-api-search
 APOLLO_SEARCH_URL = "https://api.apollo.io/api/v1/mixed_people/api_search"
 APIFY_BASE = "https://api.apify.com/v2"
-APIFY_POLL_ATTEMPTS = 60  # 5 seconds apart
+APIFY_POLL_ATTEMPTS = 60  # 5 seconds apart: 5 minutes for every APIFY_LEADS_PER_POLL_WINDOW leads asked for
+APIFY_LEADS_PER_POLL_WINDOW = 200
+APOLLO_PAGE_SIZE = 100    # the most Apollo's search returns per page
 
 
 def _is_error_item(item) -> bool:
@@ -516,7 +518,7 @@ class LeadResearchAgent:
         # This endpoint takes its filters in the query string, with [] on list parameters.
         params = {
             "page": 1,
-            "per_page": min(count, 100),
+            "per_page": min(count, APOLLO_PAGE_SIZE),
         }
 
         if icp.job_titles:
@@ -540,6 +542,20 @@ class LeadResearchAgent:
             params["organization_industries[]"] = icp.industries[:5]
 
         logger.info("Apollo search params: %s", params)
+        # One page holds at most 100 people: ask for the next until there are enough, or Apollo has no more.
+        people: list = []
+        while len(people) < count:
+            page = self._apollo_page(params, headers)
+            people.extend(page)
+            if len(page) < params["per_page"]:
+                break
+            params["page"] += 1
+        people = people[:count]
+        logger.info("Apollo returned %d people over %d page(s)", len(people), params["page"])
+        return [self._parse_apollo_person(p) for p in people]
+
+    def _apollo_page(self, params: dict, headers: dict) -> list:
+        """One page of Apollo's people search."""
         try:
             resp = requests.post(APOLLO_SEARCH_URL, params=params, headers=headers, timeout=30)
             if resp.status_code == 429 or resp.status_code >= 500:
@@ -560,10 +576,7 @@ class LeadResearchAgent:
             if resp.status_code == 429:
                 raise ValueError("Apollo.io rate limit reached (429). Try again in a few minutes.")
             resp.raise_for_status()
-            data = resp.json()
-            people = data.get('people') or []
-            logger.info("Apollo returned %d people", len(people))
-            return [self._parse_apollo_person(p) for p in people]
+            return resp.json().get('people') or []
         except requests.RequestException as exc:
             logger.error("Apollo API error: %s", exc)
             raise ValueError(f"Apollo.io request failed: {exc}") from exc
@@ -668,8 +681,9 @@ class LeadResearchAgent:
 
             logger.info("Apify: run started id=%s — polling for completion", run_id)
 
-            # Step 2: Poll until finished (max 300s)
-            for _ in range(APIFY_POLL_ATTEMPTS):
+            # Step 2: Poll until finished: 5 minutes for every 200 leads asked for (25 for 1,000)
+            poll_attempts = APIFY_POLL_ATTEMPTS * max(1, -(-count // APIFY_LEADS_PER_POLL_WINDOW))
+            for _ in range(poll_attempts):
                 time.sleep(5)
                 status_resp = requests.get(
                     f"{APIFY_BASE}/actor-runs/{run_id}",
@@ -691,7 +705,7 @@ class LeadResearchAgent:
                 # An abandoned run keeps spending the user's credit
                 requests.post(f"{APIFY_BASE}/actor-runs/{run_id}/abort",
                               headers=_apify_headers(self.apify_token), timeout=10)
-                raise ValueError("Apify run timed out after 300s")
+                raise ValueError(f"Apify run timed out after {poll_attempts * 5 // 60} minutes")
 
             # Step 3: Fetch dataset items
             dataset_id = run_data.get('defaultDatasetId')

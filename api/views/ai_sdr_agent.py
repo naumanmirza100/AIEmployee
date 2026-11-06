@@ -994,12 +994,14 @@ def research_sources(request):
     })
 
 
-# One search finds at most this many leads. Each costs the company's Apollo or Apify credits, then an AI scoring
-# and an Apollo enrichment; 1,500 was one click away (4 Nov 2026).
-MAX_LEADS_PER_SEARCH = 200
+# One search finds at most this many leads. Each costs the company's Apify credits (Apollo's search is free) and an
+# automatic enrichment; AI scoring waits for the Qualify button. 200 was too few (6 Nov 2026); the Generate dialog
+# asks for a confirmation above 200.
+MAX_LEADS_PER_SEARCH = 1000
 # A search runs in a thread of the web server, so a deploy or restart ends it without a word and its job said
-# "running" for good. A search of 200 leads takes a few minutes: one running this long was cut short.
-RESEARCH_JOB_STALE_AFTER = timedelta(minutes=30)
+# "running" for good. A search of 200 leads takes a few minutes and Apify is given 25 for 1,000: one running this
+# long was cut short.
+RESEARCH_JOB_STALE_AFTER = timedelta(minutes=90)
 
 
 def _settle_stale_job(job):
