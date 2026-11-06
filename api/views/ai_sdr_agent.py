@@ -4741,6 +4741,21 @@ def _email_template_fields(d) -> tuple:
     return {'name': name, 'subject': subject, 'html': html}, None
 
 
+def _unused_template_name(company_user, name, exclude_id=None) -> str:
+    """``name``, or "name (2)", "name (3)" ... if the user already has a template called that: two templates
+    called the same could not be told apart when choosing one to send."""
+    taken = SDREmailTemplate.objects.filter(company_user=company_user)
+    if exclude_id:
+        taken = taken.exclude(pk=exclude_id)
+    names = {n.lower() for n in taken.values_list('name', flat=True)}
+    if name.lower() not in names:
+        return name
+    n = 2
+    while f'{name} ({n})'.lower() in names:
+        n += 1
+    return f'{name[:190]} ({n})'
+
+
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -4759,6 +4774,7 @@ def sdr_email_templates(request):
     fields, error = _email_template_fields(request.data)
     if error:
         return Response({'status': 'error', 'message': error}, status=400)
+    fields['name'] = _unused_template_name(company_user, fields['name'])
     t = SDREmailTemplate.objects.create(company_user=company_user, **fields)
     return Response({'status': 'success', 'data': _serialize_email_template(t)}, status=201)
 
@@ -4778,6 +4794,7 @@ def sdr_email_template_detail(request, template_id):
     fields, error = _email_template_fields(request.data)
     if error:
         return Response({'status': 'error', 'message': error}, status=400)
+    fields['name'] = _unused_template_name(request.user, fields['name'], exclude_id=t.id)
     for k, v in fields.items():
         setattr(t, k, v)
     t.save()
@@ -4843,6 +4860,10 @@ def sdr_email_template_preview(request):
         'status': 'success', 'subject': rendered_subject, 'html': rendered_html,
         'lead': {'name': lead.display_name, 'email': lead.email, 'company': lead.company_name, 'sample': not leads},
         'lead_index': index, 'lead_count': len(leads),
+        # Whose sender details ({sender_name}, {sender_company}, ...) the preview shows.
+        'sender_campaign': ({'id': campaign.id, 'name': campaign.name, 'sender_name': campaign.sender_name,
+                             'sender_title': campaign.sender_title, 'sender_company': campaign.sender_company}
+                            if campaign else None),
         'unknown_variables': unknown_variables(subject, html),
     })
 

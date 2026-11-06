@@ -200,8 +200,9 @@ const VisualEditor = React.forwardRef(({ html, onChange }, ref) => {
 // --------------------------------------------------------------------------
 // Template editor: HTML on the left, the live preview with a real lead on the right.
 // --------------------------------------------------------------------------
-const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, onCancel }) => {
+const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, onBack }) => {
   const { toast } = useToast();
+  const [savedId, setSavedId] = useState(initial?.id || null);
   const [draft, setDraft] = useState({ name: initial?.name || '', subject: initial?.subject || '', html: initial?.html || '' });
   const [saving, setSaving] = useState(false);
   const [previewIndustry, setPreviewIndustry] = useState(initial?.previewIndustry || '');
@@ -239,34 +240,31 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
     requestAnimationFrame(() => { if (el) { el.focus(); el.setSelectionRange(start + token.length, start + token.length); } });
   };
 
-  const save = async () => {
+  const unknown = preview?.unknown_variables || [];
+
+  // Save draft keeps you here; Save & continue goes on to choosing who gets it, once nothing is left to fill in.
+  const save = async (proceed) => {
+    if (proceed && unknown.length) {
+      toast({ title: 'Fill these in first', description: unknown.join(', '), variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
-      const resp = initial?.id ? await updateEmailTemplate(initial.id, draft) : await createEmailTemplate(draft);
-      toast({ title: initial?.id ? 'Template saved' : 'Template created' });
-      onSaved(resp?.data ?? resp);
+      const resp = savedId ? await updateEmailTemplate(savedId, draft) : await createEmailTemplate(draft);
+      const t = resp?.data ?? resp;
+      setSavedId(t.id);
+      if (!proceed) toast({ title: 'Saved', description: t.name !== draft.name ? `Saved as "${t.name}" (that name was taken).` : undefined });
+      if (t.name !== draft.name) setDraft(d => ({ ...d, name: t.name }));
+      onSaved(t, proceed);
     } catch (e) {
       toast({ title: 'Could not save the template', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
     } finally { setSaving(false); }
   };
-
-  const unknown = preview?.unknown_variables || [];
   const count = preview?.lead_count || 0;
   const lead = preview?.lead;
 
   return (
-    <div style={{ ...cardStyle, padding: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-        <button onClick={onCancel} style={{ ...iconBtn, padding: '6px 10px', gap: 4, fontSize: 12 }}><ChevronLeft size={13} /> Templates</button>
-        <h3 style={{ margin: 0, color: 'var(--text-soft)', fontSize: 16, fontWeight: 700 }}>{initial?.id ? 'Edit template' : 'New template'}</h3>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button variant="outline" onClick={onCancel} style={ghostBtn}>Cancel</Button>
-          <Button onClick={save} disabled={saving || !draft.name.trim()} style={primaryBtn}>
-            {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Save template
-          </Button>
-        </div>
-      </div>
-
+    <div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 18 }}>
         {/* Left: the template */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
@@ -349,6 +347,16 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
           </div>
           <span style={{ color: '#6b7280', fontSize: 12 }}>
             {lead ? (lead.sample ? 'Shown with a sample lead.' : `As ${lead.name || lead.email}${lead.company ? ` at ${lead.company}` : ''} will see it.`) : ' '}
+            {/* {sender_...} come from a campaign: say which, so a blank one can be filled in there. */}
+            {preview?.sender_campaign && (
+              <> Sender details from campaign <strong style={{ color: 'hsl(var(--pt-9ca3af))' }}>{preview.sender_campaign.name}</strong>
+                {(() => {
+                  const c = preview.sender_campaign;
+                  const missing = [!c.sender_name && 'name', !c.sender_title && 'title', !c.sender_company && 'company'].filter(Boolean);
+                  return missing.length ? <span style={{ color: 'hsl(var(--pt-fbbf24))' }}> (no sender {missing.join(', ')} set — add it in that campaign's settings)</span> : '.';
+                })()}
+              </>
+            )}
           </span>
           {unknown.length > 0 && (
             <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: 'hsl(var(--pt-fbbf24))', fontSize: 12 }}>
@@ -359,13 +367,60 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
           <EmailFrame subject={preview?.subject} html={preview?.html} loading={previewing} />
         </div>
       </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18, paddingTop: 14, borderTop: '1px solid hsl(var(--surface-invert) / 0.06)' }}>
+        <Button variant="outline" onClick={onBack} style={ghostBtn}><ChevronLeft size={13} /> Back</Button>
+        <span style={{ marginLeft: 'auto', color: unknown.length ? 'hsl(var(--pt-fbbf24))' : '#6b7280', fontSize: 12 }}>
+          {unknown.length ? `${unknown.length} part${unknown.length === 1 ? '' : 's'} left to fill in` : !draft.name.trim() ? 'Give it a name to save it' : ''}
+        </span>
+        <Button variant="outline" onClick={() => save(false)} disabled={saving || !draft.name.trim()} style={ghostBtn}>Save draft</Button>
+        <Button onClick={() => save(true)} disabled={saving || !draft.name.trim() || unknown.length > 0} style={primaryBtn}>
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Save & continue <ChevronRight size={13} />
+        </Button>
+      </div>
     </div>
   );
 };
 
 // --------------------------------------------------------------------------
-// Main tab
+// Main tab: one sequence — 1 choose a template, 2 edit & preview it, 3 pick who gets it and from which mailbox,
+// 4 review and send — with the sends that went out underneath.
 // --------------------------------------------------------------------------
+const STEPS = ['Choose a template', 'Edit & preview', 'Recipients & mailbox', 'Review & send'];
+
+const Stepper = ({ step, reached, onGo }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 18 }}>
+    {STEPS.map((label, i) => {
+      const n = i + 1;
+      const active = n === step;
+      const done = n < step;
+      const canGo = n <= reached && n !== step;
+      return (
+        <React.Fragment key={label}>
+          {i > 0 && <span style={{ width: 24, height: 1, background: n <= reached ? 'rgba(168,85,247,0.5)' : 'var(--line-1)' }} />}
+          <button onClick={() => canGo && onGo(n)} disabled={!canGo}
+            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px 5px 5px', borderRadius: 20, border: 'none', cursor: canGo ? 'pointer' : 'default',
+              background: active ? 'rgba(168,85,247,0.16)' : 'transparent' }}>
+            <span style={{ width: 22, height: 22, borderRadius: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
+              background: active ? '#a855f7' : done ? 'rgba(168,85,247,0.25)' : 'hsl(var(--surface-invert) / 0.06)',
+              color: active ? '#fff' : done ? 'hsl(var(--pt-c084fc))' : '#6b7280' }}>
+              {done ? <Check size={12} /> : n}
+            </span>
+            <span style={{ fontSize: 13, fontWeight: active ? 700 : 500, color: active ? 'var(--text-soft)' : n <= reached ? 'hsl(var(--pt-9ca3af))' : '#6b7280' }}>{label}</span>
+          </button>
+        </React.Fragment>
+      );
+    })}
+  </div>
+);
+
+const SectionTitle = ({ children, hint }) => (
+  <div style={{ marginBottom: 12 }}>
+    <h4 style={{ margin: 0, color: 'var(--text-soft)', fontSize: 14, fontWeight: 700 }}>{children}</h4>
+    {hint && <p style={{ margin: '2px 0 0', color: '#6b7280', fontSize: 12 }}>{hint}</p>}
+  </div>
+);
+
 const SDREmailTemplatesTab = () => {
   const { toast } = useToast();
   const [templates, setTemplates] = useState([]);
@@ -376,27 +431,33 @@ const SDREmailTemplatesTab = () => {
   const [sends, setSends] = useState([]);
   const [mailboxes, setMailboxes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(null);          // null = the list; {} = new; a template = editing it
   const [deleting, setDeleting] = useState(null);
 
-  // Send panel
-  const [sendTo, setSendTo] = useState('industry');      // 'industry' | 'company'
+  // The sequence
+  const [step, setStep] = useState(1);
+  const [reached, setReached] = useState(1);              // the furthest step open so far
+  const [editorInitial, setEditorInitial] = useState(null);   // what step 2 edits
+  const [editorKey, setEditorKey] = useState(0);
+  const [template, setTemplate] = useState(null);         // the saved template being sent {id, name, subject}
+  const [sendTo, setSendTo] = useState('industry');       // 'industry' | 'company'
   const [sendIndustry, setSendIndustry] = useState('');
   const [sendCompany, setSendCompany] = useState('');
-  // Who it goes to, as the API takes it, and as it reads in sentences.
-  const audience = sendTo === 'company' ? { company: sendCompany } : { industry: sendIndustry };
-  const audienceValue = sendTo === 'company' ? sendCompany : sendIndustry;
-  const audienceLabel = sendTo === 'company' ? `at ${sendCompany}` : `of ${sendIndustry}`;
-  const [sendTemplate, setSendTemplate] = useState('');
   const [sendCampaign, setSendCampaign] = useState('');
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [sendPreview, setSendPreview] = useState(null);
-  const [confirming, setConfirming] = useState(false);
+  const [review, setReview] = useState(null);             // step 4's preview with a real recipient
+  const [reviewIndex, setReviewIndex] = useState(0);
   const [starting, setStarting] = useState(false);
-  const [openSend, setOpenSend] = useState(null);        // a send's id, with its recipients shown
+  const [openSend, setOpenSend] = useState(null);
   const [openSendData, setOpenSendData] = useState(null);
-  const [templateVersion, setTemplateVersion] = useState(0);   // a saved edit refreshes the send summary
+
+  const audience = sendTo === 'company' ? { company: sendCompany } : { industry: sendIndustry };
+  const audienceValue = sendTo === 'company' ? sendCompany : sendIndustry;
+  const audienceLabel = sendTo === 'company' ? `at ${sendCompany}` : `of ${sendIndustry}`;
+  const mailbox = mailboxes.find(m => String(m.campaign_id) === sendCampaign);
+  const readyMailboxes = mailboxes.filter(m => m.ready);
+
+  const go = (n) => { setStep(n); setReached(r => Math.max(r, n)); };
 
   const loadTemplates = useCallback(async () => {
     const r = await listEmailTemplates();
@@ -424,23 +485,58 @@ const SDREmailTemplatesTab = () => {
     return () => clearInterval(id);
   }, [anySending, loadSends]);
 
-  // Who would get it: counted (not sent) whenever the three choices change.
+  // Step 3: how many would get it, counted (nothing sent) whenever who / from where changes.
   useEffect(() => {
     setSummary(null);
-    setSendPreview(null);
-    if (!audienceValue || !sendTemplate || !sendCampaign) return undefined;
+    if (!template?.id || !audienceValue || !sendCampaign) return undefined;
     let live = true;
     setSummaryLoading(true);
-    const body = { template_id: Number(sendTemplate), campaign_id: Number(sendCampaign), ...audience };
-    Promise.all([
-      startEmailSend({ ...body, dry_run: true }).then(r => r?.data ?? r).catch(e => ({ error: apiErrorMessage(e, 'Could not count the leads.') })),
-      getEmailTemplate(Number(sendTemplate)).then(r => r?.data ?? r)
-        .then(t => previewEmailTemplate({ subject: t.subject, html: t.html, ...audience, campaign_id: Number(sendCampaign) }))
-        .then(r => r?.data ?? r).catch(() => null),
-    ]).then(([s, p]) => { if (live) { setSummary(s); setSendPreview(p); } })
+    startEmailSend({ template_id: template.id, campaign_id: Number(sendCampaign), ...audience, dry_run: true })
+      .then(r => { if (live) setSummary(r?.data ?? r); })
+      .catch(e => { if (live) setSummary({ error: apiErrorMessage(e, 'Could not count the leads.') }); })
       .finally(() => { if (live) setSummaryLoading(false); });
     return () => { live = false; };
-  }, [sendTo, sendIndustry, sendCompany, sendTemplate, sendCampaign, templateVersion]);
+  }, [template?.id, sendTo, sendIndustry, sendCompany, sendCampaign]);
+
+  // Step 4: the email exactly as one of its recipients gets it, from the chosen mailbox.
+  useEffect(() => {
+    if (step !== 4 || !template?.id) return undefined;
+    let live = true;
+    getEmailTemplate(template.id).then(r => r?.data ?? r)
+      .then(t => previewEmailTemplate({ subject: t.subject, html: t.html, ...audience, campaign_id: Number(sendCampaign), lead_index: reviewIndex }))
+      .then(r => { if (live) setReview(r?.data ?? r); })
+      .catch(() => { if (live) setReview(null); });
+    return () => { live = false; };
+  }, [step, template?.id, sendTo, sendIndustry, sendCompany, sendCampaign, reviewIndex]);
+
+  // Step 1 → 2
+  const openInEditor = (initial) => {
+    setEditorInitial(initial);
+    setEditorKey(k => k + 1);
+    setTemplate(initial.id ? { id: initial.id, name: initial.name, subject: initial.subject } : null);
+    setReached(2);            // a different template: the later steps start again
+    setStep(2);
+  };
+  const pickSaved = async (t) => {
+    try { openInEditor((await getEmailTemplate(t.id))?.data); } catch (e) {
+      toast({ title: 'Could not open the template', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
+    }
+  };
+  const pickPreset = (p) => {
+    const wanted = (p.industries || []).map(i => i.toLowerCase());
+    const match = industries.find(i => wanted.includes(i.name.toLowerCase()));
+    openInEditor({ name: p.name, subject: p.subject, html: p.html, previewIndustry: match?.name || '' });
+    if (match && !sendIndustry) setSendIndustry(match.name);   // a sensible first choice for step 3
+  };
+  const pickBlank = () => openInEditor({ name: '', subject: '', html: starterHtml });
+
+  // Step 2 → 3
+  const onTemplateSaved = (t, proceed) => {
+    setTemplate({ id: t.id, name: t.name, subject: t.subject });
+    setEditorInitial(prev => ({ ...prev, ...t }));
+    loadTemplates();
+    if (proceed) go(3);
+  };
 
   const handleDuplicate = async (t) => {
     try {
@@ -452,31 +548,27 @@ const SDREmailTemplatesTab = () => {
       toast({ title: 'Could not duplicate', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
     }
   };
-  const handleEdit = async (t, selectAfterSave = false) => {
-    try { setEditing({ ...(await getEmailTemplate(t.id))?.data, selectAfterSave }); } catch (e) {
-      toast({ title: 'Could not open the template', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
-    }
-  };
   const handleDelete = async () => {
     const t = deleting;
     setDeleting(null);
     try {
       await deleteEmailTemplate(t.id);
       toast({ title: `Deleted "${t.name}"` });
-      if (String(t.id) === sendTemplate) setSendTemplate('');
+      if (template?.id === t.id) { setTemplate(null); setReached(1); setStep(1); }
       loadTemplates();
     } catch (e) {
       toast({ title: 'Could not delete', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
     }
   };
 
-  const handleStart = async () => {
+  // Step 4: send
+  const handleSend = async () => {
     setStarting(true);
     try {
-      const r = await startEmailSend({ template_id: Number(sendTemplate), campaign_id: Number(sendCampaign), ...audience });
+      const r = await startEmailSend({ template_id: template.id, campaign_id: Number(sendCampaign), ...audience });
       toast({ title: 'Sending started', description: r?.message });
-      setConfirming(false);
-      setSendTemplate(''); setSendIndustry(''); setSendCompany('');
+      setTemplate(null); setEditorInitial(null); setSendIndustry(''); setSendCompany(''); setSummary(null); setReview(null);
+      setReviewIndex(0); setReached(1); setStep(1);
       loadSends();
     } catch (e) {
       toast({ title: 'Could not start the send', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
@@ -493,7 +585,6 @@ const SDREmailTemplatesTab = () => {
       toast({ title: 'Could not stop the send', description: apiErrorMessage(e, 'Please try again.'), variant: 'destructive' });
     }
   };
-
   const toggleSend = async (id, refresh = false) => {
     if (openSend === id && !refresh) { setOpenSend(null); return; }
     setOpenSend(id);
@@ -501,206 +592,178 @@ const SDREmailTemplatesTab = () => {
     try { setOpenSendData((await getEmailSend(id))?.data); } catch (_) { setOpenSendData({ recipients: [] }); }
   };
 
-  if (editing) {
-    return (
-      <TemplateEditor initial={editing} variables={variables} starterHtml={starterHtml} industries={industries}
-        onCancel={() => setEditing(null)}
-        onSaved={(t) => {
-          // Opened from the send panel's dropdown: back there with it chosen.
-          if (editing.selectAfterSave && t?.id) setSendTemplate(String(t.id));
-          setTemplateVersion(v => v + 1);
-          setEditing(null);
-          loadTemplates();
-        }} />
-    );
-  }
-
-  // A ready-made template opens in the editor as a new one of your own, previewed with a lead of a matching industry.
-  const usePreset = (p, selectAfterSave = false) => {
-    const wanted = (p.industries || []).map(i => i.toLowerCase());
-    const match = industries.find(i => wanted.includes(i.name.toLowerCase()))
-      || industries.find(i => i.name.toLowerCase() === sendIndustry.toLowerCase());
-    setEditing({ name: p.name, subject: p.subject, html: p.html, previewIndustry: match?.name || '', selectAfterSave });
-  };
-
-  // The send panel's template choices: your saved templates, then the ready-made ones. A ready-made one has parts to
-  // fill in first, so choosing it opens it in the editor; saved, it comes back here chosen.
-  const PRESET_PREFIX = 'preset:';
-  const templateOptions = [
-    ...templates.map(t => ({ value: String(t.id), label: t.name })),
-    ...presets.map(p => ({ value: PRESET_PREFIX + p.key, label: `Ready-made: ${p.name} — fill in & save first` })),
-  ];
-  const chooseTemplate = (v) => {
-    if (v.startsWith(PRESET_PREFIX)) {
-      const p = presets.find(x => PRESET_PREFIX + x.key === v);
-      if (p) usePreset(p, true);
-      return;
-    }
-    setSendTemplate(v);
-  };
-
-  const readyMailboxes = mailboxes.filter(m => m.ready);
-  const mailbox = mailboxes.find(m => String(m.campaign_id) === sendCampaign);
+  const footer = (children) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18, paddingTop: 14, borderTop: '1px solid hsl(var(--surface-invert) / 0.06)' }}>{children}</div>
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Templates */}
       <div style={{ ...cardStyle, padding: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <FileCode size={18} color="#a855f7" />
-          <h3 style={{ margin: 0, color: 'var(--text-soft)', fontSize: 16, fontWeight: 700 }}>Email templates</h3>
-          <Button onClick={() => setEditing({})} style={{ ...primaryBtn, marginLeft: 'auto' }}><Plus size={14} /> New template</Button>
-        </div>
-        {loading ? (
-          <div style={{ padding: 30, display: 'flex', justifyContent: 'center' }}><Loader2 size={18} className="animate-spin" style={{ color: '#a78bfa' }} /></div>
-        ) : templates.length === 0 ? (
-          <p style={{ color: '#6b7280', fontSize: 13, margin: 0, padding: '18px 0', textAlign: 'center' }}>
-            No templates yet. Create one with your own HTML — you'll see it with a real lead as you write it.
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {templates.map(t => (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 4px', borderTop: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</div>
-                  <div style={{ color: '#6b7280', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {t.subject || '(no subject)'} · edited {fmtDate(t.updated_at)}
+        <Stepper step={step} reached={reached} onGo={setStep} />
+
+        {/* ── 1. Choose a template ───────────────────────────────────── */}
+        {step === 1 && (
+          loading ? (
+            <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}><Loader2 size={18} className="animate-spin" style={{ color: '#a78bfa' }} /></div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+              <div>
+                <SectionTitle hint="Templates you've saved. Pick one to check it and send it.">Your templates</SectionTitle>
+                {templates.length === 0 ? (
+                  <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>None yet — start from a ready-made one below, or a blank page.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {templates.map(t => (
+                      <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 4px', borderTop: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</div>
+                          <div style={{ color: '#6b7280', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject || '(no subject)'} · edited {fmtDate(t.updated_at)}</div>
+                        </div>
+                        <button title="Duplicate" onClick={() => handleDuplicate(t)} style={iconBtn}><Copy size={13} /></button>
+                        <button title="Delete" onClick={() => setDeleting(t)} style={{ ...iconBtn, color: '#f87171' }}><Trash2 size={13} /></button>
+                        <Button onClick={() => pickSaved(t)} style={{ ...primaryBtn, padding: '6px 14px', height: 32 }}>Use <ChevronRight size={13} /></Button>
+                      </div>
+                    ))}
                   </div>
-                </div>
-                <button title="Edit" onClick={() => handleEdit(t)} style={iconBtn}><Edit2 size={13} /></button>
-                <button title="Duplicate" onClick={() => handleDuplicate(t)} style={iconBtn}><Copy size={13} /></button>
-                <button title="Delete" onClick={() => setDeleting(t)} style={{ ...iconBtn, color: '#f87171' }}><Trash2 size={13} /></button>
+                )}
               </div>
-            ))}
+
+              <div>
+                <SectionTitle hint="Designed for an industry. You'll fill in the parts in [square brackets] with what you offer in the next step.">Start from a ready-made template</SectionTitle>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+                  {presets.map(p => (
+                    <button key={p.key} onClick={() => pickPreset(p)} style={{ textAlign: 'left', border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden', background: 'transparent', cursor: 'pointer', padding: 0, display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ height: 6, width: '100%', background: p.accent || '#7c3aed' }} />
+                      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <span style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{p.name}</span>
+                        <span style={{ color: '#6b7280', fontSize: 12, lineHeight: 1.5 }}>{p.description}</span>
+                        <span style={{ color: 'hsl(var(--pt-c084fc))', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>Use this <ChevronRight size={12} /></span>
+                      </div>
+                    </button>
+                  ))}
+                  <button onClick={pickBlank} style={{ textAlign: 'left', border: '1px dashed var(--line-1)', borderRadius: 10, background: 'transparent', cursor: 'pointer', padding: '18px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}><Plus size={14} /> Blank template</span>
+                    <span style={{ color: '#6b7280', fontSize: 12, lineHeight: 1.5 }}>A simple layout to write your own email in.</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        )}
+
+        {/* ── 2. Edit & preview ──────────────────────────────────────── */}
+        {step === 2 && editorInitial && (
+          <TemplateEditor key={editorKey} initial={editorInitial} variables={variables} starterHtml={starterHtml} industries={industries}
+            onBack={() => setStep(1)} onSaved={onTemplateSaved} />
+        )}
+
+        {/* ── 3. Recipients & mailbox ────────────────────────────────── */}
+        {step === 3 && (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 22 }}>
+              <div>
+                <SectionTitle hint="All the leads of an industry, or the leads at one company.">Who gets it</SectionTitle>
+                <div style={{ display: 'flex', border: '1px solid var(--line-1)', borderRadius: 8, overflow: 'hidden', marginBottom: 10, width: 'fit-content' }}>
+                  {[['industry', 'An industry'], ['company', 'One company']].map(([k, l]) => (
+                    <button key={k} onClick={() => setSendTo(k)} style={{ padding: '6px 14px', fontSize: 13, border: 'none', cursor: 'pointer',
+                      background: sendTo === k ? 'rgba(168,85,247,0.2)' : 'transparent', color: sendTo === k ? 'hsl(var(--pt-c084fc))' : '#9ca3af', fontWeight: sendTo === k ? 600 : 400 }}>{l}</button>
+                  ))}
+                </div>
+                {sendTo === 'company' ? (
+                  <CompanyPicker value={sendCompany} onChange={setSendCompany} />
+                ) : (
+                  <SdrSelect value={sendIndustry} onChange={setSendIndustry} style={inputStyle} placeholder="Choose an industry"
+                    options={industries.map(i => ({ value: i.name, label: `${i.name} (${i.lead_count})` }))} />
+                )}
+              </div>
+              <div>
+                <SectionTitle hint="Your email goes out through a campaign's mailbox, with its sender name.">Send from</SectionTitle>
+                <SdrSelect value={sendCampaign} onChange={setSendCampaign} style={inputStyle}
+                  placeholder={readyMailboxes.length ? 'Choose a mailbox' : 'No campaign has a mailbox set up'}
+                  options={mailboxes.length ? mailboxes.map(m => ({
+                    value: String(m.campaign_id), disabled: !m.ready,
+                    label: m.ready ? `${m.campaign_name} — ${m.from_email}` : `${m.campaign_name} (no mailbox set up)`,
+                  })) : [{ value: '__none__', label: 'No campaigns yet — create one in Outreach', disabled: true }]} />
+                {mailbox?.ready && (
+                  <p style={{ color: '#6b7280', fontSize: 12, margin: '6px 0 0' }}>
+                    From {mailbox.sender_name || mailbox.from_email}{mailbox.sender_company ? `, ${mailbox.sender_company}` : ''} · {mailbox.left_today} more email{mailbox.left_today === 1 ? '' : 's'} today
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {(summaryLoading || summary) && (
+              <div style={{ marginTop: 18 }}>
+                {summaryLoading ? (
+                  <span style={{ color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={13} className="animate-spin" /> Counting the leads…</span>
+                ) : summary?.error ? (
+                  <div style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', fontSize: 13 }}>{summary.error}</div>
+                ) : (
+                  <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.25)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ color: '#34d399', fontSize: 22, fontWeight: 700 }}>{summary.will_send.toLocaleString()}</span>
+                    <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>lead{summary.will_send === 1 ? '' : 's'} {audienceLabel} will get this email</span>
+                    {summary.skipped > 0 && <span style={{ color: '#f59e0b', fontSize: 12 }}>· {summary.skipped} skipped (do-not-email list or bounced)</span>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {footer(<>
+              <Button variant="outline" onClick={() => setStep(2)} style={ghostBtn}><ChevronLeft size={13} /> Back</Button>
+              <Button onClick={() => go(4)} disabled={!summary?.will_send} style={{ ...primaryBtn, marginLeft: 'auto' }}>
+                Review <ChevronRight size={13} />
+              </Button>
+            </>)}
           </div>
         )}
-      </div>
 
-      {/* Ready-made */}
-      {presets.length > 0 && (
-        <div style={{ ...cardStyle, padding: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <Wand2 size={17} color="#a855f7" />
-            <h3 style={{ margin: 0, color: 'var(--text-soft)', fontSize: 16, fontWeight: 700 }}>Ready-made templates</h3>
-          </div>
-          <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 14px' }}>
-            Designed for an industry and ready to go: open one, fill in the parts in [square brackets] with what you offer, and save it as your own.
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-            {presets.map(p => (
-              <div key={p.key} style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ height: 6, background: p.accent || '#7c3aed' }} />
-                <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-                  <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{p.name}</div>
-                  <div style={{ color: '#6b7280', fontSize: 12, lineHeight: 1.5, flex: 1 }}>{p.description}</div>
-                  <div style={{ color: '#9ca3af', fontSize: 11, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Subject: {p.subject}</div>
-                  <Button onClick={() => usePreset(p)} variant="outline" style={{ ...ghostBtn, marginTop: 6, justifyContent: 'center', color: 'hsl(var(--pt-c084fc))', borderColor: 'rgba(168,85,247,0.35)' }}>
-                    <Edit2 size={13} /> Use this
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Send */}
-      <div style={{ ...cardStyle, padding: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <Send size={17} color="#a855f7" />
-          <h3 style={{ margin: 0, color: 'var(--text-soft)', fontSize: 16, fontWeight: 700 }}>Send to an industry</h3>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        {/* ── 4. Review & send ───────────────────────────────────────── */}
+        {step === 4 && template && summary && (
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-              <label style={{ ...labelStyle, marginBottom: 0 }}>1. Send to</label>
-              {/* An industry's leads, or the leads at one company. */}
-              <div style={{ marginLeft: 'auto', display: 'flex', border: '1px solid var(--line-1)', borderRadius: 7, overflow: 'hidden' }}>
-                {[['industry', 'An industry'], ['company', 'One company']].map(([k, l]) => (
-                  <button key={k} onClick={() => setSendTo(k)} style={{ padding: '2px 9px', fontSize: 11, border: 'none', cursor: 'pointer',
-                    background: sendTo === k ? 'rgba(168,85,247,0.2)' : 'transparent', color: sendTo === k ? 'hsl(var(--pt-c084fc))' : '#6b7280', fontWeight: sendTo === k ? 600 : 400 }}>{l}</button>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 22, alignItems: 'start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <SectionTitle hint="Check everything once more — sent emails can't be taken back.">Ready to send</SectionTitle>
+                {[
+                  ['Template', template.name, 2],
+                  ['Subject', review?.subject || template.subject || '(no subject)', 2],
+                  ['To', `${summary.will_send.toLocaleString()} lead${summary.will_send === 1 ? '' : 's'} ${audienceLabel}${summary.skipped ? ` (${summary.skipped} skipped)` : ''}`, 3],
+                  ['From', mailbox ? `${mailbox.sender_name || ''}${mailbox.sender_name ? ' · ' : ''}${mailbox.from_email}` : '', 3],
+                ].map(([k, v, back]) => (
+                  <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'baseline', paddingBottom: 10, borderBottom: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
+                    <span style={{ color: '#6b7280', fontSize: 12, width: 70, flexShrink: 0 }}>{k}</span>
+                    <span style={{ color: 'var(--text-soft)', fontSize: 14, flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{v}</span>
+                    <button onClick={() => setStep(back)} style={{ background: 'none', border: 'none', color: '#a78bfa', fontSize: 12, cursor: 'pointer' }}>Change</button>
+                  </div>
                 ))}
+                <p style={{ color: '#6b7280', fontSize: 12, margin: 0, lineHeight: 1.6 }}>
+                  It goes out a few at a time, within the mailbox's daily limit (shared with its campaigns), and each lead gets at most one email a day.
+                  {mailbox && summary.will_send > mailbox.left_today ? ` With ${mailbox.left_today} left today, the rest go out over the next days.` : ''} You can stop it at any time below.
+                </p>
               </div>
-            </div>
-            {sendTo === 'company' ? (
-              <CompanyPicker value={sendCompany} onChange={setSendCompany} />
-            ) : (
-              <SdrSelect value={sendIndustry} onChange={setSendIndustry} style={inputStyle} placeholder="Choose an industry"
-                options={industries.map(i => ({ value: i.name, label: `${i.name} (${i.lead_count})` }))} />
-            )}
-          </div>
-          <div>
-            <label style={labelStyle}>2. Template</label>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <SdrSelect value={sendTemplate} onChange={chooseTemplate} style={inputStyle}
-                  placeholder={templates.length ? 'Choose a template' : presets.length ? 'Choose a ready-made template' : 'Create a template first'}
-                  options={templateOptions.length ? templateOptions : [{ value: '__none__', label: 'No templates yet — create one above', disabled: true }]} />
-              </div>
-              {/* Change the chosen template before sending: saved, the summary and preview below show the change. */}
-              {sendTemplate && (
-                <button title="Edit this template" onClick={() => handleEdit({ id: Number(sendTemplate) }, true)}
-                  style={{ ...iconBtn, padding: '0 10px', gap: 4, fontSize: 12, color: 'hsl(var(--pt-c084fc))', borderColor: 'rgba(168,85,247,0.35)' }}>
-                  <Edit2 size={13} /> Edit
-                </button>
-              )}
-            </div>
-            {!templates.length && presets.length > 0 && (
-              <p style={{ color: '#6b7280', fontSize: 11, margin: '4px 0 0' }}>A ready-made one opens in the editor: fill in the [square brackets], save, and it's ready to send.</p>
-            )}
-          </div>
-          <div>
-            <label style={labelStyle}>3. Send from (a campaign's mailbox)</label>
-            <SdrSelect value={sendCampaign} onChange={setSendCampaign} style={inputStyle}
-              placeholder={readyMailboxes.length ? 'Choose a mailbox' : 'No campaign has a mailbox set up'}
-              options={mailboxes.map(m => ({
-                value: String(m.campaign_id), disabled: !m.ready,
-                label: m.ready ? `${m.campaign_name} — ${m.from_email}` : `${m.campaign_name} (no mailbox set up)`,
-              }))} />
-            {mailbox?.ready && (
-              <p style={{ color: '#6b7280', fontSize: 11, margin: '4px 0 0' }}>
-                From {mailbox.sender_name || mailbox.from_email}{mailbox.sender_company ? `, ${mailbox.sender_company}` : ''} · {mailbox.left_today} more email{mailbox.left_today === 1 ? '' : 's'} today
-              </p>
-            )}
-          </div>
-        </div>
-
-        {(summaryLoading || summary) && (
-          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, alignItems: 'start' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {summaryLoading ? (
-                <span style={{ color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={13} className="animate-spin" /> Counting the leads…</span>
-              ) : summary?.error ? (
-                <div style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', fontSize: 13 }}>{summary.error}</div>
-              ) : (
-                <>
-                  <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.25)' }}>
-                    <div style={{ color: '#34d399', fontSize: 22, fontWeight: 700 }}>{summary.will_send.toLocaleString()}</div>
-                    <div style={{ color: 'var(--text-soft)', fontSize: 13 }}>lead{summary.will_send === 1 ? '' : 's'} {audienceLabel} will get this email</div>
-                    {summary.skipped > 0 && (
-                      <div style={{ color: '#f59e0b', fontSize: 12, marginTop: 4 }}>{summary.skipped} skipped: on the do-not-email list, or bounced before</div>
-                    )}
-                  </div>
-                  <p style={{ color: '#6b7280', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
-                    It goes out a few at a time, within the mailbox's daily limit (shared with its campaigns), and each lead gets at most one email a day.
-                    {mailbox && summary.will_send > mailbox.left_today ? ` At today's limit, the rest go out over the next days.` : ''}
-                  </p>
-                  <div>
-                    <Button onClick={() => setConfirming(true)} disabled={!summary.will_send} style={primaryBtn}>
-                      <Send size={13} /> Send to {summary.will_send.toLocaleString()} lead{summary.will_send === 1 ? '' : 's'}
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-            {sendPreview && (
               <div>
-                <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 6 }}>
-                  {sendPreview.lead?.sample ? 'Preview' : `Preview — as ${sendPreview.lead?.name || sendPreview.lead?.email} will see it`}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ color: '#6b7280', fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {review?.lead ? `As ${review.lead.name || review.lead.email}${review.lead.company ? ` at ${review.lead.company}` : ''} will get it` : 'Preview'}
+                  </span>
+                  {(review?.lead_count || 0) > 1 && (
+                    <>
+                      <button title="Previous recipient" onClick={() => setReviewIndex(i => (i - 1 + review.lead_count) % review.lead_count)} style={iconBtn}><ChevronLeft size={13} /></button>
+                      <span style={{ color: '#6b7280', fontSize: 12 }}>{(review.lead_index ?? 0) + 1}/{review.lead_count}</span>
+                      <button title="Next recipient" onClick={() => setReviewIndex(i => (i + 1) % review.lead_count)} style={iconBtn}><ChevronRight size={13} /></button>
+                    </>
+                  )}
                 </div>
-                <EmailFrame subject={sendPreview.subject} html={sendPreview.html} height={420} />
+                <EmailFrame subject={review?.subject} html={review?.html} loading={!review} height={460} />
               </div>
-            )}
+            </div>
+
+            {footer(<>
+              <Button variant="outline" onClick={() => setStep(3)} style={ghostBtn}><ChevronLeft size={13} /> Back</Button>
+              <Button onClick={handleSend} disabled={starting} style={{ ...primaryBtn, marginLeft: 'auto' }}>
+                {starting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                Send to {summary.will_send.toLocaleString()} lead{summary.will_send === 1 ? '' : 's'}
+              </Button>
+            </>)}
           </div>
         )}
       </div>
@@ -758,24 +821,6 @@ const SDREmailTemplatesTab = () => {
           );
         })}
       </div>
-
-      {/* Confirm send */}
-      <Dialog open={confirming} onOpenChange={setConfirming}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 440 }}>
-          <DialogHeader><DialogTitle style={{ color: 'var(--text-soft)' }}>Send this email?</DialogTitle></DialogHeader>
-          <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, lineHeight: 1.6, margin: 0 }}>
-            <strong style={{ color: 'var(--text-soft)' }}>{templates.find(t => String(t.id) === sendTemplate)?.name}</strong> to{' '}
-            <strong style={{ color: 'var(--text-soft)' }}>{summary?.will_send?.toLocaleString()} lead{summary?.will_send === 1 ? '' : 's'}</strong> {audienceLabel},
-            from {mailbox?.from_email}. Emails that have gone out can't be taken back; you can stop the rest at any time.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirming(false)} style={ghostBtn}><X size={13} /> Cancel</Button>
-            <Button onClick={handleStart} disabled={starting} style={primaryBtn}>
-              {starting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Send
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Confirm delete */}
       <Dialog open={!!deleting} onOpenChange={o => { if (!o) setDeleting(null); }}>

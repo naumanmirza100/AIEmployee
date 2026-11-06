@@ -47,7 +47,21 @@ def lead_values(lead, campaign, unsubscribe_url: str = '') -> dict:
     }
 
 
+def _drop_empty(text: str, values: dict) -> str:
+    """A variable with no value takes the comma joining it to its neighbour with it: "{sender_title},
+    {sender_company}" with no company read "Developer," (6 Nov 2026)."""
+    for name, value in values.items():
+        if str(value).strip():
+            continue
+        token = re.escape('{' + name + '}')
+        text = re.sub(r'[ \t]*,[ \t]*' + token, '', text)    # "Developer, {sender_company}" -> "Developer"
+        text = re.sub(token + r'[ \t]*,[ \t]*', '', text)    # "{sender_title}, Acme" -> "Acme"
+    return text
+
+
 def _fill(text: str, values: dict, escape: bool) -> str:
+    text = _drop_empty(text or '', values)
+
     def one(m):
         if m.group(1) not in values:
             return m.group(0)

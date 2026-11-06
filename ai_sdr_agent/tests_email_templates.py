@@ -307,3 +307,37 @@ class OneCompanyTests(Base):
         self.lead('other@x.example')
         r = self.call(views.sdr_email_template_preview, 'post', {'html': '<p>Hi {first_name}</p>', 'company': 'Smile Line'})
         self.assertEqual(r.data['lead']['email'], 'k@s.example')
+
+
+class EmptyValueTests(Base):
+    def test_a_blank_sender_company_leaves_no_dangling_comma(self):
+        # "{sender_title}, {sender_company}" with no company read "Developer," (6 Nov 2026).
+        self.campaign.sender_title, self.campaign.sender_company = 'Developer', ''
+        _, html, _ = render('<p>{sender_title}, {sender_company}</p>{unsubscribe_url}', '', self.lead('a@x.example'),
+                            self.campaign, 'u')
+        self.assertIn('<p>Developer</p>', html)
+
+    def test_filled_values_keep_their_comma(self):
+        self.campaign.sender_title, self.campaign.sender_company = 'CEO', 'Acme'
+        _, html, _ = render('<p>{sender_title}, {sender_company}</p>{unsubscribe_url}', '', self.lead('a@x.example'),
+                            self.campaign, 'u')
+        self.assertIn('<p>CEO, Acme</p>', html)
+
+    def test_the_preview_says_whose_sender_details_it_shows(self):
+        r = self.call(views.sdr_email_template_preview, 'post', {'html': '<p>{sender_name}</p>'})
+        self.assertEqual(r.data['sender_campaign']['id'], self.campaign.id)
+
+
+class TemplateNameTests(Base):
+    """Two templates called the same could not be told apart when choosing one (6 Nov 2026): "(2)" is added."""
+
+    def test_a_taken_name_gets_a_number(self):
+        first = self.call(views.sdr_email_templates, 'post', {'name': 'Dental', 'html': 'x'}).data['data']
+        second = self.call(views.sdr_email_templates, 'post', {'name': 'dental', 'html': 'x'}).data['data']
+        third = self.call(views.sdr_email_templates, 'post', {'name': 'Dental', 'html': 'x'}).data['data']
+        self.assertEqual((first['name'], second['name'], third['name']), ('Dental', 'dental (2)', 'Dental (3)'))
+
+    def test_saving_a_template_under_its_own_name_keeps_it(self):
+        t = self.template()
+        r = self.call(views.sdr_email_template_detail, 'put', {'name': t.name, 'html': 'y'}, template_id=t.id)
+        self.assertEqual(r.data['data']['name'], t.name)
