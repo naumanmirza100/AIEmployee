@@ -13,6 +13,9 @@ pyodbc>=4.0
 # MySQL / MariaDB (set DB_ENGINE=mysql) — Hostinger deployment
 mysqlclient==2.2.8
 sentence-transformers>=3.0.0
+# The CPU build of this version is installed first by the Dockerfile (the server has no GPU); pinned, so a rebuild
+# can't move it (6 Nov 2026)
+torch==2.15.0
 
 
 # Environment

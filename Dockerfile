@@ -21,6 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /app
 
+# PyTorch for processors only, in a layer of its own before the package list (6 Nov 2026). The server has no GPU, and
+# the GPU build that sentence-transformers pulled in from PyPI brought about 5 GB of NVIDIA libraries it could never use
+# (torch, nvidia-*, triton: 5.2 of the image's 6.4 GB of packages). Every change to requirements.txt reinstalled all of
+# it, about 18 minutes a deploy. This layer is reused until this line changes; requirements.txt pins the same version,
+# which this +cpu build satisfies, so pip leaves it as it is. Embeddings are computed exactly as before: on the processor.
+RUN pip install --no-cache-dir torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
