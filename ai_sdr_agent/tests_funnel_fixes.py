@@ -21,11 +21,11 @@ from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRMeeting
 from ai_sdr_agent.tests import SDRBase
 
 
-class AutoResearchQueuesQualificationTests(SDRBase):
-    """R2: auto-researched (Apify) leads are queued for qualification."""
+class AutoResearchLeavesQualificationToTheButtonTests(SDRBase):
+    """Auto-researched (Apify) leads are not queued for qualification: that waits for the Qualify button."""
 
     @override_settings(APIFY_API_TOKEN='tok')
-    def test_auto_researched_leads_are_queued_for_qualification(self):
+    def test_auto_researched_leads_are_not_queued_for_qualification(self):
         SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
         fake_leads = [{
             'full_name': 'New Prospect', 'first_name': 'New', 'last_name': 'Prospect',
@@ -39,8 +39,8 @@ class AutoResearchQueuesQualificationTests(SDRBase):
             tasks.auto_research_leads_impl(leads_per_run=5)
 
         lead = SDRLead.objects.get(email='new.prospect@target.example')
-        self.assertEqual(lead.qualification_status, 'pending')
-        self.assertIsNotNone(lead.qualification_queued_at)
+        self.assertEqual(lead.qualification_status, 'none')
+        self.assertIsNone(lead.qualification_queued_at)
 
 
 class StatusFollowsTheScoreTests(SDRBase):

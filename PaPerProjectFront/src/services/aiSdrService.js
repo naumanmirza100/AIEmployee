@@ -241,9 +241,15 @@ export const qualifyLead = async (id) => {
   }
 };
 
-export const qualifyAllLeads = async () => {
+// No argument: every unscored lead. { ids }: the ticked leads. { filters }: every lead the list's filters match.
+// Scored leads are skipped either way.
+export const qualifyAllLeads = async ({ ids, filters } = {}) => {
   try {
-    return await companyApi.post('/sdr/leads/qualify-all/');
+    if (filters) {
+      const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
+      return await companyApi.post(`/sdr/leads/qualify-all/${query ? `?${query}` : ''}`, { all_matching: true });
+    }
+    return await companyApi.post('/sdr/leads/qualify-all/', ids ? { ids } : {});
   } catch (error) {
     console.error('Qualify all leads error:', error);
     throw error;

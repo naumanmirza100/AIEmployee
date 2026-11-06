@@ -647,12 +647,7 @@ def auto_research_leads_impl(leads_per_run: int = 10):
                     source='apify',
                     temperature='cold',
                     status='new',
-                    # Queue for background qualification, exactly like the
-                    # manual/CSV/Apollo creation paths do — otherwise these
-                    # auto-discovered leads default to qualification_status='none'
-                    # and the qualifier never scores them.
-                    qualification_status='pending',
-                    qualification_queued_at=tz.now(),
+                    # Not queued for qualification: that waits for the Qualify button.
                     enrichment_status='pending',
                     enrichment_queued_at=tz.now(),
                 )

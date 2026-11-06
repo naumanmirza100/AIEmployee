@@ -735,10 +735,18 @@ def leads_list(request):
             page_obj    = paginator.get_page(page)
 
             leads = [_serialize_lead(l) for l in page_obj.object_list]
+            stats = _lead_stats(company_user)
+            # With the ICP filter on, "Qualify all" covers that ICP's leads only: its own count of them.
+            icp_f = request.GET.get('icp', '').strip()
+            if icp_f == 'none' or icp_f.isdigit():
+                unscored = SDRLead.objects.filter(company_user=company_user, score__isnull=True)
+                unscored = (unscored.filter(icp_profile__isnull=True) if icp_f == 'none'
+                            else unscored.filter(icp_profile_id=int(icp_f)))
+                stats['unqueued_icp'] = unscored.exclude(qualification_status__in=['pending', 'processing']).count()
             return Response({
                 'status':     'success',
                 'data':       leads,
-                'stats':      _lead_stats(company_user),
+                'stats':      stats,
                 'pagination': {
                     'page':        page_obj.number,
                     'page_size':   page_size,
@@ -808,10 +816,7 @@ def leads_list(request):
             icp_profile=icp,
             source='manual',
             status='new',
-            # Queue for background qualification so manually-added leads get
-            # scored automatically like research/CSV leads.
-            qualification_status='pending',
-            qualification_queued_at=timezone.now(),
+            # Not queued for qualification: that waits for the Qualify button.
             # Auto-enrich new leads in the background too (contact/company fields).
             enrichment_status='pending',
             enrichment_queued_at=timezone.now(),
@@ -935,19 +940,31 @@ def qualify_lead(request, lead_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def qualify_all_leads(request):
-    """Queue all unscored leads for background qualification (token-safe)."""
+    """Queue unscored leads for background qualification (token-safe).
+
+    New leads are not queued on their own; this is the button that does it.
+    Body: {} for every unscored lead, {"ids": [1, 2, ...]} for the ticked leads, or {"all_matching": true}
+    for every lead the list's filters match (in the query string, as for the list). Scored leads are skipped.
+    """
     company_user = request.user
     try:
         icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
-        # Put every unscored lead (that isn't already qualifying) into the queue.
+        leads = SDRLead.objects.filter(company_user=company_user)
+        if request.data.get('all_matching') is True:
+            leads = _apply_lead_filters(leads, request).order_by()
+        elif request.data.get('ids') is not None:
+            try:
+                leads = leads.filter(id__in=_id_list(request.data.get('ids')))
+            except ValueError as exc:
+                return Response({'status': 'error', 'message': str(exc)}, status=400)
+
+        # Put the unscored ones (that aren't already qualifying) into the queue.
         # The scheduler drains it in small batches, retrying failures — so this
         # never blocks or exhausts tokens in one shot.
-        to_queue = SDRLead.objects.filter(
-            company_user=company_user, score__isnull=True,
-        ).exclude(qualification_status__in=['pending', 'processing'])
+        to_queue = leads.filter(score__isnull=True).exclude(qualification_status__in=['pending', 'processing'])
         # Leads with no ICP of their own are scored with today's default, even if another becomes the default
         # before the queue reaches them.
         to_queue.filter(icp_profile__isnull=True).update(icp_profile=icp)
@@ -1175,21 +1192,12 @@ def _execute_research_job(job_id):
                 job.total_found = len(raw_leads)
                 job.save(update_fields=['leads_created', 'total_found'])
 
-        # Queue ONLY the leads created by this run for background
-        # qualification — the scheduler drains the queue in small batches so
-        # AI tokens aren't exhausted in one burst, and retries failures
-        # automatically. Scoping to created_ids avoids sweeping up unrelated
-        # pre-existing unscored leads (e.g. CSV/manual imports).
-        queued = SDRLead.objects.filter(
-            pk__in=created_ids, score__isnull=True, qualification_status='none',
-        ).update(qualification_status='pending', qualification_queued_at=timezone.now())
-
+        # The new leads are not queued for qualification: that waits for the Qualify button.
         # Auto-enrich the newly discovered leads in the background too.
         SDRLead.objects.filter(pk__in=created_ids, enrichment_status='none').update(
             enrichment_status='pending', enrichment_queued_at=timezone.now())
 
         params['skipped_duplicates'] = skipped_dupes
-        params['leads_queued'] = queued
         job.search_params = params
         job.status = 'completed'
         job.total_found = len(raw_leads)
@@ -1317,7 +1325,6 @@ def research_job_status(request, job_id):
             'done': job.status in ('completed', 'failed'),
             'total_found': job.total_found,
             'leads_created': job.leads_created,
-            'leads_queued': params.get('leads_queued', 0),
             'skipped_duplicates': params.get('skipped_duplicates', 0),
             'source': job.source,
             'error_message': job.error_message,
@@ -1649,28 +1656,19 @@ def fetch_apify_leads(request):
                 status='new',
                 confidence_score=validation['confidence_score'],
                 data_quality_flags=validation['data_quality_flags'],
-                # Queue for background qualification instead of scoring inline —
-                # a synchronous loop here blocked the request for minutes and hit
-                # AI token limits. The scheduler drains the queue in small batches.
-                qualification_status='pending',
-                qualification_queued_at=timezone.now(),
+                # Not queued for qualification: that waits for the Qualify button.
                 enrichment_status='pending',
                 enrichment_queued_at=timezone.now(),
             )
             created += 1
 
-        queued = created  # every imported lead is queued for qualification
-
         msg = f'Imported {created} leads from Apify'
-        if queued:
-            msg += '. Qualifying them in the background — scores will appear shortly'
         if skipped:
             msg += f'. Skipped {skipped} duplicates'
         return Response({
             'status': 'success',
             'message': msg + '.',
             'leads_created': created,
-            'leads_queued': queued,
             'skipped_duplicates': skipped,
             'stats': _lead_stats(company_user),
         })
@@ -1825,10 +1823,7 @@ def import_leads_csv(request):
                     icp_profile=icp,
                     source='csv_import',
                     status='new',
-                    # Queue for background qualification so imported leads get
-                    # scored automatically instead of sitting permanently unscored.
-                    qualification_status='pending',
-                    qualification_queued_at=timezone.now(),
+                    # Not queued for qualification: that waits for the Qualify button.
                     enrichment_status='pending',
                     enrichment_queued_at=timezone.now(),
                 )
@@ -1844,8 +1839,6 @@ def import_leads_csv(request):
         msg += '.'
         if refused:
             msg += f' Not imported: {"; ".join(refused[:5])}' + (f'; and {len(refused) - 5} more' if len(refused) > 5 else '') + '.'
-        if created:
-            msg += ' Qualifying them in the background — scores will appear shortly.'
         if created == 0 and not errors and not refused:
             msg = ('No leads imported — check the CSV has a header row with columns like '
                    'full_name / email / company_name (any capitalisation).')

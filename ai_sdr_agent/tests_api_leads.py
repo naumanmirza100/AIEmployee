@@ -177,14 +177,15 @@ class CreatingALeadTests(LeadApiBase):
     def create(self, **data):
         return self.call(views.leads_list, 'post', data=data)
 
-    def test_a_valid_lead_is_saved_lower_cased_and_queued_for_scoring_and_enrichment(self):
+    def test_a_valid_lead_is_saved_lower_cased_and_queued_for_enrichment_not_scoring(self):
         r = self.create(full_name='Jane Doe', email='Jane@Corp.Example', company_size='40',
                         linkedin_url='https://www.linkedin.com/in/jane')
         self.assertEqual(r.status_code, 201, r.data)
         lead = SDRLead.objects.get(pk=r.data['data']['id'])
         self.assertEqual((lead.email, lead.source, lead.company_size, lead.company_user_id),
                          ('jane@corp.example', 'manual', 40, self.cu.id))
-        self.assertEqual((lead.qualification_status, lead.enrichment_status), ('pending', 'pending'))
+        # Scoring waits for the Qualify button.
+        self.assertEqual((lead.qualification_status, lead.enrichment_status), ('none', 'pending'))
 
     def test_a_name_alone_is_enough(self):
         self.assertEqual(self.create(full_name='Only Name').status_code, 201)
@@ -553,13 +554,13 @@ class ImportCsvTests(LeadApiBase):
         w.writerows(rows)
         return buf.getvalue()
 
-    def test_good_rows_are_imported_and_queued(self):
+    def test_good_rows_are_imported_and_not_queued_for_scoring(self):
         r = self.upload(self.rows(['Full Name', 'E-mail', 'Company', 'Employees'],
                                   ['Ann', 'ANN@corp.example', 'Corp', '1,200'], ['Ben', 'ben@corp.example', '', '']))
         self.assertEqual((r.status_code, r.data['created']), (200, 2), r.data)
         ann = SDRLead.objects.get(email='ann@corp.example')
         self.assertEqual((ann.source, ann.company_size, ann.company_user_id, ann.qualification_status),
-                         ('csv_import', 1200, self.cu.id, 'pending'))
+                         ('csv_import', 1200, self.cu.id, 'none'))
 
     def test_no_file_is_refused(self):
         self.assertRefused(self.call(views.import_leads_csv, 'post', data={}, fmt='multipart'))
@@ -671,6 +672,47 @@ class QualifyAllLeadsTests(LeadApiBase):
         self.make_lead()
         self.call(views.qualify_all_leads, 'post')
         self.assertEqual(self.call(views.qualify_all_leads, 'post').data['queued'], 0)
+
+    def test_selected_leads_only_and_scored_ones_are_skipped(self):
+        self.icp()
+        picked = self.make_lead(email='picked@acme.com')
+        scored = self.make_lead(email='scored@acme.com', score=80, temperature='hot', qualification_status='done')
+        left = self.make_lead(email='left@acme.com')
+        theirs = self.their_lead()
+        r = self.call(views.qualify_all_leads, 'post', data={'ids': [picked.id, scored.id, theirs.id]})
+        self.assertEqual((r.status_code, r.data['queued']), (200, 1), r.data)
+        got = {l.pk: l.qualification_status
+               for l in SDRLead.all_objects.filter(pk__in=[picked.pk, scored.pk, left.pk, theirs.pk])}
+        self.assertEqual(got, {picked.pk: 'pending', scored.pk: 'done', left.pk: 'none', theirs.pk: 'none'})
+
+    def test_all_matching_with_the_icp_filter_queues_that_icps_leads_only(self):
+        dentistry = self.icp(name='Dentistry')
+        saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False, job_titles=['CEO'])
+        d = self.make_lead(email='d@x.example', icp_profile=dentistry)
+        s = self.make_lead(email='s@x.example', icp_profile=saas)
+        r = self.call(views.qualify_all_leads, 'post', path=f'/x?icp={saas.id}', data={'all_matching': True})
+        self.assertEqual(r.data['queued'], 1, r.data)
+        self.assertEqual((SDRLead.objects.get(pk=s.pk).qualification_status,
+                          SDRLead.objects.get(pk=d.pk).qualification_status), ('pending', 'none'))
+        self.assertEqual(SDRLead.objects.get(pk=s.pk).icp_profile_id, saas.id)   # still scored with its own ICP
+
+    def test_bad_ids_are_refused(self):
+        self.icp()
+        for ids in ([], 'all', ['abc']):
+            with self.subTest(ids):
+                self.assertRefused(self.call(views.qualify_all_leads, 'post', data={'ids': ids}))
+
+    def test_the_list_counts_unscored_leads_of_the_filtered_icp(self):
+        dentistry = self.icp(name='Dentistry')
+        saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False, job_titles=['CEO'])
+        self.make_lead(email='d@x.example', icp_profile=dentistry)
+        self.make_lead(email='s1@x.example', icp_profile=saas)
+        self.make_lead(email='s2@x.example', icp_profile=saas, qualification_status='pending')
+        self.make_lead(email='n@x.example')
+        stats = lambda q: self.call(views.leads_list, path=f'/x{q}').data['stats']
+        self.assertEqual(stats(f'?icp={saas.id}')['unqueued_icp'], 1)
+        self.assertEqual(stats('?icp=none')['unqueued_icp'], 1)
+        self.assertNotIn('unqueued_icp', stats(''))
 
 
 class QualifyOneLeadTests(LeadApiBase):

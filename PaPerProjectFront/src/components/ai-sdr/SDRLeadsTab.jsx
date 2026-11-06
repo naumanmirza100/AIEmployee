@@ -311,7 +311,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
       >
         {LabelIcon && <LabelIcon size={13} style={{ color: value ? selected?.color : '#6b7280' }} />}
         {value && selected?.dot && <span style={{ width: 8, height: 8, borderRadius: '50%', background: selected.color, flexShrink: 0, display: 'inline-block' }} />}
-        <span style={{ flex: 1, textAlign: 'left' }}>{value ? selected?.label : label}</span>
+        <span style={{ flex: 1, textAlign: 'left', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }} title={value ? selected?.label : undefined}>{value ? selected?.label : label}</span>
         <ChevronDown size={12} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
       </button>
 
@@ -321,7 +321,9 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
           background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))',
           border: '1px solid var(--line-1)', borderRadius: 11,
           boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
-          minWidth: '100%', width: 'max-content', overflow: 'hidden',
+          minWidth: '100%', width: 'max-content', maxWidth: 'min(360px, 90vw)',
+          // A long list (one option per category) scrolls instead of running off the screen.
+          maxHeight: 320, overflowY: 'auto', overflowX: 'hidden',
         }}>
           {options.map((opt, idx) => {
             const isSel = opt.key === value;
@@ -446,7 +448,7 @@ const CategoryManagerDialog = ({ open, onOpenChange, categories, onChanged }) =>
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 520 }}>
+      <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
         <DialogHeader>
           <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <Tag size={18} color="#a855f7" /> Lead categories
@@ -1253,7 +1255,7 @@ const SDRLeadsTab = () => {
               description: [
                 `Source: ${(job.source || '').toUpperCase()}`,
                 skipped ? `${skipped} duplicates skipped.` : '',
-                job.leads_queued ? `Qualifying ${job.leads_queued} in the background.` : '',
+                created ? 'Click Qualify to score them.' : '',
               ].filter(Boolean).join(' '),
             });
           }
@@ -1430,20 +1432,37 @@ const SDRLeadsTab = () => {
     } finally { setQualifyingId(null); }
   };
 
-  // Qualify all currently-unscored leads (e.g. ones auto-qualify skipped when
-  // AI tokens ran out). Backend batches up to 50 per call.
+  // New leads aren't qualified on their own: these buttons put unscored leads in the background queue, which
+  // scores them in small batches. Scored leads are skipped. With the ICP filter on, only that ICP's leads.
   const [qualifyingAll, setQualifyingAll] = useState(false);
+  const [bulkQualifying, setBulkQualifying] = useState(false);
+  const qualifyQueued = (resp) => {
+    const n = resp?.queued ?? resp?.data?.queued ?? 0;
+    toast(n
+      ? { title: `Queued ${n} lead${n === 1 ? '' : 's'} for qualification`, description: resp?.message }
+      : { title: 'Nothing to qualify', description: 'Those leads are already scored or already being qualified.' });
+    loadLeads();
+    loadIcps();
+  };
   const handleQualifyAll = async () => {
     setQualifyingAll(true);
     try {
-      const resp = await qualifyAllLeads();
-      const n = resp?.queued ?? resp?.data?.queued ?? 0;
-      toast({ title: `Queued ${n} lead${n === 1 ? '' : 's'} for qualification`, description: resp?.message });
-      loadLeads();
+      qualifyQueued(await qualifyAllLeads(filterIcp ? { filters: { icp: filterIcp } } : undefined));
     } catch (e) {
       toast({ title: 'Qualify failed', description: e?.message, variant: 'destructive' });
     } finally { setQualifyingAll(false); }
   };
+  const handleBulkQualify = async () => {
+    setBulkQualifying(true);
+    try {
+      qualifyQueued(await qualifyAllLeads(allMatching ? { filters: currentFilters } : { ids: [...selectedIds] }));
+    } catch (e) {
+      toast({ title: 'Qualify failed', description: e?.message, variant: 'destructive' });
+    } finally { setBulkQualifying(false); }
+  };
+  // What the top button would queue: that ICP's unscored leads when the ICP filter is on, else all of them.
+  const toQualify = filterIcp ? (stats.unqueued_icp ?? 0) : stats.unqueued;
+  const filterIcpName = filterIcp === 'none' ? 'no ICP' : icpProfiles.find(i => String(i.id) === filterIcp)?.name;
 
   const handleAddLead = async () => {
     // ── Validation ──────────────────────────────────────────────────────────
@@ -1598,12 +1617,12 @@ const SDRLeadsTab = () => {
             <Upload size={14} /> Import CSV
           </Button>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
-          {/* Only for unscored leads the queue won't reach on its own (never queued, or failed for good);
-              queued leads are already covered by the "Qualifying…" status below. */}
-          {stats.unqueued > 0 && (
-            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`${stats.unqueued} unscored lead${stats.unqueued === 1 ? ' is' : 's are'} not in the qualification queue (never queued, or qualification failed). Add ${stats.unqueued === 1 ? 'it' : 'them'} to the queue.`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
+          {/* Unscored leads not yet in the queue (new, or failed for good); queued leads are covered by the
+              "Qualifying…" status below. With the ICP filter on, that ICP's leads only. */}
+          {toQualify > 0 && (
+            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`Score ${toQualify} unscored lead${toQualify === 1 ? '' : 's'}${filterIcpName ? ` (${filterIcpName})` : ''} with AI in the background. Scored leads are skipped.`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
               {qualifyingAll ? <Loader2 size={15} className="animate-spin" /> : <Brain size={15} />}
-              Qualify {stats.unqueued} more
+              Qualify {toQualify.toLocaleString()} unscored{filterIcpName ? ` · ${filterIcpName}` : ''}
             </Button>
           )}
           <div style={{ marginLeft: 'auto' }}>
@@ -1663,6 +1682,9 @@ const SDRLeadsTab = () => {
               {bulkCategorySaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Set category
             </button>
           </div>
+          <button onClick={handleBulkQualify} disabled={bulkQualifying} title="Score the selected unscored leads with AI in the background. Scored leads are skipped." style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {bulkQualifying ? <Loader2 size={13} className="animate-spin" /> : <Brain size={13} />} Qualify selected
+          </button>
           {/* Delete works on ticked leads only, never on "all matching". */}
           {!allMatching && (
             <button onClick={() => setShowBulkDeleteConfirm(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', fontSize: 13, fontWeight: 600 }}>
@@ -1987,7 +2009,7 @@ const SDRLeadsTab = () => {
                       <div style={{ display: 'flex', gap: 6 }}>
                         {lead.score == null ? (
                           // Unscored → prominent amber "Qualify" so the user can
-                          // score leads that auto-qualify skipped (e.g. AI tokens out).
+                          // score this one lead now instead of through the queue.
                           <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Qualify this lead with AI" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 6, padding: '5px 9px', cursor: 'pointer', color: 'hsl(var(--pt-fbbf24))', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
                             {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <><Brain size={12} /> Qualify</>}
                           </button>
@@ -2493,7 +2515,7 @@ const SDRLeadsTab = () => {
 
       {/* Bulk Delete Dialog */}
       <Dialog open={showBulkDeleteConfirm} onOpenChange={setShowBulkDeleteConfirm}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Trash2 size={18} /> Confirm Delete
@@ -2515,7 +2537,7 @@ const SDRLeadsTab = () => {
 
       {/* Single Delete Confirmation Dialog */}
       <Dialog open={!!pendingDeleteLead} onOpenChange={(open) => { if (!open) setPendingDeleteLead(null); }}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Trash2 size={18} /> Confirm Delete
@@ -2539,7 +2561,7 @@ const SDRLeadsTab = () => {
 
       {/* CSV Import Preview Modal */}
       <Dialog open={!!csvImport} onOpenChange={(open) => { if (!open && !csvImporting) setCsvImport(null); }}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 760 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 760, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Upload size={18} color="#a855f7" /> Import leads from CSV
@@ -2670,7 +2692,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
       {/* Add Lead Modal */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 560 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-soft)' }}>Add Lead Manually</DialogTitle>
           </DialogHeader>
@@ -2715,7 +2737,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
       {/* Generate Leads Modal */}
       <Dialog open={showGenModal} onOpenChange={setShowGenModal}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 480 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Zap size={18} color="#a855f7" /> Generate Leads
