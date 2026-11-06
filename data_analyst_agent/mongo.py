@@ -169,6 +169,18 @@ def _database(client, source):
                   'host in the connection string (…mongodb.net/your_db) or in "Database name".')
 
 
+def database_names(source) -> list:
+    """The databases this user can see (not admin, local or config), to name back when the one asked for is empty."""
+    client = _client(source)
+    try:
+        _check_members_after_connect(client)
+        return sorted(n for n in client.list_database_names() if n not in SYSTEM_DATABASES)
+    except Exception:
+        return []
+    finally:
+        client.close()
+
+
 def _check_members_after_connect(client):
     client.admin.command('ping')       # connects (and discovers the members of a replica set)
     _check_members(client)

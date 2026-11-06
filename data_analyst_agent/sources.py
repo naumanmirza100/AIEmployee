@@ -33,7 +33,11 @@ def test_source(source: DataSource):
         source.save()
         if source.kind == DataSource.KIND_MONGO:
             if not tables:
-                return True, f'Connected to "{source.database}", but this user can read no collection there.'
+                # A name MongoDB doesn't have (they are case-sensitive) reads as an empty database: name the real ones.
+                from . import mongo
+                names = [n for n in mongo.database_names(source) if n != source.database]
+                seen = f' This user can see: {", ".join(names[:15])}. Names are case-sensitive.' if names else ''
+                return True, f'Connected, but "{source.database}" has no collection this user can read.{seen}'
             return True, f'Connected to "{source.database}". {len(tables)} collection(s) read.'
         if not tables:
             return True, 'Connected, but no tables were found that this user can read.'
