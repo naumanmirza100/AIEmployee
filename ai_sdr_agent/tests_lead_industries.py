@@ -10,6 +10,13 @@ AFTER = [('ai_sdr_agent', '0037_remove_lead_categories')]
 
 
 class CategoriesBecomeIndustriesMigrationTests(TransactionTestCase):
+    def setUp(self):
+        # The test settings (project_manager_ai.settings_test, as GitHub's test job runs them) build the tables without
+        # migrations, so there are none to step through: then this test can only skip, and says why.
+        loader = MigrationExecutor(connection).loader
+        if BEFORE[0] not in loader.graph.nodes:
+            self.skipTest('needs migrations, which these settings switch off (MIGRATION_MODULES)')
+
     def migrate(self, targets):
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
