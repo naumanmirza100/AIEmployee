@@ -4809,6 +4809,54 @@ def _audience_leads(company_user, industry='', company=''):
     return qs.filter(company_industry__iexact=industry).order_by('id')
 
 
+MAX_TYPED_ADDRESSES = 500
+
+
+def _typed_addresses(value) -> tuple:
+    """(addresses, invalid) from addresses typed or pasted for a send: a list, or text split on commas, semicolons,
+    spaces and new lines; "Name <a@b.com>" gives a@b.com. Lower-cased, each once, in the order given."""
+    from django.core.exceptions import ValidationError
+
+    pieces = value if isinstance(value, list) else re.split(r'[,;\n]+', str(value or ''))
+    parts = []
+    for piece in pieces:
+        piece = str(piece or '')
+        named = re.findall(r'<([^<>]+)>', piece)
+        # "New Person <new@x.example>" is one address; "a@x.com b@y.com" on one line is two.
+        parts += named if named else piece.split()
+    good, bad, seen = [], [], set()
+    for raw in parts:
+        addr = raw.strip().strip('<>"\'').lower()
+        if not addr or addr in seen:
+            continue
+        seen.add(addr)
+        try:
+            validate_email(addr)
+            good.append(addr)
+        except ValidationError:
+            bad.append(addr)
+    return good, bad
+
+
+def _leads_for_addresses(company_user, addresses, create=False) -> list:
+    """The user's lead for each address; with ``create``, a new lead (source Manual) for an address that has none,
+    so it is tracked like any lead (bounces, unsubscribes, one email a day). Without, an unsaved stand-in."""
+    from django.db.models.functions import Lower
+    found = {}
+    for lead in (SDRLead.objects.filter(company_user=company_user).annotate(email_l=Lower('email'))
+                 .filter(email_l__in=addresses).order_by('id')):
+        found.setdefault(lead.email_l, lead)
+    out = []
+    for addr in addresses:
+        lead = found.get(addr)
+        if lead is None:
+            lead = SDRLead(company_user=company_user, email=addr, source='manual', status='new')
+            if create:
+                lead.save()
+        out.append(lead)
+    return out
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -4839,14 +4887,18 @@ def sdr_email_template_preview(request):
     html = d.get('html') if isinstance(d.get('html'), str) else ''
     industry = ' '.join(str(d.get('industry') or '').split())
     company = ' '.join(str(d.get('company') or '').split())
+    typed, _ = _typed_addresses(d.get('emails')) if d.get('emails') else ([], [])
     campaign = None
     if str(d.get('campaign_id') or '').isdigit():
         campaign = SDRCampaign.objects.filter(company_user=company_user, pk=int(d['campaign_id'])).first()
     campaign = campaign or SDRCampaign.objects.filter(company_user=company_user).order_by('-id').first()
 
-    pool = _audience_leads(company_user, industry, company) if (industry or company) else \
-        SDRLead.objects.filter(company_user=company_user).exclude(email='').order_by('-created_at')
-    leads = list(pool[:20])
+    if typed:
+        leads = _leads_for_addresses(company_user, typed[:20])
+    else:
+        pool = _audience_leads(company_user, industry, company) if (industry or company) else \
+            SDRLead.objects.filter(company_user=company_user).exclude(email='').order_by('-created_at')
+        leads = list(pool[:20])
     try:
         index = int(d.get('lead_index') or 0) % len(leads) if leads else 0
     except (TypeError, ValueError):
@@ -4890,8 +4942,9 @@ def _serialize_email_send(send: SDREmailSend) -> dict:
 @permission_classes([IsCompanyUserOnly])
 def sdr_email_sends(request):
     """GET: the user's sends, newest first, and the campaign mailboxes they can go out through (with what is left of
-    today's limit). POST {template_id, campaign_id, industry | company, dry_run?}: send the template to the leads of
-    an industry, or to the leads at one company.
+    today's limit). POST {template_id, campaign_id, industry | company | emails, dry_run?}: send the template to the
+    leads of an industry, to the leads at one company, or to addresses typed in (``emails``: a list or text; an
+    address with no lead becomes one, source Manual, when it is sent).
     With dry_run, only the numbers: who would get it, who would be skipped and why. The scheduler sends it a few
     at a time (send_email_sends_impl)."""
     from ai_sdr_agent.email_templates import unknown_variables
@@ -4919,7 +4972,8 @@ def sdr_email_sends(request):
         if str(d.get('campaign_id') or '').isdigit() else None
     industry = ' '.join(str(d.get('industry') or '').split())
     company = ' '.join(str(d.get('company') or '').split())
-    audience = f'{company}' if company else f'{industry}'
+    typed, invalid = _typed_addresses(d.get('emails')) if d.get('emails') else ([], [])
+    audience = company or industry or f'{len(typed)} chosen address(es)'
     if not template:
         return Response({'status': 'error', 'message': 'Choose one of your templates.'}, status=400)
     if not campaign:
@@ -4928,9 +4982,18 @@ def sdr_email_sends(request):
     if not _mailbox_ready(campaign):
         return Response({'status': 'error', 'message': f'The campaign "{campaign.name}" has no mailbox set up yet: '
                                                        'add its SMTP settings first.'}, status=400)
-    if bool(industry) == bool(company):
-        return Response({'status': 'error', 'message': 'Choose who to send it to: an industry, or one company.'},
-                        status=400)
+    if sum(map(bool, (industry, company, d.get('emails')))) != 1:
+        return Response({'status': 'error', 'message': 'Choose who to send it to: an industry, one company, or '
+                                                       'addresses you type in.'}, status=400)
+    if d.get('emails'):
+        if invalid:
+            return Response({'status': 'error', 'code': 'invalid_emails', 'invalid_emails': invalid,
+                             'message': f'Not email addresses: {", ".join(invalid[:10])}.'}, status=400)
+        if not typed:
+            return Response({'status': 'error', 'message': 'Type at least one email address.'}, status=400)
+        if len(typed) > MAX_TYPED_ADDRESSES:
+            return Response({'status': 'error', 'message': f'At most {MAX_TYPED_ADDRESSES} addresses at a time.'},
+                            status=400)
     if not template.html.strip():
         return Response({'status': 'error', 'message': 'The template is empty.'}, status=400)
     unknown = unknown_variables(template.subject, template.html)
@@ -4939,7 +5002,8 @@ def sdr_email_sends(request):
                          'message': f'The template still has {", ".join(unknown)}: fill '
                                     f'{"it" if len(unknown) == 1 else "them"} in before sending.'}, status=400)
 
-    leads = list(_audience_leads(company_user, industry, company))
+    leads = (_leads_for_addresses(company_user, typed) if typed
+             else list(_audience_leads(company_user, industry, company)))
     blocked = blocked_among(company_user.company, [l.email for l in leads])
     seen, rows = set(), []
     for lead in leads:
@@ -4951,13 +5015,17 @@ def sdr_email_sends(request):
                 else 'This address bounced before.' if lead.email_bounced else '')
         rows.append((lead, addr, skip))
     will_send = sum(1 for *_, skip in rows if not skip)
-    summary = {'will_send': will_send, 'skipped': len(rows) - will_send, 'leads': len(leads)}
+    summary = {'will_send': will_send, 'skipped': len(rows) - will_send, 'leads': len(leads),
+               'new_leads': sum(1 for lead in leads if lead.pk is None)}
     if d.get('dry_run') is True:
         return Response({'status': 'success', **summary})
     if not will_send:
         return Response({'status': 'error', 'message': f'No lead of "{audience}" can be emailed.', **summary},
                         status=400)
 
+    for lead, addr, skip in rows:
+        if lead.pk is None:
+            lead.save()          # a typed address with no lead: tracked from now on, like any lead
     send = SDREmailSend.objects.create(
         company_user=company_user, template=template, campaign=campaign, industry=industry, company=company,
         template_name=template.name, subject=template.subject, html=template.html)

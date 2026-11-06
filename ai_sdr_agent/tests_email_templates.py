@@ -341,3 +341,41 @@ class TemplateNameTests(Base):
         t = self.template()
         r = self.call(views.sdr_email_template_detail, 'put', {'name': t.name, 'html': 'y'}, template_id=t.id)
         self.assertEqual(r.data['data']['name'], t.name)
+
+
+class TypedAddressTests(Base):
+    """Sending to addresses typed in by hand: a lead's address uses the lead; a new one becomes a lead when sent."""
+
+    def start(self, **data):
+        body = {'template_id': self.template().id, 'campaign_id': self.campaign.id}
+        body.update(data)
+        return self.call(views.sdr_email_sends, 'post', body)
+
+    def test_known_and_new_addresses_and_the_new_one_becomes_a_lead_only_when_sent(self):
+        known = SDRLead.objects.create(company_user=self.cu, email='Kiran@Smile.example', first_name='Kiran',
+                                       full_name='Kiran K')
+        text = 'kiran@smile.example, New Person <new@x.example>\nnew@x.example;'
+        dry = self.start(emails=text, dry_run=True)
+        self.assertEqual((dry.data['will_send'], dry.data['new_leads']), (2, 1), dry.data)
+        self.assertFalse(SDRLead.objects.filter(email='new@x.example').exists())   # a dry run adds nobody
+        self.assertEqual(self.start(emails=text).status_code, 201)
+        new = SDRLead.objects.get(email='new@x.example')
+        self.assertEqual((new.source, new.company_user_id), ('manual', self.cu.id))
+        self.assertEqual(set(SDREmailSendRecipient.objects.values_list('lead_id', flat=True)), {known.id, new.id})
+
+    def test_invalid_addresses_are_listed(self):
+        r = self.start(emails='good@x.example, not-an-email, also@bad')
+        self.assertEqual((r.status_code, r.data['code']), (400, 'invalid_emails'))
+        self.assertEqual(r.data['invalid_emails'], ['not-an-email', 'also@bad'])
+        self.assertFalse(SDREmailSend.objects.exists())
+
+    def test_a_blocked_address_is_skipped(self):
+        from core.do_not_email import block
+        block(self.company.id, 'gone@x.example')
+        r = self.start(emails='gone@x.example ok@x.example', dry_run=True)
+        self.assertEqual((r.data['will_send'], r.data['skipped']), (1, 1))
+
+    def test_a_lead_with_no_name_is_greeted_as_there(self):
+        r = self.call(views.sdr_email_template_preview, 'post', {'html': '<p>Hi {first_name},</p>', 'emails': 'new@x.example'})
+        self.assertIn('Hi there,', r.data['html'])
+        self.assertEqual(r.data['lead']['email'], 'new@x.example')

@@ -439,9 +439,11 @@ const SDREmailTemplatesTab = () => {
   const [editorInitial, setEditorInitial] = useState(null);   // what step 2 edits
   const [editorKey, setEditorKey] = useState(0);
   const [template, setTemplate] = useState(null);         // the saved template being sent {id, name, subject}
-  const [sendTo, setSendTo] = useState('industry');       // 'industry' | 'company'
+  const [sendTo, setSendTo] = useState('industry');       // 'industry' | 'company' | 'emails'
   const [sendIndustry, setSendIndustry] = useState('');
   const [sendCompany, setSendCompany] = useState('');
+  const [emailsText, setEmailsText] = useState('');       // addresses as typed
+  const [sendEmails, setSendEmails] = useState('');       // the same, once typing has paused (counted then)
   const [sendCampaign, setSendCampaign] = useState('');
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -451,9 +453,16 @@ const SDREmailTemplatesTab = () => {
   const [openSend, setOpenSend] = useState(null);
   const [openSendData, setOpenSendData] = useState(null);
 
-  const audience = sendTo === 'company' ? { company: sendCompany } : { industry: sendIndustry };
-  const audienceValue = sendTo === 'company' ? sendCompany : sendIndustry;
-  const audienceLabel = sendTo === 'company' ? `at ${sendCompany}` : `of ${sendIndustry}`;
+  const audience = sendTo === 'company' ? { company: sendCompany }
+    : sendTo === 'emails' ? { emails: sendEmails } : { industry: sendIndustry };
+  const audienceValue = sendTo === 'company' ? sendCompany : sendTo === 'emails' ? sendEmails.trim() : sendIndustry;
+  const audienceLabel = sendTo === 'company' ? `at ${sendCompany}` : sendTo === 'emails' ? 'from the addresses you entered' : `of ${sendIndustry}`;
+
+  // Typed addresses are counted once typing pauses, not on every key.
+  useEffect(() => {
+    const id = setTimeout(() => setSendEmails(emailsText), 600);
+    return () => clearTimeout(id);
+  }, [emailsText]);
   const mailbox = mailboxes.find(m => String(m.campaign_id) === sendCampaign);
   const readyMailboxes = mailboxes.filter(m => m.ready);
 
@@ -496,7 +505,7 @@ const SDREmailTemplatesTab = () => {
       .catch(e => { if (live) setSummary({ error: apiErrorMessage(e, 'Could not count the leads.') }); })
       .finally(() => { if (live) setSummaryLoading(false); });
     return () => { live = false; };
-  }, [template?.id, sendTo, sendIndustry, sendCompany, sendCampaign]);
+  }, [template?.id, sendTo, sendIndustry, sendCompany, sendEmails, sendCampaign]);
 
   // Step 4: the email exactly as one of its recipients gets it, from the chosen mailbox.
   useEffect(() => {
@@ -507,7 +516,7 @@ const SDREmailTemplatesTab = () => {
       .then(r => { if (live) setReview(r?.data ?? r); })
       .catch(() => { if (live) setReview(null); });
     return () => { live = false; };
-  }, [step, template?.id, sendTo, sendIndustry, sendCompany, sendCampaign, reviewIndex]);
+  }, [step, template?.id, sendTo, sendIndustry, sendCompany, sendEmails, sendCampaign, reviewIndex]);
 
   // Step 1 → 2
   const openInEditor = (initial) => {
@@ -567,7 +576,8 @@ const SDREmailTemplatesTab = () => {
     try {
       const r = await startEmailSend({ template_id: template.id, campaign_id: Number(sendCampaign), ...audience });
       toast({ title: 'Sending started', description: r?.message });
-      setTemplate(null); setEditorInitial(null); setSendIndustry(''); setSendCompany(''); setSummary(null); setReview(null);
+      setTemplate(null); setEditorInitial(null); setSendIndustry(''); setSendCompany(''); setEmailsText(''); setSendEmails('');
+      setSummary(null); setReview(null);
       setReviewIndex(0); setReached(1); setStep(1);
       loadSends();
     } catch (e) {
@@ -662,15 +672,25 @@ const SDREmailTemplatesTab = () => {
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 22 }}>
               <div>
-                <SectionTitle hint="All the leads of an industry, or the leads at one company.">Who gets it</SectionTitle>
+                <SectionTitle hint="All the leads of an industry, the leads at one company, or addresses you enter.">Who gets it</SectionTitle>
                 <div style={{ display: 'flex', border: '1px solid var(--line-1)', borderRadius: 8, overflow: 'hidden', marginBottom: 10, width: 'fit-content' }}>
-                  {[['industry', 'An industry'], ['company', 'One company']].map(([k, l]) => (
+                  {[['industry', 'An industry'], ['company', 'One company'], ['emails', 'Specific addresses']].map(([k, l]) => (
                     <button key={k} onClick={() => setSendTo(k)} style={{ padding: '6px 14px', fontSize: 13, border: 'none', cursor: 'pointer',
                       background: sendTo === k ? 'rgba(168,85,247,0.2)' : 'transparent', color: sendTo === k ? 'hsl(var(--pt-c084fc))' : '#9ca3af', fontWeight: sendTo === k ? 600 : 400 }}>{l}</button>
                   ))}
                 </div>
                 {sendTo === 'company' ? (
                   <CompanyPicker value={sendCompany} onChange={setSendCompany} />
+                ) : sendTo === 'emails' ? (
+                  <div>
+                    <textarea value={emailsText} onChange={e => setEmailsText(e.target.value)} spellCheck={false}
+                      placeholder={'kiran@smileline.co.uk\nalex@northwind.com, sam@acme.com'}
+                      style={{ ...inputStyle, minHeight: 110, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+                    <p style={{ color: '#6b7280', fontSize: 11, margin: '4px 0 0', lineHeight: 1.5 }}>
+                      Separate them with commas, spaces or new lines (up to 500). An address that's one of your leads uses their details;
+                      a new one is added to your leads when you send, so bounces and unsubscribes are tracked.
+                    </p>
+                  </div>
                 ) : (
                   <SdrSelect value={sendIndustry} onChange={setSendIndustry} style={inputStyle} placeholder="Choose an industry"
                     options={industries.map(i => ({ value: i.name, label: `${i.name} (${i.lead_count})` }))} />
@@ -701,8 +721,9 @@ const SDREmailTemplatesTab = () => {
                 ) : (
                   <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.25)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                     <span style={{ color: '#34d399', fontSize: 22, fontWeight: 700 }}>{summary.will_send.toLocaleString()}</span>
-                    <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>lead{summary.will_send === 1 ? '' : 's'} {audienceLabel} will get this email</span>
+                    <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{sendTo === 'emails' ? 'address' : 'lead'}{summary.will_send === 1 ? '' : (sendTo === 'emails' ? 'es' : 's')} {audienceLabel} will get this email</span>
                     {summary.skipped > 0 && <span style={{ color: '#f59e0b', fontSize: 12 }}>· {summary.skipped} skipped (do-not-email list or bounced)</span>}
+                    {summary.new_leads > 0 && <span style={{ color: '#6b7280', fontSize: 12 }}>· {summary.new_leads} new — added to your leads when you send</span>}
                   </div>
                 )}
               </div>
@@ -726,7 +747,9 @@ const SDREmailTemplatesTab = () => {
                 {[
                   ['Template', template.name, 2],
                   ['Subject', review?.subject || template.subject || '(no subject)', 2],
-                  ['To', `${summary.will_send.toLocaleString()} lead${summary.will_send === 1 ? '' : 's'} ${audienceLabel}${summary.skipped ? ` (${summary.skipped} skipped)` : ''}`, 3],
+                  ['To', sendTo === 'emails'
+                    ? `${summary.will_send.toLocaleString()} address${summary.will_send === 1 ? '' : 'es'} you entered${summary.skipped ? ` (${summary.skipped} skipped)` : ''}`
+                    : `${summary.will_send.toLocaleString()} lead${summary.will_send === 1 ? '' : 's'} ${audienceLabel}${summary.skipped ? ` (${summary.skipped} skipped)` : ''}`, 3],
                   ['From', mailbox ? `${mailbox.sender_name || ''}${mailbox.sender_name ? ' · ' : ''}${mailbox.from_email}` : '', 3],
                 ].map(([k, v, back]) => (
                   <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'baseline', paddingBottom: 10, borderBottom: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
@@ -761,7 +784,7 @@ const SDREmailTemplatesTab = () => {
               <Button variant="outline" onClick={() => setStep(3)} style={ghostBtn}><ChevronLeft size={13} /> Back</Button>
               <Button onClick={handleSend} disabled={starting} style={{ ...primaryBtn, marginLeft: 'auto' }}>
                 {starting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                Send to {summary.will_send.toLocaleString()} lead{summary.will_send === 1 ? '' : 's'}
+                Send to {summary.will_send.toLocaleString()} {sendTo === 'emails' ? `address${summary.will_send === 1 ? '' : 'es'}` : `lead${summary.will_send === 1 ? '' : 's'}`}
               </Button>
             </>)}
           </div>
@@ -784,7 +807,7 @@ const SDREmailTemplatesTab = () => {
             <div key={s.id} style={{ borderTop: '1px solid hsl(var(--surface-invert) / 0.05)', padding: '10px 2px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{s.template_name || 'Template'} → {s.company || s.industry}</div>
+                  <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{s.template_name || 'Template'} → {s.company || s.industry || `${s.total} chosen address${s.total === 1 ? '' : 'es'}`}</div>
                   <div style={{ color: '#6b7280', fontSize: 12 }}>{fmtDate(s.created_at)} · from {s.campaign_name || 'a deleted campaign'}</div>
                 </div>
                 <span style={{ color: st.color, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>

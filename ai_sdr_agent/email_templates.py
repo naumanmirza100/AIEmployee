@@ -31,11 +31,13 @@ def unknown_variables(*texts) -> list:
 
 def lead_values(lead, campaign, unsubscribe_url: str = '') -> dict:
     """What each variable stands for, for this lead and this campaign's sender."""
-    first = lead.first_name or (lead.display_name.split()[0] if lead.display_name else 'there')
+    # Names only from the name fields: a lead added by its address alone would otherwise be "Hi alex@x.com,".
+    full = (lead.full_name or f"{lead.first_name or ''} {lead.last_name or ''}").strip()
+    first = lead.first_name or (full.split()[0] if full else 'there')
     return {
         'first_name': first,
         'last_name': lead.last_name or '',
-        'full_name': lead.display_name or first,
+        'full_name': full or first,
         'company_name': lead.company_name or 'your company',
         'job_title': lead.job_title or 'your role',
         'company_industry': lead.company_industry or 'your industry',
