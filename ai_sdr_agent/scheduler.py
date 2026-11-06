@@ -146,6 +146,18 @@ def _run_resume_research():
         _close_db()
 
 
+@singleton_job('email_sends', ttl_seconds=900, min_interval_seconds=60)
+def _run_email_sends():
+    # A user's HTML template to the leads of an industry, a few at a time within the mailbox's limits.
+    try:
+        from ai_sdr_agent.tasks import send_email_sends_impl
+        send_email_sends_impl()
+    except Exception as exc:
+        logger.exception("SDR email_sends crashed: %s", exc)
+    finally:
+        _close_db()
+
+
 @singleton_job('qualify_queue', ttl_seconds=900, min_interval_seconds=90)
 def _run_qualify_queue():
     try:
@@ -305,6 +317,7 @@ def start_scheduler() -> None:
         jobs = [
             ('send_due_steps',    _run_send_due_steps,     300,    30),
             ('qualify_queue',     _run_qualify_queue,      120,    45),
+            ('email_sends',       _run_email_sends,        120,    55),
             ('resume_research',   _run_resume_research,    120,    50),
             ('enrich_queue',      _run_enrich_queue,        180,    75),
             ('check_inbox',       _run_check_inbox,         300,    60),

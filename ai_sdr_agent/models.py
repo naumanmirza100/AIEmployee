@@ -697,3 +697,63 @@ class SDRLeadResearchJob(models.Model):
     def __str__(self):
         return f"ResearchJob #{self.id} — {self.status} ({self.leads_created} leads)"
 
+
+
+class SDREmailTemplate(models.Model):
+    """An HTML email the user writes and keeps, to send to the leads of an industry (SDREmailSend). Subject and HTML
+    may use the lead and sender variables ({first_name}, {company_name}, ...; see ai_sdr_agent/email_templates.py)."""
+    company_user = models.ForeignKey('core.CompanyUser', on_delete=models.CASCADE, related_name='sdr_email_templates')
+    name = models.CharField(max_length=200)
+    subject = models.CharField(max_length=500, blank=True)
+    html = models.TextField(blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sdr_email_template'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.name
+
+
+class SDREmailSend(models.Model):
+    """One template sent to the leads of one industry through one campaign's mailbox. Its subject and HTML are kept
+    as they were when it was started, so editing the template does not change a send that is going out. The
+    scheduler sends its recipients a few at a time, within the mailbox's limits it shares with the campaigns."""
+    STATUS_CHOICES = [('sending', 'Sending'), ('done', 'Done'), ('stopped', 'Stopped')]
+
+    company_user = models.ForeignKey('core.CompanyUser', on_delete=models.CASCADE, related_name='sdr_email_sends')
+    template = models.ForeignKey(SDREmailTemplate, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='sends')
+    campaign = models.ForeignKey(SDRCampaign, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='email_sends')   # whose mailbox it goes out through
+    industry = models.CharField(max_length=255, blank=True)
+    template_name = models.CharField(max_length=200, blank=True)
+    subject = models.CharField(max_length=500, blank=True)
+    html = models.TextField(blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='sending', db_index=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'sdr_email_send'
+        ordering = ['-created_at']
+
+
+class SDREmailSendRecipient(models.Model):
+    """One lead of an SDREmailSend: sent once at most (unique per send), or skipped/failed with the reason."""
+    STATUS_CHOICES = [('queued', 'Queued'), ('sent', 'Sent'), ('skipped', 'Skipped'), ('failed', 'Failed')]
+
+    send = models.ForeignKey(SDREmailSend, on_delete=models.CASCADE, related_name='recipients')
+    lead = models.ForeignKey(SDRLead, on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name='email_send_recipients')
+    email = models.CharField(max_length=255)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='queued', db_index=True)
+    error = models.CharField(max_length=500, blank=True)
+    attempts = models.IntegerField(default=0)
+    sent_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        db_table = 'sdr_email_send_recipient'
+        constraints = [models.UniqueConstraint(fields=['send', 'lead'], name='sdr_email_send_recipient_once')]

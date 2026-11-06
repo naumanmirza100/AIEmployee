@@ -10,12 +10,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   LayoutDashboard, Users, Mail, Calendar, BarChart3,
-  RefreshCw, Menu, Check, Settings, Sparkles,
+  RefreshCw, Menu, Check, Settings, Sparkles, FileCode,
 } from 'lucide-react';
 
 import SDROverviewTab from './SDROverviewTab';
 import SDRLeadsTab from './SDRLeadsTab';
 import SDROutreachTab from './SDROutreachTab';
+import SDREmailTemplatesTab from './SDREmailTemplatesTab';
 import SDRMeetingsTab from './SDRMeetingsTab';
 import SDRAnalyticsTab from './SDRAnalyticsTab';
 import SDRCRMSyncTab from './SDRCRMSyncTab';
@@ -27,6 +28,7 @@ const TAB_ITEMS = [
   { value: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { value: 'leads',     icon: Users,           label: 'Leads' },
   { value: 'outreach',  icon: Mail,            label: 'Outreach' },
+  { value: 'email-templates', icon: FileCode,   label: 'Email Templates' },
   { value: 'meetings',  icon: Calendar,        label: 'Meetings' },
   { value: 'analytics', icon: BarChart3,       label: 'Analytics' },
   { value: 'email-assistant', icon: Sparkles,  label: 'Email Assistant' },
@@ -38,6 +40,7 @@ const PATH_TO_TAB = {
   dashboard: 'dashboard',
   leads:     'leads',
   outreach:  'outreach',
+  'email-templates': 'email-templates',
   meetings:  'meetings',
   analytics: 'analytics',
   'email-assistant': 'email-assistant',
@@ -49,6 +52,7 @@ const TAB_TO_PATH = {
   dashboard: 'dashboard',
   leads:     'leads',
   outreach:  'outreach',
+  'email-templates': 'email-templates',
   meetings:  'meetings',
   analytics: 'analytics',
   'email-assistant': 'email-assistant',
@@ -89,6 +93,9 @@ const SDRDashboard = () => {
         </TabsContent>
         <TabsContent value="outreach" className="mt-4">
           <SDROutreachTab />
+        </TabsContent>
+        <TabsContent value="email-templates" className="mt-4">
+          <SDREmailTemplatesTab />
         </TabsContent>
         <TabsContent value="meetings" className="mt-4">
           <SDRMeetingsTab />

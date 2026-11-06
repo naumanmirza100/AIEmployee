@@ -32,7 +32,7 @@ from api.permissions import IsCompanyUserOnly
 from ai_sdr_agent.models import (
     SDRIcpProfile, SDRLead, SDRLeadResearchJob,
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
-    SDRAgentSettings, SDRReplyDraft,
+    SDRAgentSettings, SDRReplyDraft, SDREmailTemplate, SDREmailSend, SDREmailSendRecipient,
 )
 from ai_sdr_agent.agents.lead_research_agent import (
     ApifyApprovalRequired, ApifyUnreachable, LeadResearchAgent, NoLeadSource, apify_actor_page_url,
@@ -4713,3 +4713,243 @@ def sdr_booking_confirm(request, token):
         'sender_name': campaign.sender_name if campaign else '',
         'meet_link': meet_link,
     })
+
+
+# ==========================================================================
+# Email templates and industry sends (the Email Templates tab)
+# ==========================================================================
+
+def _serialize_email_template(t: SDREmailTemplate, with_html=True) -> dict:
+    data = {'id': t.id, 'name': t.name, 'subject': t.subject,
+            'created_at': t.created_at.isoformat(), 'updated_at': t.updated_at.isoformat()}
+    if with_html:
+        data['html'] = t.html
+    return data
+
+
+def _email_template_fields(d) -> tuple:
+    """(fields, error) for a template from a request: a name, a subject and the HTML, within their lengths."""
+    name = ' '.join(str(d.get('name') or '').split())
+    subject = ' '.join(str(d.get('subject') or '').split())
+    html = d.get('html') if isinstance(d.get('html'), str) else ''
+    if not name:
+        return None, 'Give the template a name.'
+    if len(name) > 200 or len(subject) > 500:
+        return None, 'The name can be at most 200 characters and the subject 500.'
+    if len(html) > 500_000:
+        return None, 'The HTML is too long (at most 500,000 characters).'
+    return {'name': name, 'subject': subject, 'html': html}, None
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_templates(request):
+    """GET: the user's templates (no HTML: the list does not need it). POST {name, subject, html}: a new one."""
+    from ai_sdr_agent.email_templates import STARTER_HTML, VARIABLES
+    company_user = request.user
+    if request.method == 'GET':
+        return Response({'status': 'success',
+                         'data': [_serialize_email_template(t, with_html=False)
+                                  for t in SDREmailTemplate.objects.filter(company_user=company_user)],
+                         'variables': [f'{{{v}}}' for v in VARIABLES], 'starter_html': STARTER_HTML})
+    fields, error = _email_template_fields(request.data)
+    if error:
+        return Response({'status': 'error', 'message': error}, status=400)
+    t = SDREmailTemplate.objects.create(company_user=company_user, **fields)
+    return Response({'status': 'success', 'data': _serialize_email_template(t)}, status=201)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_template_detail(request, template_id):
+    t = SDREmailTemplate.objects.filter(company_user=request.user, pk=template_id).first()
+    if not t:
+        return Response({'status': 'error', 'message': 'Template not found.'}, status=404)
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': _serialize_email_template(t)})
+    if request.method == 'DELETE':
+        t.delete()   # sends already started keep their own copy of it
+        return Response({'status': 'success', 'message': f'Deleted the template "{t.name}".'})
+    fields, error = _email_template_fields(request.data)
+    if error:
+        return Response({'status': 'error', 'message': error}, status=400)
+    for k, v in fields.items():
+        setattr(t, k, v)
+    t.save()
+    return Response({'status': 'success', 'data': _serialize_email_template(t)})
+
+
+def _industry_leads(company_user, industry):
+    """The user's leads of that industry (any capitalisation) that have an email address."""
+    return (SDRLead.objects.filter(company_user=company_user, company_industry__iexact=industry)
+            .exclude(email='').order_by('id'))
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_template_preview(request):
+    """A template as one lead will see it: the editor's subject and HTML (saved or not) with a real lead's details —
+    of ``industry`` if given, else the user's latest leads; a sample lead when there are none. ``campaign_id``
+    (optional) fills the sender's details. Body: {subject, html, industry?, campaign_id?, lead_index?}."""
+    from ai_sdr_agent.email_templates import render, unknown_variables
+
+    company_user = request.user
+    d = request.data
+    subject = d.get('subject') if isinstance(d.get('subject'), str) else ''
+    html = d.get('html') if isinstance(d.get('html'), str) else ''
+    industry = ' '.join(str(d.get('industry') or '').split())
+    campaign = None
+    if str(d.get('campaign_id') or '').isdigit():
+        campaign = SDRCampaign.objects.filter(company_user=company_user, pk=int(d['campaign_id'])).first()
+    campaign = campaign or SDRCampaign.objects.filter(company_user=company_user).order_by('-id').first()
+
+    pool = _industry_leads(company_user, industry) if industry else \
+        SDRLead.objects.filter(company_user=company_user).exclude(email='').order_by('-created_at')
+    leads = list(pool[:20])
+    try:
+        index = int(d.get('lead_index') or 0) % len(leads) if leads else 0
+    except (TypeError, ValueError):
+        index = 0
+    lead = leads[index] if leads else SDRLead(
+        company_user=company_user, first_name='Alex', last_name='Morgan', full_name='Alex Morgan',
+        email='alex@example.com', company_name='Northwind Dental', job_title='Practice Owner',
+        company_industry=industry or 'Medical Practice', company_location='Leeds, United Kingdom')
+    rendered_subject, rendered_html, _ = render(html, subject, lead, campaign, '#unsubscribe')
+    return Response({
+        'status': 'success', 'subject': rendered_subject, 'html': rendered_html,
+        'lead': {'name': lead.display_name, 'email': lead.email, 'company': lead.company_name, 'sample': not leads},
+        'lead_index': index, 'lead_count': len(leads),
+        'unknown_variables': unknown_variables(subject, html),
+    })
+
+
+def _mailbox_ready(campaign) -> bool:
+    return bool(campaign.smtp_host and campaign.smtp_username and campaign.smtp_password)
+
+
+def _serialize_email_send(send: SDREmailSend) -> dict:
+    counts = dict(send.recipients.values_list('status').annotate(n=Count('id')))
+    return {
+        'id': send.id, 'status': send.status, 'industry': send.industry,
+        'template_id': send.template_id, 'template_name': send.template_name, 'subject': send.subject,
+        'campaign_id': send.campaign_id, 'campaign_name': send.campaign.name if send.campaign else '',
+        'counts': {k: counts.get(k, 0) for k in ('queued', 'sent', 'skipped', 'failed')},
+        'total': sum(counts.values()),
+        'created_at': send.created_at.isoformat(),
+        'finished_at': send.finished_at.isoformat() if send.finished_at else None,
+    }
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_sends(request):
+    """GET: the user's sends, newest first, and the campaign mailboxes they can go out through (with what is left of
+    today's limit). POST {template_id, campaign_id, industry, dry_run?}: send the template to the industry's leads.
+    With dry_run, only the numbers: who would get it, who would be skipped and why. The scheduler sends it a few
+    at a time (send_email_sends_impl)."""
+    from ai_sdr_agent.email_templates import unknown_variables
+    from ai_sdr_agent.tasks import _mailbox_sent_today, _send_limits
+    from core.do_not_email import blocked_among
+
+    company_user = request.user
+    if request.method == 'GET':
+        day_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        _, daily_cap = _send_limits()
+        mailboxes = [{
+            'campaign_id': c.id, 'campaign_name': c.name, 'ready': _mailbox_ready(c),
+            'from_email': c.from_email or c.smtp_username, 'sender_name': c.sender_name,
+            'sender_company': c.sender_company,
+            'left_today': max(0, daily_cap - _mailbox_sent_today(c, day_start)) if _mailbox_ready(c) else 0,
+        } for c in SDRCampaign.objects.filter(company_user=company_user).order_by('-id')]
+        sends = SDREmailSend.objects.filter(company_user=company_user).select_related('campaign')[:50]
+        return Response({'status': 'success', 'data': [_serialize_email_send(x) for x in sends],
+                         'mailboxes': mailboxes, 'daily_limit': daily_cap})
+
+    d = request.data
+    template = SDREmailTemplate.objects.filter(company_user=company_user, pk=d.get('template_id') or 0).first() \
+        if str(d.get('template_id') or '').isdigit() else None
+    campaign = SDRCampaign.objects.filter(company_user=company_user, pk=d.get('campaign_id') or 0).first() \
+        if str(d.get('campaign_id') or '').isdigit() else None
+    industry = ' '.join(str(d.get('industry') or '').split())
+    if not template:
+        return Response({'status': 'error', 'message': 'Choose one of your templates.'}, status=400)
+    if not campaign:
+        return Response({'status': 'error', 'message': 'Choose the campaign whose mailbox it goes out through.'},
+                        status=400)
+    if not _mailbox_ready(campaign):
+        return Response({'status': 'error', 'message': f'The campaign "{campaign.name}" has no mailbox set up yet: '
+                                                       'add its SMTP settings first.'}, status=400)
+    if not industry:
+        return Response({'status': 'error', 'message': 'Choose the industry of the leads to send it to.'}, status=400)
+    if not template.html.strip():
+        return Response({'status': 'error', 'message': 'The template is empty.'}, status=400)
+    unknown = unknown_variables(template.subject, template.html)
+    if unknown:
+        return Response({'status': 'error', 'code': 'unknown_variables', 'unknown_variables': unknown,
+                         'message': f'The template has {", ".join(unknown)}, which no lead has a value for. '
+                                    'Fix it before sending.'}, status=400)
+
+    leads = list(_industry_leads(company_user, industry))
+    blocked = blocked_among(company_user.company, [l.email for l in leads])
+    seen, rows = set(), []
+    for lead in leads:
+        addr = lead.email.strip().lower()
+        if addr in seen:
+            continue                                     # two leads with one address get one email
+        seen.add(addr)
+        skip = ('On the do-not-email list.' if addr in blocked
+                else 'This address bounced before.' if lead.email_bounced else '')
+        rows.append((lead, addr, skip))
+    will_send = sum(1 for *_, skip in rows if not skip)
+    summary = {'will_send': will_send, 'skipped': len(rows) - will_send, 'leads': len(leads)}
+    if d.get('dry_run') is True:
+        return Response({'status': 'success', **summary})
+    if not will_send:
+        return Response({'status': 'error', 'message': f'No lead of "{industry}" can be emailed.', **summary},
+                        status=400)
+
+    send = SDREmailSend.objects.create(
+        company_user=company_user, template=template, campaign=campaign, industry=industry,
+        template_name=template.name, subject=template.subject, html=template.html)
+    SDREmailSendRecipient.objects.bulk_create([
+        SDREmailSendRecipient(send=send, lead=lead, email=addr, status='skipped' if skip else 'queued', error=skip)
+        for lead, addr, skip in rows])
+    return Response({'status': 'success', 'data': _serialize_email_send(send), **summary,
+                     'message': f'Sending to {will_send} lead(s) of "{industry}" — a few at a time, within the '
+                                "mailbox's daily limit."}, status=201)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_send_detail(request, send_id):
+    """A send's progress and its recipients (the first 500), each with its status and any reason."""
+    send = SDREmailSend.objects.filter(company_user=request.user, pk=send_id).select_related('campaign').first()
+    if not send:
+        return Response({'status': 'error', 'message': 'Send not found.'}, status=404)
+    recipients = [{
+        'email': r.email, 'name': r.lead.display_name if r.lead else '', 'status': r.status, 'error': r.error,
+        'sent_at': r.sent_at.isoformat() if r.sent_at else None,
+    } for r in send.recipients.select_related('lead').order_by('id')[:500]]
+    return Response({'status': 'success', 'data': {**_serialize_email_send(send), 'recipients': recipients}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_send_stop(request, send_id):
+    """Stop a send: its leads not yet emailed are not emailed; those already emailed stay so."""
+    send = SDREmailSend.objects.filter(company_user=request.user, pk=send_id).first()
+    if not send:
+        return Response({'status': 'error', 'message': 'Send not found.'}, status=404)
+    if send.status != 'sending':
+        return Response({'status': 'error', 'message': 'This send has already finished.'}, status=400)
+    stopped = send.recipients.filter(status='queued').update(status='skipped', error='The send was stopped.')
+    send.status, send.finished_at = 'stopped', timezone.now()
+    send.save(update_fields=['status', 'finished_at'])
+    return Response({'status': 'success', 'message': f'Stopped — {stopped} lead(s) will not be emailed.',
+                     'data': _serialize_email_send(send)})

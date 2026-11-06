@@ -28,6 +28,27 @@ def _send_limits():
     )
 
 
+def _mailbox_sent_today(campaign, day_start) -> int:
+    """Emails sent through this campaign's mailbox since ``day_start``: its steps and the industry sends that go out
+    through it (SDREmailSend). They share the mailbox's daily limit, so neither can push it past _send_limits()."""
+    from ai_sdr_agent.models import SDREmailSendRecipient, SDROutreachLog
+    return (SDROutreachLog.objects.filter(enrollment__campaign=campaign, status='sent', action_type='email',
+                                          sent_at__gte=day_start).count()
+            + SDREmailSendRecipient.objects.filter(send__campaign=campaign, status='sent',
+                                                   sent_at__gte=day_start).count())
+
+
+def _emailed_today(email_addr: str, day_start, exclude_campaign=None) -> bool:
+    """A lead gets at most one email a day, from any campaign or industry send."""
+    from ai_sdr_agent.models import SDREmailSendRecipient, SDROutreachLog
+    logs = SDROutreachLog.objects.filter(enrollment__lead__email__iexact=email_addr, status='sent',
+                                         sent_at__gte=day_start)
+    if exclude_campaign is not None:
+        logs = logs.exclude(enrollment__campaign=exclude_campaign)
+    return logs.exists() or SDREmailSendRecipient.objects.filter(
+        email__iexact=email_addr, status='sent', sent_at__gte=day_start).exists()
+
+
 def _has_sdr_access(company, cache: dict) -> bool:
     """True if ``company`` has an active AI SDR subscription.
 
@@ -120,12 +141,8 @@ def send_due_steps_impl():
 
         # Send throttle: a big campaign must not blast every lead in one burst
         # (each send is an LLM call + an SMTP round trip, and bursts hurt deliverability).
-        from ai_sdr_agent.models import SDROutreachLog as _Log
         cycle_cap, daily_cap = _send_limits()
-        sent_today = _Log.objects.filter(
-            enrollment__campaign=campaign, status='sent', action_type='email',
-            sent_at__gte=now.replace(hour=0, minute=0, second=0, microsecond=0),
-        ).count()
+        sent_today = _mailbox_sent_today(campaign, now.replace(hour=0, minute=0, second=0, microsecond=0))
         campaign_budget = max(0, min(cycle_cap, daily_cap - sent_today))
         campaign_sent = 0
         if campaign_budget == 0:
@@ -169,13 +186,9 @@ def send_due_steps_impl():
             # email per day across ALL campaigns. This prevents a lead in
             # Campaign A and Campaign B from getting 2 emails on Day 1.
             if lead_email:
-                from ai_sdr_agent.models import SDROutreachLog
                 today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                already_emailed_today = SDROutreachLog.objects.filter(
-                    enrollment__lead__email__iexact=lead_email,
-                    status='sent',
-                    sent_at__gte=today_start,
-                ).exclude(enrollment__campaign=campaign).exists()
+                # Industry sends (SDREmailSend) count too.
+                already_emailed_today = _emailed_today(lead_email, today_start, exclude_campaign=campaign)
                 if already_emailed_today:
                     logger.warning(
                         "SDR [CROSS-CAMPAIGN-DAILY] enrollment=%d lead=%s email=%s "
@@ -1108,3 +1121,109 @@ def qualify_queue_impl():
 @shared_task(bind=True, name='ai_sdr_agent.tasks.qualify_queue_task', max_retries=1)
 def qualify_queue_task(self):
     return qualify_queue_impl()
+
+
+
+# ==========================================================================
+# Industry sends — a user's HTML template to the leads of one industry
+# ==========================================================================
+
+def send_email_sends_impl():
+    """Send the queued recipients of every running SDREmailSend, a few at a time: within the campaign mailbox's
+    limits it shares with the campaigns (_mailbox_sent_today), one email per lead per day, never to the
+    do-not-email list. Each email is the template rendered for its lead, as HTML with its plain text."""
+    from django.utils import timezone as tz
+
+    from ai_sdr_agent.agents.meeting_scheduling_agent import _backend_base
+    from ai_sdr_agent.agents.outreach_agent import (
+        MAX_SEND_ATTEMPTS, MailboxRefusedError, OnDoNotEmailList, OutreachAgent, PermanentSendError,
+        is_email_suppressed, make_unsubscribe_token,
+    )
+    from ai_sdr_agent.email_templates import render
+    from ai_sdr_agent.models import SDREmailSend
+    from core.do_not_email import BOUNCED, block
+
+    now = tz.now()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    cycle_cap, daily_cap = _send_limits()
+    access, sent_this_run = {}, set()
+    totals = {'sent': 0, 'skipped': 0, 'failed': 0}
+
+    for send in SDREmailSend.objects.filter(status='sending').select_related('campaign', 'company_user__company'):
+        company_user, campaign = send.company_user, send.campaign
+        queued = send.recipients.filter(status='queued').select_related('lead').order_by('id')
+        if campaign is None:
+            queued.update(status='failed', error='The campaign whose mailbox this used was deleted.')
+        if campaign is None or not queued.exists():
+            send.status, send.finished_at = 'done', now
+            send.save(update_fields=['status', 'finished_at'])
+            continue
+        if not _has_sdr_access(company_user.company, access):
+            continue
+        budget = max(0, min(cycle_cap, daily_cap - _mailbox_sent_today(campaign, day_start)))
+        if not budget:
+            logger.info("SDR [email-sends] send=%d mailbox of campaign=%d at its daily limit", send.id, campaign.id)
+            continue
+
+        agent = OutreachAgent(company=company_user.company, needs_ai=False)
+        sent = 0
+        for r in queued[:budget * 4]:          # some wait for tomorrow (emailed today already)
+            if sent >= budget:
+                break
+            addr = (r.email or '').strip().lower()
+            if not addr or addr in sent_this_run or _emailed_today(addr, day_start):
+                continue
+            lead = r.lead
+            if lead is None or lead.is_deleted:
+                r.status, r.error = 'skipped', 'The lead was deleted.'
+                r.save(update_fields=['status', 'error'])
+                totals['skipped'] += 1
+                continue
+            if lead.email_bounced or is_email_suppressed(company_user, addr):
+                r.status, r.error = 'skipped', 'On the do-not-email list or bounced.'
+                r.save(update_fields=['status', 'error'])
+                totals['skipped'] += 1
+                continue
+
+            url = f"{_backend_base()}/api/sdr/unsubscribe/{make_unsubscribe_token(0, company_user.company_id, addr)}/"
+            subject, html, text = render(send.html, send.subject, lead, campaign, url)
+            sent_this_run.add(addr)
+            r.attempts += 1
+            try:
+                agent.send_email(campaign, addr, subject, text, unsubscribe_url=url, html=html)
+            except OnDoNotEmailList:
+                r.status, r.error = 'skipped', 'On the do-not-email list.'
+                totals['skipped'] += 1
+            except PermanentSendError as exc:
+                # The address does not exist: never again, from any campaign or send.
+                r.status, r.error = 'failed', str(exc)[:500]
+                lead.email_bounced, lead.email_bounced_at = True, now
+                lead.email_bounce_reason = str(exc)[:500]
+                lead.save(update_fields=['email_bounced', 'email_bounced_at', 'email_bounce_reason'])
+                block(company_user.company_id, addr, BOUNCED, source='ai_sdr')
+                totals['failed'] += 1
+            except MailboxRefusedError as exc:
+                # The mailbox itself will not send: the same for every lead, so this send waits for the next run.
+                r.error = f'The mailbox would not send: {exc}'[:500]
+                r.save(update_fields=['attempts', 'error'])
+                logger.warning("SDR [email-sends] send=%d mailbox refused: %s", send.id, exc)
+                break
+            except Exception as exc:
+                r.error = str(exc)[:500]
+                if r.attempts >= MAX_SEND_ATTEMPTS:
+                    r.status = 'failed'
+                    totals['failed'] += 1
+                logger.error("SDR [email-sends] send=%d to=%s failed: %s", send.id, addr, exc)
+            else:
+                r.status, r.error, r.sent_at = 'sent', '', tz.now()
+                sent += 1
+                totals['sent'] += 1
+            r.save(update_fields=['status', 'error', 'attempts', 'sent_at'])
+
+        if not send.recipients.filter(status='queued').exists():
+            send.status, send.finished_at = 'done', tz.now()
+            send.save(update_fields=['status', 'finished_at'])
+
+    if any(totals.values()):
+        logger.info("SDR [email-sends] sent=%(sent)d skipped=%(skipped)d failed=%(failed)d", totals)
+    return totals

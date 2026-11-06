@@ -904,7 +904,9 @@ Rules:
     # ------------------------------------------------------------------
 
     def send_email(self, campaign, to_email: str, subject: str, body: str,
-                   unsubscribe_url: str = '', in_reply_to: str = '') -> None:
+                   unsubscribe_url: str = '', in_reply_to: str = '', html: str = '') -> None:
+        """Send one email from the campaign's mailbox. ``html`` (optional) goes with the plain text as its HTML
+        version: the user's own templates (ai_sdr_agent/email_templates.py). Campaign steps send plain text."""
         refuse_if_suppressed(campaign.company_user, to_email)
         if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
             raise ValueError(
@@ -925,6 +927,7 @@ Rules:
                 body=body,
                 unsubscribe_url=unsubscribe_url,
                 in_reply_to=in_reply_to,
+                html=html,
             )
             return
 
@@ -946,13 +949,14 @@ Rules:
                 from_email=from_header,
                 recipient_list=[to_email],
                 fail_silently=False,
+                html_message=html or None,
             )
         except Exception as exc:
             raise ValueError(f"Email send failed: {exc}") from exc
 
     def _send_via_smtp(self, host, port, username, password, use_tls,
                        from_addr, display_name, to_email, subject, body,
-                       unsubscribe_url: str = '', in_reply_to: str = '') -> None:
+                       unsubscribe_url: str = '', in_reply_to: str = '', html: str = '') -> None:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
         msg['From'] = f"{display_name} <{from_addr}>" if display_name else from_addr
@@ -969,6 +973,9 @@ Rules:
             msg['List-Unsubscribe'] = f"<{unsubscribe_url}>"
             msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        if html:
+            # Last part = the one mail apps show; the plain text stays for the rest (and for spam filters).
+            msg.attach(MIMEText(html, 'html', 'utf-8'))
 
         host_error = validate_mail_server(host, port, 'smtp')
         if host_error:
