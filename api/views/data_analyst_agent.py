@@ -2,7 +2,8 @@
 
   GET    data-analyst/setup                  our server's address to allow, the kinds of database, the file limit
   GET    data-analyst/sources                the databases this login may ask (owners and admins: all)
-  POST   data-analyst/sources                owner/admin: a connection (JSON) or a SQLite file (multipart)
+  POST   data-analyst/sources                owner/admin: a connection (JSON: PostgreSQL, MySQL, or a MongoDB
+                                             connection string) or a SQLite file (multipart)
   GET    data-analyst/sources/<id>           one source (never its password)
   PATCH  data-analyst/sources/<id>           owner/admin: change it
   DELETE data-analyst/sources/<id>           owner/admin: remove it, its file and its questions
@@ -33,8 +34,8 @@ from rest_framework.throttling import SimpleRateThrottle
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.api_key_service import KeyServiceError
-from data_analyst_agent import connectors, engine
-from data_analyst_agent.guards import Refused, check_sql
+from data_analyst_agent import connectors, engine, mongo
+from data_analyst_agent.guards import Refused, check_query
 from data_analyst_agent.models import DataQuestion, DataSource
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,8 @@ def _serialize(source: DataSource, request) -> dict:
         out.update({'host': source.host, 'port': source.port, 'database': source.database,
                     'username': source.username, 'use_ssl': source.use_ssl,
                     'has_password': bool(source.password_encrypted)})
+        if source.kind == DataSource.KIND_MONGO:
+            out['use_srv'] = source.use_srv
     else:
         out.update({'file_name': source.file_name, 'file_size': source.file_size})
     if _is_admin(request):
@@ -125,9 +128,38 @@ def _bool(value, default):
     return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
+def _apply_mongo_fields(source: DataSource, data, text):
+    """MongoDB: a mongodb:// or mongodb+srv:// string first, then the fields sent. A database name typed beside the
+    string wins over the string's (an app's string often has none, and its data is then in "test")."""
+    if text:
+        parsed = mongo.parse_uri(text)
+        source.kind, source.use_srv, source.use_ssl = DataSource.KIND_MONGO, parsed['srv'], parsed['tls']
+        source.host, source.port, source.options = parsed['host'], parsed['port'], parsed['options']
+        source.database, source.username = parsed['database'], parsed['username']
+        if parsed['password']:
+            source.set_password(parsed['password'])
+    for field in ('host', 'database', 'username'):
+        if str(data.get(field) or '').strip():
+            setattr(source, field, str(data.get(field)).strip()[:255])
+    if str(data.get('port') or '').strip().isdigit():
+        source.port = int(str(data.get('port')).strip())
+    if str(data.get('password') or '').strip():
+        source.set_password(str(data.get('password')))
+    if 'use_ssl' in data and not text:
+        source.use_ssl = _bool(data.get('use_ssl'), True)
+    if not source.host:
+        raise Refused('Paste the MongoDB connection string, e.g. '
+                      'mongodb+srv://reader:password@cluster0.example.mongodb.net/your_db')
+    if not source.username:
+        raise Refused('The connection string needs a user (reader:password@...): a user that can only read.')
+
+
 def _apply_connection_fields(source: DataSource, data):
     """Copy the connection fields sent, a pasted connection string first. A password left blank keeps the saved one."""
     text = str(data.get('connection_string') or '').strip()
+    if text.lower().startswith(('mongodb://', 'mongodb+srv://')) or (not text and source.kind == DataSource.KIND_MONGO):
+        _apply_mongo_fields(source, data, text)
+        return
     if text:
         from sqlalchemy.engine import make_url
         try:
@@ -137,7 +169,8 @@ def _apply_connection_fields(source: DataSource, data):
         driver = url.drivername.split('+')[0].lower()
         kind = {'postgresql': 'postgres', 'postgres': 'postgres', 'mysql': 'mysql', 'mariadb': 'mysql'}.get(driver)
         if kind is None:
-            raise Refused('A connection string must start with postgresql://, mysql:// or mariadb://.')
+            raise Refused('A connection string must start with postgresql://, mysql://, mariadb://, mongodb:// or '
+                          'mongodb+srv://.')
         source.kind, source.host, source.port = kind, url.host or '', url.port
         source.database, source.username = url.database or '', url.username or ''
         if url.password:
@@ -157,7 +190,7 @@ def _apply_connection_fields(source: DataSource, data):
     if 'use_ssl' in data:
         source.use_ssl = _bool(data.get('use_ssl'), True)
     if source.kind not in DataSource.CONNECTION_KINDS:
-        raise Refused('Choose PostgreSQL or MySQL / MariaDB.')
+        raise Refused('Choose PostgreSQL, MySQL / MariaDB or MongoDB.')
     if not source.host or not source.database or not source.username:
         raise Refused('Give the host, the database name and the user.')
 
@@ -216,6 +249,10 @@ def _test(source: DataSource):
         source.user_can_write = connectors.can_write(source)
         source.status, source.last_error = DataSource.STATUS_READY, ''
         source.save()
+        if source.kind == DataSource.KIND_MONGO:
+            if not tables:
+                return True, f'Connected to "{source.database}", but this user can read no collection there.'
+            return True, f'Connected to "{source.database}". {len(tables)} collection(s) read.'
         if not tables:
             return True, 'Connected, but no tables were found that this user can read.'
         return True, f'Connected. {len(tables)} table(s) and view(s) read.'
@@ -267,7 +304,7 @@ def sources(request):
             source.kind = str(data.get('kind') or '').strip()
             _apply_connection_fields(source, data)
         if not source.name:
-            source.name = (source.file_name or source.database or 'Database')[:120]
+            source.name = (source.file_name or source.database or (source.host or '').split('.')[0] or 'Database')[:120]
     except Refused as exc:
         return _err(str(exc))
     with transaction.atomic():
@@ -389,7 +426,8 @@ def _rerun(request, record, max_rows):
         raise Refused('This question has no query to run.')
     if not record.source.may_ask(request.user):
         raise Refused('You may not ask this database any more.')
-    return connectors.run(record.source, check_sql(record.sql, record.source.kind), max_rows=max_rows)
+    checked = check_query(record.sql, record.source.kind, engine.collections(record.source))
+    return connectors.run(record.source, checked, max_rows=max_rows)
 
 
 @api_view(['POST'])

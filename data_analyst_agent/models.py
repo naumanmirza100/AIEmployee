@@ -2,7 +2,8 @@
 
 What is stored here, and what never is:
   * a source: how to reach the company's database (its password encrypted), or where its uploaded SQLite file is
-    kept, and the list of its tables and columns (names, types, keys: never a value);
+    kept, and the list of its tables and columns (names, types, keys: never a value). For MongoDB (6 Nov 2026): its
+    collections and the fields a sample of each showed, with their types;
   * each question: who asked, the answer, the SQL that ran, the result's column names and row count.
 Never a row of the company's data: a result is shown once and run again when it is opened later (decided 3 Nov 2026).
 """
@@ -17,12 +18,14 @@ class DataSource(models.Model):
     KIND_POSTGRES = 'postgres'
     KIND_MYSQL = 'mysql'
     KIND_SQLITE = 'sqlite'
+    KIND_MONGO = 'mongodb'
     KIND_CHOICES = [
         (KIND_POSTGRES, 'PostgreSQL'),
         (KIND_MYSQL, 'MySQL / MariaDB'),
+        (KIND_MONGO, 'MongoDB'),
         (KIND_SQLITE, 'SQLite file'),
     ]
-    CONNECTION_KINDS = (KIND_POSTGRES, KIND_MYSQL)
+    CONNECTION_KINDS = (KIND_POSTGRES, KIND_MYSQL, KIND_MONGO)
 
     STATUS_NEW = 'new'
     STATUS_READY = 'ready'
@@ -42,6 +45,10 @@ class DataSource(models.Model):
     username = models.CharField(max_length=255, blank=True, default='')
     password_encrypted = models.TextField(blank=True, default='')
     use_ssl = models.BooleanField(default=True)
+    #: MongoDB: a mongodb+srv:// name, whose service record names the servers (MongoDB Atlas).
+    use_srv = models.BooleanField(default=False)
+    #: MongoDB: the connection options kept from its string (authSource, authMechanism, replicaSet), nothing else.
+    options = models.JSONField(default=dict, blank=True)
 
     # An uploaded SQLite file: kept under LOCAL_STORAGE_ROOT/data_analyst, never served, deleted with the source
     file_path = models.CharField(max_length=500, blank=True, default='')

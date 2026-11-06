@@ -84,3 +84,7 @@ faiss-cpu==1.13.1
 google-api-python-client==2.198.0
 google-auth==2.55.2
 google-auth-httplib2==0.4.0
+# AI Data Analyst: MongoDB databases (6 Nov 2026). dnspython reads mongodb+srv:// service records; both pinned, so a
+# rebuild can't move them (kombu, 3 Nov 2026)
+pymongo==4.15.5
+dnspython==2.7.0
