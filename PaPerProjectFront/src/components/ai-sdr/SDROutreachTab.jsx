@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import SdrSelect from './SdrSelect';
 import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import {
   Mail, Linkedin, Plus, RefreshCw, Trash2, Users, ChevronLeft,
@@ -14,7 +15,7 @@ import {
   listCampaigns, createCampaign, deleteCampaign, updateCampaign,
   getCampaignDetail, getCampaignSteps, generateSequenceSteps,
   getCampaignContacts, enrollLeads, updateCampaignStep, listLeads,
-  clearCampaignLeads, retryFailedLeads,
+  clearCampaignLeads, retryFailedLeads, resetEnrollment,
 } from '@/services/aiSdrService';
 import SDRReplyDrafts from './SDRReplyDrafts';
 
@@ -265,10 +266,8 @@ const EditStepModal = ({ step, onChange, onSave, onClose, saving }) => {
             </div>
             <div>
               <label style={labelStyle}>Type</label>
-              <select value={step.step_type} onChange={e => onChange(p => ({ ...p, step_type: e.target.value }))} style={inputStyle}>
-                <option value="email">Email</option>
-                <option value="linkedin">LinkedIn</option>
-              </select>
+              <SdrSelect value={step.step_type} onChange={v => onChange(p => ({ ...p, step_type: v }))} style={inputStyle}
+                options={[{ value: 'email', label: 'Email' }, { value: 'linkedin', label: 'LinkedIn' }]} />
             </div>
             <div>
               <label style={labelStyle}>Day (from start)</label>
@@ -968,14 +967,13 @@ const SDROutreachTab = () => {
                     {/* Provider picker */}
                     <div style={{ gridColumn: '1 / -1' }}>
                       <label style={labelStyle}>Email Provider</label>
-                      <select
+                      <SdrSelect
                         value={detectProvider(newCampaign.smtp_host)}
-                        onChange={e => applySmtpProvider(e.target.value, setNewCampaign)}
-                        style={{ ...inputStyle, cursor: 'pointer', background: 'var(--sfc-1a0a35)', color: 'var(--text-soft)' }}
-                      >
-                        <option value="" disabled style={{ background: 'var(--sfc-1a0a35)', color: '#6b7280' }}>Select provider to auto-fill…</option>
-                        {SMTP_PROVIDERS.map(p => <option key={p.key} value={p.key} style={{ background: 'var(--sfc-1a0a35)', color: 'var(--text-soft)' }}>{p.label}</option>)}
-                      </select>
+                        onChange={v => applySmtpProvider(v, setNewCampaign)}
+                        style={{ ...inputStyle, background: 'var(--sfc-1a0a35)', color: 'var(--text-soft)' }}
+                        placeholder="Select provider to auto-fill…"
+                        options={SMTP_PROVIDERS.map(p => ({ value: p.key, label: p.label }))}
+                      />
                     </div>
                     {/* Gmail App-Password hint */}
                     {detectProvider(newCampaign.smtp_host) === 'gmail' && (
@@ -1728,14 +1726,13 @@ const SDROutreachTab = () => {
                   {/* Provider picker */}
                   <div style={{ gridColumn: '1 / -1' }}>
                     <label style={labelStyle}>Email Provider</label>
-                    <select
+                    <SdrSelect
                       value={detectProvider(settingsDraft.smtp_host || '')}
-                      onChange={e => applySmtpProvider(e.target.value, setSettingsDraft)}
-                      style={{ ...inputStyle, cursor: 'pointer', background: 'var(--sfc-1a0a35)', color: 'var(--text-soft)' }}
-                    >
-                      <option value="" disabled style={{ background: 'var(--sfc-1a0a35)', color: '#6b7280' }}>Select provider to auto-fill…</option>
-                      {SMTP_PROVIDERS.map(p => <option key={p.key} value={p.key} style={{ background: 'var(--sfc-1a0a35)', color: 'var(--text-soft)' }}>{p.label}</option>)}
-                    </select>
+                      onChange={v => applySmtpProvider(v, setSettingsDraft)}
+                      style={{ ...inputStyle, background: 'var(--sfc-1a0a35)', color: 'var(--text-soft)' }}
+                      placeholder="Select provider to auto-fill…"
+                      options={SMTP_PROVIDERS.map(p => ({ value: p.key, label: p.label }))}
+                    />
                   </div>
                   {/* Gmail App-Password hint */}
                   {detectProvider(settingsDraft.smtp_host || '') === 'gmail' && (

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import SdrSelect from './SdrSelect';
 import { Sparkles, Copy, Loader2, MailOpen, PenLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -136,10 +137,8 @@ const SDREmailAssistantTab = () => {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div>
             <span style={label}>Sender and offer from a campaign (optional)</span>
-            <select data-testid="sdr-assistant-campaign" style={input} value={campaignId} onChange={e => setCampaignId(e.target.value)}>
-              <option value="">None: use what I type</option>
-              {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <SdrSelect data-testid="sdr-assistant-campaign" style={input} value={campaignId} onChange={setCampaignId}
+              options={[{ value: '', label: 'None: use what I type' }, ...campaigns.map(c => ({ value: String(c.id), label: c.name }))]} />
           </div>
           <div>
             <span style={label}>What you offer (the AI uses only this)</span>

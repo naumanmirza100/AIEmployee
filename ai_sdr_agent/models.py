@@ -30,6 +30,9 @@ class SDRIcpProfile(models.Model):
     hot_threshold = models.IntegerField(default=75)   # score >= hot_threshold → Hot
     warm_threshold = models.IntegerField(default=60)  # score >= warm_threshold → Warm
 
+    # The login's default ICP: exactly one per login. It is preselected in the Generate / Import / Add dialogs,
+    # scores leads that have no ICP of their own, and is the one auto-research runs on. A lead found for another
+    # ICP is still scored by that one (SDRLead.scoring_icp).
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -259,6 +262,14 @@ class SDRLead(models.Model):
             if started and timezone.now() - started > self.RESEARCH_STALE_AFTER:
                 return 'failed'
         return status
+
+    def scoring_icp(self):
+        """The ICP this lead is scored against: the one it was found or imported for, else (older leads, which
+        have none) the login's default ICP, else None. A lead never follows the default once it has its own, so
+        leads for one ICP can wait in the queue while another becomes the default and gets leads of its own."""
+        if self.icp_profile_id:
+            return self.icp_profile
+        return SDRIcpProfile.objects.filter(company_user_id=self.company_user_id, is_active=True).first()
 
     def set_status_from_score(self):
         """After scoring: hot or warm is Qualified, cold stays New. Scoring every lead "qualified" put a cold lead

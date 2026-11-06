@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import SdrSelect from './SdrSelect';
 import { useNavigate } from 'react-router-dom';
 import {
   Users, Search, Plus, Upload, Brain,
@@ -18,7 +19,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, exportAllLeadsCsv, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
-  researchLead, getLeadResearch, researchLeads, getResearchJob, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
+  researchLead, getLeadResearch, researchLeads, getResearchJob, fetchApifyLeads, listIcpProfiles,
+  createIcpProfile, updateIcpProfile, setDefaultIcpProfile, deleteIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads, updateLead,
   listLeadCategories, renameLeadCategory, deleteLeadCategory, bulkSetLeadCategory,
@@ -374,14 +376,32 @@ const CategoryPicker = ({ categories, value, onChange, emptyLabel = 'No category
     );
   }
   return (
-    <select value={match ? match.name : ''} style={{ ...inputStyle, cursor: 'pointer' }}
-      onChange={e => {
-        if (e.target.value === NEW_CATEGORY) { setTyping(true); onChange(''); } else onChange(e.target.value);
-      }}>
-      <option value="">{emptyLabel}</option>
-      {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-      <option value={NEW_CATEGORY}>+ Add new category…</option>
-    </select>
+    <SdrSelect value={match ? match.name : ''} style={inputStyle}
+      onChange={v => {
+        if (v === NEW_CATEGORY) { setTyping(true); onChange(''); } else onChange(v);
+      }}
+      options={[
+        { value: '', label: emptyLabel },
+        ...categories.map(c => ({ value: c.name, label: c.name })),
+        { value: NEW_CATEGORY, label: '+ Add new category…' },
+      ]} />
+  );
+};
+
+// The ICP new leads are scored with. '' = the default ICP (the server picks it), so the default needs no id here.
+// Shown only with more than one ICP: with one there is nothing to choose.
+const IcpPicker = ({ icps, value, onChange, label = 'Score these leads with' }) => {
+  if (icps.length < 2) return null;
+  const def = icps.find(i => i.is_active);
+  return (
+    <div>
+      <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 4 }}>{label}</label>
+      <SdrSelect value={value || ''} onChange={onChange} style={inputStyle}
+        options={[
+          { value: '', label: def ? `${def.name} (default ICP)` : 'Default ICP' },
+          ...icps.filter(i => !i.is_active).map(i => ({ value: String(i.id), label: i.name })),
+        ]} />
+    </div>
   );
 };
 
@@ -542,28 +562,28 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage, totalCount = 0, 
         <ChevronDown size={11} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
       </button>
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 60, background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))', border: '1px solid var(--line-1)', borderRadius: 11, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', minWidth: 190, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 60, background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))', border: '1px solid var(--line-1)', borderRadius: 11, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', minWidth: 190, width: 'max-content', overflow: 'hidden' }}>
           {[
             { key: 'excel', Icon: FileSpreadsheet, label: 'Export as Excel (.xlsx)', color: '#10b981' },
             { key: 'pdf',   Icon: FileText,        label: 'Export as PDF',           color: '#f43f5e' },
           ].map((opt, idx) => (
             <button key={opt.key} onClick={() => doExport(opt.key)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 16px', border: 'none', cursor: 'pointer', background: 'transparent', borderBottom: idx === 0 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', transition: 'background 0.1s' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', gap: 10, width: '100%', padding: '11px 16px', border: 'none', cursor: 'pointer', background: 'transparent', borderBottom: idx === 0 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', transition: 'background 0.1s' }}
               onMouseEnter={e => { e.currentTarget.style.background = `${opt.color}12`; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
             >
               <opt.Icon size={15} style={{ color: opt.color, flexShrink: 0 }} />
-              <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>{opt.label}</span>
+              <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13, whiteSpace: 'nowrap' }}>{opt.label}</span>
             </button>
           ))}
           {/* Export ALL matching leads (every page) as CSV, streamed from the server. */}
           <button onClick={doExportAll}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 16px', border: 'none', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)', cursor: 'pointer', background: 'rgba(168,85,247,0.06)', transition: 'background 0.1s' }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', gap: 10, width: '100%', padding: '11px 16px', border: 'none', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)', cursor: 'pointer', background: 'rgba(168,85,247,0.06)', transition: 'background 0.1s' }}
             onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.14)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.06)'; }}
           >
             <Download size={15} style={{ color: '#a855f7', flexShrink: 0 }} />
-            <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>
+            <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13, whiteSpace: 'nowrap' }}>
               Export ALL{totalCount ? ` ${totalCount.toLocaleString()}` : ''} leads (CSV)
             </span>
           </button>
@@ -586,73 +606,187 @@ function useDebounce(value, delay = 400) {
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const GEN_RUNS_KEY = 'sdr-lead-searches';
 
 // --------------------------------------------------------------------------
 // ICP Profile Panel
 // --------------------------------------------------------------------------
 const BLANK_ICP = { name: 'Default ICP', industries: '', job_titles: '', locations: '', keywords: '', company_size_min: '', company_size_max: '' };
 
-const ICPProfilePanel = ({ onSaved }) => {
+// Several ICPs. Each lead is scored with the ICP it was found for, so one ICP's leads can still be waiting to be
+// scored while leads are found for another. The default ICP is preselected in Generate / Import / Add lead.
+const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
-  const [icp, setIcp] = useState(null);
+  const [editingId, setEditingId] = useState(null);   // null: the list; 'new': a new ICP; a number: that ICP
   const [form, setForm] = useState(BLANK_ICP);
   const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [formOnly, setFormOnly] = useState(false);     // the form was opened from the card, not from the list
 
-  useEffect(() => {
-    getIcpProfile().then(res => {
-      const data = res?.data?.data || res?.data || null;
-      if (data) {
-        setIcp(data);
-        setForm({ name: data.name || '', industries: (data.industries || []).join(', '), job_titles: (data.job_titles || []).join(', '), locations: (data.locations || []).join(', '), keywords: (data.keywords || []).join(', '), company_size_min: data.company_size_min || '', company_size_max: data.company_size_max || '' });
-      }
-    }).catch(() => {});
-  }, []);
+  const defaultIcp = icps.find(i => i.is_active) || null;
+
+  const openList = () => { setEditingId(null); setConfirmDeleteId(null); setFormOnly(false); setOpen(true); };
+
+  // icp: that ICP's form, or null for a new one. fromCard: Cancel closes the dialog instead of going to the list.
+  const startEdit = (icp, fromCard = false) => {
+    setConfirmDeleteId(null);
+    setFormOnly(fromCard);
+    if (!icp) {
+      setEditingId('new');
+      setForm({ ...BLANK_ICP, name: icps.length ? '' : 'Default ICP' });
+    } else {
+      setEditingId(icp.id);
+      setForm({ name: icp.name || '', industries: (icp.industries || []).join(', '), job_titles: (icp.job_titles || []).join(', '), locations: (icp.locations || []).join(', '), keywords: (icp.keywords || []).join(', '), company_size_min: icp.company_size_min || '', company_size_max: icp.company_size_max || '' });
+    }
+    setOpen(true);
+  };
 
   const handleSave = async () => {
     setSaving(true);
     try {
       const toArr = v => v.split(',').map(s => s.trim()).filter(Boolean);
-      await saveIcpProfile({ name: form.name, industries: toArr(form.industries), job_titles: toArr(form.job_titles), locations: toArr(form.locations), keywords: toArr(form.keywords), company_size_min: form.company_size_min ? parseInt(form.company_size_min) : null, company_size_max: form.company_size_max ? parseInt(form.company_size_max) : null });
-      toast({ title: 'ICP Profile saved!' });
-      const res = await getIcpProfile();
-      setIcp(res?.data?.data || res?.data || null);
-      setOpen(false);
-      onSaved?.();
+      const payload = { name: form.name, industries: toArr(form.industries), job_titles: toArr(form.job_titles), locations: toArr(form.locations), keywords: toArr(form.keywords), company_size_min: form.company_size_min ? parseInt(form.company_size_min) : null, company_size_max: form.company_size_max ? parseInt(form.company_size_max) : null };
+      const isNew = editingId === 'new';
+      const res = isNew ? await createIcpProfile(payload) : await updateIcpProfile(editingId, payload);
+      const saved = res?.data?.data || res?.data || null;
+      toast({ title: 'ICP saved' });
+      setEditingId(null);
+      await onChanged?.();
+      // A new ICP goes straight on to finding leads for it.
+      if (isNew) { setOpen(false); onSaved?.(saved?.id); }
     } catch (e) { toast({ title: 'Save failed', description: e.message, variant: 'destructive' }); }
     finally { setSaving(false); }
   };
 
+  const makeDefault = async (icp) => {
+    setBusyId(icp.id);
+    try {
+      await setDefaultIcpProfile(icp.id);
+      toast({ title: `"${icp.name}" is now your default ICP`, description: 'Leads already found for another ICP keep being scored with theirs.' });
+      await onChanged?.();
+    } catch (e) { toast({ title: 'Could not change the default', description: e?.message, variant: 'destructive' }); }
+    finally { setBusyId(null); }
+  };
+
+  const remove = async (icp) => {
+    setBusyId(icp.id);
+    try {
+      await deleteIcpProfile(icp.id);
+      setConfirmDeleteId(null);
+      toast({ title: `Deleted "${icp.name}"`, description: 'Its scored leads keep their scores.' });
+      await onChanged?.();
+    } catch (e) {
+      // The server says why: the default ICP, or leads still being scored with it.
+      toast({ title: 'Could not delete', description: e?.message, variant: 'destructive' });
+      setConfirmDeleteId(null);
+    } finally { setBusyId(null); }
+  };
+
+  const iconBtn = { display: 'flex', alignItems: 'center', gap: 4, padding: '4px 6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12 };
+  const smallBtn = { background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 8, padding: '5px 12px', color: '#a855f7', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 };
+
   return (
     <div style={{ ...cardStyle, padding: '14px 18px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <Brain size={16} color="#a855f7" />
-          <span style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 14 }}>ICP Profile</span>
-          {icp ? (
-            <span style={{ color: '#10b981', fontSize: 12, padding: '2px 8px', borderRadius: 10, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>{icp.name}</span>
+          <span style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 14 }}>ICP Profiles</span>
+          {defaultIcp ? (
+            <span title="Your default ICP" style={{ color: '#10b981', fontSize: 12, padding: '2px 8px', borderRadius: 10, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>{defaultIcp.name}</span>
           ) : (
             <span style={{ color: 'hsl(var(--pt-f59e0b))', fontSize: 12 }}>Not configured — scoring won't work without this</span>
           )}
+          {icps.length > 1 && <span style={{ color: '#6b7280', fontSize: 12 }}>+{icps.length - 1} more</span>}
         </div>
-        <button onClick={() => setOpen(!open)} style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 8, padding: '5px 12px', color: '#a855f7', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 }}>
-          <ChevronDown size={13} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
-          {icp ? 'Edit' : 'Setup'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {icps.length > 0 && (
+            <button onClick={() => startEdit(null, true)} style={smallBtn}><Plus size={13} /> New ICP</button>
+          )}
+          <button onClick={() => (icps.length ? openList() : startEdit(null, true))} style={smallBtn}>
+            <SlidersHorizontal size={13} />
+            {icps.length ? 'Manage' : 'Setup'}
+          </button>
+        </div>
       </div>
 
-      {icp && !open && (
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {[...(icp.industries || []), ...(icp.job_titles || [])].slice(0, 6).map(t => (
-            <span key={t} style={{ padding: '2px 8px', borderRadius: 10, fontSize: 11, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)', color: 'hsl(var(--pt-c4b5fd))' }}>{t}</span>
+      {/* The default ICP's targets, on one line whatever their number: the card stays the same height. */}
+      {defaultIcp && (
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'nowrap', gap: 6, overflow: 'hidden' }}>
+          {[...(defaultIcp.industries || []), ...(defaultIcp.job_titles || [])].slice(0, 8).map(t => (
+            <span key={t} style={{ flexShrink: 0, padding: '2px 8px', borderRadius: 10, fontSize: 11, whiteSpace: 'nowrap', background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)', color: 'hsl(var(--pt-c4b5fd))' }}>{t}</span>
           ))}
         </div>
       )}
 
-      {open && (
-        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* The ICPs and their form open in a dialog, so adding ICPs never pushes the leads further down. */}
+      <Dialog open={open} onOpenChange={(o) => { if (!o && !saving) { setOpen(false); setEditingId(null); setConfirmDeleteId(null); } }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 600, maxHeight: '90vh', overflowY: 'auto' }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Brain size={18} color="#a855f7" />
+              {editingId === null ? 'ICP profiles'
+                : editingId === 'new' ? 'New ICP'
+                  : `Edit ${icps.find(i => i.id === editingId)?.name || 'ICP'}`}
+            </DialogTitle>
+          </DialogHeader>
+
+      {editingId === null && icps.length > 0 && (
+        <>
+        <p style={{ color: '#6b7280', fontSize: 12, margin: 0 }}>
+          Each lead is scored with the ICP it was found for. The default one is preselected in Generate, Import and Add lead.
+        </p>
+        <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, maxHeight: '50vh', overflowY: 'auto' }}>
+          {icps.map(icp => (
+            <div key={icp.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)', flexWrap: 'wrap' }}>
+              <span style={{ flex: 1, minWidth: 120, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[...(icp.industries || []), ...(icp.job_titles || [])].join(', ')}>
+                {icp.name}
+              </span>
+              {icp.is_active && (
+                <span style={{ color: '#10b981', fontSize: 11, padding: '1px 8px', borderRadius: 10, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>Default</span>
+              )}
+              {icp.waiting > 0 && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#60a5fa', fontSize: 11 }}>
+                  <Loader2 size={11} className="animate-spin" /> {icp.waiting.toLocaleString()} being scored
+                </span>
+              )}
+              <span style={{ color: '#6b7280', fontSize: 12, whiteSpace: 'nowrap' }}>{(icp.lead_count ?? 0).toLocaleString()} leads</span>
+              {busyId === icp.id ? <Loader2 size={14} className="animate-spin" style={{ color: '#6b7280', margin: 6 }} />
+                : confirmDeleteId === icp.id ? (
+                  <>
+                    <button onClick={() => remove(icp)} style={{ ...iconBtn, color: '#f87171', fontWeight: 600 }}>Delete</button>
+                    <button onClick={() => setConfirmDeleteId(null)} style={{ ...iconBtn, color: '#6b7280' }}>Keep</button>
+                  </>
+                ) : (
+                  <>
+                    {!icp.is_active && (
+                      <button title="Preselect this ICP in Generate, Import and Add lead" onClick={() => makeDefault(icp)} style={{ ...iconBtn, color: '#a855f7' }}>Make default</button>
+                    )}
+                    <button title="Edit" onClick={() => startEdit(icp)} style={{ ...iconBtn, color: '#9ca3af' }}><Pencil size={13} /></button>
+                    {!icp.is_active && (
+                      <button title="Delete" onClick={() => setConfirmDeleteId(icp.id)} style={{ ...iconBtn, color: '#f87171' }}><Trash2 size={13} /></button>
+                    )}
+                  </>
+                )}
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <button onClick={() => startEdit(null)} style={smallBtn}><Plus size={13} /> New ICP</button>
+        </DialogFooter>
+        </>
+      )}
+
+      {editingId !== null && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12 }}>
+            {editingId === 'new'
+              ? 'A new ICP. Leads you find or import for it are scored with it, whatever else you change meanwhile.'
+              : 'Leads of this ICP still waiting to be scored use your changes; scored leads keep their scores.'}
+          </div>
           {[
-            { k: 'name',       l: 'Profile Name',          p: 'Default ICP' },
+            { k: 'name',       l: 'Profile Name',          p: 'e.g. Dentistry' },
             { k: 'industries', l: 'Target Industries (comma-separated)', p: 'SaaS, FinTech, E-commerce' },
             { k: 'job_titles', l: 'Target Job Titles (comma-separated)', p: 'CEO, VP Sales, Head of Growth' },
             { k: 'locations',  l: 'Target Locations (comma-separated)',  p: 'United States, United Kingdom' },
@@ -672,13 +806,16 @@ const ICPProfilePanel = ({ onSaved }) => {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button onClick={() => setOpen(false)} style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '7px 16px', color: 'hsl(var(--pt-9ca3af))', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+            {/* Back to the list when the form was opened from it; else close. */}
+            <button onClick={() => { setEditingId(null); if (formOnly || !icps.length) setOpen(false); }} style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '7px 16px', color: 'hsl(var(--pt-9ca3af))', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
             <button onClick={handleSave} disabled={saving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', border: 'none', borderRadius: 8, padding: '7px 20px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {saving ? <Loader2 size={12} className="animate-spin" /> : null} Save ICP
             </button>
           </div>
         </div>
       )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -784,7 +921,11 @@ const SDRLeadsTab = () => {
   const [filterSource, setFilterSource] = useState('');
   const [filterCategory, setFilterCategory] = useState('');   // '' all, 'none', or a category id
   const [filterEnrichment, setFilterEnrichment] = useState(''); // '' all, done, not, in_progress, failed
+  const [filterIcp, setFilterIcp] = useState('');               // '' all, 'none', or an ICP id
   const [sortBy, setSortBy] = useState('score_desc');
+  // The ICP a lead added by hand / an imported file is scored with ('' = the default ICP).
+  const [newLeadIcpId, setNewLeadIcpId] = useState('');
+  const [csvIcpId, setCsvIcpId] = useState('');
 
   // Industry categories (made from the data as leads come in, or typed in by hand).
   const [categories, setCategories] = useState([]);
@@ -815,13 +956,25 @@ const SDRLeadsTab = () => {
   const [genIcpId, setGenIcpId] = useState('');
   const [icpProfiles, setIcpProfiles] = useState([]);
   const [generating, setGenerating] = useState(false);
-  const [genProgress, setGenProgress] = useState(null); // { created, total } while a run is in flight
+  // Lead searches running on the server: [{ jobId, icpName, total, created }]. The Generate dialog closes as soon as
+  // one has started, so the list can be used (and another ICP searched) meanwhile. Kept for the browser tab, so
+  // leaving the Leads page and coming back still shows them.
+  const [genRuns, setGenRuns] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem(GEN_RUNS_KEY) || '[]'); } catch (_) { return []; }
+  });
   const [copiedKey, setCopiedKey] = useState(null);
   const [showSetupGuide, setShowSetupGuide] = useState(null);
 
   // ── Load ──────────────────────────────────────────────────────────────
+  // Each load is numbered; a reply that a newer load has overtaken is dropped, so a slow
+  // background refresh can't put back the page a filter change just replaced.
+  const loadSeq = useRef(0);
+  // opts.quiet: the background refresh. The table stays on screen and updates in place,
+  // ticked rows stay ticked and a failed refresh says nothing (the next one tries again).
   const loadLeads = useCallback(async (opts = {}) => {
-    setLoading(true);
+    const { quiet = false } = opts;
+    const seq = ++loadSeq.current;
+    if (!quiet) setLoading(true);
     try {
       const resp = await listLeads({
         search:      opts.search      ?? search,
@@ -830,15 +983,23 @@ const SDRLeadsTab = () => {
         source:      opts.source      ?? filterSource,
         category:    opts.category    ?? filterCategory,
         enrichment:  opts.enrichment  ?? filterEnrichment,
+        icp:         opts.icp         ?? filterIcp,
         sort:       opts.sort        ?? sortBy,
         page:        opts.page        ?? page,
         page_size:   opts.page_size   ?? pageSize,
       });
+      if (seq !== loadSeq.current) return;
       setLeads(resp?.data || []);
       setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0, unqueued: 0, enriching: 0 });
       setPagination(resp?.pagination || { page: 1, page_size: pageSize, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
-      setSelectedIds(new Set());
-      setAllMatching(false);
+      if (quiet) {
+        // Keep the ticks on rows still on the page.
+        const onPage = new Set((resp?.data || []).map(l => l.id));
+        setSelectedIds(prev => (prev.size ? new Set([...prev].filter(id => onPage.has(id))) : prev));
+      } else {
+        setSelectedIds(new Set());
+        setAllMatching(false);
+      }
       if (resp?.data) {
         setSelectedLead(prev => {
           if (!prev?.id) return prev;
@@ -847,9 +1008,14 @@ const SDRLeadsTab = () => {
         });
       }
     } catch (e) {
-      toast({ title: 'Failed to load leads', description: e?.message, variant: 'destructive' });
-    } finally { setLoading(false); }
-  }, [search, filterTemp, filterStatus, filterSource, filterCategory, filterEnrichment, sortBy, page, pageSize, toast]);
+      if (!quiet && seq === loadSeq.current) {
+        toast({ title: 'Failed to load leads', description: e?.message, variant: 'destructive' });
+      }
+    } finally {
+      // The latest load ends the spinner, quiet or not: a refresh that overtook a full load must not leave it on.
+      if (seq === loadSeq.current) setLoading(false);
+    }
+  }, [search, filterTemp, filterStatus, filterSource, filterCategory, filterEnrichment, filterIcp, sortBy, page, pageSize, toast]);
 
   const loadCategories = useCallback(async () => {
     try {
@@ -859,30 +1025,33 @@ const SDRLeadsTab = () => {
     } catch (_) { /* the pickers just show no categories */ }
   }, []);
 
-  useEffect(() => { loadLeads(); loadCategories(); }, []);
+  // The login's ICPs, for the ICP panel, the filter and the ICP pickers in Generate / Import / Add lead.
+  const loadIcps = useCallback(async () => { setIcpProfiles(await listIcpProfiles()); }, []);
+
+  useEffect(() => { loadLeads(); loadCategories(); loadIcps(); }, []);
 
   // While leads are being qualified or enriched in the background, poll every
   // 12s so scores and enriched fields appear on their own. Stops once both
-  // queues drain.
+  // queues drain. Quietly: the list must not blink every 12s.
   useEffect(() => {
     if (!stats.qualifying && !stats.enriching) return undefined;
-    const id = setInterval(() => loadLeads(), 12000);
+    const id = setInterval(() => { loadLeads({ quiet: true }); if (stats.qualifying) loadIcps(); }, 12000);
     return () => clearInterval(id);
-  }, [stats.qualifying, stats.enriching, loadLeads]);
+  }, [stats.qualifying, stats.enriching, loadLeads, loadIcps]);
 
   useEffect(() => {
     setPage(1);
-    loadLeads({ page: 1, search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, enrichment: filterEnrichment, sort: sortBy, page_size: pageSize });
-  }, [search, filterTemp, filterStatus, filterSource, filterCategory, filterEnrichment, sortBy, pageSize]);
+    loadLeads({ page: 1, search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, enrichment: filterEnrichment, icp: filterIcp, sort: sortBy, page_size: pageSize });
+  }, [search, filterTemp, filterStatus, filterSource, filterCategory, filterEnrichment, filterIcp, sortBy, pageSize]);
 
   const goToPage = useCallback((p) => { setPage(p); loadLeads({ page: p }); }, [loadLeads]);
 
-  // The Filters panel's count; the category filter sits outside the panel.
+  // The Filters panel's count; the category and ICP filters sit outside the panel.
   const activeFiltersCount = [filterTemp, filterStatus, filterSource, filterEnrichment].filter(Boolean).length;
-  const anyFilter = activeFiltersCount > 0 || !!filterCategory;
-  const clearAllFilters = () => { setFilterTemp(''); setFilterStatus(''); setFilterSource(''); setFilterCategory(''); setFilterEnrichment(''); };
+  const anyFilter = activeFiltersCount > 0 || !!filterCategory || !!filterIcp;
+  const clearAllFilters = () => { setFilterTemp(''); setFilterStatus(''); setFilterSource(''); setFilterCategory(''); setFilterEnrichment(''); setFilterIcp(''); };
   // The list's current filters, for actions that cover every matching lead (bulk category, Export ALL).
-  const currentFilters = { search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, enrichment: filterEnrichment };
+  const currentFilters = { search, temperature: filterTemp, status: filterStatus, source: filterSource, category: filterCategory, enrichment: filterEnrichment, icp: filterIcp };
 
   // After a change that can add categories or move leads between them.
   const refreshAfterCategoryChange = () => { loadLeads(); loadCategories(); };
@@ -908,6 +1077,10 @@ const SDRLeadsTab = () => {
       setFilterCategory('');
     }
   }, [categories]);
+  // Likewise for a deleted ICP.
+  useEffect(() => {
+    if (filterIcp && filterIcp !== 'none' && !icpProfiles.some(i => String(i.id) === filterIcp)) setFilterIcp('');
+  }, [icpProfiles]);
 
   // A closed import dialog forgets its category, so the next file starts on Automatic.
   useEffect(() => { if (!csvImport) setCsvCategory(''); }, [csvImport]);
@@ -983,13 +1156,15 @@ const SDRLeadsTab = () => {
     } finally { setBulkDeleting(false); }
   };
 
-  const openGenModal = async () => {
+  // preferIcpId: an ICP just made, to find leads for it; else the default ICP is preselected.
+  const openGenModal = async (preferIcpId) => {
     try {
       const [profiles, settingsRes] = await Promise.allSettled([listIcpProfiles(), getSdrSettings()]);
       if (profiles.status === 'fulfilled') {
         const p = profiles.value;
         setIcpProfiles(p);
-        if (p.length > 0) setGenIcpId(p.find(x => x.is_active)?.id || p[0].id);
+        const preferred = typeof preferIcpId === 'number' && p.some(x => x.id === preferIcpId) ? preferIcpId : null;
+        if (p.length > 0) setGenIcpId(preferred || p.find(x => x.is_active)?.id || p[0].id);
       } else { setIcpProfiles([]); }
       if (settingsRes.status === 'fulfilled') {
         const d = settingsRes.value?.data || settingsRes.value;
@@ -1001,21 +1176,22 @@ const SDRLeadsTab = () => {
     setShowGenModal(true);
   };
 
+  const apifyApprovalToast = (url) => toast({
+    title: 'Approve the Apify actor first',
+    description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
+    variant: 'destructive',
+    action: (
+      <ToastAction altText="Open Apify" onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>
+        Open Apify
+      </ToastAction>
+    ),
+  });
+
+  // Starts the search and closes the dialog: the search runs on the server, and its progress shows on the Leads
+  // page (genRuns) until it is done.
   const handleGenerate = async () => {
     setGenerating(true);
-    setGenProgress({ created: 0, total: genCount });
-    const apifyApprovalToast = (url) => toast({
-      title: 'Approve the Apify actor first',
-      description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
-      variant: 'destructive',
-      action: (
-        <ToastAction altText="Open Apify" onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>
-          Open Apify
-        </ToastAction>
-      ),
-    });
     try {
-      // Kick off the background job; the backend returns a job id immediately.
       const startResp = await researchLeads({
         count: genCount, source: genSource, icp_id: genIcpId || undefined, category: genCategory.trim() || undefined,
       });
@@ -1024,55 +1200,14 @@ const SDRLeadsTab = () => {
       if (!jobId) {
         throw Object.assign(new Error(started?.message || 'Could not start generation.'), { data: started });
       }
-
-      // Poll the job until it finishes (large Apify/Apollo runs can take minutes).
-      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-      let job = null;
-      for (let i = 0; i < 400; i++) { // ~20 min ceiling at 3s/poll
-        await sleep(3000);
-        let jobResp;
-        try { jobResp = await getResearchJob(jobId); } catch (_) { continue; }
-        job = (jobResp?.data ?? jobResp)?.job;
-        if (!job) continue;
-        setGenProgress({ created: job.leads_created || 0, total: genCount });
-        if (job.done) break;
-      }
-
-      if (!job || !job.done) {
-        toast({
-          title: 'Still generating…',
-          description: 'This run is taking a while. It keeps going in the background — refresh the list shortly.',
-        });
-        setShowGenModal(false);
-        setPage(1);
-        loadLeads({ page: 1 });
-        return;
-      }
-
-      if (job.state === 'failed') {
-        if (job.error_code === 'apify_approval_required' && job.approval_url) {
-          apifyApprovalToast(job.approval_url);
-        } else {
-          toast({ title: 'Generate failed', description: job.error_message || 'Lead generation failed.', variant: 'destructive' });
-        }
-        return;
-      }
-
-      const created = job.leads_created || 0;
-      const skipped = job.skipped_duplicates || 0;
-      toast({
-        title: created ? `${created} leads generated!` : 'No new leads found',
-        description: [
-          `Source: ${(job.source || genSource).toUpperCase()}`,
-          skipped ? `${skipped} duplicates skipped.` : '',
-          job.leads_queued ? `Qualifying ${job.leads_queued} in the background.` : '',
-        ].filter(Boolean).join(' '),
-      });
+      const icpName = icpProfiles.find(p => String(p.id) === String(genIcpId))?.name || '';
+      setGenRuns(runs => [...runs, { jobId, icpName, total: genCount, created: 0 }]);
       setShowGenModal(false);
       setGenCategory('');
-      setPage(1);
-      loadLeads({ page: 1 });
-      loadCategories();
+      toast({
+        title: `Finding ${genCount} leads${icpName ? ` for ${icpName}` : ''}`,
+        description: 'This runs in the background. Keep working; the leads appear in the list as they are found.',
+      });
     } catch (e) {
       const data = e?.data || e?.response?.data;
       if (data?.code === 'apify_approval_required') {
@@ -1082,9 +1217,56 @@ const SDRLeadsTab = () => {
       }
     } finally {
       setGenerating(false);
-      setGenProgress(null);
     }
   };
+
+  // Follow the background searches: every 3s ask each how far it is, show new leads as they arrive, and say how
+  // it went when it is done.
+  const genPollBusy = useRef(false);
+  useEffect(() => {
+    try { sessionStorage.setItem(GEN_RUNS_KEY, JSON.stringify(genRuns)); } catch (_) { /* only a convenience */ }
+    if (!genRuns.length) return undefined;
+    const id = setInterval(async () => {
+      if (genPollBusy.current) return;
+      genPollBusy.current = true;
+      try {
+        const results = await Promise.all(genRuns.map(run =>
+          getResearchJob(run.jobId).then(r => ({ run, job: (r?.data ?? r)?.job })).catch(e => ({ run, error: e }))));
+        let more = false;
+        let finished = false;
+        const keep = [];
+        for (const { run, job, error } of results) {
+          if (error?.status === 404) { finished = true; continue; }   // gone: nothing left to follow
+          if (!job) { keep.push(run); continue; }                       // a failed poll: try again next time
+          const created = job.leads_created || 0;
+          if (created > run.created) more = true;
+          if (!job.done) { keep.push({ ...run, created }); continue; }
+          finished = true;
+          const label = run.icpName ? ` for ${run.icpName}` : '';
+          if (job.state === 'failed') {
+            if (job.error_code === 'apify_approval_required' && job.approval_url) apifyApprovalToast(job.approval_url);
+            else toast({ title: `Lead search${label} failed`, description: job.error_message || 'Lead generation failed.', variant: 'destructive' });
+          } else {
+            const skipped = job.skipped_duplicates || 0;
+            toast({
+              title: created ? `${created} leads found${label}` : `No new leads found${label}`,
+              description: [
+                `Source: ${(job.source || '').toUpperCase()}`,
+                skipped ? `${skipped} duplicates skipped.` : '',
+                job.leads_queued ? `Qualifying ${job.leads_queued} in the background.` : '',
+              ].filter(Boolean).join(' '),
+            });
+          }
+        }
+        setGenRuns(keep);
+        if (more || finished) loadLeads({ quiet: true });
+        if (finished) { loadCategories(); loadIcps(); }
+      } finally {
+        genPollBusy.current = false;
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [genRuns, loadLeads, loadCategories, loadIcps]);
 
   // Import leads already generated in the Apify Console (works on the free plan,
   // which can't RUN paid actors via API but CAN read finished runs).
@@ -1301,10 +1483,12 @@ const SDRLeadsTab = () => {
         ...newLead,
         company_size: newLead.company_size ? parseInt(newLead.company_size) : null,
         category: newLeadCategory.trim() || null,   // none picked → the Industry typed in decides
+        ...(newLeadIcpId ? { icp_id: newLeadIcpId } : {}),   // none picked → the default ICP
       });
       setShowAddModal(false);
       setNewLead(BLANK_LEAD);
       setNewLeadCategory('');
+      setNewLeadIcpId('');
       toast({ title: 'Lead added' });
       setPage(1);
       loadLeads({ page: 1 });
@@ -1350,12 +1534,13 @@ const SDRLeadsTab = () => {
     if (!csvImport?.file) return;
     setCsvImporting(true);
     try {
-      const resp = await importLeadsFromCSV(csvImport.file, csvCategory.trim());
+      const resp = await importLeadsFromCSV(csvImport.file, csvCategory.trim(), csvIcpId);
       // Refused rows are listed with their reasons: 5 seconds was too short to read them (AI SDR film, 30 Oct).
       toast({ title: `Imported ${resp.created} leads`, description: resp.message,
         ...(resp.refused?.length ? { duration: 15000 } : {}) });
       setCsvImport(null);
       setCsvCategory('');
+      setCsvIcpId('');
       setPage(1);
       loadLeads({ page: 1 });
       loadCategories();
@@ -1376,7 +1561,7 @@ const SDRLeadsTab = () => {
       <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
 
       {/* With no Apollo or Apify key, saving the profile opened a lead search that could not run. */}
-      <ICPProfilePanel onSaved={() => (hasSource ? openGenModal() : toast({
+      <ICPProfilePanel icps={icpProfiles} onChanged={loadIcps} onSaved={(icpId) => (hasSource ? openGenModal(icpId) : toast({
         title: 'ICP saved', description: 'Now bring in your leads with Import CSV, or add a lead by hand.' }))} />
 
       {/* Stats row */}
@@ -1405,7 +1590,7 @@ const SDRLeadsTab = () => {
             <Plus size={15} /> Add Lead
           </Button>
           <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
-          <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
+          <Button onClick={() => openGenModal()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
             <Zap size={15} /> Generate Leads
           </Button>
           <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
@@ -1429,8 +1614,15 @@ const SDRLeadsTab = () => {
         </div>
         {/* Background work in progress. A line of its own: as buttons in the row above, "Qualifying" and
             "Enriching" pushed Export onto a second line on the live site. */}
-        {(stats.qualifying > 0 || stats.enriching > 0) && (
+        {(stats.qualifying > 0 || stats.enriching > 0 || genRuns.length > 0) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 10, paddingTop: 10, borderTop: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
+            {genRuns.map(run => (
+              <span key={run.jobId} title="Leads are being found in the background; they appear in the list as they arrive."
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', color: '#34d399', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
+                <Loader2 size={12} className="animate-spin" />
+                Finding leads{run.icpName ? ` · ${run.icpName}` : ''} {run.created}/{run.total}
+              </span>
+            ))}
             {stats.qualifying > 0 && (
               <span title="Leads are being qualified in the background." style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
                 <Loader2 size={12} className="animate-spin" /> Qualifying {stats.qualifying.toLocaleString()}…
@@ -1496,6 +1688,15 @@ const SDRLeadsTab = () => {
               </button>
             )}
           </div>
+          {/* Which ICP the leads were found for (and are scored with). */}
+          {icpProfiles.length > 1 && (
+            <FilterDropdown label="All ICPs" value={filterIcp} onChange={setFilterIcp} icon={Target}
+              options={[
+                { key: '', label: 'All ICPs', color: '#6b7280' },
+                ...icpProfiles.map(i => ({ key: String(i.id), label: `${i.name} (${(i.lead_count ?? 0).toLocaleString()})`, color: '#a78bfa' })),
+                { key: 'none', label: 'No ICP (older leads)', color: '#9ca3af' },
+              ]} />
+          )}
           {/* Industry category: the main way to keep one industry's leads apart from another's. */}
           <FilterDropdown label="All categories" value={filterCategory} onChange={setFilterCategory} icon={Tag}
             options={[
@@ -1519,9 +1720,8 @@ const SDRLeadsTab = () => {
               </button>
             );
           })()}
-          <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} style={{ ...inputStyle, width: 'auto', padding: '7px 10px', fontSize: 13, border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer' }}>
-            {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
-          </select>
+          <SdrSelect value={String(pageSize)} onChange={v => setPageSize(Number(v))} style={{ ...inputStyle, width: 'auto', padding: '7px 10px', fontSize: 13, border: '1px solid var(--line-1)', borderRadius: 9 }}
+            options={PAGE_SIZE_OPTIONS.map(n => ({ value: String(n), label: `${n} / page` }))} />
           <button onClick={() => loadLeads()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
             <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           </button>
@@ -1665,7 +1865,7 @@ const SDRLeadsTab = () => {
             ) : (
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
                 {hasSource && (
-                <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => openGenModal()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Zap size={15} /> Generate Leads
                 </Button>
                 )}
@@ -1728,8 +1928,14 @@ const SDRLeadsTab = () => {
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: '13px 16px', minWidth: 200 }} onClick={() => setSelectedLead(lead)}>
-                      <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>{lead.job_title || '—'}</span>
+                    <td style={{ padding: '13px 16px', minWidth: 200, maxWidth: 300 }} onClick={() => setSelectedLead(lead)}>
+                      {/* At most two lines: scraped titles run to a whole tagline ("Managing Director - Paye Umbrella, Peo &
+                          Cis Payroll - Apsco Trusted Partners + …") and made the row four lines tall. Hover for all of it;
+                          the lead's panel shows it in full. */}
+                      <span title={lead.job_title || ''}
+                        style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
+                        {lead.job_title || '—'}
+                      </span>
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       {lead.score != null ? (
@@ -1865,6 +2071,16 @@ const SDRLeadsTab = () => {
                   </Button>
                 )}
               </div>
+            </div>
+
+            {/* The ICP this lead was found for and is scored with. */}
+            <div style={{ marginBottom: 20 }}>
+              <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Target size={11} /> ICP
+              </h4>
+              <span style={{ fontSize: 13, color: selectedLead.icp_name ? 'var(--text-soft)' : '#6b7280' }}>
+                {selectedLead.icp_name || 'None of its own: scored with your default ICP'}
+              </span>
             </div>
 
             {/* Score + category */}
@@ -2421,6 +2637,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                 <CategoryPicker categories={categories} value={csvCategory} onChange={setCsvCategory}
                   emptyLabel="Automatic (each row's Industry column)" />
               </div>
+              <div style={{ marginTop: 12 }}>
+                <IcpPicker icps={icpProfiles} value={csvIcpId} onChange={setCsvIcpId} />
+              </div>
               <p style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
                 Duplicate emails already in your list are skipped automatically.
               </p>
@@ -2478,6 +2697,11 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               <CategoryPicker categories={categories} value={newLeadCategory} onChange={setNewLeadCategory}
                 emptyLabel="Automatic (from the Industry above)" />
             </div>
+            {icpProfiles.length > 1 && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <IcpPicker icps={icpProfiles} value={newLeadIcpId} onChange={setNewLeadIcpId} label="Score this lead with" />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); setNewLeadCategory(''); }} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
@@ -2556,9 +2780,8 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             {icpProfiles.length > 1 && (
               <div>
                 <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>ICP Profile</label>
-                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle, background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)' }}>
-                  {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active ? ' (Active)' : ''}</option>)}
-                </select>
+                <SdrSelect value={String(genIcpId)} onChange={setGenIcpId} style={{ ...inputStyle, background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)' }}
+                  options={icpProfiles.map(p => ({ value: String(p.id), label: `${p.name}${p.is_active ? ' (Default)' : ''}` }))} />
               </div>
             )}
             {icpProfiles.length === 0 && (
@@ -2614,7 +2837,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {generating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               {generating
-                ? (genProgress ? `Generating… ${genProgress.created}/${genProgress.total}` : 'Starting…')
+                ? 'Starting…'
                 : `Generate ${genCount} Leads`}
             </Button>
           </DialogFooter>
