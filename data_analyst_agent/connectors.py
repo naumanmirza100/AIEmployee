@@ -39,19 +39,32 @@ def files_root():
     return root
 
 
-def new_file_path(company_id) -> str:
+def new_file_path(company_id, suffix='.sqlite') -> str:
     folder = os.path.join(files_root(), str(int(company_id)))
     os.makedirs(folder, exist_ok=True)
-    return os.path.join(folder, f'{uuid.uuid4().hex}.sqlite')
+    return os.path.join(folder, f'{uuid.uuid4().hex}{suffix}')
+
+
+def safe_path(path) -> str:
+    """`path`, only if it is a file inside our folder (a path is never taken from anyone)."""
+    root = os.path.realpath(files_root())
+    real = os.path.realpath(path or '')
+    if not real.startswith(root + os.sep) or not os.path.isfile(real):
+        raise Refused('The uploaded file is missing. Upload it again.')
+    return real
+
+
+def remove_file(path):
+    """Delete a file of ours (inside our folder only); nothing when it is already gone."""
+    try:
+        os.remove(safe_path(path))
+    except (Refused, OSError):
+        pass
 
 
 def _safe_file(source: DataSource) -> str:
-    """The source's file, only if it lies inside our folder (a path is never taken from anyone)."""
-    root = os.path.realpath(files_root())
-    path = os.path.realpath(source.file_path or '')
-    if not path.startswith(root + os.sep) or not os.path.isfile(path):
-        raise Refused('The uploaded file is missing. Upload it again.')
-    return path
+    """The source's file, only if it lies inside our folder."""
+    return safe_path(source.file_path)
 
 
 def _engine(source: DataSource):
