@@ -19,6 +19,8 @@ import { getAgentNavItems } from '@/utils/agentNavItems';
  * (PostgreSQL, MySQL / MariaDB, MongoDB, or an uploaded SQLite file). Only the question, its answer and its query
  * are kept; the rows come with the answer and are run again when a question is reopened (plan: MDS/01-Plan/week-45).
  * MongoDB (6 Nov 2026): a connection string; the AI writes one read-only aggregation instead of SQL.
+ * A .sql dump (7 Nov 2026): uploaded like a SQLite file and read into a SQLite copy on the server (in the background
+ * when it is big; the Databases tab checks back until it is ready).
  */
 const TABS = [
   { key: 'ask', label: 'Ask' },
@@ -160,7 +162,7 @@ function AskTab({ sources, onAsked }) {
       <div className={`${panel} mx-auto mt-6 max-w-xl p-6 text-center`}>
         <Database className="mx-auto mb-3 h-10 w-10 text-violet-400" />
         <h2 className="text-lg font-semibold text-foreground">No database to ask yet</h2>
-        <p className="mt-1 text-sm text-muted-foreground">An owner or admin adds one under Databases: a PostgreSQL, MySQL or MongoDB connection, or a SQLite file.</p>
+        <p className="mt-1 text-sm text-muted-foreground">An owner or admin adds one under Databases: a PostgreSQL, MySQL or MongoDB connection, a SQLite file, or a .sql dump.</p>
       </div>
     );
   }
@@ -219,7 +221,7 @@ const READ_ONLY_USER = {
   mongodb: "MongoDB Atlas: Database Access > Add New Database User > Built-in Role: Only read any database.\nYour own server (mongosh):\nuse admin\ndb.createUser({ user: 'pp_reader', pwd: 'a long password', roles: [{ role: 'read', db: 'your_db' }] })",
 };
 
-const KINDS = [['postgres', 'PostgreSQL'], ['mysql', 'MySQL / MariaDB'], ['mongodb', 'MongoDB'], ['sqlite', 'SQLite file']];
+const KINDS = [['postgres', 'PostgreSQL'], ['mysql', 'MySQL / MariaDB'], ['mongodb', 'MongoDB'], ['sqlite', 'File: SQLite or .sql']];
 
 function AddDatabase({ setup, logins, onAdded }) {
   const [mode, setMode] = useState('postgres');
@@ -245,7 +247,7 @@ function AddDatabase({ setup, logins, onAdded }) {
           : await analyst.addConnection(useString
             ? { ...shared, connection_string: form.connection_string }
             : { ...shared, kind: mode, host: form.host, port: form.port, database: form.database, username: form.username, password: form.password, use_ssl: form.use_ssl });
-      const ok = res?.data?.status === 'ready';
+      const ok = res?.data?.status === 'ready' || res?.data?.status === 'loading';
       setMessage({ ok, text: ok ? res.message : (res?.data?.last_error || res.message) });
       onAdded?.();
       if (ok) setForm((f) => ({ ...f, password: '', connection_string: '' }));
@@ -261,15 +263,15 @@ function AddDatabase({ setup, logins, onAdded }) {
       <h3 className="text-base font-semibold text-foreground">Add a database</h3>
       <div className="flex flex-wrap gap-2">
         {KINDS.map(([key, label]) => (
-          <Button key={key} type="button" size="sm" variant={mode === key ? 'default' : 'outline'} onClick={() => setMode(key)}>{label}</Button>
+          <Button key={key} type="button" size="sm" variant={mode === key ? 'default' : 'outline'} onClick={() => { setMode(key); setMessage(null); }}>{label}</Button>
         ))}
       </div>
       <input className={field} placeholder="A name, e.g. Shop database" value={form.name} onChange={set('name')} aria-label="Name" />
       {mode === 'sqlite' ? (
         <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
           <FileUp className="h-5 w-5" />
-          <span>{file ? `${file.name} (${(file.size / 1048576).toFixed(1)} MB)` : `Choose a SQLite file (up to ${setup?.max_file_mb || 500} MB)`}</span>
-          <input type="file" className="hidden" accept=".db,.sqlite,.sqlite3,.db3" onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="analyst-file" />
+          <span>{file ? `${file.name} (${(file.size / 1048576).toFixed(1)} MB)` : `Choose a SQLite file, or a .sql dump from MySQL, PostgreSQL, SQLite or SQL Server (.sql or .sql.gz), up to ${setup?.max_file_mb || 500} MB`}</span>
+          <input type="file" className="hidden" accept=".db,.sqlite,.sqlite3,.db3,.sql,.gz" onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="analyst-file" />
         </label>
       ) : (
         <>
@@ -340,6 +342,13 @@ function DatabasesTab({ setup, sources, reload }) {
   useEffect(() => {
     if (setup?.can_manage) analyst.listLogins().then((r) => setLogins((r?.data?.logins || []).filter((l) => l.is_active !== false))).catch(() => {});
   }, [setup]);
+  // A dump being read in the background: look again every few seconds until it is ready or has failed.
+  const loading = sources.some((s) => s.status === 'loading');
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(reload, 4000);
+    return () => clearTimeout(timer);
+  }, [loading, sources, reload]);
 
   const test = async (s) => {
     setBusy(`t${s.id}`); setNote('');
@@ -367,12 +376,19 @@ function DatabasesTab({ setup, sources, reload }) {
                   {s.kind_label}{s.host ? ` · ${s.host}${s.port ? `:${s.port}` : ''} · ${s.database} · ${s.username}` : ''}{s.file_name ? ` · ${s.file_name}` : ''}
                 </p>
               </div>
-              <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${s.status === 'ready' ? 'bg-emerald-500/15 text-emerald-300' : s.status === 'failed' ? 'bg-red-500/15 text-red-300' : 'bg-muted text-muted-foreground'}`}>
-                {s.status === 'ready' ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                {s.status === 'ready' ? `Ready · ${s.tables_count} ${s.kind === 'mongodb' ? 'collections' : 'tables'}` : s.status === 'failed' ? 'Could not connect' : 'Not tested'}
+              <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${s.status === 'ready' ? 'bg-emerald-500/15 text-emerald-300' : s.status === 'failed' ? 'bg-red-500/15 text-red-300' : s.status === 'loading' ? 'bg-violet-500/15 text-violet-200' : 'bg-muted text-muted-foreground'}`}>
+                {s.status === 'ready' ? <CheckCircle2 className="h-3.5 w-3.5" /> : s.status === 'loading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                {s.status === 'ready' ? `Ready · ${s.tables_count} ${s.kind === 'mongodb' ? 'collections' : 'tables'}` : s.status === 'failed' ? (s.load ? 'Could not be read' : 'Could not connect') : s.status === 'loading' ? 'Loading the dump…' : 'Not tested'}
               </span>
             </div>
             {s.last_error && <p className="mt-2 text-sm text-red-300">{s.last_error}</p>}
+            {s.load && !s.load.loading && s.status === 'ready' && (
+              <p className="mt-2 text-xs text-muted-foreground" data-testid="analyst-load">
+                From {s.load.dump_name} ({s.load.dialect_label} dump): {s.load.tables} tables, {(s.load.rows || 0).toLocaleString()} rows{s.load.skipped ? `; ${s.load.skipped} other statements skipped (${s.load.skipped_kinds.join(', ')})` : ''}.
+                {s.load.problems?.length > 0 && <span className="block text-amber-300">{s.load.problems[0]}</span>}
+              </p>
+            )}
+            {s.load?.loading && <p className="mt-2 text-xs text-muted-foreground">Reading {s.load.dump_name} ({s.load.dialect_label} dump). This page shows when it is ready.</p>}
             {s.user_can_write && (
               <p className="mt-2 flex items-center gap-1 text-xs text-amber-300"><AlertTriangle className="h-3.5 w-3.5" /> This user can change data. It is only ever used to read, but a read-only user is safer.</p>
             )}

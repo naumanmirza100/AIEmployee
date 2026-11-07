@@ -58,7 +58,10 @@ class FakeDatabase:
         return FakeCollection(self.client, name)
 
     def list_collections(self, **kwargs):
-        return [{'name': name, 'type': 'collection'} for name in self.client.data]
+        # Like Atlas's free clusters, which refused a filter here: "can't get regex from filter doc not a regex".
+        if 'filter' in kwargs:
+            raise OperationFailure("can't get regex from filter doc not a regex", 2)
+        return [{'name': name, 'type': 'collection'} for name in [*self.client.data, 'system.views']]
 
     def command(self, command):
         actions = list(self.client.actions)
@@ -71,7 +74,7 @@ class FakeMongo:
     """What _client returns: records the database used and every aggregation asked of it."""
 
     def __init__(self, data=None, answer=(), databases=('shop',), actions=('find', 'listCollections'), members=()):
-        self.data, self.answer, self.databases, self.actions = dict(data or DATA), list(answer), databases, actions
+        self.data, self.answer, self.databases, self.actions = dict(DATA if data is None else data), list(answer), databases, actions
         self.asked, self.used, self.fail_with, self.closed = [], [], None, 0
         self.admin = mock.Mock(command=mock.Mock(return_value={'ok': 1}))
         self.topology_description = mock.Mock(server_descriptions=mock.Mock(return_value={m: None for m in members}))
@@ -168,6 +171,14 @@ class AddingAMongoDatabase(MongoCase):
         code, body = self.add(FakeMongo(databases=('shop', 'blog', 'admin')), string=ATLAS.replace('/shop', '/'))
         self.assertEqual(body['data']['status'], 'failed')
         self.assertIn('this user can see blog, shop', body['data']['last_error'])
+
+    def test_an_empty_or_misspelt_database_names_the_ones_the_user_can_see(self):
+        # Live, 7 Nov 2026: "AbdulH" read 0 collections; MongoDB's names are case-sensitive.
+        fake = FakeMongo(data={}, databases=('abdulH', 'test', 'admin'))
+        code, body = self.add(fake, string=ATLAS.replace('/shop', '/AbdulH'))
+        self.assertEqual((body['data']['status'], body['data']['tables_count']), ('ready', 0))
+        self.assertEqual(body['message'], 'Connected, but "AbdulH" has no collection this user can read. This user '
+                                          'can see: abdulH, test. Names are case-sensitive.')
 
     def test_a_database_typed_beside_the_string_wins(self):
         fake = FakeMongo()

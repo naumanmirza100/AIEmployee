@@ -3,7 +3,9 @@
   GET    data-analyst/setup                  our server's address to allow, the kinds of database, the file limit
   GET    data-analyst/sources                the databases this login may ask (owners and admins: all)
   POST   data-analyst/sources                owner/admin: a connection (JSON: PostgreSQL, MySQL, or a MongoDB
-                                             connection string) or a SQLite file (multipart)
+                                             connection string) or a file (multipart): a SQLite database, or a .sql
+                                             dump (MySQL, PostgreSQL, SQLite, SQL Server; .sql.gz too), which is read
+                                             into a SQLite copy, in the background when it is big
   GET    data-analyst/sources/<id>           one source (never its password)
   PATCH  data-analyst/sources/<id>           owner/admin: change it
   DELETE data-analyst/sources/<id>           owner/admin: remove it, its file and its questions
@@ -34,7 +36,7 @@ from rest_framework.throttling import SimpleRateThrottle
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.api_key_service import KeyServiceError
-from data_analyst_agent import connectors, engine, mongo
+from data_analyst_agent import connectors, dumps, engine, mongo, sources as source_work
 from data_analyst_agent.guards import Refused, check_query
 from data_analyst_agent.models import DataQuestion, DataSource
 
@@ -115,6 +117,15 @@ def _serialize(source: DataSource, request) -> dict:
             out['use_srv'] = source.use_srv
     else:
         out.update({'file_name': source.file_name, 'file_size': source.file_size})
+        report = source.load_report or {}
+        if report:
+            out['load'] = {
+                'dialect_label': report.get('dialect_label', ''), 'dump_name': report.get('dump_name', ''),
+                'loading': source.status == DataSource.STATUS_LOADING,
+                'tables': len(report.get('tables') or []), 'rows': report.get('rows'),
+                'skipped': sum((report.get('skipped') or {}).values()), 'skipped_kinds': list(report.get('skipped') or {})[:4],
+                'problems': (report.get('problems') or [])[:3], 'seconds': report.get('seconds'),
+            }
     if _is_admin(request):
         out['allowed_user_ids'] = list(source.allowed_users.values_list('pk', flat=True))
         out['tables'] = [{'name': t['name'], 'schema': t.get('schema', ''), 'kind': t.get('kind', 'table'),
@@ -213,14 +224,7 @@ def _apply_allowed(source: DataSource, data):
     source.allowed_users.set(CompanyUser.objects.filter(company_id=source.company_id, pk__in=wanted))
 
 
-def _save_upload(source: DataSource, upload):
-    if upload.size > _max_file_bytes():
-        raise Refused(f'The file is larger than {_max_file_bytes() // (1024 * 1024)} MB.')
-    head = upload.read(16)
-    upload.seek(0)
-    if head != SQLITE_HEADER:
-        raise Refused('That is not a SQLite database file.')
-    path = connectors.new_file_path(source.company_id)
+def _write_upload(upload, path):
     with open(path, 'wb') as out:
         for chunk in upload.chunks():
             out.write(chunk)
@@ -228,8 +232,31 @@ def _save_upload(source: DataSource, upload):
         os.chmod(path, 0o600)
     except OSError:  # pragma: no cover (Windows)
         pass
-    source.file_path, source.file_size = path, upload.size
-    source.file_name = re.sub(r'[^\w.\- ]', '_', os.path.basename(upload.name or 'database.sqlite'))[:255]
+
+
+def _save_upload(source: DataSource, upload):
+    """A SQLite database is kept as it is. A .sql dump (or .sql.gz) is kept until it has been read into a SQLite copy:
+    the source is "loading" until then."""
+    if upload.size > _max_file_bytes():
+        raise Refused(f'The file is larger than {_max_file_bytes() // (1024 * 1024)} MB.')
+    head = upload.read(16)
+    upload.seek(0)
+    name = re.sub(r'[^\w.\- ]', '_', os.path.basename(upload.name or 'database.sqlite'))[:255]
+    if head == SQLITE_HEADER:
+        path = connectors.new_file_path(source.company_id)
+        _write_upload(upload, path)
+        source.file_path, source.file_size, source.file_name = path, upload.size, name
+        return
+    path = connectors.new_file_path(source.company_id, '.sql.gz' if head[:2] == dumps.GZIP_MAGIC else '.sql')
+    _write_upload(upload, path)
+    dialect = dumps.sniff(dumps.read_head(path))
+    if dialect is None:
+        connectors.remove_file(path)
+        raise Refused('That is neither a SQLite database file nor a .sql dump with tables in it.')
+    source.file_path, source.file_size, source.file_name = path, upload.size, name
+    source.status = DataSource.STATUS_LOADING
+    source.load_report = {'dialect': dialect, 'dialect_label': dumps.LABELS[dialect], 'dump_name': name,
+                          'dump_size': upload.size}
 
 
 def _remove_file(source: DataSource):
@@ -240,30 +267,17 @@ def _remove_file(source: DataSource):
             os.remove(path)
 
 
-def _test(source: DataSource):
-    """Connect, read the tables, check the user. Saves what it found; returns (ok, message)."""
-    source.last_checked_at = timezone.now()
-    try:
-        tables = connectors.read_tables(source)
-        source.tables, source.tables_read_at = tables, timezone.now()
-        source.user_can_write = connectors.can_write(source)
-        source.status, source.last_error = DataSource.STATUS_READY, ''
-        source.save()
-        if source.kind == DataSource.KIND_MONGO:
-            if not tables:
-                return True, f'Connected to "{source.database}", but this user can read no collection there.'
-            return True, f'Connected to "{source.database}". {len(tables)} collection(s) read.'
-        if not tables:
-            return True, 'Connected, but no tables were found that this user can read.'
-        return True, f'Connected. {len(tables)} table(s) and view(s) read.'
-    except Refused as exc:
-        message = str(exc)
-    except Exception as exc:
-        message = f'Could not connect: {connectors.friendly_error(exc)}'
-        logger.info('data analyst: test of source %s failed: %s', source.pk, message[:200])
-    source.status, source.last_error = DataSource.STATUS_FAILED, message
-    source.save()
-    return False, message
+_test = source_work.test_source
+
+
+def _load_or_queue(source: DataSource):
+    """Read an uploaded dump now when it is small, else in the background. (ok, message)."""
+    if (source.file_size or 0) <= dumps.INLINE_BYTES:
+        return source_work.load_dump(source)
+    from data_analyst_agent.tasks import load_dump
+    load_dump.delay(source.pk)
+    return True, ('The dump is being read in the background; this page shows when it is ready. Big dumps take a few '
+                  'minutes.')
 
 
 # ---- endpoints ------------------------------------------------------------------------------------------------------
@@ -287,6 +301,8 @@ def setup(request):
 def sources(request):
     if request.method == 'GET':
         rows = DataSource.objects.filter(company_id=request.user.company_id).prefetch_related('allowed_users')
+        for s in rows:
+            source_work.settle_stale(s)
         visible = [s for s in rows if _is_admin(request) or s.may_ask(request.user)]
         return Response({'status': 'success', 'data': [_serialize(s, request) for s in visible]})
     refused = _admins_only(request)
@@ -310,7 +326,11 @@ def sources(request):
     with transaction.atomic():
         source.save()
         _apply_allowed(source, data)
-    ok, message = _test(source)
+    if source.status == DataSource.STATUS_LOADING:
+        ok, message = _load_or_queue(source)
+        source.refresh_from_db()
+    else:
+        ok, message = _test(source)
     return Response({'status': 'success', 'message': message, 'data': _serialize(source, request)},
                     status=status.HTTP_201_CREATED)
 
@@ -351,6 +371,8 @@ def source_test(request, source_id):
     source, refused = _source_for(request, source_id, manage=True)
     if refused:
         return refused
+    if source.status == DataSource.STATUS_LOADING:
+        return _err('The dump is still being read. This page shows when it is ready.')
     ok, message = _test(source)
     return Response({'status': 'success' if ok else 'error', 'message': message,
                      'data': _serialize(source, request)}, status=status.HTTP_200_OK if ok else status.HTTP_400_BAD_REQUEST)
@@ -372,6 +394,8 @@ def ask(request):
         return refused
     if not source.may_ask(request.user):
         return _err('You may not ask this database. Ask an owner or admin of your company.', status.HTTP_403_FORBIDDEN)
+    if source.status == DataSource.STATUS_LOADING:
+        return _err('This database is still being read from its dump. Ask again when it is ready.')
     conversation = str(data.get('conversation') or '').strip() or None
     if conversation and not re.fullmatch(r'[0-9a-fA-F-]{32,36}', conversation):
         conversation = None
