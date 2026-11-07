@@ -5040,6 +5040,8 @@ def sdr_email_sends(request):
     SDREmailSendRecipient.objects.bulk_create([
         SDREmailSendRecipient(send=send, lead=lead, email=addr, status='skipped' if skip else 'queued', error=skip)
         for lead, addr, skip in rows])
+    from ai_sdr_agent.scheduler import run_email_sends_soon
+    transaction.on_commit(run_email_sends_soon)      # not at the next 2-minute run
     return Response({'status': 'success', 'data': _serialize_email_send(send), **summary,
                      'message': f'Sending to {will_send} lead(s) of "{audience}" — a few at a time, within the '
                                 "mailbox's daily limit."}, status=201)

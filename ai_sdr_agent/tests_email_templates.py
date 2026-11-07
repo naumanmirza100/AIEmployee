@@ -413,3 +413,35 @@ class HeldForTomorrowTests(DeliveryTests):
         r = self.call(views.sdr_email_sends, 'post', {'template_id': self.template().id, 'campaign_id': self.campaign.id,
                                                       'emails': 'a@x.example', 'dry_run': True})
         self.assertEqual(r.data['waits_until_tomorrow'], 0)
+
+
+class SentAtOnceTests(TypedAddressTests):
+    """A send waited for the next 2-minute run of the scheduler: 1.5 min to one typed address (7 Nov 2026)."""
+
+    def test_a_new_send_asks_the_scheduler_to_send_now(self):
+        with mock.patch('ai_sdr_agent.scheduler.run_email_sends_soon') as soon, \
+                self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.start(emails='a@x.example').status_code, 201)
+        soon.assert_called_once_with()
+        with mock.patch('ai_sdr_agent.scheduler.run_email_sends_soon') as soon, \
+                self.captureOnCommitCallbacks(execute=True):
+            self.start(emails='a@x.example', dry_run=True)
+        soon.assert_not_called()                          # a dry run sends nothing
+
+    def test_without_a_scheduler_in_this_process_it_waits_for_the_next_run(self):
+        from ai_sdr_agent import scheduler
+        with mock.patch.object(scheduler, '_scheduler', None):
+            self.assertFalse(scheduler.run_email_sends_soon())
+        running = mock.Mock(running=True)
+        with mock.patch.object(scheduler, '_scheduler', running):
+            self.assertTrue(scheduler.run_email_sends_soon())
+        self.assertIs(running.add_job.call_args.args[0], scheduler._run_email_sends_now)
+
+    def test_the_run_now_is_not_held_back_by_a_run_a_moment_ago(self):
+        from ai_sdr_agent import scheduler
+        with mock.patch('ai_sdr_agent.tasks.send_email_sends_impl') as impl:
+            scheduler._run_email_sends()                  # the interval job ran just now
+            scheduler._run_email_sends()
+            self.assertEqual(impl.call_count, 1)          # within its min_interval
+            scheduler._run_email_sends_now()
+            self.assertEqual(impl.call_count, 2)
