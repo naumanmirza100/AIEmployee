@@ -1166,12 +1166,22 @@ def send_email_sends_impl():
             continue
 
         agent = OutreachAgent(company=company_user.company, needs_ai=False)
+        # Addresses the user typed in themselves go out at once; an industry or company send keeps to one email a
+        # day per lead (6 Nov 2026: a test to one's own address waited until the next day).
+        typed = not send.industry and not send.company
         sent = 0
         for r in queued[:budget * 4]:          # some wait for tomorrow (emailed today already)
             if sent >= budget:
                 break
             addr = (r.email or '').strip().lower()
-            if not addr or addr in sent_this_run or _emailed_today(addr, day_start):
+            if not addr or addr in sent_this_run:
+                continue
+            if not typed and _emailed_today(addr, day_start):
+                # Held for tomorrow (one email a day per lead): say so, or it just looks stuck at "queued".
+                waiting = 'Already emailed today: it goes out tomorrow.'
+                if r.error != waiting:
+                    r.error = waiting
+                    r.save(update_fields=['error'])
                 continue
             lead = r.lead
             if lead is None or lead.is_deleted:

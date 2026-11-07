@@ -379,3 +379,37 @@ class TypedAddressTests(Base):
         r = self.call(views.sdr_email_template_preview, 'post', {'html': '<p>Hi {first_name},</p>', 'emails': 'new@x.example'})
         self.assertIn('Hi there,', r.data['html'])
         self.assertEqual(r.data['lead']['email'], 'new@x.example')
+
+
+class HeldForTomorrowTests(DeliveryTests):
+    """A second send to a lead emailed today waited silently, shown only as "queued" (6 Nov 2026)."""
+
+    def test_the_held_email_says_why_and_the_send_counts_it(self):
+        self.make_send(['a@x.example'])
+        self.deliver()                                    # the first email of the day
+        second = self.make_send([])
+        SDREmailSendRecipient.objects.create(send=second, lead=SDRLead.objects.get(email='a@x.example'),
+                                             email='a@x.example')
+        self.assertEqual(self.deliver().call_count, 0)
+        r = second.recipients.get()
+        self.assertEqual((r.status, r.error), ('queued', 'Already emailed today: it goes out tomorrow.'))
+        self.assertEqual(views._serialize_email_send(second)['waiting_tomorrow'], 1)
+
+    def test_the_count_before_sending_warns_about_it(self):
+        self.make_send(['a@x.example'])
+        self.deliver()
+        self.lead('b@x.example')
+        r = self.call(views.sdr_email_sends, 'post', {'template_id': self.template().id, 'campaign_id': self.campaign.id,
+                                                      'industry': 'Dentistry', 'dry_run': True})
+        self.assertEqual((r.data['will_send'], r.data['waits_until_tomorrow']), (2, 1))
+
+    def test_typed_addresses_go_out_even_if_emailed_today(self):
+        self.make_send(['a@x.example'])
+        self.deliver()
+        typed = SDREmailSend.objects.create(company_user=self.cu, campaign=self.campaign, subject='S', html=HTML)
+        SDREmailSendRecipient.objects.create(send=typed, lead=SDRLead.objects.get(email='a@x.example'), email='a@x.example')
+        self.assertEqual(self.deliver().call_count, 1)
+        self.assertEqual(typed.recipients.get().status, 'sent')
+        r = self.call(views.sdr_email_sends, 'post', {'template_id': self.template().id, 'campaign_id': self.campaign.id,
+                                                      'emails': 'a@x.example', 'dry_run': True})
+        self.assertEqual(r.data['waits_until_tomorrow'], 0)

@@ -4931,6 +4931,8 @@ def _serialize_email_send(send: SDREmailSend) -> dict:
         'template_id': send.template_id, 'template_name': send.template_name, 'subject': send.subject,
         'campaign_id': send.campaign_id, 'campaign_name': send.campaign.name if send.campaign else '',
         'counts': {k: counts.get(k, 0) for k in ('queued', 'sent', 'skipped', 'failed')},
+        # Queued ones held because the lead was emailed today already (tasks.send_email_sends_impl).
+        'waiting_tomorrow': send.recipients.filter(status='queued', error__startswith='Already emailed today').count(),
         'total': sum(counts.values()),
         'created_at': send.created_at.isoformat(),
         'finished_at': send.finished_at.isoformat() if send.finished_at else None,
@@ -5015,8 +5017,14 @@ def sdr_email_sends(request):
                 else 'This address bounced before.' if lead.email_bounced else '')
         rows.append((lead, addr, skip))
     will_send = sum(1 for *_, skip in rows if not skip)
+    from ai_sdr_agent.tasks import _emailed_today
+    day_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     summary = {'will_send': will_send, 'skipped': len(rows) - will_send, 'leads': len(leads),
-               'new_leads': sum(1 for lead in leads if lead.pk is None)}
+               'new_leads': sum(1 for lead in leads if lead.pk is None),
+               # Emailed today already (any campaign or send): these wait until tomorrow (one email a day per lead),
+               # except addresses typed in by hand, which go out at once.
+               'waits_until_tomorrow': 0 if typed else sum(1 for lead, addr, skip in rows
+                                                           if not skip and _emailed_today(addr, day_start))}
     if d.get('dry_run') is True:
         return Response({'status': 'success', **summary})
     if not will_send:

@@ -724,6 +724,11 @@ const SDREmailTemplatesTab = () => {
                     <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{sendTo === 'emails' ? 'address' : 'lead'}{summary.will_send === 1 ? '' : (sendTo === 'emails' ? 'es' : 's')} {audienceLabel} will get this email</span>
                     {summary.skipped > 0 && <span style={{ color: '#f59e0b', fontSize: 12 }}>· {summary.skipped} skipped (do-not-email list or bounced)</span>}
                     {summary.new_leads > 0 && <span style={{ color: '#6b7280', fontSize: 12 }}>· {summary.new_leads} new — added to your leads when you send</span>}
+                    {summary.waits_until_tomorrow > 0 && (
+                      <span style={{ color: 'hsl(var(--pt-fbbf24))', fontSize: 12, flexBasis: '100%' }}>
+                        {summary.waits_until_tomorrow} of {summary.will_send === 1 ? 'it was' : 'these were'} already emailed today, so {summary.waits_until_tomorrow === 1 ? 'it goes' : 'they go'} out tomorrow (one email a day per lead).
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -760,7 +765,8 @@ const SDREmailTemplatesTab = () => {
                 ))}
                 <p style={{ color: '#6b7280', fontSize: 12, margin: 0, lineHeight: 1.6 }}>
                   It goes out a few at a time, within the mailbox's daily limit (shared with its campaigns), and each lead gets at most one email a day.
-                  {mailbox && summary.will_send > mailbox.left_today ? ` With ${mailbox.left_today} left today, the rest go out over the next days.` : ''} You can stop it at any time below.
+                  {mailbox && summary.will_send > mailbox.left_today ? ` With ${mailbox.left_today} left today, the rest go out over the next days.` : ''}
+                  {summary.waits_until_tomorrow ? ` ${summary.waits_until_tomorrow} already emailed today ${summary.waits_until_tomorrow === 1 ? 'goes' : 'go'} out tomorrow.` : ''} You can stop it at any time below.
                 </p>
               </div>
               <div>
@@ -815,6 +821,7 @@ const SDREmailTemplatesTab = () => {
                 </span>
                 <span style={{ color: '#9ca3af', fontSize: 12 }}>
                   <span style={{ color: RECIPIENT_COLOR.sent }}>{s.counts.sent} sent</span> · {s.counts.queued} queued
+                  {s.waiting_tomorrow ? <span title="Already emailed today: one email a day per lead" style={{ color: 'hsl(var(--pt-fbbf24))' }}> ({s.waiting_tomorrow} wait{s.waiting_tomorrow === 1 ? 's' : ''} for tomorrow)</span> : null}
                   {s.counts.skipped ? <> · <span style={{ color: RECIPIENT_COLOR.skipped }}>{s.counts.skipped} skipped</span></> : null}
                   {s.counts.failed ? <> · <span style={{ color: RECIPIENT_COLOR.failed }}>{s.counts.failed} failed</span></> : null}
                 </span>
