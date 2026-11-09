@@ -942,6 +942,27 @@ class LeadSearchTests(SimpleTestCase):
         self.assertEqual(kwargs['params']['person_titles[]'], ['CTO'])
         self.assertEqual(kwargs['params']['organization_num_employees_ranges[]'], ['10001,1000000'])
 
+    def test_apollo_pages_through_results_until_it_has_enough(self):
+        # One page holds at most 100 people: a search for 250 asked for page 1 only and found 100 (6 Nov 2026).
+        agent = self.agent(apollo_api_key='k')
+        pages = []
+
+        def page(url, params, headers, timeout):
+            pages.append((params['page'], params['per_page']))
+            n = 100 if params['page'] < 3 else 70
+            return self.response(200, {'people': [{'id': f"{params['page']}-{i}", 'name': 'A B'} for i in range(n)]})
+
+        with mock.patch('requests.post', side_effect=page):
+            found = agent._search_apollo(self.icp(), 250)
+        self.assertEqual(len(found), 250)
+        self.assertEqual(pages, [(1, 100), (2, 100), (3, 100)])
+
+    def test_apollo_stops_when_it_runs_out_of_people(self):
+        agent = self.agent(apollo_api_key='k')
+        with mock.patch('requests.post', return_value=self.response(200, {'people': [{'id': '1', 'name': 'A B'}]})) as post:
+            self.assertEqual(len(agent._search_apollo(self.icp(), 500)), 1)
+        post.assert_called_once()
+
     def test_apollo_status_codes_are_readable(self):
         agent = self.agent(apollo_api_key='k')
         for status, text in ((401, 'rejected the API key'), (403, 'access denied'), (429, 'rate limit')):

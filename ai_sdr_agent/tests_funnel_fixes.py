@@ -76,14 +76,15 @@ class ResearchJobSourceTests(SDRBase):
             response = views.research_leads(request)
         return SDRLeadResearchJob.objects.get(pk=response.data['job_id'])
 
-    def test_one_search_finds_at_most_200_leads(self):
-        # 1,500 was one click away, each lead costing the company's credits (4 Nov 2026).
-        self.assertEqual(self._start(1500).search_params['count'], 200)
+    def test_one_search_finds_at_most_1000_leads(self):
+        # 1,500 was one click away (4 Nov 2026), then 200 was too few (6 Nov 2026); the dialog confirms above 200.
+        self.assertEqual(self._start(1500).search_params['count'], 1000)
+        self.assertEqual(self._start(1000).search_params['count'], 1000)
         self.assertEqual(self._start(50).search_params['count'], 50)
 
     def test_a_search_cut_short_by_a_restart_stops_saying_running(self):
         job = self._start(20)
-        job.started_at = timezone.now() - timedelta(minutes=31)
+        job.started_at = timezone.now() - views.RESEARCH_JOB_STALE_AFTER - timedelta(minutes=1)
         job.save(update_fields=['started_at'])
         request = APIRequestFactory().get('/x')
         force_authenticate(request, user=self.cu)
@@ -235,7 +236,14 @@ class LeadsExportAllTests(SDRBase):
         body = self._csv({})
         self.assertIn('"\'=HYPERLINK(""http://bad.example"",""Click"")"', body)
         self.assertIn('\'-2+3+cmd', body)
-        self.assertIn(',+92 300 1234567,', body)
+        # Excel showed a bare +441159254169 as 4.41159E+11 (6 Nov 2026): ="..." keeps it as text.
+        self.assertIn(',"=""+92 300 1234567""",', body)
+
+    def test_a_phone_cell_is_text_only_when_it_holds_a_phone(self):
+        self.assertEqual(views._phone_cell('447789223569'), '="447789223569"')
+        self.assertEqual(views._phone_cell(''), '')
+        self.assertEqual(views._phone_cell('=1+1'), "'=1+1")          # not a phone: the formula guard as before
+        self.assertEqual(views._phone_cell('ext. 12'), 'ext. 12')
 
 
 class BookingConfirmSyncsToCrmTests(SDRBase):

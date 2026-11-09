@@ -132,6 +132,37 @@ def _run_send_due_steps():
         _close_db()
 
 
+@singleton_job('resume_research', ttl_seconds=300, min_interval_seconds=60)
+def _run_resume_research():
+    # Lead searches whose thread died go on with their Apify run, so the leads already paid for are not lost.
+    try:
+        from api.views.ai_sdr_agent import resume_orphaned_research_jobs
+        resumed = resume_orphaned_research_jobs()
+        if resumed:
+            logger.info("SDR resume_research → resumed %d search(es)", resumed)
+    except Exception as exc:
+        logger.exception("SDR resume_research crashed: %s", exc)
+    finally:
+        _close_db()
+
+
+def _email_sends_body():
+    # A user's HTML template to the leads of an industry, a few at a time within the mailbox's limits.
+    try:
+        from ai_sdr_agent.tasks import send_email_sends_impl
+        send_email_sends_impl()
+    except Exception as exc:
+        logger.exception("SDR email_sends crashed: %s", exc)
+    finally:
+        _close_db()
+
+
+_run_email_sends = singleton_job('email_sends', ttl_seconds=900, min_interval_seconds=60)(_email_sends_body)
+# A send just created: no min_interval, or one created within a minute of the last run would wait for the next.
+# The lock still keeps it from running alongside the interval job; if that one is mid-run, the next run sends it.
+_run_email_sends_now = singleton_job('email_sends', ttl_seconds=900)(_email_sends_body)
+
+
 @singleton_job('qualify_queue', ttl_seconds=900, min_interval_seconds=90)
 def _run_qualify_queue():
     try:
@@ -291,6 +322,8 @@ def start_scheduler() -> None:
         jobs = [
             ('send_due_steps',    _run_send_due_steps,     300,    30),
             ('qualify_queue',     _run_qualify_queue,      120,    45),
+            ('email_sends',       _run_email_sends,        120,    55),
+            ('resume_research',   _run_resume_research,    120,    50),
             ('enrich_queue',      _run_enrich_queue,        180,    75),
             ('check_inbox',       _run_check_inbox,         300,    60),
             ('auto_start',        _run_auto_start,          900,    90),
@@ -336,6 +369,21 @@ def stop_scheduler() -> None:
             except Exception as exc:
                 logger.warning("SDR scheduler shutdown error: %s", exc)
             _scheduler = None
+
+
+def run_email_sends_soon() -> bool:
+    """Send the queued SDREmailSends now, in the scheduler's thread pool, rather than at the next 2-minute run
+    (7 Nov 2026: a send to one typed address took 1.5 min). Returns False when no scheduler runs in this process
+    (one-off commands, tests, a host that must not send): the send then goes out with the scheduler's next run."""
+    s = _scheduler
+    if s is None or not s.running:
+        return False
+    try:
+        s.add_job(_run_email_sends_now, id='email_sends_now', name='sdr-email_sends_now', replace_existing=True)
+    except Exception as exc:
+        logger.warning("SDR email_sends_now not scheduled: %s", exc)
+        return False
+    return True
 
 
 def get_scheduler() -> BackgroundScheduler | None:

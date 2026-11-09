@@ -19,7 +19,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, exportAllLeadsCsv, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
-  researchLead, getLeadResearch, researchLeads, getResearchJob, fetchApifyLeads, listIcpProfiles,
+  researchLead, getLeadResearch, researchLeads, getResearchJob, stopResearchJob, fetchApifyLeads, listIcpProfiles,
   createIcpProfile, updateIcpProfile, setDefaultIcpProfile, deleteIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads, updateLead,
@@ -370,6 +370,11 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
 // new one typed in. `value` is an industry name ('' = none).
 // --------------------------------------------------------------------------
 const NEW_INDUSTRY = '__new__';
+
+// Generate Leads: the most one search finds (MAX_LEADS_PER_SEARCH on the server), and the size above which the
+// dialog asks for a confirmation first.
+const MAX_SEARCH = 1000;
+const BIG_SEARCH = 200;
 
 const IndustryPicker = ({ industries, value, onChange, emptyLabel = 'No industry' }) => {
   const match = industries.find(i => i.name.toLowerCase() === (value || '').trim().toLowerCase());
@@ -943,6 +948,8 @@ const SDRLeadsTab = () => {
   const [showGenModal, setShowGenModal] = useState(false);
   const [genSource, setGenSource] = useState('apollo');
   const [genCount, setGenCount] = useState(10);
+  // Above BIG_SEARCH leads the first click on Generate shows what it will cost; the second starts it.
+  const [genConfirmBig, setGenConfirmBig] = useState(false);
   const [genIcpId, setGenIcpId] = useState('');
   const [icpProfiles, setIcpProfiles] = useState([]);
   const [generating, setGenerating] = useState(false);
@@ -1153,6 +1160,7 @@ const SDRLeadsTab = () => {
 
   // preferIcpId: an ICP just made, to find leads for it; else the default ICP is preselected.
   const openGenModal = async (preferIcpId) => {
+    setGenConfirmBig(false);
     try {
       const [profiles, settingsRes] = await Promise.allSettled([listIcpProfiles(), getSdrSettings()]);
       if (profiles.status === 'fulfilled') {
@@ -1198,6 +1206,7 @@ const SDRLeadsTab = () => {
       const icpName = icpProfiles.find(p => String(p.id) === String(genIcpId))?.name || '';
       setGenRuns(runs => [...runs, { jobId, icpName, total: genCount, created: 0 }]);
       setShowGenModal(false);
+      setGenConfirmBig(false);
       toast({
         title: `Finding ${genCount} leads${icpName ? ` for ${icpName}` : ''}`,
         description: 'This runs in the background. Keep working; the leads appear in the list as they are found.',
@@ -1211,6 +1220,18 @@ const SDRLeadsTab = () => {
       }
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Stop a search: its Apify run is aborted, so nothing more is charged; the leads found so far stay.
+  const handleStopSearch = async (run) => {
+    setGenRuns(runs => runs.map(r => r.jobId === run.jobId ? { ...r, stopping: true } : r));
+    try {
+      const resp = await stopResearchJob(run.jobId);
+      toast({ title: 'Stopping the search', description: resp?.message || 'The leads found so far are kept.' });
+    } catch (e) {
+      setGenRuns(runs => runs.map(r => r.jobId === run.jobId ? { ...r, stopping: false } : r));
+      toast({ title: 'Could not stop the search', description: e?.message, variant: 'destructive' });
     }
   };
 
@@ -1234,7 +1255,7 @@ const SDRLeadsTab = () => {
           if (!job) { keep.push(run); continue; }                       // a failed poll: try again next time
           const created = job.leads_created || 0;
           if (created > run.created) more = true;
-          if (!job.done) { keep.push({ ...run, created }); continue; }
+          if (!job.done) { keep.push({ ...run, created, stopping: job.stopping }); continue; }
           finished = true;
           const label = run.icpName ? ` for ${run.icpName}` : '';
           if (job.state === 'failed') {
@@ -1243,8 +1264,12 @@ const SDRLeadsTab = () => {
           } else {
             const skipped = job.skipped_duplicates || 0;
             toast({
-              title: created ? `${created} leads found${label}` : `No new leads found${label}`,
+              title: job.partial
+                ? `${created} of ${run.total} leads found${label}`
+                : created ? `${created} leads found${label}` : `No new leads found${label}`,
               description: [
+                // Ended early (stopped, or the run failed or timed out): what it found is saved all the same.
+                job.partial ? `${job.stopped_reason === 'Stopped' ? 'Stopped.' : `The search ended early: ${job.stopped_reason}.`} The ${created} found are saved.` : '',
                 `Source: ${(job.source || '').toUpperCase()}`,
                 skipped ? `${skipped} duplicates skipped.` : '',
                 created ? 'Click Qualify to score them.' : '',
@@ -1627,7 +1652,13 @@ const SDRLeadsTab = () => {
               <span key={run.jobId} title="Leads are being found in the background; they appear in the list as they arrive."
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', color: '#34d399', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
                 <Loader2 size={12} className="animate-spin" />
-                Finding leads{run.icpName ? ` · ${run.icpName}` : ''} {run.created}/{run.total}
+                {run.stopping ? 'Stopping' : 'Finding leads'}{run.icpName ? ` · ${run.icpName}` : ''} {run.created}/{run.total}
+                {!run.stopping && (
+                  <button onClick={() => handleStopSearch(run)} title="Stop this search: the leads found so far are kept, and nothing more is charged."
+                    style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, marginLeft: 2, cursor: 'pointer', color: '#34d399' }}>
+                    <X size={12} />
+                  </button>
+                )}
               </span>
             ))}
             {stats.qualifying > 0 && (
@@ -2801,10 +2832,19 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>
                 Number of Leads: <span style={{ color: '#a855f7', fontWeight: 700 }}>{genCount}</span>
               </label>
-              <input type="range" min={5} max={200} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width: '100%', accentColor: '#a855f7' }} />
+              <input type="range" min={5} max={MAX_SEARCH} step={5} value={genCount} onChange={e => { setGenCount(Number(e.target.value)); setGenConfirmBig(false); }} style={{ width: '100%', accentColor: '#a855f7' }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563', fontSize: 11, marginTop: 2 }}>
-                <span>5</span><span>200</span>
+                <span>5</span><span>{MAX_SEARCH.toLocaleString()}</span>
               </div>
+              {genConfirmBig && genCount > BIG_SEARCH && (
+                <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.35)', color: 'hsl(var(--pt-fbbf24))', fontSize: 12, lineHeight: 1.5 }}>
+                  <strong>{genCount.toLocaleString()} leads is a big search.</strong>{' '}
+                  {genSource === 'apify'
+                    ? `Apify charges your account's credits for every lead it finds, and the run can take up to ${Math.ceil(genCount / BIG_SEARCH) * 5} minutes.`
+                    : 'Apollo pages through its results, which takes longer than a small search.'}{' '}
+                  Every new lead is also enriched automatically. Click again to start.
+                </div>
+              )}
             </div>
           </div>
 
@@ -2825,13 +2865,13 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
-            <Button onClick={handleGenerate}
+            <Button onClick={() => { if (genCount > BIG_SEARCH && !genConfirmBig) setGenConfirmBig(true); else handleGenerate(); }}
               disabled={generating || icpProfiles.length === 0 || (sdrKeyStatus.loaded && !sdrKeyStatus[genSource])}
               style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {generating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               {generating
                 ? 'Starting…'
-                : `Generate ${genCount} Leads`}
+                : genConfirmBig && genCount > BIG_SEARCH ? `Yes, generate ${genCount.toLocaleString()} leads` : `Generate ${genCount.toLocaleString()} Leads`}
             </Button>
           </DialogFooter>
         </DialogContent>

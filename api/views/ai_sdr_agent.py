@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import threading
 from datetime import timedelta
 from typing import Optional
 
@@ -31,10 +32,10 @@ from api.permissions import IsCompanyUserOnly
 from ai_sdr_agent.models import (
     SDRIcpProfile, SDRLead, SDRLeadResearchJob,
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
-    SDRAgentSettings, SDRReplyDraft,
+    SDRAgentSettings, SDRReplyDraft, SDREmailTemplate, SDREmailSend, SDREmailSendRecipient,
 )
 from ai_sdr_agent.agents.lead_research_agent import (
-    ApifyApprovalRequired, LeadResearchAgent, NoLeadSource, apify_actor_page_url,
+    ApifyApprovalRequired, ApifyUnreachable, LeadResearchAgent, NoLeadSource, apify_actor_page_url,
 )
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
 from ai_sdr_agent.agents.email_assistant_agent import strip_quoted_reply
@@ -637,6 +638,16 @@ def _apply_lead_filters(qs, request):
 
 
 _PHONE_CHARS = set('0123456789 ()-.+/')
+# The export writes a phone as ="+441159254169" so Excel keeps it as text; the import takes that back to the number.
+_EXCEL_TEXT_CELL = re.compile(r'^="([0-9 ()\-.+/]*)"$')
+
+
+def _phone_cell(text: str) -> str:
+    """A phone number for the CSV export. As a bare value Excel reads +441159254169 as a number: it drops the + and
+    shows 4.41159E+11. ="..." makes it text. Only a cell made of phone characters gets this, so it runs nothing."""
+    if text and set(text) <= _PHONE_CHARS and any(c.isdigit() for c in text):
+        return f'="{text}"'
+    return _no_formula(text)
 
 
 def _no_formula(text: str) -> str:
@@ -690,7 +701,8 @@ def sdr_leads_export(request):
     def _rows():
         yield writer.writerow([header for _, header in columns])
         for lead in qs.iterator(chunk_size=1000):
-            yield writer.writerow([_val(getattr(lead, field, '')) for field, _ in columns])
+            yield writer.writerow([_phone_cell(lead.phone) if field == 'phone' else _val(getattr(lead, field, ''))
+                                   for field, _ in columns])
 
     resp = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
     resp['Content-Disposition'] = 'attachment; filename="sdr-leads-export.csv"'
@@ -994,26 +1006,202 @@ def research_sources(request):
     })
 
 
-# One search finds at most this many leads. Each costs the company's Apollo or Apify credits, then an AI scoring
-# and an Apollo enrichment; 1,500 was one click away (4 Nov 2026).
-MAX_LEADS_PER_SEARCH = 200
+# One search finds at most this many leads. Each costs the company's Apify credits (Apollo's search is free) and an
+# automatic enrichment; AI scoring waits for the Qualify button. 200 was too few (6 Nov 2026); the Generate dialog
+# asks for a confirmation above 200.
+MAX_LEADS_PER_SEARCH = 1000
 # A search runs in a thread of the web server, so a deploy or restart ends it without a word and its job said
-# "running" for good. A search of 200 leads takes a few minutes: one running this long was cut short.
-RESEARCH_JOB_STALE_AFTER = timedelta(minutes=30)
+# "running" for good. A search of 200 leads takes a few minutes and Apify is given 25 for 1,000: one running this
+# long was cut short.
+RESEARCH_JOB_STALE_AFTER = timedelta(minutes=90)
+
+
+# A search whose thread stopped beating this long ago (a restart, a deploy) is picked up again by resume_research,
+# on the same Apify run, from the dataset items it had read. A run is not followed for more than a day.
+RESEARCH_HEARTBEAT_STALE = timedelta(minutes=3)
+RESEARCH_RESUME_GIVE_UP = timedelta(hours=24)
 
 
 def _settle_stale_job(job):
-    """A job still "running" past RESEARCH_JOB_STALE_AFTER is marked failed, so the screen stops waiting for it."""
-    if job.status != 'running' or not job.started_at or timezone.now() - job.started_at < RESEARCH_JOB_STALE_AFTER:
+    """A job still "running" past RESEARCH_JOB_STALE_AFTER is ended, so the screen stops waiting for it. A job with
+    an Apify run is resumed instead (resume_orphaned_research_jobs) and only ended past RESEARCH_RESUME_GIVE_UP."""
+    limit = RESEARCH_RESUME_GIVE_UP if job.apify_run_id else RESEARCH_JOB_STALE_AFTER
+    if job.status != 'running' or not job.started_at or timezone.now() - job.started_at < limit:
         return job
     params = job.search_params or {}
     params['error_code'] = 'interrupted'
     job.search_params = params
-    job.status = 'failed'
-    job.error_message = 'The search was cut short, most likely by a server restart. Please start it again.'
     job.completed_at = timezone.now()
+    if job.leads_created:
+        # The leads it saved are kept: the search ended early, it did not fail.
+        job.status = 'completed'
+        params['stopped_reason'] = 'The search was cut short, most likely by a server restart.'
+    else:
+        job.status = 'failed'
+        job.error_message = 'The search was cut short, most likely by a server restart. Please start it again.'
     job.save(update_fields=['search_params', 'status', 'error_message', 'completed_at'])
     return job
+
+
+def _existing_lead_keys(company_user) -> dict:
+    """What the user's leads are known by, to catch duplicates: LinkedIn URL (the most reliable — essential for
+    no-email sources like the Google scraper, where company often doesn't parse), email, name+company, name."""
+    keys = {'linkedin': set(), 'email': set(), 'name_company': set(), 'name': set()}
+    for em, fn, cn, li in SDRLead.objects.filter(company_user=company_user).values_list(
+            'email', 'full_name', 'company_name', 'linkedin_url'):
+        if em:
+            keys['email'].add(em.lower())
+        if fn and cn:
+            keys['name_company'].add((fn.lower().strip(), cn.lower().strip()))
+        if fn:
+            keys['name'].add(fn.lower().strip())
+        nli = normalize_linkedin_url(li)
+        if nli:
+            keys['linkedin'].add(nli)
+    return keys
+
+
+def _save_found_leads(job, raw_leads, keys, default_source) -> tuple:
+    """Save a batch of a search's leads as new leads, skipping duplicates of ``keys`` (which it adds to); returns
+    (created, skipped). Each is queued for enrichment; scoring waits for the Qualify button."""
+    from ai_sdr_agent.agents.lead_validator import validate_lead
+
+    created = skipped = 0
+    for ld in raw_leads:
+        full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
+        lead_email = (ld.get('email') or '').strip().lower()
+        company_name = (ld.get('company_name') or '').strip()
+        linkedin = normalize_linkedin_url(ld.get('linkedin_url'))
+
+        # ── Reject leads with no name and no company (totally empty) ──
+        if not full_name.strip() and not company_name:
+            skipped += 1
+            continue
+
+        # ── Duplicate guard — linkedin > email > name+company > name ──
+        if linkedin and linkedin in keys['linkedin']:
+            skipped += 1
+            continue
+        if lead_email and lead_email in keys['email']:
+            skipped += 1
+            continue
+        name_company_key = (full_name.lower().strip(), company_name.lower().strip())
+        if full_name and company_name and name_company_key in keys['name_company']:
+            skipped += 1
+            continue
+        # No email/company (Google scraper) → fall back to name-only so
+        # the same profile scraped twice isn't inserted again.
+        name_key = full_name.lower().strip()
+        if not lead_email and not company_name and not linkedin and name_key and name_key in keys['name']:
+            skipped += 1
+            continue
+
+        # Track all keys for intra-batch dedup
+        if linkedin:
+            keys['linkedin'].add(linkedin)
+        if lead_email:
+            keys['email'].add(lead_email)
+        if full_name and company_name:
+            keys['name_company'].add(name_company_key)
+        if name_key:
+            keys['name'].add(name_key)
+
+        validation = validate_lead({**ld, 'full_name': full_name})
+        SDRLead.objects.create(
+            company_user=job.company_user,
+            icp_profile=job.icp_profile,
+            first_name=ld.get('first_name', ''),
+            last_name=ld.get('last_name', ''),
+            full_name=full_name,
+            email=lead_email or ld.get('email', ''),
+            phone=ld.get('phone', ''),
+            job_title=ld.get('job_title', ''),
+            seniority_level=ld.get('seniority_level', ''),
+            department=ld.get('department', ''),
+            company_name=ld.get('company_name', ''),
+            company_domain=ld.get('company_domain', ''),
+            company_industry=ld.get('company_industry', ''),
+            company_size=ld.get('company_size') or None,
+            company_size_range=ld.get('company_size_range', ''),
+            company_location=ld.get('company_location', ''),
+            company_technologies=ld.get('company_technologies', []),
+            linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
+            company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
+            company_website=_ensure_https(ld.get('company_website', '')),
+            recent_news=ld.get('recent_news', []),
+            buying_signals=ld.get('buying_signals', []),
+            apollo_id=ld.get('apollo_id', ''),
+            raw_data=ld.get('raw_data', {}),
+            source=ld.get('source') or default_source,
+            status='new',
+            confidence_score=validation['confidence_score'],
+            data_quality_flags=validation['data_quality_flags'],
+            # Not queued for qualification: that waits for the Qualify button. Enriched in the background.
+            enrichment_status='pending',
+            enrichment_queued_at=timezone.now(),
+        )
+        created += 1
+    return created, skipped
+
+
+class _JobTracker:
+    """Saves a search's leads as they are found and keeps its job row current (see LeadResearchAgent.search_leads),
+    so an interrupted search keeps every lead it had already paid for."""
+
+    def __init__(self, job, default_source):
+        self.job = job
+        self.default_source = default_source
+        self.keys = _existing_lead_keys(job.company_user)
+        self.skipped = 0
+        self.source = None
+
+    def run_started(self, run_id, dataset_id):
+        self.job.apify_run_id, self.job.apify_dataset_id = run_id, dataset_id or ''
+        self.job.heartbeat_at = timezone.now()
+        self.job.save(update_fields=['apify_run_id', 'apify_dataset_id', 'heartbeat_at'])
+
+    def heartbeat(self):
+        self.job.heartbeat_at = timezone.now()
+        self.job.save(update_fields=['heartbeat_at'])
+
+    def found(self, leads, items_read):
+        created, skipped = _save_found_leads(self.job, leads, self.keys, self.default_source)
+        self.skipped += skipped
+        self.source = self.source or next((ld.get('source') for ld in leads if ld.get('source')), None)
+        self.job.leads_created += created
+        self.job.total_found += len(leads)
+        fields = ['leads_created', 'total_found', 'heartbeat_at']
+        if items_read is not None:
+            self.job.items_read = items_read
+            fields.append('items_read')
+        self.job.heartbeat_at = timezone.now()
+        # Never search_params here: the Stop button writes stop_requested into it meanwhile.
+        self.job.save(update_fields=fields)
+
+    def should_stop(self) -> bool:
+        params = SDRLeadResearchJob.objects.filter(pk=self.job.pk).values_list('search_params', flat=True).first()
+        return bool((params or {}).get('stop_requested'))
+
+
+def resume_orphaned_research_jobs() -> int:
+    """Pick up Apify searches whose thread died (a restart, a deploy, Apify out of reach for a while): each goes on
+    with the same run from the dataset items it had read, so nothing is bought twice. Run by the scheduler."""
+    now = timezone.now()
+    orphans = (SDRLeadResearchJob.objects.filter(status='running').exclude(apify_run_id='')
+               .filter(Q(heartbeat_at__lt=now - RESEARCH_HEARTBEAT_STALE) | Q(heartbeat_at__isnull=True)))
+    resumed = 0
+    for job in orphans:
+        if _settle_stale_job(job).status != 'running':
+            continue
+        # Claimed by moving its heartbeat: another process looking at the same moment finds it beating.
+        if not SDRLeadResearchJob.objects.filter(pk=job.pk, status='running', heartbeat_at=job.heartbeat_at) \
+                .update(heartbeat_at=now):
+            continue
+        logger.info("Research job %s: resuming Apify run %s from item %s", job.pk, job.apify_run_id, job.items_read)
+        threading.Thread(target=_execute_research_job, args=(job.pk,), name=f"sdr-research-job-{job.pk}",
+                         daemon=True).start()
+        resumed += 1
+    return resumed
 
 
 def _execute_research_job(job_id):
@@ -1024,11 +1212,10 @@ def _execute_research_job(job_id):
 
     A run of up to MAX_LEADS_PER_SEARCH leads can take minutes — far longer than an HTTP request
     should block — so ``research_leads`` returns immediately and this does the
-    actual Apollo/Apify search + lead creation + qualification queueing out of
-    band. It must NEVER raise out of the thread; every failure is written to the
-    job row instead.
+    actual Apollo/Apify search out of band. Leads are saved batch by batch as the provider finds them
+    (_JobTracker), so a search cut short keeps what it found. A job that already has an Apify run (its thread died)
+    goes on with that run. It must NEVER raise out of the thread; every failure is written to the job row instead.
     """
-    from ai_sdr_agent.agents.lead_validator import validate_lead
     from django.db import close_old_connections
 
     job = (SDRLeadResearchJob.objects
@@ -1038,17 +1225,26 @@ def _execute_research_job(job_id):
     if not job:
         return
 
+    def _fresh_params():
+        # The Stop button may have written to search_params since the job was read.
+        return SDRLeadResearchJob.objects.filter(pk=job.pk).values_list('search_params', flat=True).first() or {}
+
     def _fail(exc, code=None):
-        params = job.search_params or {}
+        params = _fresh_params()
         if code:
             params['error_code'] = code
         if isinstance(exc, ApifyApprovalRequired):
             params['approval_url'] = exc.approval_url
             params['actor'] = exc.actor
-        job.search_params = params
-        job.status = 'failed'
-        job.error_message = str(exc)
         job.completed_at = timezone.now()
+        if job.leads_created:
+            # Leads were saved before it went wrong: they are kept, and the search ended early.
+            params['stopped_reason'] = str(exc)
+            job.status = 'completed'
+        else:
+            job.status = 'failed'
+            job.error_message = str(exc)
+        job.search_params = params
         job.save()
 
     try:
@@ -1059,135 +1255,29 @@ def _execute_research_job(job_id):
         source = params.get('source', 'auto')
 
         researcher = _get_research_agent(company_user.company, company_user=company_user)
-        raw_leads = researcher.search_leads(icp, count=count, source=source)
+        tracker = _JobTracker(job, researcher.source_label)
+        if job.apify_run_id:
+            researcher.follow_apify_run(icp, count, job.apify_run_id, job.apify_dataset_id, tracker=tracker,
+                                        offset=job.items_read)
+        else:
+            researcher.search_leads(icp, count=count, source=source, tracker=tracker)
 
-        created = 0
-        created_ids = []
-        skipped_dupes = 0
-
-        # Pre-load existing keys to catch dupes. LinkedIn URL is the most
-        # reliable (unique per profile) — essential for no-email sources like
-        # the Google scraper, where company often doesn't parse and name+company
-        # dedup misses. Also track email, name+company, and name-only.
-        existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list(
-            'email', 'full_name', 'company_name', 'linkedin_url'
-        )
-        existing_emails_lower = set()
-        existing_name_company = set()
-        existing_linkedin = set()
-        existing_names = set()
-
-        _norm_li = normalize_linkedin_url
-
-        for em, fn, cn, li in existing_leads_qs:
-            if em:
-                existing_emails_lower.add(em.lower())
-            if fn and cn:
-                existing_name_company.add((fn.lower().strip(), cn.lower().strip()))
-            if fn:
-                existing_names.add(fn.lower().strip())
-            nli = _norm_li(li)
-            if nli:
-                existing_linkedin.add(nli)
-
-        for ld in raw_leads:
-            full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
-            lead_email = (ld.get('email') or '').strip().lower()
-            company_name = (ld.get('company_name') or '').strip()
-            linkedin = _norm_li(ld.get('linkedin_url'))
-
-            # ── Reject leads with no name and no company (totally empty) ──
-            if not full_name.strip() and not company_name:
-                skipped_dupes += 1
-                continue
-
-            # ── Duplicate guard — linkedin > email > name+company > name ──
-            if linkedin and linkedin in existing_linkedin:
-                skipped_dupes += 1
-                continue
-            if lead_email and lead_email in existing_emails_lower:
-                skipped_dupes += 1
-                continue
-            name_company_key = (full_name.lower().strip(), company_name.lower().strip())
-            if full_name and company_name and name_company_key in existing_name_company:
-                skipped_dupes += 1
-                continue
-            # No email/company (Google scraper) → fall back to name-only so
-            # the same profile scraped twice isn't inserted again.
-            name_key = full_name.lower().strip()
-            if not lead_email and not company_name and not linkedin and name_key and name_key in existing_names:
-                skipped_dupes += 1
-                continue
-
-            # Track all keys for intra-batch dedup
-            if linkedin:
-                existing_linkedin.add(linkedin)
-            if lead_email:
-                existing_emails_lower.add(lead_email)
-            if full_name and company_name:
-                existing_name_company.add(name_company_key)
-            if name_key:
-                existing_names.add(name_key)
-            # ─────────────────────────────────────────────────────────────
-
-            validation = validate_lead({**ld, 'full_name': full_name})
-
-            new_lead = SDRLead.objects.create(
-                company_user=company_user,
-                icp_profile=icp,
-                first_name=ld.get('first_name', ''),
-                last_name=ld.get('last_name', ''),
-                full_name=full_name,
-                email=lead_email or ld.get('email', ''),
-                phone=ld.get('phone', ''),
-                job_title=ld.get('job_title', ''),
-                seniority_level=ld.get('seniority_level', ''),
-                department=ld.get('department', ''),
-                company_name=ld.get('company_name', ''),
-                company_domain=ld.get('company_domain', ''),
-                company_industry=ld.get('company_industry', ''),
-                company_size=ld.get('company_size') or None,
-                company_size_range=ld.get('company_size_range', ''),
-                company_location=ld.get('company_location', ''),
-                company_technologies=ld.get('company_technologies', []),
-                linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
-                company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
-                company_website=_ensure_https(ld.get('company_website', '')),
-                recent_news=ld.get('recent_news', []),
-                buying_signals=ld.get('buying_signals', []),
-                apollo_id=ld.get('apollo_id', ''),
-                raw_data=ld.get('raw_data', {}),
-                source=ld.get('source') or researcher.source_label,
-                status='new',
-                confidence_score=validation['confidence_score'],
-                data_quality_flags=validation['data_quality_flags'],
-            )
-            created += 1
-            created_ids.append(new_lead.pk)
-
-            # Surface incremental progress to the polling UI without hammering
-            # the DB on every single insert.
-            if created % 50 == 0:
-                job.leads_created = created
-                job.total_found = len(raw_leads)
-                job.save(update_fields=['leads_created', 'total_found'])
-
-        # The new leads are not queued for qualification: that waits for the Qualify button.
-        # Auto-enrich the newly discovered leads in the background too.
-        SDRLead.objects.filter(pk__in=created_ids, enrichment_status='none').update(
-            enrichment_status='pending', enrichment_queued_at=timezone.now())
-
-        params['skipped_duplicates'] = skipped_dupes
+        params = _fresh_params()
+        params['skipped_duplicates'] = params.get('skipped_duplicates', 0) + tracker.skipped
+        if researcher.stop_reason:
+            params['stopped_reason'] = researcher.stop_reason
         job.search_params = params
         job.status = 'completed'
-        job.total_found = len(raw_leads)
-        job.leads_created = created
         job.leads_qualified = 0
         # The provider that answered: with both keys, "apollo" was written even for an Apify run.
-        job.source = next((ld.get('source') for ld in raw_leads if ld.get('source')), job.source)
+        job.source = tracker.source or job.source
         job.completed_at = timezone.now()
         job.save()
 
+    except ApifyUnreachable as exc:
+        # The run goes on on Apify's side and its leads are paid for: the job stays "running" and resume_research
+        # picks it up when Apify answers again (its heartbeat has stopped).
+        logger.warning("Research job %s: %s — left for resume_research", job_id, exc)
     except ApifyApprovalRequired as exc:
         # Not a server error: the user has to approve the actor once on Apify.
         _fail(exc, code='apify_approval_required')
@@ -1300,6 +1390,10 @@ def research_job_status(request, job_id):
             'total_found': job.total_found,
             'leads_created': job.leads_created,
             'skipped_duplicates': params.get('skipped_duplicates', 0),
+            # Ended early (stopped, the run failed or timed out): the leads it found are saved all the same.
+            'partial': bool(params.get('stopped_reason')),
+            'stopped_reason': params.get('stopped_reason', ''),
+            'stopping': job.status == 'running' and bool(params.get('stop_requested')),
             'source': job.source,
             'error_message': job.error_message,
             'error_code': params.get('error_code'),
@@ -1310,6 +1404,38 @@ def research_job_status(request, job_id):
         },
         'stats': _lead_stats(company_user),
     })
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_job_stop(request, job_id):
+    """Stop a running search: its Apify run is aborted so nothing more is charged, and the leads found so far are
+    kept. The search's thread sees the request within a few seconds; a search with no thread left is ended here."""
+    company_user = request.user
+    job = SDRLeadResearchJob.objects.filter(company_user=company_user, pk=job_id).first()
+    if not job:
+        return Response({'status': 'error', 'message': 'Research job not found.'}, status=404)
+    if job.status != 'running':
+        return Response({'status': 'error', 'message': 'This search has already finished.'}, status=400)
+    params = job.search_params or {}
+    params['stop_requested'] = True
+    SDRLeadResearchJob.objects.filter(pk=job.pk).update(search_params=params)
+
+    alive = job.heartbeat_at and timezone.now() - job.heartbeat_at < RESEARCH_HEARTBEAT_STALE
+    if not alive:
+        if job.apify_run_id:
+            # Its thread is gone: one that sees the stop at once aborts the run and saves its last leads.
+            threading.Thread(target=_execute_research_job, args=(job.pk,), name=f"sdr-research-job-{job.pk}",
+                             daemon=True).start()
+        else:
+            params['stopped_reason'] = 'Stopped'
+            SDRLeadResearchJob.objects.filter(pk=job.pk).update(
+                search_params=params, status='completed' if job.leads_created else 'failed',
+                error_message='' if job.leads_created else 'Stopped before any lead was found.',
+                completed_at=timezone.now())
+    return Response({'status': 'success',
+                     'message': f'Stopping — the {job.leads_created} lead(s) found so far are kept.'})
 
 
 @api_view(['GET', 'POST'])
@@ -1774,7 +1900,8 @@ def import_leads_csv(request):
                     last_name=last_name,
                     full_name=full_name,
                     email=row_email,
-                    phone=pick('phone'),
+                    # A file this export wrote has ="+44..." for a phone (see _phone_cell): the number inside.
+                    phone=_EXCEL_TEXT_CELL.sub(r'\1', pick('phone')),
                     job_title=pick('job_title'),
                     company_name=company_name,
                     company_industry=pick('company_industry') or file_industry,
@@ -4586,3 +4713,367 @@ def sdr_booking_confirm(request, token):
         'sender_name': campaign.sender_name if campaign else '',
         'meet_link': meet_link,
     })
+
+
+# ==========================================================================
+# Email templates and industry sends (the Email Templates tab)
+# ==========================================================================
+
+def _serialize_email_template(t: SDREmailTemplate, with_html=True) -> dict:
+    data = {'id': t.id, 'name': t.name, 'subject': t.subject,
+            'created_at': t.created_at.isoformat(), 'updated_at': t.updated_at.isoformat()}
+    if with_html:
+        data['html'] = t.html
+    return data
+
+
+def _email_template_fields(d) -> tuple:
+    """(fields, error) for a template from a request: a name, a subject and the HTML, within their lengths."""
+    name = ' '.join(str(d.get('name') or '').split())
+    subject = ' '.join(str(d.get('subject') or '').split())
+    html = d.get('html') if isinstance(d.get('html'), str) else ''
+    if not name:
+        return None, 'Give the template a name.'
+    if len(name) > 200 or len(subject) > 500:
+        return None, 'The name can be at most 200 characters and the subject 500.'
+    if len(html) > 500_000:
+        return None, 'The HTML is too long (at most 500,000 characters).'
+    return {'name': name, 'subject': subject, 'html': html}, None
+
+
+def _unused_template_name(company_user, name, exclude_id=None) -> str:
+    """``name``, or "name (2)", "name (3)" ... if the user already has a template called that: two templates
+    called the same could not be told apart when choosing one to send."""
+    taken = SDREmailTemplate.objects.filter(company_user=company_user)
+    if exclude_id:
+        taken = taken.exclude(pk=exclude_id)
+    names = {n.lower() for n in taken.values_list('name', flat=True)}
+    if name.lower() not in names:
+        return name
+    n = 2
+    while f'{name} ({n})'.lower() in names:
+        n += 1
+    return f'{name[:190]} ({n})'
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_templates(request):
+    """GET: the user's templates (no HTML: the list does not need it). POST {name, subject, html}: a new one."""
+    from ai_sdr_agent.email_presets import PRESETS
+    from ai_sdr_agent.email_templates import STARTER_HTML, VARIABLES
+    company_user = request.user
+    if request.method == 'GET':
+        return Response({'status': 'success',
+                         'data': [_serialize_email_template(t, with_html=False)
+                                  for t in SDREmailTemplate.objects.filter(company_user=company_user)],
+                         'variables': [f'{{{v}}}' for v in VARIABLES], 'starter_html': STARTER_HTML,
+                         # Ready-made templates: opened in the editor as a new template of the user's own.
+                         'presets': PRESETS})
+    fields, error = _email_template_fields(request.data)
+    if error:
+        return Response({'status': 'error', 'message': error}, status=400)
+    fields['name'] = _unused_template_name(company_user, fields['name'])
+    t = SDREmailTemplate.objects.create(company_user=company_user, **fields)
+    return Response({'status': 'success', 'data': _serialize_email_template(t)}, status=201)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_template_detail(request, template_id):
+    t = SDREmailTemplate.objects.filter(company_user=request.user, pk=template_id).first()
+    if not t:
+        return Response({'status': 'error', 'message': 'Template not found.'}, status=404)
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': _serialize_email_template(t)})
+    if request.method == 'DELETE':
+        t.delete()   # sends already started keep their own copy of it
+        return Response({'status': 'success', 'message': f'Deleted the template "{t.name}".'})
+    fields, error = _email_template_fields(request.data)
+    if error:
+        return Response({'status': 'error', 'message': error}, status=400)
+    fields['name'] = _unused_template_name(request.user, fields['name'], exclude_id=t.id)
+    for k, v in fields.items():
+        setattr(t, k, v)
+    t.save()
+    return Response({'status': 'success', 'data': _serialize_email_template(t)})
+
+
+def _audience_leads(company_user, industry='', company=''):
+    """The user's leads with an email address of that industry, or at that company (any capitalisation)."""
+    qs = SDRLead.objects.filter(company_user=company_user).exclude(email='')
+    if company:
+        return qs.filter(company_name__iexact=company).order_by('id')
+    return qs.filter(company_industry__iexact=industry).order_by('id')
+
+
+MAX_TYPED_ADDRESSES = 500
+
+
+def _typed_addresses(value) -> tuple:
+    """(addresses, invalid) from addresses typed or pasted for a send: a list, or text split on commas, semicolons,
+    spaces and new lines; "Name <a@b.com>" gives a@b.com. Lower-cased, each once, in the order given."""
+    from django.core.exceptions import ValidationError
+
+    pieces = value if isinstance(value, list) else re.split(r'[,;\n]+', str(value or ''))
+    parts = []
+    for piece in pieces:
+        piece = str(piece or '')
+        named = re.findall(r'<([^<>]+)>', piece)
+        # "New Person <new@x.example>" is one address; "a@x.com b@y.com" on one line is two.
+        parts += named if named else piece.split()
+    good, bad, seen = [], [], set()
+    for raw in parts:
+        addr = raw.strip().strip('<>"\'').lower()
+        if not addr or addr in seen:
+            continue
+        seen.add(addr)
+        try:
+            validate_email(addr)
+            good.append(addr)
+        except ValidationError:
+            bad.append(addr)
+    return good, bad
+
+
+def _leads_for_addresses(company_user, addresses, create=False) -> list:
+    """The user's lead for each address; with ``create``, a new lead (source Manual) for an address that has none,
+    so it is tracked like any lead (bounces, unsubscribes, one email a day). Without, an unsaved stand-in."""
+    from django.db.models.functions import Lower
+    found = {}
+    for lead in (SDRLead.objects.filter(company_user=company_user).annotate(email_l=Lower('email'))
+                 .filter(email_l__in=addresses).order_by('id')):
+        found.setdefault(lead.email_l, lead)
+    out = []
+    for addr in addresses:
+        lead = found.get(addr)
+        if lead is None:
+            lead = SDRLead(company_user=company_user, email=addr, source='manual', status='new')
+            if create:
+                lead.save()
+        out.append(lead)
+    return out
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_lead_companies(request):
+    """Companies the user has leads with an email at, for sending to one company: ?q= matches part of the name.
+    The 20 with the most such leads first, each with how many."""
+    q = ' '.join(request.GET.get('q', '').split())
+    qs = SDRLead.objects.filter(company_user=request.user).exclude(email='').exclude(company_name='')
+    if q:
+        qs = qs.filter(company_name__icontains=q)
+    rows = qs.values('company_name').annotate(n=Count('id')).order_by('-n', 'company_name')[:20]
+    return Response({'status': 'success', 'data': [{'name': r['company_name'], 'lead_count': r['n']} for r in rows]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_template_preview(request):
+    """A template as one lead will see it: the editor's subject and HTML (saved or not) with a real lead's details —
+    of ``industry`` or at ``company`` if given, else the user's latest leads; a sample lead when there are none.
+    ``campaign_id`` (optional) fills the sender's details. Body: {subject, html, industry?, company?, campaign_id?,
+    lead_index?}."""
+    from ai_sdr_agent.email_templates import render, unknown_variables
+
+    company_user = request.user
+    d = request.data
+    subject = d.get('subject') if isinstance(d.get('subject'), str) else ''
+    html = d.get('html') if isinstance(d.get('html'), str) else ''
+    industry = ' '.join(str(d.get('industry') or '').split())
+    company = ' '.join(str(d.get('company') or '').split())
+    typed, _ = _typed_addresses(d.get('emails')) if d.get('emails') else ([], [])
+    campaign = None
+    if str(d.get('campaign_id') or '').isdigit():
+        campaign = SDRCampaign.objects.filter(company_user=company_user, pk=int(d['campaign_id'])).first()
+    campaign = campaign or SDRCampaign.objects.filter(company_user=company_user).order_by('-id').first()
+
+    if typed:
+        leads = _leads_for_addresses(company_user, typed[:20])
+    else:
+        pool = _audience_leads(company_user, industry, company) if (industry or company) else \
+            SDRLead.objects.filter(company_user=company_user).exclude(email='').order_by('-created_at')
+        leads = list(pool[:20])
+    try:
+        index = int(d.get('lead_index') or 0) % len(leads) if leads else 0
+    except (TypeError, ValueError):
+        index = 0
+    lead = leads[index] if leads else SDRLead(
+        company_user=company_user, first_name='Alex', last_name='Morgan', full_name='Alex Morgan',
+        email='alex@example.com', company_name='Northwind Dental', job_title='Practice Owner',
+        company_industry=industry or 'Medical Practice', company_location='Leeds, United Kingdom')
+    rendered_subject, rendered_html, _ = render(html, subject, lead, campaign, '#unsubscribe')
+    return Response({
+        'status': 'success', 'subject': rendered_subject, 'html': rendered_html,
+        'lead': {'name': lead.display_name, 'email': lead.email, 'company': lead.company_name, 'sample': not leads},
+        'lead_index': index, 'lead_count': len(leads),
+        # Whose sender details ({sender_name}, {sender_company}, ...) the preview shows.
+        'sender_campaign': ({'id': campaign.id, 'name': campaign.name, 'sender_name': campaign.sender_name,
+                             'sender_title': campaign.sender_title, 'sender_company': campaign.sender_company}
+                            if campaign else None),
+        'unknown_variables': unknown_variables(subject, html),
+    })
+
+
+def _mailbox_ready(campaign) -> bool:
+    return bool(campaign.smtp_host and campaign.smtp_username and campaign.smtp_password)
+
+
+def _serialize_email_send(send: SDREmailSend) -> dict:
+    counts = dict(send.recipients.values_list('status').annotate(n=Count('id')))
+    return {
+        'id': send.id, 'status': send.status, 'industry': send.industry, 'company': send.company,
+        'template_id': send.template_id, 'template_name': send.template_name, 'subject': send.subject,
+        'campaign_id': send.campaign_id, 'campaign_name': send.campaign.name if send.campaign else '',
+        'counts': {k: counts.get(k, 0) for k in ('queued', 'sent', 'skipped', 'failed')},
+        # Queued ones held because the lead was emailed today already (tasks.send_email_sends_impl).
+        'waiting_tomorrow': send.recipients.filter(status='queued', error__startswith='Already emailed today').count(),
+        'total': sum(counts.values()),
+        'created_at': send.created_at.isoformat(),
+        'finished_at': send.finished_at.isoformat() if send.finished_at else None,
+    }
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_sends(request):
+    """GET: the user's sends, newest first, and the campaign mailboxes they can go out through (with what is left of
+    today's limit). POST {template_id, campaign_id, industry | company | emails, dry_run?}: send the template to the
+    leads of an industry, to the leads at one company, or to addresses typed in (``emails``: a list or text; an
+    address with no lead becomes one, source Manual, when it is sent).
+    With dry_run, only the numbers: who would get it, who would be skipped and why. The scheduler sends it a few
+    at a time (send_email_sends_impl)."""
+    from ai_sdr_agent.email_templates import unknown_variables
+    from ai_sdr_agent.tasks import _mailbox_sent_today, _send_limits
+    from core.do_not_email import blocked_among
+
+    company_user = request.user
+    if request.method == 'GET':
+        day_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        _, daily_cap = _send_limits()
+        mailboxes = [{
+            'campaign_id': c.id, 'campaign_name': c.name, 'ready': _mailbox_ready(c),
+            'from_email': c.from_email or c.smtp_username, 'sender_name': c.sender_name,
+            'sender_company': c.sender_company,
+            'left_today': max(0, daily_cap - _mailbox_sent_today(c, day_start)) if _mailbox_ready(c) else 0,
+        } for c in SDRCampaign.objects.filter(company_user=company_user).order_by('-id')]
+        sends = SDREmailSend.objects.filter(company_user=company_user).select_related('campaign')[:50]
+        return Response({'status': 'success', 'data': [_serialize_email_send(x) for x in sends],
+                         'mailboxes': mailboxes, 'daily_limit': daily_cap})
+
+    d = request.data
+    template = SDREmailTemplate.objects.filter(company_user=company_user, pk=d.get('template_id') or 0).first() \
+        if str(d.get('template_id') or '').isdigit() else None
+    campaign = SDRCampaign.objects.filter(company_user=company_user, pk=d.get('campaign_id') or 0).first() \
+        if str(d.get('campaign_id') or '').isdigit() else None
+    industry = ' '.join(str(d.get('industry') or '').split())
+    company = ' '.join(str(d.get('company') or '').split())
+    typed, invalid = _typed_addresses(d.get('emails')) if d.get('emails') else ([], [])
+    audience = company or industry or f'{len(typed)} chosen address(es)'
+    if not template:
+        return Response({'status': 'error', 'message': 'Choose one of your templates.'}, status=400)
+    if not campaign:
+        return Response({'status': 'error', 'message': 'Choose the campaign whose mailbox it goes out through.'},
+                        status=400)
+    if not _mailbox_ready(campaign):
+        return Response({'status': 'error', 'message': f'The campaign "{campaign.name}" has no mailbox set up yet: '
+                                                       'add its SMTP settings first.'}, status=400)
+    if sum(map(bool, (industry, company, d.get('emails')))) != 1:
+        return Response({'status': 'error', 'message': 'Choose who to send it to: an industry, one company, or '
+                                                       'addresses you type in.'}, status=400)
+    if d.get('emails'):
+        if invalid:
+            return Response({'status': 'error', 'code': 'invalid_emails', 'invalid_emails': invalid,
+                             'message': f'Not email addresses: {", ".join(invalid[:10])}.'}, status=400)
+        if not typed:
+            return Response({'status': 'error', 'message': 'Type at least one email address.'}, status=400)
+        if len(typed) > MAX_TYPED_ADDRESSES:
+            return Response({'status': 'error', 'message': f'At most {MAX_TYPED_ADDRESSES} addresses at a time.'},
+                            status=400)
+    if not template.html.strip():
+        return Response({'status': 'error', 'message': 'The template is empty.'}, status=400)
+    unknown = unknown_variables(template.subject, template.html)
+    if unknown:
+        return Response({'status': 'error', 'code': 'unknown_variables', 'unknown_variables': unknown,
+                         'message': f'The template still has {", ".join(unknown)}: fill '
+                                    f'{"it" if len(unknown) == 1 else "them"} in before sending.'}, status=400)
+
+    leads = (_leads_for_addresses(company_user, typed) if typed
+             else list(_audience_leads(company_user, industry, company)))
+    blocked = blocked_among(company_user.company, [l.email for l in leads])
+    seen, rows = set(), []
+    for lead in leads:
+        addr = lead.email.strip().lower()
+        if addr in seen:
+            continue                                     # two leads with one address get one email
+        seen.add(addr)
+        skip = ('On the do-not-email list.' if addr in blocked
+                else 'This address bounced before.' if lead.email_bounced else '')
+        rows.append((lead, addr, skip))
+    will_send = sum(1 for *_, skip in rows if not skip)
+    from ai_sdr_agent.tasks import _emailed_today
+    day_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    summary = {'will_send': will_send, 'skipped': len(rows) - will_send, 'leads': len(leads),
+               'new_leads': sum(1 for lead in leads if lead.pk is None),
+               # Emailed today already (any campaign or send): these wait until tomorrow (one email a day per lead),
+               # except addresses typed in by hand, which go out at once.
+               'waits_until_tomorrow': 0 if typed else sum(1 for lead, addr, skip in rows
+                                                           if not skip and _emailed_today(addr, day_start))}
+    if d.get('dry_run') is True:
+        return Response({'status': 'success', **summary})
+    if not will_send:
+        return Response({'status': 'error', 'message': f'No lead of "{audience}" can be emailed.', **summary},
+                        status=400)
+
+    for lead, addr, skip in rows:
+        if lead.pk is None:
+            lead.save()          # a typed address with no lead: tracked from now on, like any lead
+    send = SDREmailSend.objects.create(
+        company_user=company_user, template=template, campaign=campaign, industry=industry, company=company,
+        template_name=template.name, subject=template.subject, html=template.html)
+    SDREmailSendRecipient.objects.bulk_create([
+        SDREmailSendRecipient(send=send, lead=lead, email=addr, status='skipped' if skip else 'queued', error=skip)
+        for lead, addr, skip in rows])
+    from ai_sdr_agent.scheduler import run_email_sends_soon
+    transaction.on_commit(run_email_sends_soon)      # not at the next 2-minute run
+    return Response({'status': 'success', 'data': _serialize_email_send(send), **summary,
+                     'message': f'Sending to {will_send} lead(s) of "{audience}" — a few at a time, within the '
+                                "mailbox's daily limit."}, status=201)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_send_detail(request, send_id):
+    """A send's progress and its recipients (the first 500), each with its status and any reason."""
+    send = SDREmailSend.objects.filter(company_user=request.user, pk=send_id).select_related('campaign').first()
+    if not send:
+        return Response({'status': 'error', 'message': 'Send not found.'}, status=404)
+    recipients = [{
+        'email': r.email, 'name': r.lead.display_name if r.lead else '', 'status': r.status, 'error': r.error,
+        'sent_at': r.sent_at.isoformat() if r.sent_at else None,
+    } for r in send.recipients.select_related('lead').order_by('id')[:500]]
+    return Response({'status': 'success', 'data': {**_serialize_email_send(send), 'recipients': recipients}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_email_send_stop(request, send_id):
+    """Stop a send: its leads not yet emailed are not emailed; those already emailed stay so."""
+    send = SDREmailSend.objects.filter(company_user=request.user, pk=send_id).first()
+    if not send:
+        return Response({'status': 'error', 'message': 'Send not found.'}, status=404)
+    if send.status != 'sending':
+        return Response({'status': 'error', 'message': 'This send has already finished.'}, status=400)
+    stopped = send.recipients.filter(status='queued').update(status='skipped', error='The send was stopped.')
+    send.status, send.finished_at = 'stopped', timezone.now()
+    send.save(update_fields=['status', 'finished_at'])
+    return Response({'status': 'success', 'message': f'Stopped — {stopped} lead(s) will not be emailed.',
+                     'data': _serialize_email_send(send)})

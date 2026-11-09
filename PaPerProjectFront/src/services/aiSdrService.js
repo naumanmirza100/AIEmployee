@@ -317,6 +317,16 @@ export const researchLeads = async ({ count = 20, source = 'auto', icp_id } = {}
   }
 };
 
+/** Stop a running search: its Apify run is aborted, and the leads found so far are kept. */
+export const stopResearchJob = async (jobId) => {
+  try {
+    return await companyApi.post(`/sdr/leads/research/jobs/${jobId}/stop/`);
+  } catch (error) {
+    console.error('Stop research job error:', error);
+    throw error;
+  }
+};
+
 /** Poll a background lead-discovery job started by researchLeads. */
 export const getResearchJob = async (jobId) => {
   try {
@@ -762,3 +772,32 @@ export const retryCrmFailed = async () => {
   try { return await companyApi.post('/crm-sync/queue/retry/'); }
   catch (e) { console.error('CRM retry error:', e); throw e; }
 };
+
+// --------------------------------------------------------------------------
+// Email templates and industry sends — the user's own HTML emails, sent to
+// the leads of one industry through a campaign's mailbox.
+// --------------------------------------------------------------------------
+const sdrCall = (label, fn) => async (...args) => {
+  try {
+    return await fn(...args);
+  } catch (error) {
+    console.error(`${label} error:`, error);
+    throw error;
+  }
+};
+
+export const listEmailTemplates = sdrCall('List email templates', () => companyApi.get('/sdr/email-templates/'));
+export const getEmailTemplate = sdrCall('Get email template', (id) => companyApi.get(`/sdr/email-templates/${id}/`));
+export const createEmailTemplate = sdrCall('Create email template', (data) => companyApi.post('/sdr/email-templates/', data));
+export const updateEmailTemplate = sdrCall('Update email template', (id, data) => companyApi.put(`/sdr/email-templates/${id}/`, data));
+export const deleteEmailTemplate = sdrCall('Delete email template', (id) => companyApi.delete(`/sdr/email-templates/${id}/`));
+/** The editor's subject + HTML (saved or not) rendered with a real lead: { subject, html, industry?, campaign_id?, lead_index? }. */
+export const previewEmailTemplate = sdrCall('Preview email template', (data) => companyApi.post('/sdr/email-templates/preview/', data));
+/** The sends, and the campaign mailboxes they can go out through. */
+export const listEmailSends = sdrCall('List email sends', () => companyApi.get('/sdr/email-sends/'));
+/** { template_id, campaign_id, industry, dry_run? } — dry_run only counts who would get it. */
+export const startEmailSend = sdrCall('Start email send', (data) => companyApi.post('/sdr/email-sends/', data));
+export const getEmailSend = sdrCall('Get email send', (id) => companyApi.get(`/sdr/email-sends/${id}/`));
+/** Companies you have leads with an email at, matching ?q= (part of the name), with how many. */
+export const listLeadCompanies = sdrCall('List lead companies', (q = '') => companyApi.get(`/sdr/lead-companies/${q ? `?q=${encodeURIComponent(q)}` : ''}`));
+export const stopEmailSend = sdrCall('Stop email send', (id) => companyApi.post(`/sdr/email-sends/${id}/stop/`));

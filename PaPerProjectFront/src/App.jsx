@@ -273,6 +273,7 @@ import { useTranslation } from 'react-i18next';
               <Route path="/ai-sdr/dashboard" element={<SDRDashboard />} />
               <Route path="/ai-sdr/leads" element={<SDRDashboard />} />
               <Route path="/ai-sdr/outreach" element={<SDRDashboard />} />
+              <Route path="/ai-sdr/email-templates" element={<SDRDashboard />} />
               <Route path="/ai-sdr/meetings" element={<SDRDashboard />} />
               <Route path="/ai-sdr/analytics" element={<SDRDashboard />} />
               <Route path="/ai-sdr/email-assistant" element={<SDRDashboard />} />
