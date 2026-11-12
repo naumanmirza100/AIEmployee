@@ -19,7 +19,7 @@ from django.utils import timezone
 from django.db import IntegrityError
 from django.db.models import Q, Count
 from django.contrib.auth.models import User
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.conf import settings
 from django.core import signing
 from datetime import timedelta, datetime
@@ -1287,6 +1287,33 @@ def get_document(request, document_id):
         )
 
 
+def _no_text_yet(document, action):
+    """Why a document has no text, in plain words. The text is saved when the background job has read the file
+    (about two minutes for a 10 MB PDF), and Summarize used to say "no text content" during that time."""
+    state = document.processing_status
+    if state in ('pending', 'processing'):
+        return Response({
+            'status': 'error',
+            'processing_status': state,
+            'message': (f"This document is still being read, so it can't be {action} yet. Try again when its card "
+                        "shows Indexed: usually within a minute, a few minutes for a large PDF."),
+        }, status=status.HTTP_409_CONFLICT)
+    if state == 'failed':
+        reason = (document.processing_error or '').strip()
+        return Response({
+            'status': 'error',
+            'processing_status': state,
+            'message': ("This document could not be read" + (f" ({reason})" if reason else '')
+                        + ". Press Retry on its card."),
+        }, status=status.HTTP_400_BAD_REQUEST)
+    return Response({
+        'status': 'error',
+        'processing_status': state,
+        'message': ("No text could be read from this document. A scanned picture without readable text, "
+                    "for example; upload a copy with text in it."),
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1299,10 +1326,7 @@ def summarize_document(request, document_id):
         document = get_object_or_404(Document, id=document_id, company=company)
         content = document.document_content or ""
         if not content.strip():
-            return Response({
-                'status': 'error',
-                'message': 'Document has no text content to summarize',
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return _no_text_yet(document, 'summarized')
         data = json.loads(request.body) if request.body else {}
         max_sentences = data.get('max_sentences')
         by_section = data.get('by_section', False)
@@ -1321,7 +1345,8 @@ def summarize_document(request, document_id):
                 'summary': result.get('summary'),
             },
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
+        # Another company's document is "not found", not a server error.
         raise
     except Exception as e:
         logger.exception("summarize_document failed")
@@ -1343,10 +1368,7 @@ def extract_document(request, document_id):
         document = get_object_or_404(Document, id=document_id, company=company)
         content = document.document_content or ""
         if not content.strip():
-            return Response({
-                'status': 'error',
-                'message': 'Document has no text content to extract from',
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return _no_text_yet(document, 'read for data')
         data = json.loads(request.body) if request.body else {}
         schema = data.get('schema')
         agent = FrontlineAgent(company_id=company.id)
@@ -1364,7 +1386,8 @@ def extract_document(request, document_id):
                 'extracted': result.get('data'),
             },
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
+        # Another company's document is "not found", not a server error.
         raise
     except Exception as e:
         logger.exception("extract_document failed")

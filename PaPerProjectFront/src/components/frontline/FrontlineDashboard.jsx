@@ -662,6 +662,37 @@ const FrontlineDashboard = () => {
     }
   };
 
+  // Documents still being read move on to Indexed (or Failed) by themselves. The cards used to keep "Processing"
+  // until the page was reloaded, unless the upload had been started from this page.
+  const busyDocIds = documents
+    .filter((d) => d.processing_status === 'pending' || d.processing_status === 'processing')
+    .map((d) => d.id)
+    .join(',');
+  useEffect(() => {
+    if (!busyDocIds) return undefined;
+    const ids = busyDocIds.split(',').map(Number).slice(0, 10);
+    let stopped = false;
+    const tick = async () => {
+      const found = await Promise.all(ids.map((id) => frontlineAgentService.getDocumentStatus(id)
+        .then((r) => r?.data || null).catch(() => null)));
+      if (stopped) return;
+      setDocuments((arr) => arr.map((d) => {
+        const s = found.find((x) => x && x.id === d.id);
+        if (!s || s.processing_status === d.processing_status) return d;
+        return {
+          ...d,
+          processing_status: s.processing_status,
+          processing_error: s.processing_error,
+          chunks_processed: s.chunks_processed,
+          chunks_total: s.chunks_total,
+          is_indexed: s.processing_status === 'ready' ? true : d.is_indexed,
+        };
+      }));
+    };
+    const timer = setInterval(tick, 8000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [busyDocIds]);
+
   // Enqueue the upload with the global BackgroundUploadManager. The dialog
   // closes immediately; the bottom-right floating pill shows progress and
   // the user can navigate away or upload more files without blocking.
@@ -779,7 +810,9 @@ const FrontlineDashboard = () => {
    *  Subsequent clicks just flip expanded without re-fetching. */
   const toggleDocSummary = async (doc) => {
     const cur = docSummaries[doc.id];
-    if (cur?.summary) {
+    if (cur?.loading) return;
+    // "Show less" collapses, also after an error (it used to ask again instead); a collapsed error asks again.
+    if (cur?.expanded || cur?.summary) {
       setDocSummaries((m) => ({ ...m, [doc.id]: { ...cur, expanded: !cur.expanded } }));
       return;
     }
