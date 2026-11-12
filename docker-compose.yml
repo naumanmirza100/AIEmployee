@@ -92,8 +92,9 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       USE_REDIS: "True"
-    # prefork + concurrency 4 come from settings on Linux; override here per
-    # container size if needed.
+    # prefork, concurrency 4 and the memory ceiling per process
+    # (CELERY_WORKER_MAX_MEMORY_PER_CHILD, 600,000 KiB) come from settings on
+    # Linux; override them in .env per container size if needed.
     command: celery -A project_manager_ai worker -l info
     volumes:
       - media:/app/media
