@@ -99,9 +99,9 @@ def _allowance(ctx):
     return None
 
 
-def _budget(company_id, agent_key_name, max_output):
-    """How many tokens of documents one call may carry: what the model reads, what the settings allow and what the
-    allowance covers, whichever is least. 0 means not at all."""
+def _budget(company_id, agent_key_name, max_output, *, cap=None, allowance_share=1.0):
+    """How many tokens of documents one call may carry: what the model reads, what the settings allow (`cap`) and
+    the share of the allowance left that one call may take, whichever is least. 0 means not at all."""
     from core.api_key_service import resolve_for_call
     from core.models import Company
     ctx = resolve_for_call(Company.objects.get(pk=company_id), agent_key_name)
@@ -109,11 +109,12 @@ def _budget(company_id, agent_key_name, max_output):
         return 0                # Groq's models read far less than a document of this kind
     # The model the agents' OpenAI calls use (BaseAgent._call_llm).
     window = _context_window(getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini'))
-    budget = min(int(getattr(settings, 'KQA_WHOLE_DOCUMENT_MAX_TOKENS', 300_000)),
-                 window - max_output - _PROMPT_OVERHEAD)
+    if cap is None:
+        cap = int(getattr(settings, 'KQA_WHOLE_DOCUMENT_MAX_TOKENS', 300_000))
+    budget = min(cap, window - max_output - _PROMPT_OVERHEAD)
     allowance = _allowance(ctx)
     if allowance is not None:
-        budget = min(budget, allowance - max_output - _PROMPT_OVERHEAD)
+        budget = min(budget, int(allowance * allowance_share) - max_output - _PROMPT_OVERHEAD)
     return max(0, budget)
 
 
@@ -233,3 +234,51 @@ def stream(agent, whole, *, system_prompt):
     except Exception as exc:
         logger.warning("whole document: the stream failed (%s)", exc)
         yield {'type': 'error', 'message': str(exc)}
+
+
+# ---- One document read whole: Summarize and Extract -----------------------------------------------------------
+#
+# They sent the AI the first 12,000 characters of a document: of the 245-page prospectus (630,433 characters, live
+# 12 Nov 2026) about 2%, so its "summary" described the opening pages. A document is now read whole when it fits one
+# call: the model's window, DOCUMENT_READ_MAX_TOKENS, and at most half of the allowance left, so one summary never
+# empties it. Otherwise (a provider with a small window, an allowance too small, a document too big) the call reads
+# passages spread evenly from its start to its end, as much as fits, and the answer says so.
+
+SMALL_READ_CHARS = 12_000           # what a call reads when no budget is known (Groq, a blocked key): as before
+
+
+def spread_excerpts(text, room):
+    """Passages from all through `text`, about `room` characters together: as many as suit the room, evenly spaced
+    from the first line to the last, each starting at a line break when one is near, the gaps marked."""
+    gap = '\n\n[...]\n\n'
+    pieces = max(4, min(24, room // 5_000))
+    size = max(500, (room - len(gap) * (pieces - 1)) // pieces)
+    # The first passage starts at the first line and the last one ends at the last.
+    step = max(0, len(text) - size) / (pieces - 1)
+    out = []
+    for i in range(pieces):
+        start = int(i * step)
+        if i:
+            line = text.find('\n', start, start + 400)
+            if line != -1:
+                start = line + 1
+        out.append(text[start:start + size].strip())
+    return gap.join(piece for piece in out if piece)
+
+
+def read_document(text, *, company_id, agent_key_name, max_output):
+    """(text for the call, note for the reader). The note is empty when the whole document is read."""
+    text = _PAGE_MARK.sub(lambda m: f'[Page {m.group(1)}]\n', (text or '').strip())
+    try:
+        budget = _budget(company_id, agent_key_name, max_output,
+                         cap=int(getattr(settings, 'DOCUMENT_READ_MAX_TOKENS', 200_000)), allowance_share=0.5)
+    except Exception as exc:            # a blocked key: the call itself reports it properly
+        logger.info("read_document: no budget (%s: %s)", type(exc).__name__, exc)
+        budget = 0
+    room = max(budget * 4, SMALL_READ_CHARS)        # about four characters a token (estimate_tokens)
+    if len(text) <= room:
+        return text, ''
+    share = max(1, round(100 * room / len(text)))
+    return spread_excerpts(text, room), (
+        f"This document is too long to read whole here, so this is based on passages from all through it "
+        f"(about {share}% of its text).")

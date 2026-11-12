@@ -34,6 +34,9 @@ export default function FrontlineDocumentsTab({
   onToggleOutdated,
   onDelete,
   onRetry,
+  total = 0,
+  onLoadMore,
+  loadingMore = false,
 }) {
   const docs = Array.isArray(documents) ? documents : [];
   return (
@@ -80,6 +83,16 @@ export default function FrontlineDocumentsTab({
                 onRetry={onRetry}
               />
             ))}
+          </div>
+        )}
+        {/* Every document, a page at a time: the tab used to show the newest 10 only. */}
+        {docs.length > 0 && total > docs.length && onLoadMore && (
+          <div className="mt-4 flex flex-col items-center gap-2">
+            <span className="text-xs text-muted-foreground">Showing {docs.length} of {total} documents</span>
+            <Button variant="outline" size="sm" onClick={onLoadMore} disabled={loadingMore}>
+              {loadingMore && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              Load more
+            </Button>
           </div>
         )}
       </CardContent>

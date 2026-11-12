@@ -643,13 +643,45 @@ const FrontlineDashboard = () => {
     });
   }, [documents, activeTab]);
 
+  // The Documents tab lists every document, DOCS_PAGE at a time ("Load more"). It showed the dashboard's newest
+  // 10 only, so older documents could not be opened, summarized or deleted there. A refresh (after an upload or a
+  // delete) reloads as many as are shown.
+  const DOCS_PAGE = 30;
+  const [docsTotal, setDocsTotal] = useState(0);
+  const [docsLoadingMore, setDocsLoadingMore] = useState(false);
+  const docsShown = useRef(DOCS_PAGE);
+  const loadDocuments = async (more = false) => {
+    const offset = more ? docsShown.current : 0;
+    const limit = more ? DOCS_PAGE : Math.min(200, Math.max(DOCS_PAGE, docsShown.current));
+    if (more) setDocsLoadingMore(true);
+    try {
+      const res = await frontlineAgentService.listDocuments({ offset, limit });
+      const list = res?.data?.documents || [];
+      setDocsTotal(res?.data?.total ?? list.length);
+      setDocuments((prev) => {
+        const next = more ? [...prev, ...list.filter((d) => !prev.some((p) => p.id === d.id))] : list;
+        docsShown.current = Math.max(DOCS_PAGE, next.length);
+        return next;
+      });
+      return true;
+    } catch (error) {
+      if (more) {
+        toast({ title: 'Could not load more documents', description: error.message, variant: 'destructive' });
+      }
+      return false;
+    } finally {
+      if (more) setDocsLoadingMore(false);
+    }
+  };
+
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       const response = await frontlineAgentService.getFrontlineDashboard();
       if (response.status === 'success') {
         setStats(response.data.stats);
-        setDocuments(response.data.recent_documents || []);
+        const listed = await loadDocuments();
+        if (!listed) setDocuments(response.data.recent_documents || []);
       }
     } catch (error) {
       toast({
@@ -768,7 +800,10 @@ const FrontlineDashboard = () => {
     try {
       const response = await frontlineAgentService.summarizeDocument(doc.id, {});
       const summary = response?.data?.summary ?? response?.summary;
-      setDocResultDialog((prev) => ({ ...prev, content: summary || 'No summary generated.', loading: false }));
+      const note = response?.data?.note;
+      setDocResultDialog((prev) => ({
+        ...prev, content: (summary || 'No summary generated.') + (note ? `\n\n${note}` : ''), loading: false,
+      }));
     } catch (error) {
       setDocResultDialog((prev) => ({ ...prev, content: `Error: ${error.message || 'Summarization failed'}`, loading: false }));
     }
@@ -779,7 +814,9 @@ const FrontlineDashboard = () => {
     try {
       const response = await frontlineAgentService.extractDocument(doc.id, {});
       const extracted = response?.data?.extracted ?? response?.extracted;
-      const content = typeof extracted === 'object' ? JSON.stringify(extracted, null, 2) : (extracted || 'No data extracted.');
+      const note = response?.data?.note;
+      const content = (typeof extracted === 'object' ? JSON.stringify(extracted, null, 2) : (extracted || 'No data extracted.'))
+        + (note ? `\n\n${note}` : '');
       setDocResultDialog((prev) => ({ ...prev, content, loading: false }));
     } catch (error) {
       setDocResultDialog((prev) => ({ ...prev, content: apiErrorMessage(error, 'Extraction failed'), loading: false }));
@@ -819,7 +856,8 @@ const FrontlineDashboard = () => {
     setDocSummaries((m) => ({ ...m, [doc.id]: { summary: null, loading: true, expanded: true, error: null } }));
     try {
       const response = await frontlineAgentService.summarizeDocument(doc.id, { max_sentences: 3 });
-      const summary = response?.data?.summary ?? response?.summary ?? '';
+      const note = response?.data?.note;
+      const summary = (response?.data?.summary ?? response?.summary ?? '') + (note ? `\n\n${note}` : '');
       setDocSummaries((m) => ({ ...m, [doc.id]: { summary, loading: false, expanded: true, error: null } }));
     } catch (error) {
       setDocSummaries((m) => ({
@@ -1613,6 +1651,9 @@ const FrontlineDashboard = () => {
             onToggleOutdated={handleToggleDocOutdated}
             onDelete={handleDeleteDocument}
             onRetry={handleRetryDocument}
+            documentsTotal={docsTotal}
+            onLoadMoreDocuments={() => loadDocuments(true)}
+            loadingMoreDocuments={docsLoadingMore}
             qa={qaProps}
             onNavigateToTab={setActiveTab}
             activeSubTab={activeSubTab}
@@ -1807,6 +1848,9 @@ const FrontlineDashboard = () => {
             onToggleOutdated={handleToggleDocOutdated}
             onDelete={handleDeleteDocument}
             onRetry={handleRetryDocument}
+            total={docsTotal}
+            onLoadMore={() => loadDocuments(true)}
+            loadingMore={docsLoadingMore}
           />
           </ErrorBoundary>
         </TabsContent>

@@ -915,7 +915,9 @@ def list_documents(request):
         company_user = request.user
         company = company_user.company
         
-        documents = Document.objects.filter(company=company).order_by('-created_at')
+        # Not the text or the kept AI results: the list doesn't send them, and a page can hold 200 documents.
+        documents = (Document.objects.filter(company=company).order_by('-created_at')
+                     .defer('document_content', 'processed_data'))
         
         # Optional filters
         document_type = request.GET.get('document_type')
@@ -927,10 +929,11 @@ def list_documents(request):
             is_indexed_bool = is_indexed.lower() == 'true'
             documents = documents.filter(is_indexed=is_indexed_bool)
         
-        # Pagination
-        page = int(request.GET.get('page', 1))
-        limit = int(request.GET.get('limit', 20))
-        offset = (page - 1) * limit
+        # Pagination. The Documents tab asks by `offset` ("Load more"); `page` still works. Bad numbers fall back
+        # to the defaults instead of a 500, and a page is at most 200.
+        limit = _bounded_int(request.GET.get('limit'), 1, 200, 20)
+        page = _bounded_int(request.GET.get('page'), 1, 100000, 1)
+        offset = _bounded_int(request.GET.get('offset'), 0, 10 ** 9, (page - 1) * limit)
         
         total = documents.count()
         documents_page = documents[offset:offset + limit]
@@ -957,6 +960,7 @@ def list_documents(request):
                         'superseded_by_id': d.superseded_by_id,
                         'visibility': d.visibility,
                         'retention_days': d.retention_days,
+                        'is_outdated': d.is_outdated,
                         'created_at': d.created_at.isoformat(),
                         'updated_at': d.updated_at.isoformat(),
                     }
@@ -964,6 +968,7 @@ def list_documents(request):
                 ],
                 'total': total,
                 'page': page,
+                'offset': offset,
                 'limit': limit,
             }
         }, status=status.HTTP_200_OK)
@@ -1256,9 +1261,7 @@ def get_document(request, document_id):
     """Get document details"""
     try:
         company_user = request.user
-        company = company_user.company
-        
-        document = get_object_or_404(Document, id=document_id, company=company)
+        document = get_object_or_404(_readable_documents(company_user), id=document_id)
         
         return Response({
             'status': 'success',
@@ -1277,7 +1280,7 @@ def get_document(request, document_id):
             }
         }, status=status.HTTP_200_OK)
         
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception as e:
         logger.exception("get_document failed")
@@ -1285,6 +1288,51 @@ def get_document(request, document_id):
             {'status': 'error', 'message': 'Failed to get document', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+def _bounded_int(raw, lo, hi, fallback):
+    """`raw` as a whole number within [lo, hi], or `fallback` when it is not a number."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return max(lo, min(hi, value))
+
+
+def _readable_documents(company_user):
+    """The documents whose text this user may read: the company's, less the private ones they are not listed on.
+    The AI's answers already kept to this (core/Frontline_agent/services.py); the document view, Summarize and
+    Extract did not, so anyone in the company could read a private document's text through them."""
+    company_docs = Document.objects.filter(company=company_user.company)
+    # A subquery, not a join and DISTINCT: DISTINCT would copy each row, its whole text included, to compare them.
+    listed = company_docs.filter(allowed_users=company_user).values('id')
+    return company_docs.filter(Q(visibility='company') | Q(visibility='private', id__in=listed))
+
+
+# A summary or extraction is kept on the document (processed_data['ai_results']) until its text changes. They read
+# the whole document now (a 245-page PDF: about 150,000 tokens), and the card asked again on every page load.
+_AI_RESULTS = 'ai_results'
+_AI_RESULTS_KEPT = 8
+
+
+def _text_key(document):
+    return hashlib.sha256((document.document_content or '').encode('utf-8', 'ignore')).hexdigest()[:24]
+
+
+def _kept_result(document, kind):
+    kept = ((document.processed_data or {}).get(_AI_RESULTS) or {}).get(kind)
+    return kept if kept and kept.get('text_key') == _text_key(document) else None
+
+
+def _keep_result(document, kind, value):
+    data = Document.objects.filter(pk=document.pk).values_list('processed_data', flat=True).first() or {}
+    results = {k: v for k, v in (data.get(_AI_RESULTS) or {}).items() if k != kind}
+    results[kind] = {**value, 'text_key': _text_key(document), 'at': timezone.now().isoformat()}
+    for old in sorted(results, key=lambda k: results[k].get('at', ''))[:max(0, len(results) - _AI_RESULTS_KEPT)]:
+        results.pop(old)
+    data[_AI_RESULTS] = results
+    # A queryset update: `updated_at` is how a stuck document is found, and keeping a summary is not progress.
+    Document.objects.filter(pk=document.pk).update(processed_data=data)
 
 
 def _no_text_yet(document, action):
@@ -1323,26 +1371,33 @@ def summarize_document(request, document_id):
     try:
         company_user = request.user
         company = company_user.company
-        document = get_object_or_404(Document, id=document_id, company=company)
+        document = get_object_or_404(_readable_documents(company_user), id=document_id)
         content = document.document_content or ""
         if not content.strip():
             return _no_text_yet(document, 'summarized')
         data = json.loads(request.body) if request.body else {}
-        max_sentences = data.get('max_sentences')
-        by_section = data.get('by_section', False)
-        agent = FrontlineAgent(company_id=company.id)
-        result = agent.summarize_document(content, max_sentences=max_sentences, by_section=by_section)
-        if not result.get('success'):
-            return Response({
-                'status': 'error',
-                'message': result.get('error', 'Summarization failed'),
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        max_sentences = _bounded_int(data.get('max_sentences'), 1, 50, None)
+        by_section = bool(data.get('by_section', False))
+        kind = f"summary|{max_sentences or ''}|{int(by_section)}"
+        kept = _kept_result(document, kind)
+        if kept is None:
+            agent = FrontlineAgent(company_id=company.id)
+            result = agent.summarize_document(content, max_sentences=max_sentences, by_section=by_section)
+            if not result.get('success'):
+                return Response({
+                    'status': 'error',
+                    'message': result.get('error', 'Summarization failed'),
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            kept = {'summary': result.get('summary'), 'note': result.get('note') or ''}
+            _keep_result(document, kind, kept)
         return Response({
             'status': 'success',
             'data': {
                 'document_id': document.id,
                 'title': document.title,
-                'summary': result.get('summary'),
+                'summary': kept.get('summary'),
+                # Set when the document was too long to read whole: the summary is from passages all through it.
+                'note': kept.get('note') or '',
             },
         }, status=status.HTTP_200_OK)
     except (KeyServiceError, Http404):
@@ -1365,25 +1420,33 @@ def extract_document(request, document_id):
     try:
         company_user = request.user
         company = company_user.company
-        document = get_object_or_404(Document, id=document_id, company=company)
+        document = get_object_or_404(_readable_documents(company_user), id=document_id)
         content = document.document_content or ""
         if not content.strip():
             return _no_text_yet(document, 'read for data')
         data = json.loads(request.body) if request.body else {}
         schema = data.get('schema')
-        agent = FrontlineAgent(company_id=company.id)
-        result = agent.extract_from_document(content, schema=schema)
-        if not result.get('success'):
-            return Response({
-                'status': 'error',
-                'message': result.get('error', 'Extraction failed'),
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        schema = ([str(f).strip()[:60] for f in schema[:20] if str(f).strip()] or None) if isinstance(schema, list) \
+            else None
+        kind = 'extract|' + ','.join(schema or [])
+        kept = _kept_result(document, kind)
+        if kept is None:
+            agent = FrontlineAgent(company_id=company.id)
+            result = agent.extract_from_document(content, schema=schema)
+            if not result.get('success'):
+                return Response({
+                    'status': 'error',
+                    'message': result.get('error', 'Extraction failed'),
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            kept = {'extracted': result.get('data'), 'note': result.get('note') or ''}
+            _keep_result(document, kind, kept)
         return Response({
             'status': 'success',
             'data': {
                 'document_id': document.id,
                 'title': document.title,
-                'extracted': result.get('data'),
+                'extracted': kept.get('extracted'),
+                'note': kept.get('note') or '',
             },
         }, status=status.HTTP_200_OK)
     except (KeyServiceError, Http404):
