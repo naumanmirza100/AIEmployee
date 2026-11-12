@@ -24,6 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from django.utils import timezone
 from django.db.models import Count, Q
 
@@ -265,6 +266,20 @@ def _resolve_asker_role(company_user: CompanyUser) -> str:
     # answerable to anyone who could log in (HR-SEC-3). An unknown role must
     # fall to the *lowest* rung, never the highest.
     return 'employee'
+
+
+def _readable_hr_documents(company_user):
+    """The HR documents this login may read: the confidentiality its role allows and, below HR, only the company's
+    general documents and the person's own. The list kept to this; the document view, Summarize and Extract checked
+    the company only, so any login could read another person's payslip or contract by its number (12 Nov 2026)."""
+    from core.HR_agent.services import _allowed_confidentialities
+    company = company_user.company
+    role = _resolve_asker_role(company_user)
+    qs = HRDocument.objects.filter(company=company, confidentiality__in=_allowed_confidentialities(role))
+    if role != 'hr':
+        asker_emp = Employee.objects.filter(company=company, company_user=company_user).first()
+        qs = qs.filter(Q(employee__isnull=True) | Q(employee=asker_emp))
+    return qs
 
 
 def _serialize_employee(e: Employee) -> dict:
@@ -971,15 +986,7 @@ def list_hr_documents(request):
     Returns ``pagination.total`` for the frontend to render page controls.
     """
     try:
-        company = request.user.company
-        cu = request.user
-        role = _resolve_asker_role(cu)
-        qs = HRDocument.objects.filter(company=company)
-        from core.HR_agent.services import _allowed_confidentialities
-        qs = qs.filter(confidentiality__in=_allowed_confidentialities(role))
-        if role != 'hr':
-            asker_emp = Employee.objects.filter(company=company, company_user=cu).first()
-            qs = qs.filter(Q(employee__isnull=True) | Q(employee=asker_emp))
+        qs = _readable_hr_documents(request.user)
         doc_type = request.GET.get('document_type')
         if doc_type:
             qs = qs.filter(document_type=doc_type)
@@ -1205,22 +1212,34 @@ def summarize_hr_document(request, document_id):
     """LLM summary of an HR document — uses the HRAgent's prompt that focuses
     on scope, eligibility, deadlines, and numeric thresholds."""
     try:
+        from core import whole_document
         company = request.user.company
-        d = get_object_or_404(HRDocument, id=document_id, company=company)
+        d = get_object_or_404(_readable_hr_documents(request.user), id=document_id)
         if not (d.document_content or '').strip():
             return Response({'status': 'error', 'message': 'Document has no extracted text yet'},
                             status=status.HTTP_400_BAD_REQUEST)
-        max_sentences = (request.data or {}).get('max_sentences')
-        agent = HRAgent(company_id=company.id)
-        result = agent.summarize_document(d.document_content, max_sentences=max_sentences)
-        if not result.get('success'):
-            return Response({'status': 'error', 'message': result.get('error') or 'Summarize failed'},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        try:
+            max_sentences = max(1, min(30, int((request.data or {}).get('max_sentences') or 5)))
+        except (TypeError, ValueError):
+            max_sentences = 5
+        # Read whole now, so kept until the text changes (core/whole_document.keep_result).
+        kind = f'summary|{max_sentences}'
+        kept = whole_document.kept_result(d.ai_results, kind, d.document_content)
+        if kept is None:
+            agent = HRAgent(company_id=company.id)
+            result = agent.summarize_document(d.document_content, max_sentences=max_sentences)
+            if not result.get('success'):
+                return Response({'status': 'error', 'message': result.get('error') or 'Summarize failed'},
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            kept = {'summary': result.get('summary'), 'note': result.get('note') or ''}
+            whole_document.keep_result(HRDocument, d.pk, 'ai_results', kind, kept, d.document_content)
         _log_document_access(request, d, action='summarize')
         return Response({'status': 'success', 'data': {
-            'document_id': d.id, 'title': d.title, 'summary': result.get('summary'),
+            'document_id': d.id, 'title': d.title, 'summary': kept.get('summary'),
+            # Set when the document was too long to read whole: the summary is from passages all through it.
+            'note': kept.get('note') or '',
         }})
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception:
         logger.exception("summarize_hr_document failed")
@@ -1236,26 +1255,35 @@ def extract_hr_document(request, document_id):
     """LLM-extract structured fields from an HR document (offer letter →
     {employee_name, role, start_date, salary, ...})."""
     try:
+        from core import whole_document
         company = request.user.company
-        d = get_object_or_404(HRDocument, id=document_id, company=company)
+        d = get_object_or_404(_readable_hr_documents(request.user), id=document_id)
         if not (d.document_content or '').strip():
             return Response({'status': 'error', 'message': 'Document has no extracted text yet'},
                             status=status.HTTP_400_BAD_REQUEST)
         schema = (request.data or {}).get('schema')
-        agent = HRAgent(company_id=company.id)
-        result = agent.extract_from_document(d.document_content, schema=schema)
-        if not result.get('success'):
-            return Response({'status': 'error', 'message': result.get('error') or 'Extract failed',
-                             'raw': result.get('raw')},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        # Persist what we found onto the row so future calls can use it
-        d.extracted_fields = {**(d.extracted_fields or {}), **(result.get('data') or {})}
-        d.save(update_fields=['extracted_fields', 'updated_at'])
+        schema = ([str(f).strip()[:60] for f in schema[:20] if str(f).strip()] or None) if isinstance(schema, list) \
+            else None
+        kind = 'extract|' + ','.join(schema or [])
+        kept = whole_document.kept_result(d.ai_results, kind, d.document_content)
+        if kept is None:
+            agent = HRAgent(company_id=company.id)
+            result = agent.extract_from_document(d.document_content, schema=schema)
+            if not result.get('success'):
+                return Response({'status': 'error', 'message': result.get('error') or 'Extract failed',
+                                 'raw': result.get('raw')},
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            kept = {'extracted': result.get('data'), 'note': result.get('note') or ''}
+            whole_document.keep_result(HRDocument, d.pk, 'ai_results', kind, kept, d.document_content)
+            # Persist what we found onto the row so future calls can use it
+            if isinstance(kept['extracted'], dict):
+                d.extracted_fields = {**(d.extracted_fields or {}), **kept['extracted']}
+                d.save(update_fields=['extracted_fields', 'updated_at'])
         _log_document_access(request, d, action='extract')
         return Response({'status': 'success', 'data': {
-            'document_id': d.id, 'extracted': result.get('data'),
+            'document_id': d.id, 'extracted': kept.get('extracted'), 'note': kept.get('note') or '',
         }})
-    except KeyServiceError:
+    except (KeyServiceError, Http404):
         raise
     except Exception:
         logger.exception("extract_hr_document failed")
@@ -1320,8 +1348,7 @@ def get_hr_document(request, document_id):
     Writes an HRDocumentAccessLog row so compliance can answer "who read
     this confidential doc, and when?"."""
     try:
-        company = request.user.company
-        d = HRDocument.objects.filter(pk=document_id, company=company).first()
+        d = _readable_hr_documents(request.user).filter(pk=document_id).first()
         if not d:
             return Response({'status': 'error', 'message': 'Document not found'},
                             status=status.HTTP_404_NOT_FOUND)

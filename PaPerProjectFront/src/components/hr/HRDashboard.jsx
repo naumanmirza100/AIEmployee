@@ -546,7 +546,11 @@ const HRDashboard = () => {
                    loading: true, content: null, error: null });
     try {
       const res = await hrAgentService.summarizeHRDocument(d.id, {});
-      const summary = res?.data?.summary || '(empty summary)';
+      // `note`: the document was too long to read whole, so the summary is from passages all through it.
+      const note = res?.data?.note;
+      const summary = (res?.data?.summary || '(empty summary)') + (note ? `
+
+${note}` : '');
       setDocResult((s) => ({ ...s, loading: false, content: summary }));
     } catch (e) {
       setDocResult((s) => ({ ...s, loading: false, error: e.message || 'Summarize failed' }));
@@ -559,7 +563,11 @@ const HRDashboard = () => {
     try {
       const res = await hrAgentService.extractHRDocument(d.id, {});
       const data = res?.data?.extracted ?? {};
-      const pretty = typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data);
+      const note = res?.data?.note;
+      const pretty = (typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data))
+        + (note ? `
+
+${note}` : '');
       setDocResult((s) => ({ ...s, loading: false, content: pretty }));
     } catch (e) {
       setDocResult((s) => ({ ...s, loading: false, error: e.message || 'Extract failed' }));

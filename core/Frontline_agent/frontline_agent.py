@@ -859,17 +859,6 @@ class FrontlineAgent(BaseAgent):
             logger.warning(f"Unknown action: {action}")
             return {'success': False, 'error': f'Unknown action: {action}'}
 
-    def _read_for_call(self, text: str, max_output: int):
-        """The document for a call that reads all of it, and a note when only passages fit (core/whole_document)."""
-        from .prompt_safety import wrap_untrusted
-        content, note = whole_document.read_document(
-            text, company_id=getattr(self, 'company_id', None),
-            agent_key_name=getattr(self, 'agent_key_name', None), max_output=max_output)
-        how = ("The document is given in full." if not note else
-               "These are passages from all through the document, in order; [...] marks the text left out between "
-               "them.")
-        return how, wrap_untrusted(content, tag='document'), note
-
     def summarize_document(self, text: str, max_sentences: Optional[int] = None, by_section: bool = False) -> Dict:
         """
         Summarize document text using the LLM: the whole document when it fits one call, otherwise passages from
@@ -885,7 +874,7 @@ class FrontlineAgent(BaseAgent):
             return {'success': False, 'error': 'Document has no text to summarize', 'summary': None}
         try:
             max_output = 2000 if by_section else 1024
-            how, document, note = self._read_for_call(text, max_output)
+            how, document, note = whole_document.document_for_call(self, text, max_output)
             instruction = (f"Summarize the following document clearly and concisely. {how} Cover the whole "
                            "document, not only its beginning.")
             if max_sentences:
@@ -923,7 +912,7 @@ class FrontlineAgent(BaseAgent):
         fields = schema or ['parties', 'dates', 'amounts', 'key_terms']
         try:
             max_output = 3000
-            how, document, note = self._read_for_call(text, max_output)
+            how, document, note = whole_document.document_for_call(self, text, max_output)
             instruction = (
                 f"Extract the following structured information from the document. {how} "
                 "Return a valid JSON object only, with keys: " + ", ".join(f'"{f}"' for f in fields) + ". "
