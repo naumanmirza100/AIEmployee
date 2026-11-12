@@ -5,6 +5,7 @@ Supports Local (sentence-transformers), OpenRouter, DeepSeek, Groq, and OpenAI.
 """
 import logging
 import os
+import threading
 from typing import List, Optional, Dict
 from django.conf import settings
 
@@ -22,6 +23,12 @@ if not NUMPY_AVAILABLE:
 # Tri-state cache for the optional sentence-transformers import: None = not yet
 # tried, True = failed (don't retry), False = succeeded. See `_init_local`.
 _LOCAL_IMPORT_FAILED = None
+
+# One loaded local model per (name, device) in a process, shared by every EmbeddingService. Each service used to load
+# its own copy (about 0.5 GB with torch), and services are made per request and per test: the test suite in the
+# server image grew past 6 GB and was killed (12 Nov 2026). The live site uses OpenAI (EMBEDDING_PROVIDER=openai).
+_LOCAL_MODELS = {}
+_LOCAL_MODELS_LOCK = threading.Lock()
 
 
 # The OpenAI SDK defaults to a 600s timeout with 2 retries, so a stalled
@@ -167,10 +174,15 @@ class EmbeddingService:
             model_name = getattr(settings, 'LOCAL_EMBEDDING_MODEL', 'BAAI/bge-small-en-v1.5')
             device = getattr(settings, 'LOCAL_EMBEDDING_DEVICE', 'cpu')
 
-            # First load downloads the model (~130 MB for bge-small). Subsequent
-            # loads are near-instant from the local cache.
-            logger.info(f"Loading local embedding model '{model_name}' on device '{device}'...")
-            self.client = SentenceTransformer(model_name, device=device)
+            # First load downloads the model (~130 MB for bge-small) and reads it into memory; every later
+            # service in this process shares that one copy.
+            with _LOCAL_MODELS_LOCK:
+                model = _LOCAL_MODELS.get((model_name, device))
+                if model is None:
+                    logger.info(f"Loading local embedding model '{model_name}' on device '{device}'...")
+                    model = SentenceTransformer(model_name, device=device)
+                    _LOCAL_MODELS[(model_name, device)] = model
+            self.client = model
             self.embedding_model = model_name
             return True
         except Exception as e:
