@@ -77,6 +77,10 @@ _FORBIDDEN_FUNCTIONS = {
     'sleep', 'benchmark', 'load_file', 'get_lock', 'release_lock', 'master_pos_wait', 'source_pos_wait', 'sys_exec',
     'sys_eval', 'xp_cmdshell', 'openrowset', 'opendatasource', 'openquery', 'openxml',
     'load_extension', 'readfile', 'writefile', 'edit', 'fts3_tokenizer',
+    # SQL Server: reading files on the database's server, or its transaction log (12 Nov 2026)
+    'fn_get_audit_file', 'fn_xe_file_target_read_file', 'fn_trace_gettable', 'fn_dblog', 'fn_dump_dblog',
+    'fn_get_sql', 'fn_virtualfilestats', 'xp_dirtree', 'xp_fileexist', 'xp_regread', 'sp_oacreate', 'sp_oamethod',
+    'sp_executesql', 'sp_configure', 'openjson_file',
 }
 
 
@@ -109,6 +113,9 @@ def check_sql(sql: str, kind: str) -> str:
     for node in root.walk():
         if isinstance(node, _FORBIDDEN):
             raise Refused(f'Only reading is allowed: the query contains {node.key.upper()}.')
+        # server.database.schema.table: a SQL Server linked server, another machine reached through theirs.
+        if isinstance(node, exp.Table) and len(node.parts) > 3:
+            raise Refused('A table on another server (a four-part name) may not be read.')
         if isinstance(node, (exp.Func, exp.Anonymous)) and _function_name(node) in _FORBIDDEN_FUNCTIONS:
             raise Refused(f'The function {_function_name(node)}() is not allowed.')
     return text

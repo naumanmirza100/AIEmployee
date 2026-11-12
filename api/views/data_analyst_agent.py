@@ -36,7 +36,7 @@ from rest_framework.throttling import SimpleRateThrottle
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.api_key_service import KeyServiceError
-from data_analyst_agent import connectors, dumps, engine, mongo, sources as source_work
+from data_analyst_agent import connectors, dumps, engine, mongo, mssql, sources as source_work
 from data_analyst_agent.guards import Refused, check_query
 from data_analyst_agent.models import DataQuestion, DataSource
 
@@ -165,12 +165,26 @@ def _apply_mongo_fields(source: DataSource, data, text):
         raise Refused('The connection string needs a user (reader:password@...): a user that can only read.')
 
 
+def _apply_sql_server_string(source: DataSource, text):
+    """SQL Server's strings: ADO.NET (Azure portal: Server=tcp:...;Initial Catalog=...;User ID=...), ODBC, JDBC or a
+    mssql:// URL."""
+    parsed = mssql.parse_connection_string(text)
+    source.kind, source.host, source.port = DataSource.KIND_MSSQL, parsed['host'], parsed['port']
+    source.database, source.username = parsed['database'], parsed['username']
+    source.use_ssl, source.options = parsed['use_ssl'], parsed['options']
+    if parsed['password']:
+        source.set_password(parsed['password'])
+
+
 def _apply_connection_fields(source: DataSource, data):
     """Copy the connection fields sent, a pasted connection string first. A password left blank keeps the saved one."""
     text = str(data.get('connection_string') or '').strip()
     if text.lower().startswith(('mongodb://', 'mongodb+srv://')) or (not text and source.kind == DataSource.KIND_MONGO):
         _apply_mongo_fields(source, data, text)
         return
+    if text and mssql.looks_like_sql_server(text):
+        _apply_sql_server_string(source, text)
+        text = ''
     if text:
         from sqlalchemy.engine import make_url
         try:
@@ -181,7 +195,7 @@ def _apply_connection_fields(source: DataSource, data):
         kind = {'postgresql': 'postgres', 'postgres': 'postgres', 'mysql': 'mysql', 'mariadb': 'mysql'}.get(driver)
         if kind is None:
             raise Refused('A connection string must start with postgresql://, mysql://, mariadb://, mongodb:// or '
-                          'mongodb+srv://.')
+                          'mongodb+srv://, or be a SQL Server string (Server=...;Database=...;User ID=...).')
         source.kind, source.host, source.port = kind, url.host or '', url.port
         source.database, source.username = url.database or '', url.username or ''
         if url.password:
@@ -201,7 +215,9 @@ def _apply_connection_fields(source: DataSource, data):
     if 'use_ssl' in data:
         source.use_ssl = _bool(data.get('use_ssl'), True)
     if source.kind not in DataSource.CONNECTION_KINDS:
-        raise Refused('Choose PostgreSQL, MySQL / MariaDB or MongoDB.')
+        raise Refused('Choose PostgreSQL, MySQL / MariaDB, SQL Server or MongoDB.')
+    if source.kind == DataSource.KIND_MSSQL:
+        mssql.check_host(source.host)
     if not source.host or not source.database or not source.username:
         raise Refused('Give the host, the database name and the user.')
 
