@@ -34,6 +34,9 @@ export default function FrontlineDocumentsTab({
   onToggleOutdated,
   onDelete,
   onRetry,
+  total = 0,
+  onLoadMore,
+  loadingMore = false,
 }) {
   const docs = Array.isArray(documents) ? documents : [];
   return (
@@ -82,6 +85,16 @@ export default function FrontlineDocumentsTab({
             ))}
           </div>
         )}
+        {/* Every document, a page at a time: the tab used to show the newest 10 only. */}
+        {docs.length > 0 && total > docs.length && onLoadMore && (
+          <div className="mt-4 flex flex-col items-center gap-2">
+            <span className="text-xs text-muted-foreground">Showing {docs.length} of {total} documents</span>
+            <Button variant="outline" size="sm" onClick={onLoadMore} disabled={loadingMore}>
+              {loadingMore && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              Load more
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -116,6 +129,10 @@ function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, o
     pending: 'bg-white/[0.04] text-white/55 border-white/[0.08]',
     failed: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
   }[procStatus] || 'bg-white/[0.04] text-white/55 border-white/[0.08]';
+  // The text is read in the background (about two minutes for a 10 MB PDF); until then there is nothing to
+  // summarize or extract, and the buttons used to answer "Document has no text content to summarize".
+  const reading = procStatus === 'pending' || procStatus === 'processing';
+  const waitTitle = 'Available once the document has been read and shows Indexed';
 
   return (
     <div className="group flex flex-col rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.04] to-white/[0.01] hover:border-violet-400/40 hover:shadow-[0_0_0_1px_rgba(139,92,246,0.15),0_8px_32px_-8px_rgba(139,92,246,0.25)] transition-all duration-200 overflow-hidden">
@@ -181,6 +198,11 @@ function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, o
               Show less <ChevronUp className="h-3 w-3" />
             </button>
           </div>
+        ) : reading ? (
+          <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+            <span>Reading the document. The summary is ready once it shows Indexed.</span>
+          </div>
         ) : (
           <button
             onClick={() => onToggleSummary(doc)}
@@ -201,10 +223,12 @@ function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, o
               <RotateCcw className="h-3.5 w-3.5 mr-1" /> Retry
             </Button>
           )}
-          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onSummarize(doc)} title="Full summary">
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onSummarize(doc)}
+            disabled={reading} title={reading ? waitTitle : 'Full summary'}>
             <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onExtract(doc)} title="Extract structured data">
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onExtract(doc)}
+            disabled={reading} title={reading ? waitTitle : 'Extract structured data'}>
             <ListChecks className="h-3.5 w-3.5 mr-1" /> Extract
           </Button>
           {doc.is_outdated ? (

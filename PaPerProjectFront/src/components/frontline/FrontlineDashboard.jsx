@@ -643,13 +643,45 @@ const FrontlineDashboard = () => {
     });
   }, [documents, activeTab]);
 
+  // The Documents tab lists every document, DOCS_PAGE at a time ("Load more"). It showed the dashboard's newest
+  // 10 only, so older documents could not be opened, summarized or deleted there. A refresh (after an upload or a
+  // delete) reloads as many as are shown.
+  const DOCS_PAGE = 30;
+  const [docsTotal, setDocsTotal] = useState(0);
+  const [docsLoadingMore, setDocsLoadingMore] = useState(false);
+  const docsShown = useRef(DOCS_PAGE);
+  const loadDocuments = async (more = false) => {
+    const offset = more ? docsShown.current : 0;
+    const limit = more ? DOCS_PAGE : Math.min(200, Math.max(DOCS_PAGE, docsShown.current));
+    if (more) setDocsLoadingMore(true);
+    try {
+      const res = await frontlineAgentService.listDocuments({ offset, limit });
+      const list = res?.data?.documents || [];
+      setDocsTotal(res?.data?.total ?? list.length);
+      setDocuments((prev) => {
+        const next = more ? [...prev, ...list.filter((d) => !prev.some((p) => p.id === d.id))] : list;
+        docsShown.current = Math.max(DOCS_PAGE, next.length);
+        return next;
+      });
+      return true;
+    } catch (error) {
+      if (more) {
+        toast({ title: 'Could not load more documents', description: error.message, variant: 'destructive' });
+      }
+      return false;
+    } finally {
+      if (more) setDocsLoadingMore(false);
+    }
+  };
+
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       const response = await frontlineAgentService.getFrontlineDashboard();
       if (response.status === 'success') {
         setStats(response.data.stats);
-        setDocuments(response.data.recent_documents || []);
+        const listed = await loadDocuments();
+        if (!listed) setDocuments(response.data.recent_documents || []);
       }
     } catch (error) {
       toast({
@@ -661,6 +693,37 @@ const FrontlineDashboard = () => {
       setLoading(false);
     }
   };
+
+  // Documents still being read move on to Indexed (or Failed) by themselves. The cards used to keep "Processing"
+  // until the page was reloaded, unless the upload had been started from this page.
+  const busyDocIds = documents
+    .filter((d) => d.processing_status === 'pending' || d.processing_status === 'processing')
+    .map((d) => d.id)
+    .join(',');
+  useEffect(() => {
+    if (!busyDocIds) return undefined;
+    const ids = busyDocIds.split(',').map(Number).slice(0, 10);
+    let stopped = false;
+    const tick = async () => {
+      const found = await Promise.all(ids.map((id) => frontlineAgentService.getDocumentStatus(id)
+        .then((r) => r?.data || null).catch(() => null)));
+      if (stopped) return;
+      setDocuments((arr) => arr.map((d) => {
+        const s = found.find((x) => x && x.id === d.id);
+        if (!s || s.processing_status === d.processing_status) return d;
+        return {
+          ...d,
+          processing_status: s.processing_status,
+          processing_error: s.processing_error,
+          chunks_processed: s.chunks_processed,
+          chunks_total: s.chunks_total,
+          is_indexed: s.processing_status === 'ready' ? true : d.is_indexed,
+        };
+      }));
+    };
+    const timer = setInterval(tick, 8000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [busyDocIds]);
 
   // Enqueue the upload with the global BackgroundUploadManager. The dialog
   // closes immediately; the bottom-right floating pill shows progress and
@@ -737,7 +800,10 @@ const FrontlineDashboard = () => {
     try {
       const response = await frontlineAgentService.summarizeDocument(doc.id, {});
       const summary = response?.data?.summary ?? response?.summary;
-      setDocResultDialog((prev) => ({ ...prev, content: summary || 'No summary generated.', loading: false }));
+      const note = response?.data?.note;
+      setDocResultDialog((prev) => ({
+        ...prev, content: (summary || 'No summary generated.') + (note ? `\n\n${note}` : ''), loading: false,
+      }));
     } catch (error) {
       setDocResultDialog((prev) => ({ ...prev, content: `Error: ${error.message || 'Summarization failed'}`, loading: false }));
     }
@@ -748,7 +814,9 @@ const FrontlineDashboard = () => {
     try {
       const response = await frontlineAgentService.extractDocument(doc.id, {});
       const extracted = response?.data?.extracted ?? response?.extracted;
-      const content = typeof extracted === 'object' ? JSON.stringify(extracted, null, 2) : (extracted || 'No data extracted.');
+      const note = response?.data?.note;
+      const content = (typeof extracted === 'object' ? JSON.stringify(extracted, null, 2) : (extracted || 'No data extracted.'))
+        + (note ? `\n\n${note}` : '');
       setDocResultDialog((prev) => ({ ...prev, content, loading: false }));
     } catch (error) {
       setDocResultDialog((prev) => ({ ...prev, content: apiErrorMessage(error, 'Extraction failed'), loading: false }));
@@ -779,14 +847,17 @@ const FrontlineDashboard = () => {
    *  Subsequent clicks just flip expanded without re-fetching. */
   const toggleDocSummary = async (doc) => {
     const cur = docSummaries[doc.id];
-    if (cur?.summary) {
+    if (cur?.loading) return;
+    // "Show less" collapses, also after an error (it used to ask again instead); a collapsed error asks again.
+    if (cur?.expanded || cur?.summary) {
       setDocSummaries((m) => ({ ...m, [doc.id]: { ...cur, expanded: !cur.expanded } }));
       return;
     }
     setDocSummaries((m) => ({ ...m, [doc.id]: { summary: null, loading: true, expanded: true, error: null } }));
     try {
       const response = await frontlineAgentService.summarizeDocument(doc.id, { max_sentences: 3 });
-      const summary = response?.data?.summary ?? response?.summary ?? '';
+      const note = response?.data?.note;
+      const summary = (response?.data?.summary ?? response?.summary ?? '') + (note ? `\n\n${note}` : '');
       setDocSummaries((m) => ({ ...m, [doc.id]: { summary, loading: false, expanded: true, error: null } }));
     } catch (error) {
       setDocSummaries((m) => ({
@@ -1580,6 +1651,9 @@ const FrontlineDashboard = () => {
             onToggleOutdated={handleToggleDocOutdated}
             onDelete={handleDeleteDocument}
             onRetry={handleRetryDocument}
+            documentsTotal={docsTotal}
+            onLoadMoreDocuments={() => loadDocuments(true)}
+            loadingMoreDocuments={docsLoadingMore}
             qa={qaProps}
             onNavigateToTab={setActiveTab}
             activeSubTab={activeSubTab}
@@ -1774,6 +1848,9 @@ const FrontlineDashboard = () => {
             onToggleOutdated={handleToggleDocOutdated}
             onDelete={handleDeleteDocument}
             onRetry={handleRetryDocument}
+            total={docsTotal}
+            onLoadMore={() => loadDocuments(true)}
+            loadingMore={docsLoadingMore}
           />
           </ErrorBoundary>
         </TabsContent>

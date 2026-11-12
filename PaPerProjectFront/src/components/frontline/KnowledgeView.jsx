@@ -32,6 +32,9 @@ export default function KnowledgeView({
   onToggleOutdated,
   onDelete,
   onRetry,
+  documentsTotal,
+  onLoadMoreDocuments,
+  loadingMoreDocuments,
   // QA props — everything passed straight through; see FrontlineKnowledgeQATab.
   qa,
   // Navigation
@@ -64,6 +67,9 @@ export default function KnowledgeView({
             onToggleOutdated={onToggleOutdated}
             onDelete={onDelete}
             onRetry={onRetry}
+            total={documentsTotal}
+            onLoadMore={onLoadMoreDocuments}
+            loadingMore={loadingMoreDocuments}
           />
         </TabsContent>
 
