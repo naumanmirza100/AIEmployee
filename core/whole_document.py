@@ -15,6 +15,7 @@ error) leaves the answer to the passages, as before.
 Settings: KQA_WHOLE_DOCUMENT (on by default), KQA_WHOLE_DOCUMENT_MAX_TOKENS (300,000: about $0.12 a question on
 gpt-4.1-mini), KQA_WHOLE_DOCUMENT_MAX_OUTPUT_TOKENS (4,000).
 """
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -282,3 +283,47 @@ def read_document(text, *, company_id, agent_key_name, max_output):
     return spread_excerpts(text, room), (
         f"This document is too long to read whole here, so this is based on passages from all through it "
         f"(about {share}% of its text).")
+
+
+def document_for_call(agent, text, max_output):
+    """(how the document is given, the document wrapped as content, note) for a call that reads one document all
+    through: Frontline's and HR's Summarize and Extract."""
+    content, note = read_document(text, company_id=getattr(agent, 'company_id', None),
+                                  agent_key_name=getattr(agent, 'agent_key_name', None), max_output=max_output)
+    how = ("The document is given in full." if not note else
+           "These are passages from all through the document, in order; [...] marks the text left out between them.")
+    return how, wrap_untrusted(content, tag='document'), note
+
+
+# ---- A summary or extraction kept with its document ----------------------------------------------------------
+#
+# Reading a whole document is one large call (the 245-page prospectus: about 150,000 tokens, 18 to 32 seconds), so
+# its result is kept on the document, per kind (a short summary, a full one, a list of fields), until the document's
+# text changes. Frontline keeps them in Document.processed_data['ai_results'], HR in HRDocument.ai_results.
+
+def _text_key(text):
+    return hashlib.sha256((text or '').encode('utf-8', 'ignore')).hexdigest()[:24]
+
+
+def kept_result(results, kind, text):
+    """The result kept for `kind` while the document's text is unchanged, or None."""
+    kept = (results or {}).get(kind)
+    return kept if kept and kept.get('text_key') == _text_key(text) else None
+
+
+def keep_result(model, pk, field, kind, value, text, *, inside=None, most=8):
+    """Keep `value` for `kind` in the row's JSON `field` (under the key `inside` when given), the newest `most`
+    kinds only. A queryset update: `updated_at` is how a stuck document is found, and keeping a result isn't
+    progress."""
+    from django.utils import timezone
+    data = model.objects.filter(pk=pk).values_list(field, flat=True).first() or {}
+    results = dict((data.get(inside) or {}) if inside else data)
+    results.pop(kind, None)
+    results[kind] = {**value, 'text_key': _text_key(text), 'at': timezone.now().isoformat()}
+    for old in sorted(results, key=lambda k: results[k].get('at', ''))[:max(0, len(results) - most)]:
+        results.pop(old)
+    if inside:
+        data = {**data, inside: results}
+    else:
+        data = results
+    model.objects.filter(pk=pk).update(**{field: data})

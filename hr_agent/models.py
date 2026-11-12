@@ -669,6 +669,10 @@ class HRDocument(models.Model):
     # extract endpoint.
     extracted_fields = models.JSONField(default=dict, blank=True,
                                         help_text='Auto-extracted key fields, e.g. {"salary": ..., "start_date": ...}.')
+    # Summaries and extractions read the whole document (core/whole_document.py), one large call for a long one, so
+    # each is kept here per kind until the text changes: {"summary|5": {"summary": ..., "note": ..., "text_key": ...}}.
+    ai_results = models.JSONField(default=dict, blank=True,
+                                  help_text='Kept AI summaries and extractions, until the text changes.')
 
     # Versioning — same shape as Frontline's Document. When a newer revision
     # is uploaded with `parent_document_id=<old.id>`, the old row's

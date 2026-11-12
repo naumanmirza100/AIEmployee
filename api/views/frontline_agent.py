@@ -1309,30 +1309,17 @@ def _readable_documents(company_user):
     return company_docs.filter(Q(visibility='company') | Q(visibility='private', id__in=listed))
 
 
-# A summary or extraction is kept on the document (processed_data['ai_results']) until its text changes. They read
-# the whole document now (a 245-page PDF: about 150,000 tokens), and the card asked again on every page load.
-_AI_RESULTS = 'ai_results'
-_AI_RESULTS_KEPT = 8
-
-
-def _text_key(document):
-    return hashlib.sha256((document.document_content or '').encode('utf-8', 'ignore')).hexdigest()[:24]
-
-
 def _kept_result(document, kind):
-    kept = ((document.processed_data or {}).get(_AI_RESULTS) or {}).get(kind)
-    return kept if kept and kept.get('text_key') == _text_key(document) else None
+    """A summary or extraction kept on the document until its text changes (core/whole_document.keep_result)."""
+    from core import whole_document
+    return whole_document.kept_result((document.processed_data or {}).get('ai_results'), kind,
+                                      document.document_content)
 
 
 def _keep_result(document, kind, value):
-    data = Document.objects.filter(pk=document.pk).values_list('processed_data', flat=True).first() or {}
-    results = {k: v for k, v in (data.get(_AI_RESULTS) or {}).items() if k != kind}
-    results[kind] = {**value, 'text_key': _text_key(document), 'at': timezone.now().isoformat()}
-    for old in sorted(results, key=lambda k: results[k].get('at', ''))[:max(0, len(results) - _AI_RESULTS_KEPT)]:
-        results.pop(old)
-    data[_AI_RESULTS] = results
-    # A queryset update: `updated_at` is how a stuck document is found, and keeping a summary is not progress.
-    Document.objects.filter(pk=document.pk).update(processed_data=data)
+    from core import whole_document
+    whole_document.keep_result(Document, document.pk, 'processed_data', kind, value, document.document_content,
+                               inside='ai_results')
 
 
 def _no_text_yet(document, action):
