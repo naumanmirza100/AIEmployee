@@ -4,6 +4,7 @@ Every connection is opened for one question and closed straight after (no pool).
 layers (guards.check_sql comes first; the company's read-only user is the third):
   * PostgreSQL: default_transaction_read_only and statement_timeout, set as the connection opens;
   * MySQL/MariaDB: SET SESSION TRANSACTION READ ONLY and an execution time limit, LOCAL INFILE off;
+  * SQL Server: ApplicationIntent=ReadOnly and a query time limit (mssql.py);
   * SQLite: the file opened read-only and immutable, interrupted after the time limit, extensions never loaded.
 Whatever happens, the transaction is rolled back. MongoDB has its own module (mongo.py): only aggregate(), with a
 time limit.
@@ -16,7 +17,7 @@ import time
 import uuid
 
 from django.conf import settings
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.engine import URL
 from sqlalchemy.pool import NullPool
 
@@ -88,6 +89,18 @@ def _engine(source: DataSource):
                 'sslmode': 'require' if source.use_ssl else 'prefer',
                 'options': f'-c default_transaction_read_only=on -c statement_timeout={QUERY_TIMEOUT * 1000}'}
         return create_engine(url, connect_args=args, poolclass=NullPool)
+    if source.kind == DataSource.KIND_MSSQL:
+        from . import mssql
+        # Every address of the name was checked above; the connection uses the name, which SQL Server's certificate
+        # and Azure SQL's gateway both need.
+        url = URL.create('mssql+pyodbc', query={'odbc_connect': mssql.odbc_connection_string(source)})
+        engine = create_engine(url, connect_args={'timeout': CONNECT_TIMEOUT}, poolclass=NullPool)
+
+        @event.listens_for(engine, 'connect')
+        def _query_time_limit(dbapi_connection, _record):
+            dbapi_connection.timeout = QUERY_TIMEOUT      # seconds; pyodbc stops a statement that runs longer
+
+        return engine
     if source.kind == DataSource.KIND_MYSQL:
         url = URL.create('mysql+mysqldb', username=source.username or None, password=source.get_password() or None,
                          host=address, port=source.port or 3306, database=source.database or None)
@@ -100,7 +113,7 @@ def _engine(source: DataSource):
 
 
 def _default_port(kind) -> int:
-    return {DataSource.KIND_POSTGRES: 5432, DataSource.KIND_MYSQL: 3306}.get(kind, 0)
+    return {DataSource.KIND_POSTGRES: 5432, DataSource.KIND_MYSQL: 3306, DataSource.KIND_MSSQL: 1433}.get(kind, 0)
 
 
 def _limit_mysql_time(conn):
@@ -134,14 +147,25 @@ def friendly_error(exc) -> str:
                 'in MongoDB Atlas, under Network Access.)')
     text = str(getattr(exc, 'orig', None) or exc).strip().splitlines()
     message = (text[0] if text else exc.__class__.__name__)[:400]
+    if 'SQL Server' in message:
+        from . import mssql
+        message = mssql.clean_error(' '.join(text))[:400]
     if exc.__class__.__name__ == 'OperationFailure':
         message = message.split(', full error:')[0]
     lowered = ' '.join(text).lower()
     if 'does not support ssl' in lowered or 'ssl connection is required' in lowered and 'not' in lowered:
         message += ' (This server has no encrypted connection: untick "Require an encrypted connection".)'
     elif ('password authentication failed' in lowered or 'access denied' in lowered or 'bad auth' in lowered
-          or 'authentication failed' in lowered):
+          or 'authentication failed' in lowered or 'login failed' in lowered):
         message += ' (Check the user and password.)'
+    elif 'certificate' in lowered and ('not trusted' in lowered or 'verify failed' in lowered):
+        message += (" (The server's certificate is not trusted. For your own server with a self-signed certificate, "
+                    'add TrustServerCertificate=yes to the connection string.)')
+    elif 'cannot open database' in lowered:
+        message += ' (Check the database name, and that this user may use it.)'
+    elif 'login timeout expired' in lowered or 'tcp provider' in lowered or 'network-related' in lowered:
+        message += (" (Our server couldn't reach it: allow our address in the database's firewall; in Azure SQL, under "
+                    "the server's Networking.)")
     elif 'not authorized' in lowered:
         message += ' (This user may not read it: give it the read role on the database.)'
     elif 'timeout' in lowered and 'connect' in lowered:
@@ -150,7 +174,8 @@ def friendly_error(exc) -> str:
 
 
 _TIMED_OUT = ('statement timeout', 'max_statement_time', 'maximum statement execution time', 'execution was interrupted',
-              'lost connection to mysql server during query', 'exceeded time limit', 'maxtimemsexpired')
+              'lost connection to mysql server during query', 'exceeded time limit', 'maxtimemsexpired',
+              'query timeout expired')
 
 
 def timed_out(exc) -> bool:
@@ -277,6 +302,12 @@ def read_tables(source: DataSource) -> list:
     engine = _engine(source)
     try:
         with engine.connect() as raw:
+            if source.kind == DataSource.KIND_MSSQL:
+                from . import mssql
+                try:
+                    return mssql.read_tables(raw, _table_entry, MAX_TABLES)
+                finally:
+                    raw.rollback()
             if source.kind in _INFO_QUERIES:
                 conn = raw.execution_options(isolation_level='AUTOCOMMIT') if source.kind == DataSource.KIND_POSTGRES \
                     else raw
@@ -316,6 +347,11 @@ def can_write(source: DataSource):
                     "WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema')").first()
                 conn.rollback()
                 return bool(row[0]) if row and row[0] is not None else False
+            if source.kind == DataSource.KIND_MSSQL:
+                from . import mssql
+                row = conn.execution_options(no_parameters=True).exec_driver_sql(mssql.CAN_WRITE_SQL).first()
+                conn.rollback()
+                return bool(row[0]) if row and row[0] is not None else None
             grants = ' '.join(str(r[0]).upper() for r in conn.exec_driver_sql('SHOW GRANTS'))
             conn.rollback()
             return any(word in grants for word in ('ALL PRIVILEGES', 'INSERT', 'UPDATE', 'DELETE'))

@@ -19,13 +19,15 @@ class DataSource(models.Model):
     KIND_MYSQL = 'mysql'
     KIND_SQLITE = 'sqlite'
     KIND_MONGO = 'mongodb'
+    KIND_MSSQL = 'mssql'
     KIND_CHOICES = [
         (KIND_POSTGRES, 'PostgreSQL'),
         (KIND_MYSQL, 'MySQL / MariaDB'),
+        (KIND_MSSQL, 'Microsoft SQL Server'),
         (KIND_MONGO, 'MongoDB'),
         (KIND_SQLITE, 'SQLite file'),
     ]
-    CONNECTION_KINDS = (KIND_POSTGRES, KIND_MYSQL, KIND_MONGO)
+    CONNECTION_KINDS = (KIND_POSTGRES, KIND_MYSQL, KIND_MSSQL, KIND_MONGO)
 
     STATUS_NEW = 'new'
     STATUS_LOADING = 'loading'
@@ -50,6 +52,7 @@ class DataSource(models.Model):
     #: MongoDB: a mongodb+srv:// name, whose service record names the servers (MongoDB Atlas).
     use_srv = models.BooleanField(default=False)
     #: MongoDB: the connection options kept from its string (authSource, authMechanism, replicaSet), nothing else.
+    #: SQL Server: {"trust_server_certificate": true} when its string says TrustServerCertificate=yes.
     options = models.JSONField(default=dict, blank=True)
 
     # An uploaded SQLite file: kept under LOCAL_STORAGE_ROOT/data_analyst, never served, deleted with the source. An

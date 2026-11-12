@@ -16,7 +16,7 @@ import { getAgentNavItems } from '@/utils/agentNavItems';
 
 /**
  * /data-analyst: the AI Data Analyst. Questions in plain words, answered read-only from the company's own database
- * (PostgreSQL, MySQL / MariaDB, MongoDB, or an uploaded SQLite file). Only the question, its answer and its query
+ * (PostgreSQL, MySQL / MariaDB, Microsoft SQL Server, MongoDB, or an uploaded SQLite file). Only the question, its answer and its query
  * are kept; the rows come with the answer and are run again when a question is reopened (plan: MDS/01-Plan/week-45).
  * MongoDB (6 Nov 2026): a connection string; the AI writes one read-only aggregation instead of SQL.
  * A .sql dump (7 Nov 2026): uploaded like a SQLite file and read into a SQLite copy on the server (in the background
@@ -162,7 +162,7 @@ function AskTab({ sources, onAsked }) {
       <div className={`${panel} mx-auto mt-6 max-w-xl p-6 text-center`}>
         <Database className="mx-auto mb-3 h-10 w-10 text-violet-400" />
         <h2 className="text-lg font-semibold text-foreground">No database to ask yet</h2>
-        <p className="mt-1 text-sm text-muted-foreground">An owner or admin adds one under Databases: a PostgreSQL, MySQL or MongoDB connection, a SQLite file, or a .sql dump.</p>
+        <p className="mt-1 text-sm text-muted-foreground">An owner or admin adds one under Databases: a PostgreSQL, MySQL, SQL Server or MongoDB connection, a SQLite file, or a .sql dump.</p>
       </div>
     );
   }
@@ -218,10 +218,17 @@ function AskTab({ sources, onAsked }) {
 const READ_ONLY_USER = {
   postgres: "CREATE USER pp_reader WITH PASSWORD 'a long password';\nGRANT CONNECT ON DATABASE your_db TO pp_reader;\nGRANT USAGE ON SCHEMA public TO pp_reader;\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO pp_reader;\nALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO pp_reader;",
   mysql: "CREATE USER 'pp_reader'@'%' IDENTIFIED BY 'a long password';\nGRANT SELECT ON your_db.* TO 'pp_reader'@'%';",
+  mssql: "CREATE LOGIN pp_reader WITH PASSWORD = 'a long password';\nUSE your_db;\nCREATE USER pp_reader FOR LOGIN pp_reader;\nALTER ROLE db_datareader ADD MEMBER pp_reader;\n-- Azure SQL: CREATE USER pp_reader WITH PASSWORD = '...'; in the database, then the same ALTER ROLE.\n-- Azure SQL firewall: the server's Networking page, add our address.",
   mongodb: "MongoDB Atlas: Database Access > Add New Database User > Built-in Role: Only read any database.\nYour own server (mongosh):\nuse admin\ndb.createUser({ user: 'pp_reader', pwd: 'a long password', roles: [{ role: 'read', db: 'your_db' }] })",
 };
 
-const KINDS = [['postgres', 'PostgreSQL'], ['mysql', 'MySQL / MariaDB'], ['mongodb', 'MongoDB'], ['sqlite', 'File: SQLite or .sql']];
+const KINDS = [['postgres', 'PostgreSQL'], ['mysql', 'MySQL / MariaDB'], ['mssql', 'SQL Server'], ['mongodb', 'MongoDB'], ['sqlite', 'File: SQLite or .sql']];
+const STRING_PLACEHOLDER = {
+  postgres: 'postgresql://user:password@host:5432/database?sslmode=require',
+  mysql: 'mysql://user:password@host:3306/database',
+  mssql: 'Server=tcp:yourserver.database.windows.net,1433;Database=your_db;User ID=pp_reader;Password=...;Encrypt=True;',
+};
+const PORT_PLACEHOLDER = { postgres: 'Port (5432)', mysql: 'Port (3306)', mssql: 'Port (1433)' };
 
 function AddDatabase({ setup, logins, onAdded }) {
   const [mode, setMode] = useState('postgres');
@@ -294,12 +301,12 @@ function AddDatabase({ setup, logins, onAdded }) {
             <input type="checkbox" checked={useString} onChange={(e) => setUseString(e.target.checked)} /> Paste a connection string instead
           </label>
           {useString ? (
-            <input className={field} placeholder={mode === 'mysql' ? 'mysql://user:password@host:3306/database' : 'postgresql://user:password@host:5432/database?sslmode=require'}
+            <input className={field} placeholder={STRING_PLACEHOLDER[mode] || STRING_PLACEHOLDER.postgres}
               value={form.connection_string} onChange={set('connection_string')} aria-label="Connection string" />
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <input className={field} placeholder="Host, e.g. db.example.com" value={form.host} onChange={set('host')} aria-label="Host" />
-              <input className={field} placeholder={mode === 'mysql' ? 'Port (3306)' : 'Port (5432)'} value={form.port} onChange={set('port')} aria-label="Port" />
+              <input className={field} placeholder={PORT_PLACEHOLDER[mode] || 'Port'} value={form.port} onChange={set('port')} aria-label="Port" />
               <input className={field} placeholder="Database name" value={form.database} onChange={set('database')} aria-label="Database" />
               <input className={field} placeholder="User (read-only)" value={form.username} onChange={set('username')} aria-label="User" />
               <input className={field} type="password" placeholder="Password" value={form.password} onChange={set('password')} aria-label="Password" autoComplete="new-password" />
