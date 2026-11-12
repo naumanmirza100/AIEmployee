@@ -1061,6 +1061,11 @@ CELERY_WORKER_POOL = os.getenv(
     'CELERY_WORKER_POOL', 'solo' if _ON_WINDOWS else 'prefork')
 CELERY_WORKER_CONCURRENCY = int(os.getenv(
     'CELERY_WORKER_CONCURRENCY', '1' if _ON_WINDOWS else '4'))
+# A worker process that ends a task above this much memory (KiB) is replaced by a fresh one. Python keeps what a
+# task took: after reading a 9.3 MB PDF one process held 1.9 GB (live, 12 Nov 2026), against about 400 MB at rest,
+# and four of them run on a 7.6 GB server that ran out of memory that morning. The task always finishes first;
+# prefork only (solo ignores it).
+CELERY_WORKER_MAX_MEMORY_PER_CHILD = int(os.getenv('CELERY_WORKER_MAX_MEMORY_PER_CHILD', '600000'))
 
 # Retry settings
 CELERY_TASK_DEFAULT_RETRY_DELAY = 300  # 5 minutes default retry delay
