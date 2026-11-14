@@ -2,13 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, CheckCircle2, Database, Download, FileUp, Loader2, Lock, MessageSquarePlus, Play, RefreshCw,
-  Send, ShieldCheck, Trash2,
+  AlertTriangle, CheckCircle2, Database, Download, FileUp, Loader2, Lock, MessageCircle, Play, Plus, RefreshCw,
+  Send, ShieldCheck, Trash2, Upload,
 } from 'lucide-react';
 
 import AgentLocked from '@/components/common/AgentLocked';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import ChatShell from '@/components/shared/ChatShell';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
 import * as analyst from '@/services/dataAnalystService';
@@ -21,9 +23,11 @@ import { getAgentNavItems } from '@/utils/agentNavItems';
  * MongoDB (6 Nov 2026): a connection string; the AI writes one read-only aggregation instead of SQL.
  * A .sql dump (7 Nov 2026): uploaded like a SQLite file and read into a SQLite copy on the server (in the background
  * when it is big; the Databases tab checks back until it is ready).
+ * Chats (14 Nov 2026): laid out like the PM agent's (components/shared/ChatShell), every chat on the left; a chat stays
+ * on the database it started with.
  */
 const TABS = [
-  { key: 'ask', label: 'Ask' },
+  { key: 'ask', label: 'Chats' },
   { key: 'databases', label: 'Databases' },
   { key: 'history', label: 'History' },
 ];
@@ -94,37 +98,93 @@ function Answer({ item, onRun, onCsv }) {
   );
 }
 
-function AskTab({ sources, onAsked }) {
-  const usable = sources.filter((s) => s.status === 'ready');
-  const [sourceId, setSourceId] = useState(usable[0]?.id || '');
-  const [conversation, setConversation] = useState(null);
+/**
+ * The chats (14 Nov 2026), laid out like the PM agent's: every chat on the left, whichever database it is about; the
+ * database is chosen above the composer. A chat stays on its database once it has started (the server refuses
+ * another one in it): picking another database offers the last chat on that one, or a new chat. Owners and admins
+ * can add a database file (SQLite, or a .sql dump) from here too.
+ */
+function AskTab({ setup, sources, reload }) {
+  const usable = useMemo(() => sources.filter((s) => s.status === 'ready'), [sources]);
+  const byId = useMemo(() => new Map(sources.map((s) => [String(s.id), s])), [sources]);
+  const [chats, setChats] = useState([]);
+  const [loadingChats, setLoadingChats] = useState(true);
+  const [chatId, setChatId] = useState(null);
   const [items, setItems] = useState([]);
-  const [past, setPast] = useState([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [newSourceId, setNewSourceId] = useState(() => String(usable[0]?.id || ''));
+  const [switching, setSwitching] = useState(null);
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const fileRef = useRef(null);
   const bottom = useRef(null);
+  const opening = useRef(null);
 
-  const loadPast = useCallback(async () => {
-    if (!sourceId) return;
+  const chat = chats.find((c) => c.id === chatId) || null;
+  const sourceId = chat ? String(chat.source.id) : newSourceId;
+  const source = byId.get(sourceId) || (chat ? chat.source : null);
+  const locked = !!chatId;
+
+  const loadChats = useCallback(async () => {
     try {
-      const res = await analyst.listQuestions({ source: sourceId });
-      const seen = new Map();
-      (res?.data || []).forEach((q) => { if (!seen.has(q.conversation)) seen.set(q.conversation, q); });
-      setPast([...seen.values()].slice(0, 30));
-    } catch { /* the list is a convenience */ }
-  }, [sourceId]);
+      const res = await analyst.listChats();
+      setChats(res?.data || []);
+    } catch { /* the list is a convenience */ } finally {
+      setLoadingChats(false);
+    }
+  }, []);
+  useEffect(() => { loadChats(); }, [loadChats]);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [items]);
+  // A new chat's database must be one that can be asked; after a removal, fall back to the first.
+  useEffect(() => {
+    if (!usable.some((s) => String(s.id) === newSourceId)) setNewSourceId(String(usable[0]?.id || ''));
+  }, [usable, newSourceId]);
+  // A dump being read in the background: look again until it is ready, so it appears in the list.
+  const loading = sources.some((s) => s.status === 'loading');
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(reload, 5000);
+    return () => clearTimeout(timer);
+  }, [loading, sources, reload]);
 
-  useEffect(() => { loadPast(); }, [loadPast]);
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }); }, [items]);
-
-  const startNew = () => { setConversation(null); setItems([]); setError(''); };
-  const openPast = async (conv) => {
-    setError('');
-    const res = await analyst.listQuestions({ source: sourceId, conversation: conv });
-    setItems([...(res?.data || [])].reverse().map((q) => ({ ...q, rows: null })));
-    setConversation(conv);
+  const newChat = (id) => {
+    opening.current = null;
+    setChatId(null); setItems([]); setSwitching(null); setError(''); setNote('');
+    if (id) setNewSourceId(String(id));
   };
+  const openChat = async (c) => {
+    opening.current = c.id;
+    setChatId(c.id); setItems([]); setSwitching(null); setError(''); setNote(''); setLoadingItems(true);
+    try {
+      const res = await analyst.listQuestions({ conversation: c.id });
+      if (opening.current === c.id) setItems([...(res?.data || [])].reverse().map((q) => ({ ...q, rows: null })));
+    } catch (e) {
+      if (opening.current === c.id) setError(e?.message || 'The chat could not be opened.');
+    } finally {
+      if (opening.current === c.id) setLoadingItems(false);
+    }
+  };
+  const removeChat = async (c) => {
+    if (!window.confirm(`Delete the chat "${c.title}"? Its questions and answers are removed.`)) return;
+    try {
+      await analyst.deleteChat(c.id);
+      if (c.id === chatId) newChat();
+      loadChats();
+    } catch (e) { setError(e?.message || 'The chat could not be deleted.'); }
+  };
+
+  // Another database in a chat that has started: this chat stays as it is; offer the last chat on that database
+  // (the list is newest first), or a new one.
+  const pickSource = (value) => {
+    setError('');
+    if (!locked) { setNewSourceId(value); return; }
+    if (value === sourceId) { setSwitching(null); return; }
+    setSwitching({ source: byId.get(value), chat: chats.find((c) => String(c.source.id) === value) || null });
+  };
+
   const runAgain = async (item) => {
     try {
       const res = await analyst.runAgain(item.id);
@@ -139,15 +199,18 @@ function AskTab({ sources, onAsked }) {
     event?.preventDefault();
     const q = question.trim();
     if (!q || !sourceId || busy) return;
-    setBusy(true); setError('');
+    if (source && source.status && source.status !== 'ready') {
+      setError(`${source.name} can't be asked right now (${source.status === 'loading' ? 'it is still being read' : 'it could not be reached'}).`);
+      return;
+    }
+    setBusy(true); setError(''); setNote(''); setSwitching(null);
     setItems((all) => [...all, { pending: true, question: q }]);
     setQuestion('');
     try {
-      const res = await analyst.ask(Number(sourceId), q, conversation);
-      setConversation(res.data.conversation);
+      const res = await analyst.ask(Number(sourceId), q, chatId);
       setItems((all) => [...all.filter((x) => !x.pending), res.data]);
-      onAsked?.();
-      loadPast();
+      if (!chatId) { opening.current = res.data.conversation; setChatId(res.data.conversation); }
+      loadChats();
     } catch (e) {
       setItems((all) => all.filter((x) => !x.pending));
       setQuestion(q);
@@ -157,61 +220,133 @@ function AskTab({ sources, onAsked }) {
     }
   };
 
-  if (!usable.length) {
-    return (
-      <div className={`${panel} mx-auto mt-6 max-w-xl p-6 text-center`}>
-        <Database className="mx-auto mb-3 h-10 w-10 text-violet-400" />
-        <h2 className="text-lg font-semibold text-foreground">No database to ask yet</h2>
-        <p className="mt-1 text-sm text-muted-foreground">An owner or admin adds one under Databases: a PostgreSQL, MySQL, SQL Server or MongoDB connection, a SQLite file, or a .sql dump.</p>
+  const upload = async (file) => {
+    if (!file) return;
+    setUploading(true); setError(''); setNote('');
+    try {
+      const name = file.name.replace(/\.(sql\.gz|sqlite3|sqlite|db3|db|sql|gz)$/i, '') || file.name;
+      const res = await analyst.uploadSqlite(file, { name, send_rows_to_ai: true, everyone_may_ask: true });
+      const added = res?.data;
+      await reload();
+      if (added?.status === 'ready') {
+        newChat(added.id);
+        setNote(`${added.name} is added. Ask your first question about it below.`);
+      } else if (added?.status === 'loading') {
+        newChat();
+        setNote(`${added.name} is being read from its dump. It can be picked here when it is ready; the Databases tab shows how far it is.`);
+      } else {
+        setError(added?.last_error || res?.message || 'The file could not be read.');
+      }
+    } catch (e) {
+      setError(e?.message || 'The file could not be added.');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const listed = chats.map((c) => ({
+    id: c.id, title: c.title, updatedAt: c.last_at,
+    detail: `${c.source.name}${c.questions > 1 ? ` · ${c.questions} questions` : ''}`, raw: c,
+  }));
+  const options = locked && chat && !usable.some((s) => String(s.id) === sourceId) ? [chat.source, ...usable] : usable;
+  const nothingToAsk = !usable.length && !locked;
+
+  const composer = (
+    <div className="mx-3 my-3 rounded-xl border border-border px-3 py-3 sm:mx-4">
+      {switching && (
+        <div data-testid="analyst-switch" className="mb-2 rounded-lg border border-violet-500/30 bg-violet-500/10 p-2.5 text-xs text-foreground">
+          <p>This chat stays on <b>{source?.name}</b>. To ask <b>{switching.source?.name}</b>:</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {switching.chat && (
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openChat(switching.chat)} data-testid="analyst-switch-open">
+                Open your last chat on it
+              </Button>
+            )}
+            <Button size="sm" className="h-7 text-xs" onClick={() => newChat(switching.source?.id)} data-testid="analyst-switch-new">
+              <Plus className="mr-1 h-3.5 w-3.5" /> New chat on {switching.source?.name}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSwitching(null)}>Stay here</Button>
+          </div>
+        </div>
+      )}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5"
+          title={locked ? `This chat is about ${source?.name || 'this database'}. Pick another database to open your last chat on it or start a new one.` : 'The database this chat asks'}>
+          {locked ? <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <Database className="h-3.5 w-3.5 shrink-0 text-violet-300" />}
+          <select id="analyst-source" aria-label="Database" data-testid="analyst-source-select" value={sourceId}
+            onChange={(e) => pickSource(e.target.value)} disabled={busy || !options.length}
+            className={`h-8 w-full min-w-0 flex-1 rounded-md border border-border px-2 text-xs text-foreground outline-none focus:border-violet-400 ${locked ? 'bg-muted/40' : 'bg-background'}`}>
+            {!options.length && <option value="">No database yet</option>}
+            {options.map((s) => <option key={s.id} value={String(s.id)}>{s.name} ({s.kind_label})</option>)}
+          </select>
+        </div>
+        {setup?.can_manage && (
+          <>
+            <input ref={fileRef} type="file" className="hidden" accept=".db,.sqlite,.sqlite3,.db3,.sql,.gz"
+              onChange={(e) => upload(e.target.files?.[0])} data-testid="analyst-chat-file" />
+            <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 text-xs" disabled={uploading || busy}
+              onClick={() => fileRef.current?.click()}
+              title={`Add a database file: a SQLite file, or a .sql dump from MySQL, PostgreSQL, SQLite or SQL Server (up to ${setup?.max_file_mb || 500} MB)`}>
+              {uploading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1 h-3.5 w-3.5" />}
+              Add database file
+            </Button>
+          </>
+        )}
       </div>
-    );
-  }
+      <form onSubmit={submit} className="flex items-start gap-2">
+        <Textarea value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={2000} rows={1}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }}
+          placeholder={source ? `Ask about ${source.name}, e.g. How many orders did we have last month, by city?` : 'Add a database first'}
+          aria-label="Question" data-testid="analyst-question" disabled={busy || nothingToAsk}
+          className="min-h-[40px] flex-1 resize-none text-sm" />
+        <Button type="submit" size="icon" className="h-[40px] w-10 shrink-0" disabled={busy || !question.trim() || nothingToAsk} title="Ask">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </Button>
+      </form>
+      {error && <p className="mt-2 text-xs text-red-300" data-testid="analyst-error">{error}</p>}
+      {note && <p className="mt-2 text-xs text-emerald-300" data-testid="analyst-note">{note}</p>}
+    </div>
+  );
 
   return (
-    // grid-cols-1 and min-w-0: a long query or line of SQL scrolls in its box instead of widening the page past a
-    // phone's screen (4 Nov 2026).
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] [&>*]:min-w-0">
-      <aside className="space-y-3">
-        <label className="block text-xs text-muted-foreground" htmlFor="analyst-source">Database</label>
-        <select id="analyst-source" className={field} value={sourceId} onChange={(e) => { setSourceId(e.target.value); startNew(); }}>
-          {usable.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.kind_label})</option>)}
-        </select>
-        <Button variant="outline" className="w-full" onClick={startNew}><MessageSquarePlus className="mr-2 h-4 w-4" /> New conversation</Button>
-        <div className="space-y-1">
-          {past.map((q) => (
-            <button key={q.conversation} type="button" onClick={() => openPast(q.conversation)}
-              className={`block w-full truncate rounded-lg px-3 py-2 text-left text-sm hover:bg-accent ${q.conversation === conversation ? 'bg-accent text-foreground' : 'text-muted-foreground'}`}>
-              {q.question}
-            </button>
-          ))}
+    <ChatShell
+      icon={Database} title="AI Data Analyst" badge="Read-only"
+      description="Answers come from your database, read-only. Only each question, its answer and its query are kept."
+      chats={listed} selectedId={chatId} loadingChats={loadingChats} testId="analyst-chats"
+      onSelect={(c) => openChat(c.raw)} onNew={() => newChat()} onDelete={(c) => removeChat(c.raw)}
+      emptyChatsText="No chats yet. Pick a database below and ask a question."
+      composer={composer}
+    >
+      {nothingToAsk && (
+        <div className="mx-auto mt-6 max-w-md text-center">
+          <Database className="mx-auto mb-3 h-10 w-10 text-violet-400" />
+          <h3 className="text-lg font-semibold text-foreground">No database to ask yet</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {setup?.can_manage
+              ? 'Add a database file below, or a PostgreSQL, MySQL, SQL Server or MongoDB connection under Databases.'
+              : 'An owner or admin adds one under Databases: a PostgreSQL, MySQL, SQL Server or MongoDB connection, a SQLite file, or a .sql dump.'}
+          </p>
         </div>
-      </aside>
-      <section className={`${panel} flex min-h-[65vh] flex-col`}>
-        <div className="border-b border-border px-4 py-3 text-xs text-muted-foreground">
-          Answers come from your database, read-only: it never changes anything. Only each question, its answer and its SQL are kept.
+      )}
+      {!nothingToAsk && !locked && items.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
+          <MessageCircle className="mb-3 h-10 w-10 opacity-50" />
+          <p className="font-medium text-foreground">New chat{source ? ` on ${source.name}` : ''}</p>
+          <p className="mt-1 max-w-md text-sm">Ask about your data in plain words, e.g. "How many orders did we have last month, by city?" Follow-up questions in the same chat build on the earlier ones.</p>
         </div>
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {items.length === 0 && (
-            <p className="py-10 text-center text-sm text-muted-foreground">Ask about your data in plain words, e.g. "How many orders did we have last month, by city?"</p>
-          )}
-          {items.map((item, i) => (
-            <div key={item.id || `p${i}`} className="space-y-2">
-              <div className="flex justify-end"><div className="max-w-[80%] rounded-2xl bg-violet-600 px-4 py-2 text-sm text-white">{item.question}</div></div>
-              {item.pending
-                ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Writing and running the query…</div>
-                : <Answer item={item} onRun={runAgain} onCsv={csv} />}
-            </div>
-          ))}
-          <div ref={bottom} />
+      )}
+      {loadingItems && <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
+      {items.map((item, i) => (
+        <div key={item.id || `p${i}`} className="space-y-2">
+          <div className="flex justify-end"><div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-violet-600 px-4 py-2 text-sm text-white">{item.question}</div></div>
+          {item.pending
+            ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Writing and running the query…</div>
+            : <Answer item={item} onRun={runAgain} onCsv={csv} />}
         </div>
-        {error && <p className="px-4 pb-2 text-sm text-red-300">{error}</p>}
-        <form onSubmit={submit} className="flex gap-2 border-t border-border p-3">
-          <input className={field} value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={2000}
-            placeholder="Ask a question about this database" aria-label="Question" data-testid="analyst-question" />
-          <Button type="submit" disabled={busy || !question.trim()}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}<span className="ml-1">Ask</span></Button>
-        </form>
-      </section>
-    </div>
+      ))}
+      <div ref={bottom} />
+    </ChatShell>
   );
 }
 
@@ -481,9 +616,9 @@ export default function DataAnalystPage() {
 
   useEffect(() => { if (!companyUser) navigate('/company/login'); }, [companyUser, navigate]);
   const bought = purchasedModules.includes('data_analyst_agent');
-  const reload = useCallback(() => {
-    analyst.listSources().then((r) => setSources(r?.data || [])).catch((e) => { setSources([]); setError(e?.message || ''); });
-  }, []);
+  const reload = useCallback(() => (
+    analyst.listSources().then((r) => setSources(r?.data || [])).catch((e) => { setSources([]); setError(e?.message || ''); })
+  ), []);
   useEffect(() => {
     if (!modulesLoaded || !bought) return;
     analyst.getSetup().then((r) => setSetup(r?.data || null)).catch(() => {});
@@ -521,7 +656,7 @@ export default function DataAnalystPage() {
               </div>
               {error && <p className="mb-3 text-sm text-red-300">{error}</p>}
               {sources === null ? <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                : tab === 'ask' ? <AskTab key={sources.map((s) => `${s.id}${s.status}`).join()} sources={sources} />
+                : tab === 'ask' ? <AskTab setup={setup} sources={sources} reload={reload} />
                   : tab === 'databases' ? <DatabasesTab setup={setup} sources={sources} reload={reload} />
                     : <HistoryTab setup={setup} />}
             </>

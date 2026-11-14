@@ -1007,6 +1007,9 @@ urlpatterns = [
     re_path(r'^data-analyst/sources/(?P<source_id>\d+)/?$', analyst_api.source_detail, name='analyst_source_detail'),  # GET, PATCH, DELETE
     re_path(r'^data-analyst/sources/(?P<source_id>\d+)/test/?$', analyst_api.source_test, name='analyst_source_test'),  # POST
     re_path(r'^data-analyst/ask/?$', analyst_api.ask, name='analyst_ask'),  # POST
+    re_path(r'^data-analyst/chats/?$', analyst_api.chats, name='analyst_chats'),  # GET
+    re_path(r'^data-analyst/chats/(?P<conversation>[0-9a-fA-F-]{32,36})/?$', analyst_api.chat_detail,
+            name='analyst_chat_detail'),  # DELETE
     re_path(r'^data-analyst/questions/?$', analyst_api.questions, name='analyst_questions'),  # GET
     re_path(r'^data-analyst/questions/(?P<question_id>\d+)/?$', analyst_api.question_detail, name='analyst_question_detail'),  # GET
     re_path(r'^data-analyst/questions/(?P<question_id>\d+)/run/?$', analyst_api.question_run, name='analyst_question_run'),  # POST
