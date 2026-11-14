@@ -135,6 +135,9 @@ class DataQuestion(models.Model):
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_ANSWERED)
     error = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    #: When its asker deleted the chat it is in (14 Nov 2026): gone from their chats and their history, kept in the
+    #: company's History for owners and admins, so it stays a full record of what was asked.
+    hidden_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at', '-id']

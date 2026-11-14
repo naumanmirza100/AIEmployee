@@ -168,7 +168,7 @@ function AskTab({ setup, sources, reload }) {
     }
   };
   const removeChat = async (c) => {
-    if (!window.confirm(`Delete the chat "${c.title}"? Its questions and answers are removed.`)) return;
+    if (!window.confirm(`Delete the chat "${c.title}"? It leaves your list; owners and admins still see its questions in History.`)) return;
     try {
       await analyst.deleteChat(c.id);
       if (c.id === chatId) newChat();
@@ -587,7 +587,10 @@ function HistoryTab({ setup }) {
                 <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">{new Date(q.created_at).toLocaleString()}</td>
                 <td className="px-4 py-2">{q.source?.name}</td>
                 {all && <td className="px-4 py-2">{q.asked_by}</td>}
-                <td className="px-4 py-2 text-foreground">{q.question}</td>
+                <td className="px-4 py-2 text-foreground">
+                  {q.question}
+                  {q.hidden && <span className="ml-2 whitespace-nowrap rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground" title="Its asker deleted this chat; it is kept here as a record">chat deleted</span>}
+                </td>
                 <td className="px-4 py-2 text-muted-foreground">{q.status === 'answered' ? q.row_count : q.status === 'failed' ? 'failed' : 'asked back'}</td>
               </tr>
             ))}

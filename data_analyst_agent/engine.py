@@ -323,5 +323,7 @@ def serialize_question(record: DataQuestion) -> dict:
     """A stored question for the history: its answer and SQL, never rows (they are run again when opened)."""
     out = _reply(record, rows=[])
     out.update({'source': {'id': record.source_id, 'name': record.source.name},
-                'asked_by': getattr(record.asked_by, 'full_name', '') or ''})
+                'asked_by': getattr(record.asked_by, 'full_name', '') or '',
+                # Its asker deleted the chat: shown to owners and admins in History only.
+                'hidden': record.hidden_at is not None})
     return out
