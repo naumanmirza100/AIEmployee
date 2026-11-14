@@ -10,7 +10,11 @@
   PATCH  data-analyst/sources/<id>           owner/admin: change it
   DELETE data-analyst/sources/<id>           owner/admin: remove it, its file and its questions
   POST   data-analyst/sources/<id>/test      owner/admin: connect, read its tables, check the user can't write
-  POST   data-analyst/ask                    {source, question, conversation?}: the answer, the SQL, the rows (not kept)
+  POST   data-analyst/ask                    {source, question, conversation?}: the answer, the SQL, the rows (not kept).
+                                             A chat (conversation) stays on the database it started with, and is
+                                             only its asker's (14 Nov 2026)
+  GET    data-analyst/chats                  this login's chats, newest first: title, database, questions, last time
+  DELETE data-analyst/chats/<conversation>   remove one of this login's chats (its questions)
   GET    data-analyst/questions              this login's questions (owners/admins: ?all=1 for everyone's)
   GET    data-analyst/questions/<id>         one, without rows
   POST   data-analyst/questions/<id>/run     its SQL run again now, read-only: the rows as of now
@@ -412,9 +416,17 @@ def ask(request):
         return _err('You may not ask this database. Ask an owner or admin of your company.', status.HTTP_403_FORBIDDEN)
     if source.status == DataSource.STATUS_LOADING:
         return _err('This database is still being read from its dump. Ask again when it is ready.')
-    conversation = str(data.get('conversation') or '').strip() or None
-    if conversation and not re.fullmatch(r'[0-9a-fA-F-]{32,36}', conversation):
-        conversation = None
+    conversation = _conversation(data.get('conversation'))
+    if conversation:
+        # A chat is its asker's, and stays on the database it started with: its earlier turns are about that one,
+        # and the screen offers another chat (or a new one) for another database.
+        earlier = DataQuestion.objects.filter(conversation=conversation)
+        if earlier.exclude(company_id=request.user.company_id, asked_by=request.user).exists():
+            return _err('That chat was not found.', status.HTTP_404_NOT_FOUND)
+        other = earlier.exclude(source=source).select_related('source').first()
+        if other is not None:
+            return _err(f'This chat is about {other.source.name}. Start a new chat to ask about {source.name}.',
+                        status.HTTP_409_CONFLICT)
     try:
         result = engine.ask(request.user, source, question, conversation=conversation)
     except Refused as exc:
@@ -447,8 +459,56 @@ def questions(request):
     if str(request.query_params.get('source') or '').isdigit():
         rows = rows.filter(source_id=int(request.query_params['source']))
     if request.query_params.get('conversation'):
-        rows = rows.filter(conversation=request.query_params['conversation'])
+        conversation = _conversation(request.query_params['conversation'])
+        rows = rows.filter(conversation=conversation) if conversation else rows.none()
     return Response({'status': 'success', 'data': [engine.serialize_question(q) for q in rows[:200]]})
+
+
+def _conversation(value):
+    """A chat's id as given, or None when it is not one (it is a UUID)."""
+    value = str(value or '').strip()
+    return value if re.fullmatch(r'[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}',
+                                 value) else None
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def chats(request):
+    """This login's chats, newest first (the chat list on the left): each with its first question as the title, the
+    database it is about, how many questions, and when the last one was asked."""
+    rows = (DataQuestion.objects.select_related('source')
+            .filter(company_id=request.user.company_id, asked_by=request.user)
+            .only('conversation', 'question', 'created_at', 'source__id', 'source__name', 'source__kind',
+                  'source__status')
+            .order_by('-created_at', '-id')[:3000])
+    found = {}
+    for q in rows:
+        chat = found.get(q.conversation)
+        if chat is None:
+            chat = found[q.conversation] = {
+                'id': str(q.conversation), 'last_at': q.created_at.isoformat(), 'questions': 0,
+                'source': {'id': q.source_id, 'name': q.source.name, 'kind': q.source.kind,
+                           'kind_label': q.source.get_kind_display(), 'status': q.source.status},
+            }
+        chat['questions'] += 1
+        chat['title'] = q.question[:120]          # the rows come newest first: the last one seen is the first asked
+    return Response({'status': 'success', 'data': list(found.values())[:300]})
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def chat_detail(request, conversation):
+    """Remove one of this login's chats: its questions, answers and SQL."""
+    conversation = _conversation(conversation)
+    rows = DataQuestion.objects.filter(company_id=request.user.company_id, asked_by=request.user,
+                                       conversation=conversation) if conversation else DataQuestion.objects.none()
+    removed = rows.count()
+    if not removed:
+        return _err('That chat was not found.', status.HTTP_404_NOT_FOUND)
+    rows.delete()
+    return Response({'status': 'success', 'message': 'The chat was removed.', 'data': {'removed': removed}})
 
 
 @api_view(['GET'])

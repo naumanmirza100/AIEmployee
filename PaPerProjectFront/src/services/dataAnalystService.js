@@ -25,6 +25,9 @@ export const testSource = (id) => companyApi.post(`/data-analyst/sources/${id}/t
 export const ask = (source, question, conversation) =>
   companyApi.post('/data-analyst/ask', { source, question, ...(conversation ? { conversation } : {}) });
 export const listQuestions = (params = {}) => companyApi.get('/data-analyst/questions', params);
+/** This login's chats, newest first: [{ id, title, source: { id, name, kind_label, status }, questions, last_at }]. */
+export const listChats = () => companyApi.get('/data-analyst/chats');
+export const deleteChat = (id) => companyApi.delete(`/data-analyst/chats/${id}`);
 export const runAgain = (id) => companyApi.post(`/data-analyst/questions/${id}/run`, {});
 
 /** The result as a CSV, run again now; saved by the browser, nothing kept by us. */
