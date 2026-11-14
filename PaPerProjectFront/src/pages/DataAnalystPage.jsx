@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 
 import AgentLocked from '@/components/common/AgentLocked';
+import { renderChart } from '@/components/common/ChartRenderer';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import ChatShell from '@/components/shared/ChatShell';
 import { Button } from '@/components/ui/button';
@@ -60,6 +61,52 @@ function ResultTable({ columns, rows, more }) {
   );
 }
 
+// A chart asked for in a question (14 Nov 2026): the server keeps only its description ({ type, x, y, title }); it is
+// drawn here from the result's rows with the agents' shared renderer. Bars: at most CHART_BARS; a pie: at most
+// PIE_PARTS, the smallest together as "Other". The same label twice is added up.
+const CHART_BARS = 30;
+const PIE_PARTS = 8;
+
+function AnalystChart({ chart, columns, rows }) {
+  const xi = (columns || []).indexOf(chart.x);
+  const yi = (columns || []).indexOf(chart.y);
+  if (xi < 0 || yi < 0 || !rows?.length) return null;
+  const points = [];
+  rows.forEach((row) => {
+    const raw = row[yi];
+    const value = Number(String(raw ?? '').replace(/,/g, ''));
+    if (raw === null || raw === '' || Number.isNaN(value)) return;
+    points.push({ label: row[xi] === null ? '—' : String(row[xi]), value });
+  });
+  if (!points.length) return null;
+  let data;
+  let note = '';
+  if (chart.type === 'line') {
+    data = points;
+  } else {
+    const sums = new Map();
+    points.forEach(({ label, value }) => sums.set(label, (sums.get(label) || 0) + value));
+    let entries = [...sums.entries()];
+    if (chart.type === 'pie' && entries.length > PIE_PARTS) {
+      entries.sort((a, b) => b[1] - a[1]);
+      const rest = entries.slice(PIE_PARTS - 1).reduce((total, [, v]) => total + v, 0);
+      note = `The ${entries.length - (PIE_PARTS - 1)} smallest are shown together as "Other".`;
+      entries = [...entries.slice(0, PIE_PARTS - 1), ['Other', rest]];
+    } else if (entries.length > CHART_BARS) {
+      note = `The first ${CHART_BARS} of ${entries.length} are shown; the table has them all.`;
+      entries = entries.slice(0, CHART_BARS);
+    }
+    // An object, not a list: the renderer then keeps the labels exactly as the database has them.
+    data = Object.fromEntries(entries.map(([label, v]) => [label, Math.round(v * 100) / 100]));
+  }
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-background/40 p-3" data-testid="analyst-chart">
+      {renderChart({ type: chart.type, title: chart.title, data })}
+      {note && <p className="mt-1 text-[11px] text-muted-foreground">{note}</p>}
+    </div>
+  );
+}
+
 function Answer({ item, onRun, onCsv }) {
   const [busy, setBusy] = useState('');
   const run = async () => { setBusy('run'); try { await onRun(item); } finally { setBusy(''); } };
@@ -73,12 +120,13 @@ function Answer({ item, onRun, onCsv }) {
           <AlertTriangle className="h-3.5 w-3.5" /> Some figures ({item.flagged.slice(0, 5).join(', ')}) are not in the rows the answer was written from; check them in the table.
         </p>
       )}
+      {item.chart && item.rows ? <AnalystChart chart={item.chart} columns={item.columns} rows={item.rows} /> : null}
       {item.rows ? <ResultTable columns={item.columns} rows={item.rows} more={item.more_rows} /> : null}
       {item.as_of && <p className="text-[11px] text-muted-foreground">Run again: as of {new Date(item.as_of).toLocaleString()}.</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {item.sql && !item.rows && item.status === 'answered' && (
           <Button size="sm" variant="outline" onClick={run} disabled={!!busy}>
-            {busy === 'run' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1 h-3.5 w-3.5" />} Show the table
+            {busy === 'run' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1 h-3.5 w-3.5" />} {item.chart ? 'Show the chart and table' : 'Show the table'}
           </Button>
         )}
         {item.sql && item.status === 'answered' && (
@@ -168,7 +216,7 @@ function AskTab({ setup, sources, reload }) {
     }
   };
   const removeChat = async (c) => {
-    if (!window.confirm(`Delete the chat "${c.title}"? Its questions and answers are removed.`)) return;
+    if (!window.confirm(`Delete the chat "${c.title}"? It leaves your list; owners and admins still see its questions in History.`)) return;
     try {
       await analyst.deleteChat(c.id);
       if (c.id === chatId) newChat();
@@ -587,7 +635,10 @@ function HistoryTab({ setup }) {
                 <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">{new Date(q.created_at).toLocaleString()}</td>
                 <td className="px-4 py-2">{q.source?.name}</td>
                 {all && <td className="px-4 py-2">{q.asked_by}</td>}
-                <td className="px-4 py-2 text-foreground">{q.question}</td>
+                <td className="px-4 py-2 text-foreground">
+                  {q.question}
+                  {q.hidden && <span className="ml-2 whitespace-nowrap rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground" title="Its asker deleted this chat; it is kept here as a record">chat deleted</span>}
+                </td>
                 <td className="px-4 py-2 text-muted-foreground">{q.status === 'answered' ? q.row_count : q.status === 'failed' ? 'failed' : 'asked back'}</td>
               </tr>
             ))}

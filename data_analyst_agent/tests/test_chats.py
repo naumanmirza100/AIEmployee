@@ -61,7 +61,31 @@ class ChatTests(AnalystCase):
         self.assertEqual(self.call(views.chat_detail, self.admin, method='delete', conversation=chat)[0], 404)
         code, body = self.call(views.chat_detail, self.member, method='delete', conversation=chat)
         self.assertEqual((code, body['data']['removed']), (200, 1))
+        self.assertIn("stays in your company's History", body['message'])
         self.assertEqual(self.chats(self.member), [])
+        self.assertEqual(self.call(views.chat_detail, self.member, method='delete', conversation=chat)[0], 404)
+
+    def test_a_deleted_chat_stays_in_the_admins_history_as_a_record(self):
+        # Decided 14 Nov 2026: deleting hides a chat from its asker; History stays a full record of what was asked.
+        chat = self.asked(self.member, self.shop, 'How many orders?')[1]['data']['conversation']
+        question = DataQuestion.objects.get(conversation=chat)
+        self.call(views.chat_detail, self.member, method='delete', conversation=chat)
+        question.refresh_from_db()
+        self.assertIsNotNone(question.hidden_at)
+
+        mine = self.call(views.questions, self.member, method='get')[1]['data']
+        self.assertEqual(mine, [])
+        everyone = self.call(views.questions, self.admin, {'all': '1'}, method='get')[1]['data']
+        self.assertEqual([(q['question'], q['hidden']) for q in everyone], [('How many orders?', True)])
+        self.assertEqual(self.call(views.question_detail, self.member, method='get', question_id=question.pk)[0], 404)
+        self.assertEqual(self.call(views.question_detail, self.admin, method='get', question_id=question.pk)[0], 200)
+
+    def test_a_deleted_chat_cannot_be_continued(self):
+        chat = self.asked(self.member, self.shop, 'How many orders?')[1]['data']['conversation']
+        self.call(views.chat_detail, self.member, method='delete', conversation=chat)
+        code, body = self.asked(self.member, self.shop, 'And last week?', conversation=chat)
+        self.assertEqual(code, 404, body)
+        self.assertEqual(DataQuestion.objects.filter(conversation=chat).count(), 1)
 
     def test_a_chat_id_that_is_not_one_finds_nothing(self):
         self.asked(self.member, self.shop, 'How many orders?')

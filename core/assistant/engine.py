@@ -332,12 +332,22 @@ _NUMBER = re.compile(r'\d+(?:[.,:]\d+)?')
 _CITATION = re.compile(r'\[\d+\]')
 
 
+def _same_figure(n):
+    """One spelling per figure: "4300.50" and "4300.5" are the same amount, and so are "12.00" and "12". The answer
+    wrote "4,300.50 PKR" for a row's 4300.5 and was flagged as a figure the rows didn't have (14 Nov 2026)."""
+    if '.' in n:
+        whole, _, fraction = n.partition('.')
+        fraction = fraction.rstrip('0')
+        n = f'{whole}.{fraction}' if fraction else whole
+    return n.lstrip('0') or '0'
+
+
 def unchecked_numbers(answer, facts, question='', today=None) -> list[str]:
     """Numbers in the answer that are in no fact (nor the question, nor today's date)."""
     def numbers(text):
         out = set()
         for n in _NUMBER.findall(text or ''):
-            out.add(n.lstrip('0') or '0')
+            out.add(_same_figure(n))
             out.update(part.lstrip('0') or '0' for part in re.split(r'[.,:]', n))
         return out
     known = numbers(' '.join(f.text for f in facts) + ' ' + str(question))
@@ -345,7 +355,7 @@ def unchecked_numbers(answer, facts, question='', today=None) -> list[str]:
         known |= numbers(today.isoformat()) | {str(today.day), str(today.year)}
     found = []
     for n in _NUMBER.findall(_CITATION.sub(' ', answer or '')):
-        if (n.lstrip('0') or '0') not in known and not all((p.lstrip('0') or '0') in known for p in re.split(r'[.,:]', n)):
+        if _same_figure(n) not in known and not all((p.lstrip('0') or '0') in known for p in re.split(r'[.,:]', n)):
             found.append(n)
     return found
 

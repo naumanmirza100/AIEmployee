@@ -14,7 +14,8 @@
                                              A chat (conversation) stays on the database it started with, and is
                                              only its asker's (14 Nov 2026)
   GET    data-analyst/chats                  this login's chats, newest first: title, database, questions, last time
-  DELETE data-analyst/chats/<conversation>   remove one of this login's chats (its questions)
+  DELETE data-analyst/chats/<conversation>   remove one of this login's chats from its list; its questions stay in
+                                             the company's History for owners and admins
   GET    data-analyst/questions              this login's questions (owners/admins: ?all=1 for everyone's)
   GET    data-analyst/questions/<id>         one, without rows
   POST   data-analyst/questions/<id>/run     its SQL run again now, read-only: the rows as of now
@@ -421,7 +422,8 @@ def ask(request):
         # A chat is its asker's, and stays on the database it started with: its earlier turns are about that one,
         # and the screen offers another chat (or a new one) for another database.
         earlier = DataQuestion.objects.filter(conversation=conversation)
-        if earlier.exclude(company_id=request.user.company_id, asked_by=request.user).exists():
+        if (earlier.exclude(company_id=request.user.company_id, asked_by=request.user).exists()
+                or earlier.filter(hidden_at__isnull=False).exists()):
             return _err('That chat was not found.', status.HTTP_404_NOT_FOUND)
         other = earlier.exclude(source=source).select_related('source').first()
         if other is not None:
@@ -444,7 +446,8 @@ def ask(request):
 def _question_for(request, pk):
     record = (DataQuestion.objects.select_related('source', 'asked_by')
               .filter(company_id=request.user.company_id, pk=pk).first())
-    if record is None or (record.asked_by_id != request.user.pk and not _is_admin(request)):
+    # A question in a chat its asker deleted is only in the company's History, for owners and admins.
+    if record is None or ((record.asked_by_id != request.user.pk or record.hidden_at) and not _is_admin(request)):
         return None, _err('That question was not found.', status.HTTP_404_NOT_FOUND)
     return record, None
 
@@ -455,7 +458,8 @@ def _question_for(request, pk):
 def questions(request):
     rows = DataQuestion.objects.select_related('source', 'asked_by').filter(company_id=request.user.company_id)
     if not (_is_admin(request) and request.query_params.get('all') == '1'):
-        rows = rows.filter(asked_by=request.user)
+        # One's own questions, less the chats one deleted (they stay in everyone's History for owners and admins).
+        rows = rows.filter(asked_by=request.user, hidden_at__isnull=True)
     if str(request.query_params.get('source') or '').isdigit():
         rows = rows.filter(source_id=int(request.query_params['source']))
     if request.query_params.get('conversation'):
@@ -478,7 +482,7 @@ def chats(request):
     """This login's chats, newest first (the chat list on the left): each with its first question as the title, the
     database it is about, how many questions, and when the last one was asked."""
     rows = (DataQuestion.objects.select_related('source')
-            .filter(company_id=request.user.company_id, asked_by=request.user)
+            .filter(company_id=request.user.company_id, asked_by=request.user, hidden_at__isnull=True)
             .only('conversation', 'question', 'created_at', 'source__id', 'source__name', 'source__kind',
                   'source__status')
             .order_by('-created_at', '-id')[:3000])
@@ -500,15 +504,17 @@ def chats(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def chat_detail(request, conversation):
-    """Remove one of this login's chats: its questions, answers and SQL."""
+    """Remove one of this login's chats from its list and history. Its questions are kept for the company's History,
+    which owners and admins see as a full record of what was asked (decided 14 Nov 2026)."""
     conversation = _conversation(conversation)
     rows = DataQuestion.objects.filter(company_id=request.user.company_id, asked_by=request.user,
-                                       conversation=conversation) if conversation else DataQuestion.objects.none()
-    removed = rows.count()
+                                       conversation=conversation, hidden_at__isnull=True)         if conversation else DataQuestion.objects.none()
+    removed = rows.update(hidden_at=timezone.now())
     if not removed:
         return _err('That chat was not found.', status.HTTP_404_NOT_FOUND)
-    rows.delete()
-    return Response({'status': 'success', 'message': 'The chat was removed.', 'data': {'removed': removed}})
+    return Response({'status': 'success', 'data': {'removed': removed},
+                     'message': "The chat was removed from your list. It stays in your company's History for owners "
+                                'and admins.'})
 
 
 @api_view(['GET'])
