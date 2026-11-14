@@ -130,8 +130,13 @@ Rules:
 - Work dates out from today ("last month", "this year").
 - When the tables can't answer it, or it is too unclear to write a query for, put one short sentence for the person in
   "ask_back" (what is missing, or what to make clear) and leave "sql" empty.
+- Asked for a graph, chart, plot or any picture of the data: also describe it in "chart". "type": "bar" to compare
+  groups, "line" for a change over time, "pie" for the parts of a whole (at most 8 parts); "x": the result column with
+  the labels (for a line, the dates); "y": the result column with the figure; "title": a few words. The query must
+  return those two columns: a bar chart at most 30 groups, largest first; a line in date order. Not asked for a
+  picture: "chart": null.
 
-Return only JSON: {{"sql": "...", "ask_back": ""}}"""
+Return only JSON: {{"sql": "...", "ask_back": "", "chart": null}}"""
 
 _MONGO = """You write one read-only MongoDB aggregation, to answer a question about a company's own data.
 
@@ -159,8 +164,13 @@ Rules:
 - Work dates out from today ("last month", "this year").
 - When the collections can't answer it, or it is too unclear to write a query for, put one short sentence for the
   person in "ask_back" (what is missing, or what to make clear) and leave "pipeline" empty.
+- Asked for a graph, chart, plot or any picture of the data: also describe it in "chart". "type": "bar" to compare
+  groups, "line" for a change over time, "pie" for the parts of a whole (at most 8 parts); "x": the result field with
+  the labels (for a line, the dates); "y": the result field with the figure; "title": a few words. The pipeline must
+  return those two fields: a bar chart at most 30 groups, largest first; a line in date order. Not asked for a
+  picture: "chart": null.
 
-Return only JSON: {{"collection": "...", "pipeline": [...], "ask_back": ""}}"""
+Return only JSON: {{"collection": "...", "pipeline": [...], "ask_back": "", "chart": null}}"""
 
 _ANSWER = """You answer a question from the result of a query that just ran on the company's own database.
 
@@ -170,7 +180,7 @@ The query: {sql}
 
 Result: {count}. Columns: {columns}
 {rows}
-
+{chart}
 Write the answer plainly, in the language of the question:
 - First one sentence that answers it, with the figure that answers it (the count, the total). Then, only if they
   help, up to five short bullets (the next ones, each with its own figure from the rows).
@@ -213,7 +223,7 @@ def _write_aggregation(ai, source, question, history, tables, previous='') -> di
     if ask_back and not pipeline:
         return {'sql': '', 'ask_back': ask_back}
     text = mongo.query_text(collection, pipeline) if collection and isinstance(pipeline, list) else ''
-    return {'sql': text, 'ask_back': ask_back}
+    return {'sql': text, 'ask_back': ask_back, 'chart': out.get('chart')}
 
 
 def collections(source: DataSource) -> set:
@@ -230,17 +240,51 @@ def _write_sql(ai, source, question, history, tables, previous='') -> dict:
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')
     out = _json(ai._call_llm(prompt=prompt, system_prompt='You write SQL. Output only one JSON object.',
                              temperature=0, max_tokens=1200, json_mode=True))
-    return {'sql': str(out.get('sql') or '').strip(), 'ask_back': str(out.get('ask_back') or '').strip()[:500]}
+    return {'sql': str(out.get('sql') or '').strip(), 'ask_back': str(out.get('ask_back') or '').strip()[:500],
+            'chart': out.get('chart')}
 
 
-def _write_answer(ai, question, sql, result, total) -> str:
+CHART_TYPES = ('bar', 'line', 'pie')
+
+
+def _chart(spec, columns, rows):
+    """The chart the AI described, when it fits the result: a known type, a label column and a number column that
+    are both in the result, and numbers in the number column. Otherwise None: the answer and the table still show."""
+    if not isinstance(spec, dict) or not rows:
+        return None
+    named = {str(c).lower(): c for c in columns}
+    kind = str(spec.get('type') or '').strip().lower()
+    y = spec.get('y')
+    y = (y[0] if y else '') if isinstance(y, list) else y
+    x, y = named.get(str(spec.get('x') or '').strip().lower()), named.get(str(y or '').strip().lower())
+    if kind not in CHART_TYPES or x is None or y is None or x == y:
+        return None
+    at, numbers = list(columns).index(y), 0
+    for row in rows[:ROWS_TO_SCREEN]:
+        value = row[at]
+        if value is None or value == '':
+            continue
+        try:
+            float(str(value).replace(',', ''))
+        except ValueError:
+            return None
+        numbers += 1
+    if not numbers:
+        return None
+    return {'type': kind, 'x': x, 'y': y, 'title': str(spec.get('title') or '').strip()[:120] or f'{y} by {x}'}
+
+
+def _write_answer(ai, question, sql, result, total, chart=None) -> str:
     shown = result['rows'][:ROWS_TO_AI]
     count = f'{total} row(s)' + (f', the first {len(shown)} shown below' if total > len(shown) else '')
     if result['truncated']:
         count = f'more than {len(result["rows"])} rows; the first {len(shown)} shown below'
     rows = '\n'.join(' | '.join('' if v is None else str(v)[:120] for v in row) for row in shown) or '(no rows)'
+    # Asked for a picture, the answer said "I can't create graphs": it is told one is drawn under it.
+    drawn = (f'A {chart["type"]} chart of {chart["y"]} by {chart["x"]} is drawn from these rows under your answer: '
+             "mention it in a few words, and never say you can't draw one.\n") if chart else ''
     prompt = _ANSWER.format(question=question, sql=sql[:2000], count=count, columns=', '.join(result['columns']),
-                            rows=f'Rows:\n{rows}')
+                            rows=f'Rows:\n{rows}', chart=drawn)
     return (ai._call_llm(prompt=prompt, system_prompt='You answer only from the rows given.', temperature=0.2,
                          max_tokens=700) or '').strip()
 
@@ -295,8 +339,9 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
 
     total = len(result['rows'])
     record.sql, record.columns, record.row_count, record.truncated = sql, result['columns'], total, result['truncated']
+    record.chart = _chart(written.get('chart'), result['columns'], result['rows'])
     if source.send_rows_to_ai:
-        record.answer = _write_answer(ai, question, sql, result, total)
+        record.answer = _write_answer(ai, question, sql, result, total, record.chart)
         seen = [_Fact(' '.join('' if v is None else str(v) for v in row)) for row in result['rows'][:ROWS_TO_AI]]
         seen.append(_Fact(f'{total} {len(result["columns"])}'))
         # "314,950" in the answer is 314950 in the rows: thousands separators don't make a figure new (3 Nov 2026).
@@ -304,7 +349,8 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
         record.flagged = unchecked_numbers(plain, seen, question, timezone.localdate())
     else:
         record.answer = ('No rows matched.' if not total else
-                         f'{"More than " if result["truncated"] else ""}{total} row(s): see the table.')
+                         f'{"More than " if result["truncated"] else ""}{total} row(s): see the '
+                         f'{"chart and the " if record.chart else ""}table.')
     record.duration_ms = int((time.monotonic() - started) * 1000)
     record.save()
     return _reply(record, rows=result['rows'][:ROWS_TO_SCREEN], more=total > ROWS_TO_SCREEN or result['truncated'])
@@ -315,6 +361,7 @@ def _reply(record: DataQuestion, rows, more=False) -> dict:
             'answer': record.answer, 'sql': record.sql, 'columns': record.columns, 'rows': rows,
             'row_count': record.row_count, 'more_rows': bool(more or record.truncated), 'flagged': record.flagged,
             'status': record.status, 'error': record.error, 'duration_ms': record.duration_ms,
+            'chart': record.chart or None,
             'query_kind': 'mongodb' if record.source.kind == DataSource.KIND_MONGO else 'sql',
             'created_at': record.created_at.isoformat() if record.created_at else None}
 

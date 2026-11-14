@@ -131,6 +131,9 @@ class DataQuestion(models.Model):
     truncated = models.BooleanField(default=False)
     #: Numbers in the answer not found in the rows the AI saw (shown under the answer).
     flagged = models.JSONField(default=list, blank=True)
+    #: The chart the question asked for (14 Nov 2026): {"type": bar|line|pie, "x": label column, "y": number column,
+    #: "title"}. Only its description: the screen draws it from the result's rows, which are never kept.
+    chart = models.JSONField(null=True, blank=True)
     duration_ms = models.IntegerField(null=True, blank=True)
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_ANSWERED)
     error = models.TextField(blank=True, default='')
