@@ -73,8 +73,9 @@ def _pairs(text):
     return out
 
 
-def _server(value: str):
-    """'tcp:host,1433', 'host\\instance', 'host:1433' or '[::1],1433' as (host, port or None)."""
+def _server(value: str, port_given=False):
+    """'tcp:host,1433', 'host\\instance', 'host:1433' or '[::1],1433' as (host, port or None). A named instance needs
+    its port, in the string or (port_given) beside it."""
     value = re.sub(r'^(?:tcp|np|lpc|admin):', '', (value or '').strip(), flags=re.I)
     host, port = value, None
     if ',' in value:
@@ -84,7 +85,7 @@ def _server(value: str):
     host = host.strip().strip('[]')
     if '\\' in host:
         host, _instance = host.split('\\', 1)
-        if not port:
+        if not port and not port_given:
             raise Refused('A named instance (server\\instance) needs its port here, e.g. server,1433: our server cannot '
                           'ask SQL Server Browser for it.')
     port = str(port or '').strip()
@@ -93,8 +94,9 @@ def _server(value: str):
     return host, (int(port) if port else None)
 
 
-def parse_connection_string(text: str) -> dict:
-    """An ADO.NET (Azure portal), ODBC, JDBC or URL connection string as the source's fields. Nothing is connected."""
+def parse_connection_string(text: str, port_given=False) -> dict:
+    """An ADO.NET (Azure portal), ODBC, JDBC or URL connection string as the source's fields. Nothing is connected.
+    port_given: a port is typed beside the string (16 Nov 2026), so a named instance without one in it is read."""
     text = (text or '').strip()
     lowered = text.lower()
     fields = {}
@@ -121,7 +123,8 @@ def parse_connection_string(text: str) -> dict:
             found[name] = value
     if not found.get('server'):
         raise Refused('The connection string has no server (Server=... or Data Source=...).')
-    host, port = _server(found['server'])
+    port_given = port_given or str(found.get('port') or '').strip().isdigit()
+    host, port = _server(found['server'], port_given)
     if found.get('port') and not port:
         port = int(found['port']) if str(found['port']).isdigit() else None
     encrypt = str(found.get('encrypt', 'true')).strip().lower()

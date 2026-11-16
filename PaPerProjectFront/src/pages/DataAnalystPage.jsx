@@ -16,6 +16,9 @@ import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
 import * as analyst from '@/services/dataAnalystService';
 import { getAgentNavItems } from '@/utils/agentNavItems';
+import {
+  DEFAULT_PORTS, KIND_LABELS, PORT_OPTIONS, isConnectionString, readConnectionString, validPort,
+} from '@/utils/connectionString';
 
 /**
  * /data-analyst: the AI Data Analyst. Questions in plain words, answered read-only from the company's own database
@@ -413,10 +416,96 @@ const STRING_PLACEHOLDER = {
 };
 const PORT_PLACEHOLDER = { postgres: 'Port (5432)', mysql: 'Port (3306)', mssql: 'Port (1433)' };
 
+// A port box with the kind's common ports to pick (the default first); any other port can be typed.
+function PortPicker({ kind, value, onChange }) {
+  const options = PORT_OPTIONS[kind] || [];
+  return (
+    <div className="space-y-1.5">
+      <input className={field} inputMode="numeric" placeholder={PORT_PLACEHOLDER[kind] || 'Port'} value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\s/g, ''))} aria-label="Port" data-testid="analyst-port" />
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(([port, label]) => (
+          <button key={port} type="button" onClick={() => onChange(String(port))} data-testid="analyst-port-option"
+            className={`rounded-full border px-2 py-0.5 text-[11px] ${String(port) === String(value).trim() ? 'border-violet-400 bg-violet-500/20 text-violet-100' : 'border-border text-muted-foreground hover:border-violet-400'}`}>
+            {port} · {label}
+          </button>
+        ))}
+      </div>
+      {String(value).trim() !== '' && !validPort(value) && <p className="text-xs text-red-300">A port is a number from 1 to 65535.</p>}
+    </div>
+  );
+}
+
+const SSL_TEXT = {
+  required: 'Required',
+  offered: 'Used when the server offers it (add ?sslmode=require to insist)',
+  off: 'Off',
+};
+
+// What a pasted connection string holds, shown as it is typed: the port can be changed, and what the string lacks
+// (a password, the database, the user) can be given here.
+function StringReading({ reading, port, onPort, portTouched, form, set }) {
+  if (!reading) return null;
+  if (reading.error) return <p className="text-xs text-amber-300" data-testid="analyst-string-reading">{reading.error}</p>;
+  const { kind } = reading;
+  const row = 'grid grid-cols-[88px_minmax(0,1fr)] items-start gap-x-3';
+  const label = 'pt-0.5 text-xs text-muted-foreground';
+  let portNote = '';
+  if (reading.port && portTouched && String(reading.port) !== String(port).trim()) portNote = `The string says ${reading.port}; this one is used.`;
+  else if (reading.port && !portTouched) portNote = 'From the string.';
+  else if (!reading.port && !portTouched && !reading.problem) portNote = `Not in the string: ${KIND_LABELS[kind]}'s default.`;
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-background/40 p-3 text-sm text-foreground" data-testid="analyst-string-reading">
+      <p className="text-xs font-semibold text-muted-foreground">Read from the string: {KIND_LABELS[kind]}</p>
+      <div className={row}><span className={label}>Host</span><span className="break-all">{reading.host}</span></div>
+      <div className={row}>
+        <span className={label}>Port</span>
+        {reading.srv ? <span className="text-muted-foreground">Set by the cluster's DNS record (a mongodb+srv string has no port)</span>
+          : reading.servers ? (
+            <span className="break-all">{reading.servers.map((s) => `${s.host}:${s.port || DEFAULT_PORTS.mongodb}`).join(', ')}
+              <span className="block text-xs text-muted-foreground">Several servers: each with its own port, {DEFAULT_PORTS.mongodb} where the string gives none.</span></span>
+          ) : (
+            <div className="space-y-1">
+              <PortPicker kind={kind} value={port} onChange={onPort} />
+              {portNote && <p className="text-xs text-muted-foreground" data-testid="analyst-port-note">{portNote}</p>}
+            </div>
+          )}
+      </div>
+      <div className={row}>
+        <span className={label}>Database</span>
+        {reading.database ? <span className="break-all">{reading.database}</span>
+          : kind === 'mongodb' ? <span className="text-muted-foreground">Not in the string: give it below, or the only one the user can see is used.</span>
+            : <input className={field} placeholder="Not in the string: the database name" value={form.database} onChange={set('database')} aria-label="Database" />}
+      </div>
+      <div className={row}>
+        <span className={label}>User</span>
+        {reading.username ? <span className="break-all">{reading.username}</span>
+          : <input className={field} placeholder="Not in the string: the user (read-only)" value={form.username} onChange={set('username')} aria-label="User" />}
+      </div>
+      <div className={row}>
+        <span className={label}>Password</span>
+        {reading.hasPassword ? <span className="text-muted-foreground">In the string (not shown)</span>
+          : <input className={field} type="password" placeholder="Not in the string: the password" value={form.password} onChange={set('password')} aria-label="Password" autoComplete="new-password" />}
+      </div>
+      <div className={row}>
+        <span className={label}>Encryption</span>
+        <span>{reading.srv ? 'Required (a mongodb+srv string always is)' : SSL_TEXT[reading.ssl]}</span>
+      </div>
+      {reading.options.length > 0 && (
+        <div className={row}><span className={label}>Options</span><span className="break-all">{reading.options.join(', ')}</span></div>
+      )}
+      {reading.problem && <p className="text-xs text-amber-300">{reading.problem}</p>}
+    </div>
+  );
+}
+
 function AddDatabase({ setup, logins, onAdded }) {
   const [mode, setMode] = useState('postgres');
-  const [form, setForm] = useState({ name: '', host: '', port: '', database: '', username: '', password: '', use_ssl: true, connection_string: '' });
+  const [form, setForm] = useState({ name: '', host: '', port: String(DEFAULT_PORTS.postgres), database: '', username: '', password: '', use_ssl: true, connection_string: '' });
   const [useString, setUseString] = useState(false);
+  // A port typed or picked for a pasted string (null: the string's own, else the kind's default).
+  const [stringPort, setStringPort] = useState(null);
+  const [moved, setMoved] = useState(false);
   const [file, setFile] = useState(null);
   const [sendRows, setSendRows] = useState(true);
   const [everyone, setEveryone] = useState(true);
@@ -424,6 +513,54 @@ function AddDatabase({ setup, logins, onAdded }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
+  const reading = useMemo(() => readConnectionString(form.connection_string), [form.connection_string]);
+  const stringShown = mode === 'mongodb' || (mode !== 'sqlite' && useString);
+  const readKind = reading && !reading.error ? reading.kind : null;
+  const needsPort = Boolean(readKind && reading.problem);
+  const shownPort = stringPort ?? (needsPort ? '' : String(reading?.port || DEFAULT_PORTS[readKind] || ''));
+  const portBad = stringShown
+    ? Boolean(readKind && !reading.srv && !reading.servers && (needsPort || shownPort.trim() !== '') && !validPort(shownPort))
+    : mode !== 'sqlite' && form.port.trim() !== '' && !validPort(form.port);
+
+  // Another kind: its default port, unless a port of one's own was typed (one of the old kind's list gives way).
+  const chooseMode = (key) => {
+    setMode(key);
+    setMessage(null);
+    const listed = (PORT_OPTIONS[mode] || []).map(([port]) => String(port));
+    setForm((f) => ({ ...f, port: !f.port.trim() || listed.includes(f.port.trim()) ? String(DEFAULT_PORTS[key] ?? '') : f.port }));
+  };
+  // A string for another kind moves the form to that kind; a port picked for the old kind is dropped.
+  const takeString = (value) => {
+    const next = readConnectionString(value);
+    const kind = next && !next.error ? next.kind : null;
+    setForm((f) => ({ ...f, connection_string: value }));
+    if (kind !== readKind) setStringPort(null);
+    if (kind && kind !== mode) chooseMode(kind);
+    if (kind && kind !== 'mongodb') setUseString(true);
+  };
+  // A whole connection string pasted in the Host box is read as one.
+  const onHost = (e) => {
+    const { value } = e.target;
+    if (isConnectionString(value)) {
+      setForm((f) => ({ ...f, host: '' }));
+      setUseString(true);
+      setMoved(true);
+      takeString(value.trim());
+      return;
+    }
+    setForm((f) => ({ ...f, host: value }));
+  };
+
+  // Beside a string: the port when one was typed or picked, and what the string lacks when it is given here.
+  const stringExtras = () => {
+    if (!readKind) return {};
+    const extras = {};
+    if (stringPort != null && stringPort.trim() && !reading.srv && !reading.servers) extras.port = stringPort.trim();
+    if (!reading.database && readKind !== 'mongodb' && form.database.trim()) extras.database = form.database.trim();
+    if (!reading.username && form.username.trim()) extras.username = form.username.trim();
+    if (!reading.hasPassword && form.password) extras.password = form.password;
+    return extras;
+  };
 
   const submit = async (event) => {
     event.preventDefault();
@@ -433,14 +570,18 @@ function AddDatabase({ setup, logins, onAdded }) {
       const res = mode === 'sqlite'
         ? await analyst.uploadSqlite(file, shared)
         : mode === 'mongodb'
-          ? await analyst.addConnection({ ...shared, kind: 'mongodb', connection_string: form.connection_string, database: form.database })
+          ? await analyst.addConnection({ ...shared, kind: 'mongodb', connection_string: form.connection_string, database: form.database, ...stringExtras() })
           : await analyst.addConnection(useString
-            ? { ...shared, connection_string: form.connection_string }
+            ? { ...shared, connection_string: form.connection_string, ...stringExtras() }
             : { ...shared, kind: mode, host: form.host, port: form.port, database: form.database, username: form.username, password: form.password, use_ssl: form.use_ssl });
       const ok = res?.data?.status === 'ready' || res?.data?.status === 'loading';
       setMessage({ ok, text: ok ? res.message : (res?.data?.last_error || res.message) });
       onAdded?.();
-      if (ok) setForm((f) => ({ ...f, password: '', connection_string: '' }));
+      if (ok) {
+        setForm((f) => ({ ...f, password: '', connection_string: '' }));
+        setStringPort(null);
+        setMoved(false);
+      }
     } catch (e) {
       setMessage({ ok: false, text: e?.message || 'It could not be added.' });
     } finally {
@@ -453,7 +594,7 @@ function AddDatabase({ setup, logins, onAdded }) {
       <h3 className="text-base font-semibold text-foreground">Add a database</h3>
       <div className="flex flex-wrap gap-2">
         {KINDS.map(([key, label]) => (
-          <Button key={key} type="button" size="sm" variant={mode === key ? 'default' : 'outline'} onClick={() => { setMode(key); setMessage(null); }}>{label}</Button>
+          <Button key={key} type="button" size="sm" variant={mode === key ? 'default' : 'outline'} onClick={() => { chooseMode(key); setMoved(false); }}>{label}</Button>
         ))}
       </div>
       <input className={field} placeholder="A name, e.g. Shop database" value={form.name} onChange={set('name')} aria-label="Name" />
@@ -475,7 +616,8 @@ function AddDatabase({ setup, logins, onAdded }) {
           {mode === 'mongodb' ? (
             <div className="space-y-3">
               <input className={field} placeholder="mongodb+srv://pp_reader:password@cluster0.abcde.mongodb.net/your_db"
-                value={form.connection_string} onChange={set('connection_string')} aria-label="Connection string" data-testid="analyst-mongo-string" />
+                value={form.connection_string} onChange={(e) => takeString(e.target.value)} aria-label="Connection string" data-testid="analyst-mongo-string" />
+              <StringReading reading={reading} port={shownPort} onPort={setStringPort} portTouched={stringPort != null} form={form} set={set} />
               <input className={field} placeholder="Database name, if the string has none" value={form.database} onChange={set('database')} aria-label="Database" />
               <p className="text-xs text-muted-foreground">The AI reads a sample of each collection to learn its fields; it keeps their names and types, never a value.</p>
             </div>
@@ -484,12 +626,16 @@ function AddDatabase({ setup, logins, onAdded }) {
             <input type="checkbox" checked={useString} onChange={(e) => setUseString(e.target.checked)} /> Paste a connection string instead
           </label>
           {useString ? (
-            <input className={field} placeholder={STRING_PLACEHOLDER[mode] || STRING_PLACEHOLDER.postgres}
-              value={form.connection_string} onChange={set('connection_string')} aria-label="Connection string" />
+            <div className="space-y-3">
+              <input className={field} placeholder={STRING_PLACEHOLDER[mode] || STRING_PLACEHOLDER.postgres}
+                value={form.connection_string} onChange={(e) => takeString(e.target.value)} aria-label="Connection string" data-testid="analyst-sql-string" />
+              {moved && <p className="text-xs text-muted-foreground">That was a whole connection string, so it is read here.</p>}
+              <StringReading reading={reading} port={shownPort} onPort={setStringPort} portTouched={stringPort != null} form={form} set={set} />
+            </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <input className={field} placeholder="Host, e.g. db.example.com" value={form.host} onChange={set('host')} aria-label="Host" />
-              <input className={field} placeholder={PORT_PLACEHOLDER[mode] || 'Port'} value={form.port} onChange={set('port')} aria-label="Port" />
+            <div className="grid items-start gap-3 sm:grid-cols-2">
+              <input className={field} placeholder="Host, or paste a whole connection string" value={form.host} onChange={onHost} aria-label="Host" />
+              <PortPicker kind={mode} value={form.port} onChange={(port) => setForm((f) => ({ ...f, port }))} />
               <input className={field} placeholder="Database name" value={form.database} onChange={set('database')} aria-label="Database" />
               <input className={field} placeholder="User (read-only)" value={form.username} onChange={set('username')} aria-label="User" />
               <input className={field} type="password" placeholder="Password" value={form.password} onChange={set('password')} aria-label="Password" autoComplete="new-password" />
@@ -518,7 +664,7 @@ function AddDatabase({ setup, logins, onAdded }) {
         </div>
       )}
       {message && <p className={`text-sm ${message.ok ? 'text-emerald-300' : 'text-red-300'}`} data-testid="analyst-add-message">{message.text}</p>}
-      <Button type="submit" disabled={busy || (mode === 'sqlite' && !file) || (mode === 'mongodb' && !form.connection_string.trim())}>
+      <Button type="submit" disabled={busy || portBad || (mode === 'sqlite' && !file) || (mode === 'mongodb' && !form.connection_string.trim())}>
         {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />} Add and test
       </Button>
     </form>

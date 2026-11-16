@@ -116,8 +116,16 @@ def _engine(source: DataSource):
     raise Refused('This kind of database is not supported yet.')
 
 
-def _default_port(kind) -> int:
-    return {DataSource.KIND_POSTGRES: 5432, DataSource.KIND_MYSQL: 3306, DataSource.KIND_MSSQL: 1433}.get(kind, 0)
+#: The port each kind of server listens on unless set otherwise. The screen offers the same ones (16 Nov 2026).
+DEFAULT_PORTS = {DataSource.KIND_POSTGRES: 5432, DataSource.KIND_MYSQL: 3306, DataSource.KIND_MSSQL: 1433,
+                 DataSource.KIND_MONGO: 27017}
+
+
+def default_port(kind) -> int:
+    return DEFAULT_PORTS.get(kind, 0)
+
+
+_default_port = default_port
 
 
 def _limit_mysql_time(conn):

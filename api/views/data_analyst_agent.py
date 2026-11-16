@@ -157,8 +157,9 @@ def _apply_mongo_fields(source: DataSource, data, text):
     for field in ('host', 'database', 'username'):
         if str(data.get(field) or '').strip():
             setattr(source, field, str(data.get(field)).strip()[:255])
-    if str(data.get('port') or '').strip().isdigit():
-        source.port = int(str(data.get('port')).strip())
+    port = _port(data)
+    if port and not source.use_srv:
+        source.port = port
     if str(data.get('password') or '').strip():
         source.set_password(str(data.get('password')))
     if 'use_ssl' in data and not text:
@@ -168,12 +169,28 @@ def _apply_mongo_fields(source: DataSource, data, text):
                       'mongodb+srv://reader:password@cluster0.example.mongodb.net/your_db')
     if not source.username:
         raise Refused('The connection string needs a user (reader:password@...): a user that can only read.')
+    # One server without a port: MongoDB's own (27017), kept so the list shows it. A +srv name's ports come from its
+    # service record, and several servers each carry their own in the host list.
+    if source.use_srv:
+        source.port = None
+    elif ',' not in source.host and not source.port:
+        source.port = connectors.default_port(DataSource.KIND_MONGO)
 
 
-def _apply_sql_server_string(source: DataSource, text):
+def _port(data):
+    """The port sent, or None when none is. Anything but a number from 1 to 65535 is refused."""
+    text = str(data.get('port') or '').strip()
+    if not text:
+        return None
+    if not text.isdigit() or not 1 <= int(text) <= 65535:
+        raise Refused(f'"{text[:20]}" is not a port: a port is a number from 1 to 65535.')
+    return int(text)
+
+
+def _apply_sql_server_string(source: DataSource, text, port_given=False):
     """SQL Server's strings: ADO.NET (Azure portal: Server=tcp:...;Initial Catalog=...;User ID=...), ODBC, JDBC or a
-    mssql:// URL."""
-    parsed = mssql.parse_connection_string(text)
+    mssql:// URL. port_given: a port typed beside the string, applied after it."""
+    parsed = mssql.parse_connection_string(text, port_given)
     source.kind, source.host, source.port = DataSource.KIND_MSSQL, parsed['host'], parsed['port']
     source.database, source.username = parsed['database'], parsed['username']
     source.use_ssl, source.options = parsed['use_ssl'], parsed['options']
@@ -188,7 +205,7 @@ def _apply_connection_fields(source: DataSource, data):
         _apply_mongo_fields(source, data, text)
         return
     if text and mssql.looks_like_sql_server(text):
-        _apply_sql_server_string(source, text)
+        _apply_sql_server_string(source, text, port_given=_port(data) is not None)
         text = ''
     if text:
         from sqlalchemy.engine import make_url
@@ -213,8 +230,7 @@ def _apply_connection_fields(source: DataSource, data):
         if field in data:
             setattr(source, field, str(data.get(field) or '').strip()[:255])
     if 'port' in data:
-        port = str(data.get('port') or '').strip()
-        source.port = int(port) if port.isdigit() else None
+        source.port = _port(data)
     if str(data.get('password') or '').strip():
         source.set_password(str(data.get('password')))
     if 'use_ssl' in data:
@@ -225,6 +241,10 @@ def _apply_connection_fields(source: DataSource, data):
         mssql.check_host(source.host)
     if not source.host or not source.database or not source.username:
         raise Refused('Give the host, the database name and the user.')
+    # No port in the string or the form: the kind's own (PostgreSQL 5432, MySQL 3306, SQL Server 1433), kept so the
+    # list shows it. It was used anyway when connecting.
+    if not source.port:
+        source.port = connectors.default_port(source.kind)
 
 
 def _apply_shared_fields(source: DataSource, data):
