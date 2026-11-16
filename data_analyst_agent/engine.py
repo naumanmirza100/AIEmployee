@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 AGENT_KEY = 'data_analyst_agent'
 TABLES_WITHOUT_CHOOSING = 30   # a database with more tables first has the question's tables chosen
 TABLES_CHOSEN = 12
+# The chosen tables and the ones they point at (their foreign keys), up to this many: the AI chose core_project and
+# core_task but not auth_user, which both point at, and joined the project manager through the wrong table (16 Nov 2026).
+TABLES_WITH_LINKS = 20
 # The table list for choosing stays under about 6,000 tokens: fewer columns a table first, then names only. All 294
 # tables of a real database with 25 columns each came to 11,536 tokens, more than a Groq key allows a minute (3 Nov 2026).
 CHOOSE_LIST_CHARS = 20000
@@ -74,11 +77,32 @@ def _table_key(t) -> str:
     return f"{t['schema']}.{t['name']}" if t.get('schema') else t['name']
 
 
-def _table_text(t, full=True, columns=25) -> str:
+def _telling(cols) -> list:
+    """A table's columns, the ones that say most about what it holds first: status-like ones (status, type ...), then
+    the rest, then timestamps, then ids. The list for choosing tables shows only the first few: the leave requests
+    showed "id, leave_type, start_date, end_date", hiding their status and days, and the balances were chosen for
+    approved leave days (16 Nov 2026)."""
+    def rank(c):
+        name = str(c['name']).lower()
+        if name == 'id' or name.endswith('_id'):
+            return 3
+        if name.endswith('_at') or name in ('created', 'updated', 'modified'):
+            return 2
+        return 0 if connectors._CHOICE_COLUMN.search(name) else 1
+    return sorted(cols, key=rank)
+
+
+def _table_text(t, full=True, columns=25, values=None) -> str:
     if not full:
-        names = ', '.join(c['name'] for c in t['columns'][:columns])
+        names = ', '.join(c['name'] for c in _telling(t['columns'])[:columns])
         return f"- {_table_key(t)} ({names})" if names else f"- {_table_key(t)}"
-    cols = ', '.join(f"{c['name']} {c['type']}{' PK' if c.get('pk') else ''}" for c in t['columns'])
+    values = values or {}
+
+    def column(c):
+        known = values.get(c['name'])
+        listed = f" (values: {', '.join(repr(v) for v in known)})" if known else ''
+        return f"{c['name']} {c['type']}{' PK' if c.get('pk') else ''}{listed}"
+    cols = ', '.join(column(c) for c in t['columns'])
     fks = ''.join(f"; {', '.join(fk['columns'])} -> {fk['references']}" for fk in t.get('fks') or [])
     return f"- {_table_key(t)}{' (view)' if t.get('kind') == 'view' else ''}: {cols}{fks}"
 
@@ -106,7 +130,11 @@ Tables (name and some columns):
 {history}Question: {question}
 
 Return only JSON: {{"tables": ["name", ...]}} with at most {limit} names, spelled exactly as listed. Include the tables
-needed to join. If none fits, return {{"tables": []}}."""
+needed to join, and the tables that hold the names of what the answer lists (people, companies, projects, products).
+When two tables could hold what is asked (a record of each request and a running total, say), include both. To
+count or add up what happened (approved leave days, orders, payments, tickets), the table with a row for each one is
+the source; a table of running totals or balances only for a balance or what is left.
+If none fits, return {{"tables": []}}."""
 
 _SQL = """You write one read-only SQL query for a {dialect} database, to answer a question about a company's own data.
 
@@ -126,6 +154,14 @@ Rules:
   can say by how much.
 - Use only the tables and columns listed, spelled exactly; quote names the way {dialect} needs when they have capitals,
   spaces or reserved words.
+- Show what things are called, not only their ids: for companies, people, projects, campaigns, products and the like,
+  join the table that holds the name and return it (an id may come alongside).
+- A column listed with its values holds only those: filter with them exactly as spelled there.
+- Count rows by the counted table's own id (COUNT(t.id)), also after a LEFT JOIN: COUNT of another column leaves out
+  the rows where it is empty (COUNT(contact_id) misses the tickets without a contact), and COUNT(*) after a LEFT JOIN
+  counts the empty row.
+- Add no condition the question doesn't ask for (only active ones, only a period or a kind): when it doesn't say,
+  count them all.
 - A list gets at most 200 rows ({limit_word}) unless the question asks for everything.
 - Work dates out from today ("last month", "this year").
 - When the tables can't answer it, or it is too unclear to write a query for, put one short sentence for the person in
@@ -159,6 +195,7 @@ Rules:
   names. For "which ... the most / least / top", return the top 5 with their figures, in order, so the answer can say
   by how much.
 - Use only the fields listed, spelled exactly. Leave _id out unless it is asked for ({{"$project": {{"_id": 0, ...}}}}).
+- Show what things are called, not only their ids: $lookup the collection that holds the name and return it.
 - Write a date as {{"$date": "2026-10-01T00:00:00Z"}} and an ObjectId as {{"$oid": "..."}}.
 - A list gets at most 200 documents ($limit 200) unless the question asks for everything.
 - Work dates out from today ("last month", "this year").
@@ -210,7 +247,24 @@ def _choose_tables(ai, source, question, history) -> list:
                        max_tokens=600, json_mode=True)
     wanted = {str(n).strip().lower() for n in _json(raw).get('tables') or []}
     chosen = [t for t in tables if _table_key(t).lower() in wanted or t['name'].lower() in wanted]
-    return chosen[:TABLES_CHOSEN] or tables[:TABLES_WITHOUT_CHOOSING]
+    return _with_references(tables, chosen[:TABLES_CHOSEN]) if chosen else tables[:TABLES_WITHOUT_CHOOSING]
+
+
+def _with_references(tables, chosen) -> list:
+    """The chosen tables, then the tables they point at by foreign key, up to TABLES_WITH_LINKS: a join's other end
+    is there even when the choice left it out."""
+    by_name = {}
+    for t in tables:
+        by_name.setdefault(_table_key(t).lower(), t)
+        by_name.setdefault(t['name'].lower(), t)
+    out, seen = list(chosen), {id(t) for t in chosen}
+    for t in chosen:
+        for fk in t.get('fks') or []:
+            target = by_name.get(str(fk.get('references') or '').split('(')[0].strip().lower())
+            if target is not None and id(target) not in seen and len(out) < TABLES_WITH_LINKS:
+                out.append(target)
+                seen.add(id(target))
+    return out
 
 
 def _write_aggregation(ai, source, question, history, tables, previous='') -> dict:
@@ -231,11 +285,13 @@ def collections(source: DataSource) -> set:
     return {t['name'] for t in source.tables or []} if source.kind == DataSource.KIND_MONGO else set()
 
 
-def _write_sql(ai, source, question, history, tables, previous='') -> dict:
+def _write_sql(ai, source, question, history, tables, previous='', values=None) -> dict:
     if source.kind == DataSource.KIND_MONGO:
         return _write_aggregation(ai, source, question, history, tables, previous)
+    values = values or {}
+    listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name']))) for t in tables)
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
-                         tables='\n'.join(_table_text(t) for t in tables) or '(none)', history=history,
+                         tables=listed or '(none)', history=history,
                          question=question, previous=previous,
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')
     out = _json(ai._call_llm(prompt=prompt, system_prompt='You write SQL. Output only one JSON object.',
@@ -302,10 +358,13 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
         raise Refused('Test this database first, so its tables are known.')
     history = _history(conversation, source)
     tables = _choose_tables(ai, source, question, history)
+    # The values of the chosen tables' status-like columns, so a filter is spelled as the data has it. Only when the
+    # AI may see rows: these are values of the data. Read now, never kept.
+    values = connectors.sample_values(source, tables) if source.send_rows_to_ai else {}
     attempt, result, sql, previous, too_long = 0, None, '', '', False
     while attempt < 2:
         attempt += 1
-        written = _write_sql(ai, source, question, history, tables, previous)
+        written = _write_sql(ai, source, question, history, tables, previous, values)
         if written['ask_back'] and not written['sql']:
             record.status, record.answer = DataQuestion.STATUS_ASKED_BACK, written['ask_back']
             record.duration_ms = int((time.monotonic() - started) * 1000)
