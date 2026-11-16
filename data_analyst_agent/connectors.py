@@ -249,7 +249,8 @@ def sample_values(source: DataSource, tables) -> dict:
     """{(schema, table): {column: [values]}} for the tables' choice columns, read from their first SAMPLE_SCAN_ROWS
     rows on one connection. Anything that fails is left out: the query is written without it."""
     if source.kind == DataSource.KIND_MONGO:
-        return {}
+        from . import mongo
+        return mongo.sample_values(source, tables)
     wanted = [(t, choice_columns(t)) for t in tables if t.get('kind', 'table') in ('table', 'view')]
     wanted = [(t, cols) for t, cols in wanted if cols][:SAMPLE_TABLES]
     if not wanted:
