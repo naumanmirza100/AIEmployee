@@ -131,7 +131,9 @@ Tables (name and some columns):
 
 Return only JSON: {{"tables": ["name", ...]}} with at most {limit} names, spelled exactly as listed. Include the tables
 needed to join, and the tables that hold the names of what the answer lists (people, companies, projects, products).
-When two tables could hold what is asked (a record of each request and a running total, say), include both. To
+Choose generously, up to the limit: a table that may hold a figure the question needs (a salary, a price, hours, a
+count) is better included than left out; the query is written from the tables chosen alone. When two tables could
+hold what is asked (a record of each request and a running total, say), include both. To
 count or add up what happened (approved leave days, orders, payments, tickets), the table with a row for each one is
 the source; a table of running totals or balances only for a balance or what is left.
 If none fits, return {{"tables": []}}."""
@@ -196,6 +198,16 @@ Rules:
   by how much.
 - Use only the fields listed, spelled exactly. Leave _id out unless it is asked for ({{"$project": {{"_id": 0, ...}}}}).
 - Show what things are called, not only their ids: $lookup the collection that holds the name and return it.
+- A field listed with its values holds only those: match them exactly as spelled there.
+- A field marked -> holds the _id of a document in that collection: join with $lookup from that collection,
+  localField the field, foreignField _id. Don't join through a field that has no such mark to a collection it
+  doesn't point at.
+- Return one flat document per row, the figures as plain fields, no lists inside: for "per company and category",
+  group by both together.
+- Count documents with {{"$sum": 1}} (or $count): counting a field leaves out the documents where it is missing.
+  To count different values ($addToSet, then $size), leave out the missing and null ones first.
+- Add no condition the question doesn't ask for (only active ones, only a period or a kind): when it doesn't say,
+  count them all.
 - Write a date as {{"$date": "2026-10-01T00:00:00Z"}} and an ObjectId as {{"$oid": "..."}}.
 - A list gets at most 200 documents ($limit 200) unless the question asks for everything.
 - Work dates out from today ("last month", "this year").
@@ -237,17 +249,103 @@ def _choose_list(tables) -> str:
     return text[:CHOOSE_LIST_CHARS]
 
 
-def _choose_tables(ai, source, question, history) -> list:
+_GENERIC_TOKENS = {'obj', 'ref', 'fk', 'key', 'pk'}
+
+
+def _singular(word: str) -> str:
+    if word.endswith('ies') and len(word) > 4:
+        return word[:-3] + 'y'
+    if word.endswith('s') and not word.endswith('ss') and len(word) > 3:
+        return word[:-1]
+    return word
+
+
+def _tokens(name: str) -> list:
+    """'hr_agent_employee' -> ['hr', 'agent', 'employee']; 'companyId' -> ['company', 'id']."""
+    import re as _re
+    spaced = _re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', str(name))
+    return [t for t in _re.split(r'[^A-Za-z0-9]+', spaced.lower()) if t]
+
+
+def _mongo_references(tables) -> list:
+    """MongoDB has no foreign keys, so the AI guessed what a field pointed at: leave requests were joined straight to
+    departments, and projects to themselves for their company (16 Nov 2026). A field named for a collection
+    (employee_id, companyId, company, department_obj_id) is taken to hold the _id of a document in it, when one
+    collection is named so; of several, the one whose name shares the most of the field's collection's name (the same
+    app). Returns copies of the tables with those as their 'fks', for the prompt and for adding the tables pointed at."""
+    by_last = {}          # every ending of a collection's name, singular: company_users -> "user", "companyuser"
+    for t in tables:
+        words = _tokens(t['name'])
+        for size in range(1, len(words) + 1):
+            key = _singular(''.join(words[-size:]))
+            if t not in by_last.setdefault(key, []):
+                by_last[key].append(t)
+    out = []
+    for t in tables:
+        fks = list(t.get('fks') or [])
+        for column in t.get('columns') or []:
+            name, kind = str(column['name']), str(column.get('type') or '')
+            if name == '_id' or '.' in name or not kind.startswith(('int', 'long', 'objectId', 'string', 'array<objectId')):
+                continue
+            words = _tokens(name)
+            if words and words[-1] in ('id', 'ids'):
+                words = words[:-1]
+            elif kind != 'objectId':
+                continue
+            target = None
+            words = [w for w in words if w not in _GENERIC_TOKENS]
+            # The longest ending of the name first: company_user_id is core_companyuser, not auth_user.
+            for size in range(len(words), 0, -1):
+                key = _singular(''.join(words[-size:]))
+                matches = [m for m in by_last.get(key, []) if m is not t]
+                if not matches:
+                    continue
+                if len(matches) > 1:
+                    # The same app first (the most of the name in common), then the closest name (the fewest words
+                    # besides the match): user_id is auth_user rather than core_company_users.
+                    mine = _tokens(t['name'])
+                    shared = lambda m: sum(1 for a, b in zip(mine, _tokens(m['name'])) if a == b)
+                    best = max(shared(m) for m in matches)
+                    matches = [m for m in matches if shared(m) == best]
+                    fewest = min(len(_tokens(m['name'])) for m in matches)
+                    matches = [m for m in matches if len(_tokens(m['name'])) == fewest]
+                if len(matches) == 1:
+                    target = matches[0]
+                break
+            if target is not None:
+                fks.append({'columns': [name], 'references': f"{target['name']}(_id)"})
+        out.append({**t, 'fks': fks})
+    return out
+
+
+def _known_tables(source) -> list:
     tables = source.tables or []
-    if len(tables) <= TABLES_WITHOUT_CHOOSING:
+    return _mongo_references(tables) if source.kind == DataSource.KIND_MONGO else tables
+
+
+def _checked(source, tables) -> list:
+    """MongoDB's links inferred from names, kept only where the data agrees (mongo.verify_references)."""
+    if source.kind != DataSource.KIND_MONGO:
         return tables
+    from . import mongo
+    return mongo.verify_references(source, tables)
+
+
+def _choose_tables(ai, source, question, history) -> list:
+    tables = _known_tables(source)
+    if len(tables) <= TABLES_WITHOUT_CHOOSING:
+        return _checked(source, tables)
     raw = ai._call_llm(prompt=_CHOOSE.format(dialect=DIALECT_NAMES[source.kind], history=history, question=question,
                                              tables=_choose_list(tables), limit=TABLES_CHOSEN),
                        system_prompt='You choose tables. Output only one JSON object.', temperature=0,
                        max_tokens=600, json_mode=True)
     wanted = {str(n).strip().lower() for n in _json(raw).get('tables') or []}
     chosen = [t for t in tables if _table_key(t).lower() in wanted or t['name'].lower() in wanted]
-    return _with_references(tables, chosen[:TABLES_CHOSEN]) if chosen else tables[:TABLES_WITHOUT_CHOOSING]
+    if not chosen:
+        return _checked(source, tables[:TABLES_WITHOUT_CHOOSING])
+    chosen = _checked(source, chosen[:TABLES_CHOSEN])
+    linked = _with_references(tables, chosen)
+    return chosen + _checked(source, linked[len(chosen):])
 
 
 def _with_references(tables, chosen) -> list:
@@ -267,9 +365,11 @@ def _with_references(tables, chosen) -> list:
     return out
 
 
-def _write_aggregation(ai, source, question, history, tables, previous='') -> dict:
+def _write_aggregation(ai, source, question, history, tables, previous='', values=None) -> dict:
+    values = values or {}
+    listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name']))) for t in tables)
     prompt = _MONGO.format(today=timezone.localdate().isoformat(), history=history, question=question,
-                           previous=previous, tables='\n'.join(_table_text(t) for t in tables) or '(none)')
+                           previous=previous, tables=listed or '(none)')
     out = _json(ai._call_llm(prompt=prompt, system_prompt='You write MongoDB aggregations. Output only one JSON object.',
                              temperature=0, max_tokens=1500, json_mode=True))
     ask_back = str(out.get('ask_back') or '').strip()[:500]
@@ -287,7 +387,7 @@ def collections(source: DataSource) -> set:
 
 def _write_sql(ai, source, question, history, tables, previous='', values=None) -> dict:
     if source.kind == DataSource.KIND_MONGO:
-        return _write_aggregation(ai, source, question, history, tables, previous)
+        return _write_aggregation(ai, source, question, history, tables, previous, values)
     values = values or {}
     listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name']))) for t in tables)
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),

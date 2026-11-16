@@ -282,6 +282,98 @@ def _sample(collection) -> list:
         return list(collection.find({}, limit=SAMPLE_SIZE, max_time_ms=SAMPLE_TIMEOUT_MS))
 
 
+def sample_values(source, tables) -> dict:
+    """{('', collection): {field: [values]}} for the collections' status-like text fields (connectors.choice_columns),
+    read from their first documents when a question is asked and never kept: as for SQL databases, so a $match is
+    spelled as the data has it (16 Nov 2026). Top-level fields only; anything that fails is left out."""
+    from . import connectors
+    wanted = []
+    for table in tables:
+        fields = [c for c in connectors.choice_columns(table)
+                  if '.' not in c and not any(col['name'] == c and str(col.get('type', '')).startswith('array')
+                                              for col in table.get('columns') or [])]
+        if fields:
+            wanted.append((table, fields))
+    wanted = wanted[:connectors.SAMPLE_TABLES]
+    if not wanted:
+        return {}
+    found = {}
+    client = _client(source)
+    try:
+        db = _database(client, source)
+        for table, fields in wanted:
+            try:
+                docs = list(db[table['name']].find({}, {**{f: 1 for f in fields}, '_id': 0},
+                                                   limit=connectors.SAMPLE_SCAN_ROWS, max_time_ms=SAMPLE_TIMEOUT_MS))
+            except Exception:
+                continue
+            values = {}
+            for field in fields:
+                seen = []
+                for doc in docs:
+                    v = doc.get(field)
+                    if not isinstance(v, str) or not v:
+                        continue
+                    if len(v) > connectors.SAMPLE_VALUE_CHARS:
+                        seen = None
+                        break
+                    if v not in seen:
+                        seen.append(v)
+                        if len(seen) > connectors.SAMPLE_VALUES:
+                            seen = None
+                            break
+                if seen:
+                    values[field] = sorted(seen)
+            if values:
+                found[('', table['name'])] = values
+    except Exception:
+        return found
+    finally:
+        client.close()
+    return found
+
+
+VERIFY_LINKS = 25      # inferred links checked against the data for one question; more are left as named
+
+
+def verify_references(source, tables) -> list:
+    """The tables with an inferred link (engine._mongo_references) kept only when the field's values are _ids in the
+    collection it is taken to point at: by name core_task.assignee_id pointed at a collection of meeting assignees,
+    while its values are users (16 Nov 2026). Up to VERIFY_LINKS checks; anything that fails keeps the link."""
+    checks = [(t, fk) for t in tables for fk in t.get('fks') or [] if str(fk.get('references', '')).endswith('(_id)')]
+    if not checks:
+        return tables
+    wrong = set()
+    try:
+        client = _client(source)
+    except Exception:
+        return tables
+    try:
+        db = _database(client, source)
+        for table, fk in checks[:VERIFY_LINKS]:
+            field, target = fk['columns'][0], fk['references'][:-len('(_id)')]
+            try:
+                values = []
+                for doc in db[table['name']].find({field: {'$ne': None}}, {field: 1, '_id': 0}, limit=50,
+                                                  max_time_ms=SAMPLE_TIMEOUT_MS):
+                    value = doc.get(field)
+                    values.extend(value if isinstance(value, list) else [value])
+                distinct = list({repr(v): v for v in values if v is not None}.values())[:20]
+                if not distinct:
+                    continue
+                found = db[target].count_documents({'_id': {'$in': distinct}}, maxTimeMS=SAMPLE_TIMEOUT_MS)
+                if found * 2 < len(distinct):
+                    wrong.add((table['name'], field))
+            except Exception:
+                continue
+    except Exception:
+        return tables
+    finally:
+        client.close()
+    return [{**t, 'fks': [fk for fk in t.get('fks') or [] if (t['name'], fk['columns'][0]) not in wrong]}
+            for t in tables]
+
+
 def read_tables(source) -> list:
     """Collections and views with the fields a sample of each shows: never a value. A collection left when the time is
     up is listed by name only."""
