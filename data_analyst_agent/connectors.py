@@ -11,7 +11,9 @@ time limit.
 """
 import datetime
 import decimal
+import logging
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -23,6 +25,8 @@ from sqlalchemy.pool import NullPool
 
 from .guards import Refused, resolve_public
 from .models import DataSource
+
+logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 10      # seconds
 QUERY_TIMEOUT = 30        # seconds
@@ -209,6 +213,90 @@ def run(source: DataSource, sql: str, max_rows: int = MAX_ROWS) -> dict:
     rows = [[_value(v) for v in row] for row in fetched[:max_rows]]
     return {'columns': columns, 'rows': rows, 'truncated': len(fetched) > max_rows,
             'duration_ms': int((time.monotonic() - started) * 1000)}
+
+
+# ---- The values of a few short columns, for writing a query (16 Nov 2026) --------------------------------------
+#
+# Asked for tickets "status new, open or in progress", the AI wrote status = 'in progress' for a column that holds
+# 'in_progress', and three tickets were missed. So before writing a query, the values of the chosen tables' short
+# status-like columns are read from their first rows and named to the AI. Read when a question is asked, never kept,
+# and only when the source lets the AI see rows. A column with more values than SAMPLE_VALUES is not a list of
+# choices and is left out.
+SAMPLE_SCAN_ROWS = 5000
+SAMPLE_VALUES = 12
+SAMPLE_TABLES = 15
+SAMPLE_VALUE_CHARS = 40
+_CHOICE_COLUMN = re.compile(r'(^|_)(status|state|type|kind|category|priority|stage|level|role|source|channel|mode|'
+                            r'frequency|period|currency|response|outcome|tier|interval|direction|gender)$', re.I)
+_TEXT_TYPE = re.compile(r'char|text|string|enum|varchar|clob', re.I)
+
+
+def _quote(kind, name) -> str:
+    if kind == DataSource.KIND_MYSQL:
+        return '`' + str(name).replace('`', '``') + '`'
+    if kind == DataSource.KIND_MSSQL:
+        return '[' + str(name).replace(']', ']]') + ']'
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def choice_columns(table) -> list:
+    """The table's short text columns whose names say they hold one of a few choices (status, type, priority ...)."""
+    return [c['name'] for c in table.get('columns') or []
+            if _CHOICE_COLUMN.search(c['name']) and _TEXT_TYPE.search(str(c.get('type') or ''))]
+
+
+def sample_values(source: DataSource, tables) -> dict:
+    """{(schema, table): {column: [values]}} for the tables' choice columns, read from their first SAMPLE_SCAN_ROWS
+    rows on one connection. Anything that fails is left out: the query is written without it."""
+    if source.kind == DataSource.KIND_MONGO:
+        return {}
+    wanted = [(t, choice_columns(t)) for t in tables if t.get('kind', 'table') in ('table', 'view')]
+    wanted = [(t, cols) for t, cols in wanted if cols][:SAMPLE_TABLES]
+    if not wanted:
+        return {}
+    found = {}
+    engine = _engine(source)
+    try:
+        with engine.connect() as conn:
+            if source.kind == DataSource.KIND_MYSQL:
+                _limit_mysql_time(conn)
+            for table, cols in wanted:
+                name = (_quote(source.kind, table['schema']) + '.' if table.get('schema') else '') + \
+                    _quote(source.kind, table['name'])
+                listed = ', '.join(_quote(source.kind, c) for c in cols)
+                sql = (f'SELECT TOP {SAMPLE_SCAN_ROWS} {listed} FROM {name}' if source.kind == DataSource.KIND_MSSQL
+                       else f'SELECT {listed} FROM {name} LIMIT {SAMPLE_SCAN_ROWS}')
+                try:
+                    rows = conn.execution_options(no_parameters=True).exec_driver_sql(sql).fetchall()
+                except Exception:
+                    conn.rollback()
+                    continue
+                values = {}
+                for i, col in enumerate(cols):
+                    seen = []
+                    for row in rows:
+                        v = row[i]
+                        if v is None or v == '':
+                            continue
+                        v = str(v)
+                        if len(v) > SAMPLE_VALUE_CHARS:
+                            seen = None
+                            break
+                        if v not in seen:
+                            seen.append(v)
+                            if len(seen) > SAMPLE_VALUES:
+                                seen = None
+                                break
+                    if seen:
+                        values[col] = sorted(seen)
+                if values:
+                    found[(table.get('schema') or '', table['name'])] = values
+            conn.rollback()
+    except Exception:
+        logger.info('data analyst: values not sampled for source %s', source.pk, exc_info=True)
+    finally:
+        engine.dispose()
+    return found
 
 
 def _table_entry(name, schema, default, kind, columns, pk, fks) -> dict:
