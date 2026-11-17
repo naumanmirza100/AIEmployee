@@ -72,7 +72,9 @@ def _safe_file(source: DataSource) -> str:
     return safe_path(source.file_path)
 
 
-def _engine(source: DataSource):
+def _engine(source: DataSource, seconds=None):
+    """seconds: the time limit for each statement, QUERY_TIMEOUT unless less is left (a second try, 17 Nov 2026)."""
+    limit = seconds or QUERY_TIMEOUT
     if source.kind == DataSource.KIND_SQLITE:
         path = _safe_file(source)
 
@@ -81,7 +83,7 @@ def _engine(source: DataSource):
                                    timeout=CONNECT_TIMEOUT)
             started = time.monotonic()
             # Stops a query that runs past the limit (returning non-zero interrupts it).
-            conn.set_progress_handler(lambda: int(time.monotonic() - started > QUERY_TIMEOUT), 10_000)
+            conn.set_progress_handler(lambda: int(time.monotonic() - started > limit), 10_000)
             return conn
         return create_engine('sqlite+pysqlite://', creator=connect, poolclass=NullPool)
 
@@ -91,7 +93,7 @@ def _engine(source: DataSource):
                          host=source.host, port=source.port or 5432, database=source.database or None)
         args = {'hostaddr': address, 'connect_timeout': CONNECT_TIMEOUT,
                 'sslmode': 'require' if source.use_ssl else 'prefer',
-                'options': f'-c default_transaction_read_only=on -c statement_timeout={QUERY_TIMEOUT * 1000}'}
+                'options': f'-c default_transaction_read_only=on -c statement_timeout={int(limit * 1000)}'}
         return create_engine(url, connect_args=args, poolclass=NullPool)
     if source.kind == DataSource.KIND_MSSQL:
         from . import mssql
@@ -102,13 +104,13 @@ def _engine(source: DataSource):
 
         @event.listens_for(engine, 'connect')
         def _query_time_limit(dbapi_connection, _record):
-            dbapi_connection.timeout = QUERY_TIMEOUT      # seconds; pyodbc stops a statement that runs longer
+            dbapi_connection.timeout = int(limit)      # seconds; pyodbc stops a statement that runs longer
 
         return engine
     if source.kind == DataSource.KIND_MYSQL:
         url = URL.create('mysql+mysqldb', username=source.username or None, password=source.get_password() or None,
                          host=address, port=source.port or 3306, database=source.database or None)
-        args = {'connect_timeout': CONNECT_TIMEOUT, 'read_timeout': QUERY_TIMEOUT + 10, 'local_infile': False,
+        args = {'connect_timeout': CONNECT_TIMEOUT, 'read_timeout': int(limit) + 10, 'local_infile': False,
                 'charset': 'utf8mb4', 'init_command': 'SET SESSION TRANSACTION READ ONLY'}
         if source.use_ssl:
             args['ssl_mode'] = 'REQUIRED'
@@ -128,10 +130,11 @@ def default_port(kind) -> int:
 _default_port = default_port
 
 
-def _limit_mysql_time(conn):
+def _limit_mysql_time(conn, seconds=None):
     """MySQL's limit is max_execution_time (ms), MariaDB's max_statement_time (s); each refuses the other's."""
-    for statement in (f'SET SESSION max_execution_time = {QUERY_TIMEOUT * 1000}',
-                      f'SET SESSION max_statement_time = {QUERY_TIMEOUT}'):
+    limit = seconds or QUERY_TIMEOUT
+    for statement in (f'SET SESSION max_execution_time = {int(limit * 1000)}',
+                      f'SET SESSION max_statement_time = {int(limit)}'):
         try:
             conn.exec_driver_sql(statement)
         except Exception:
@@ -199,17 +202,18 @@ def timed_out(exc) -> bool:
     return any(words in text for words in _TIMED_OUT) or text.strip() == 'interrupted'
 
 
-def run(source: DataSource, sql: str, max_rows: int = MAX_ROWS) -> dict:
-    """Run one already-checked query read-only. {"columns", "rows", "truncated", "duration_ms"}."""
+def run(source: DataSource, sql: str, max_rows: int = MAX_ROWS, seconds=None) -> dict:
+    """Run one already-checked query read-only. {"columns", "rows", "truncated", "duration_ms"}. seconds: its time
+    limit when less than QUERY_TIMEOUT is left."""
     if source.kind == DataSource.KIND_MONGO:
         from . import mongo
-        return mongo.run(source, sql, max_rows)
-    engine = _engine(source)
+        return mongo.run(source, sql, max_rows, seconds)
+    engine = _engine(source, seconds)
     started = time.monotonic()
     try:
         with engine.connect() as conn:
             if source.kind == DataSource.KIND_MYSQL:
-                _limit_mysql_time(conn)
+                _limit_mysql_time(conn, seconds)
             try:
                 result = conn.execution_options(no_parameters=True).exec_driver_sql(sql)
                 columns = list(result.keys())
@@ -305,6 +309,178 @@ def sample_values(source: DataSource, tables) -> dict:
         logger.info('data analyst: values not sampled for source %s', source.pk, exc_info=True)
     finally:
         engine.dispose()
+    return found
+
+
+# ---- what the database says about its own tables (17 Nov 2026) ----------------------------------------------------
+# A test database's own data dictionary said "total_amount is in the order's currency: convert with exchange_rates
+# (the latest rate_date on or before the order date)", "NULL customer_id is a guest checkout", "negative payments are
+# refunds"; the AI never saw it and added up ten currencies. Column comments (PostgreSQL, MySQL / MariaDB, SQL Server)
+# and a dictionary table the database keeps (table_name, column_name, description) are now its notes. Periods
+# (valid_from / valid_to) are read for whether valid_to is the last day or the day the next one starts: "order_ts <
+# valid_to" left out the orders on a tier's last day. Read when a question is asked, never kept.
+NOTE_CHARS = 300
+NOTES_MAX = 800
+PERIOD_TABLES = 8
+_DICT_TABLE = {'table_name', 'tablename', 'table', 'tbl', 'entity', 'entity_name'}
+_DICT_COLUMN = {'column_name', 'columnname', 'column', 'field', 'field_name', 'attribute', 'col', 'col_name'}
+_DICT_TEXT = {'description', 'descr', 'comment', 'comments', 'notes', 'note', 'definition', 'meaning', 'explanation',
+              'details', 'remarks'}
+_PERIOD_ENDS = (('valid_from', 'valid_to'), ('effective_from', 'effective_to'), ('date_from', 'date_to'),
+                ('start_date', 'end_date'), ('starts_on', 'ends_on'), ('from_date', 'to_date'))
+_MIDNIGHT = re.compile(r'^[ T]00:00(:00(\.0+)?)?$')
+_COMMENT_QUERIES = {
+    DataSource.KIND_MYSQL: (
+        "SELECT table_name, '', table_comment FROM information_schema.tables WHERE table_schema = DATABASE() "
+        "AND table_comment <> '' AND table_type = 'BASE TABLE'",
+        "SELECT table_name, column_name, column_comment FROM information_schema.columns "
+        "WHERE table_schema = DATABASE() AND column_comment <> ''",
+    ),
+    DataSource.KIND_POSTGRES: (
+        "SELECT c.relname, COALESCE(a.attname, ''), d.description FROM pg_catalog.pg_description d "
+        "JOIN pg_catalog.pg_class c ON c.oid = d.objoid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+        "LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.objsubid AND d.objsubid > 0 "
+        "WHERE d.classoid = 'pg_catalog.pg_class'::regclass AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+        "AND n.nspname NOT LIKE 'pg\\_%'",
+    ),
+    DataSource.KIND_MSSQL: (
+        "SELECT t.name, COALESCE(c.name, ''), CAST(ep.value AS nvarchar(1000)) FROM sys.extended_properties ep "
+        "JOIN sys.objects t ON t.object_id = ep.major_id LEFT JOIN sys.columns c ON c.object_id = ep.major_id "
+        "AND c.column_id = ep.minor_id AND ep.minor_id > 0 WHERE ep.class = 1 AND ep.name = 'MS_Description'",
+    ),
+}
+
+
+def dictionary_table(tables):
+    """(table, its table-name column, its column-name column or None, its description column) for a table the database
+    keeps to describe its own tables and columns; None when it has none."""
+    for t in tables:
+        if t.get('kind', 'table') not in ('table', 'view'):
+            continue
+        names = {str(c['name']).lower(): c['name'] for c in t.get('columns') or []}
+        table_col = next((names[n] for n in names if n in _DICT_TABLE), None)
+        text_col = next((names[n] for n in names if n in _DICT_TEXT), None)
+        if table_col and text_col:
+            return t, table_col, next((names[n] for n in names if n in _DICT_COLUMN), None), text_col
+    return None
+
+
+def _day(value):
+    """A date from a date, a midnight timestamp or 'YYYY-MM-DD...' text; None for anything else (a time of day)."""
+    if isinstance(value, datetime.datetime):
+        return value.date() if value.time() == datetime.time(0) else None
+    if isinstance(value, datetime.date):
+        return value
+    text = str(value or '').strip()
+    if len(text) > 10 and not _MIDNIGHT.match(text[10:]):
+        return None
+    try:
+        return datetime.date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def period_pairs(table) -> list:
+    """[(start column, end column)] of a table of periods (valid_from / valid_to and the like)."""
+    names = {str(c['name']).lower(): c['name'] for c in table.get('columns') or []}
+    return [(names[a], names[b]) for a, b in _PERIOD_ENDS if a in names and b in names]
+
+
+def _period_note(rows, start, end) -> str:
+    """How a table's periods end, from its rows [(key, start, end)]: the next period of the same key starting the day
+    after the end (the end is the last day) or on it (the end is not part of the period). '' when the rows don't say."""
+    by_key = {}
+    for key, begins, ends in rows:
+        if key is not None:
+            by_key.setdefault(key, []).append((_day(begins), ends, _day(ends)))
+    after = on = 0
+    for periods in by_key.values():
+        periods.sort(key=lambda p: (p[0] is None, p[0] or datetime.date.min))
+        for (_b, _raw, ends), (begins, _r2, _e2) in zip(periods, periods[1:]):
+            if ends is None or begins is None:
+                continue
+            if begins == ends + datetime.timedelta(days=1):
+                after += 1
+            elif begins == ends:
+                on += 1
+    total = after + on
+    if total < 5:
+        return ''
+    if after >= 0.8 * total:
+        return (f'{end} is the period\'s last day (the next period starts the day after): a date d is in it when '
+                f'{start} <= d <= {end}')
+    if on >= 0.8 * total:
+        return (f'{end} is the day the next period starts, not part of this one: a date d is in it when '
+                f'{start} <= d < {end}')
+    return ''
+
+
+def notes(source: DataSource, tables) -> dict:
+    """{table name (lower case): {'': the table's note, column (lower case): its note}}: the column comments, the
+    database's own dictionary table, and how its periods end. One connection; anything that fails is left out."""
+    if source.kind == DataSource.KIND_MONGO:
+        return {}
+    found = {}
+
+    def add(table, column, text):
+        text = ' '.join(str(text or '').split())[:NOTE_CHARS]
+        if not table or not text or sum(len(v) for v in found.values()) >= NOTES_MAX:
+            return
+        entry = found.setdefault(str(table).lower(), {})
+        key = str(column or '').lower()
+        if text not in entry.get(key, ''):
+            entry[key] = f"{entry[key]}; {text}" if entry.get(key) else text
+
+    def name_of(t):
+        return (_quote(source.kind, t['schema']) + '.' if t.get('schema') else '') + _quote(source.kind, t['name'])
+
+    def first_rows(t, columns):
+        listed = ', '.join(_quote(source.kind, c) for c in columns)
+        return (f'SELECT TOP {SAMPLE_SCAN_ROWS} {listed} FROM {name_of(t)}' if source.kind == DataSource.KIND_MSSQL
+                else f'SELECT {listed} FROM {name_of(t)} LIMIT {SAMPLE_SCAN_ROWS}')
+
+    dictionary = dictionary_table(tables)
+    periods = [(t, pair) for t in tables if t.get('kind', 'table') == 'table'
+               for pair in period_pairs(t)][:PERIOD_TABLES]
+    queries = _COMMENT_QUERIES.get(source.kind, ())
+    if not (dictionary or periods or queries):
+        return {}
+    engine = None
+    try:
+        engine = _engine(source)
+        with engine.connect() as conn:
+            if source.kind == DataSource.KIND_MYSQL:
+                _limit_mysql_time(conn)
+
+            def read(sql):
+                try:
+                    return conn.execution_options(no_parameters=True).exec_driver_sql(sql).fetchall()
+                except Exception:
+                    conn.rollback()
+                    return []
+
+            for sql in queries:
+                for table, column, text in read(sql):
+                    add(table, column, text)
+            if dictionary:
+                t, table_col, column_col, text_col = dictionary
+                for row in read(first_rows(t, [c for c in (table_col, column_col, text_col) if c])):
+                    add(row[0], row[1] if column_col else '', row[-1])
+            for t, (start, end) in periods:
+                keys = [c for fk in t.get('fks') or [] for c in fk.get('columns') or [] if c not in (start, end)]
+                best = ''
+                for key in keys[:3]:
+                    best = _period_note(read(first_rows(t, [key, start, end])), start, end)
+                    if best:
+                        break
+                if best:
+                    add(t['name'], end, best)
+            conn.rollback()
+    except Exception:
+        logger.info('data analyst: notes not read for source %s', source.pk, exc_info=True)
+    finally:
+        if engine is not None:
+            engine.dispose()
     return found
 
 

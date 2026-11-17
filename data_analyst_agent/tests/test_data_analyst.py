@@ -13,6 +13,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from api.views import data_analyst_agent as views
 from core.models import Agent
+from data_analyst_agent import engine
 from data_analyst_agent.guards import Refused, check_sql, resolve_public
 from data_analyst_agent.models import DataQuestion, DataSource
 from hr_agent.tests.base import HRTestCase
@@ -203,13 +204,37 @@ class AFileAskedEndToEnd(AnalystCase):
 
         def clock():
             calls.append(1)
-            return 0.0 if len(calls) == 1 else 25.0      # the first query took 25 s before it failed
+            return 0.0 if len(calls) == 1 else 40.0      # the first query failed 40 s in: 10 s are left
 
         with mock.patch('data_analyst_agent.connectors.run', side_effect=Exception('no such column: amount')), \
              mock.patch('data_analyst_agent.engine.time.monotonic', side_effect=clock):
             code, body = self.ask(self.admin, source, 'Total of all orders?', fake)
         self.assertEqual(len(fake.prompts), 1)
         self.assertEqual(body['data']['answer'], 'The query could not be run: no such column: amount')
+
+    def test_a_quick_failure_after_slow_preparation_is_tried_again_in_the_time_left(self):
+        # 17 Nov 2026: a complex question took 12 s to reach its first query, which SQLite refused at once ("1st ORDER BY
+        # term does not match"); another try needed a whole 30-second query time left, so there was none.
+        source = self.source()
+        fake = FakeAI({'sql': 'SELECT amount FROM orders'}, {'sql': 'SELECT sum(total) AS total FROM orders'},
+                      'The orders came to 125.5 in total.')
+        result = {'columns': ['total'], 'rows': [[125.5]], 'truncated': False, 'duration_ms': 3}
+        now, written = [0.0], engine._write_sql
+
+        def write(*args, **kwargs):            # the first query is ready 12 s in, the second 30 s in
+            now[0] = 12.0 if now[0] < 12.0 else 30.0
+            return written(*args, **kwargs)
+
+        with mock.patch('data_analyst_agent.connectors.run',
+                        side_effect=[Exception('no such column: amount'), result]) as ran, \
+             mock.patch.object(engine, '_write_sql', side_effect=write), \
+             mock.patch('data_analyst_agent.engine.time.monotonic', side_effect=lambda: now[0]):
+            code, body = self.ask(self.admin, source, 'Total of all orders?', fake)
+        self.assertEqual((code, body['data']['status']), (200, 'answered'), body)
+        self.assertEqual(len(fake.prompts), 3)
+        self.assertIn('It failed: no such column: amount', fake.prompts[1])
+        # The first query got the whole limit; the second only what was left of the 50 seconds.
+        self.assertEqual([c.kwargs['seconds'] for c in ran.call_args_list], [30, 20])
 
     def test_a_question_the_tables_cant_answer_is_asked_back(self):
         source = self.source()
