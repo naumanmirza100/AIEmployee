@@ -138,14 +138,17 @@ class TheNotesInTheQuestion(NotesCase):
         self.assertIn('Note on the table: One row per order, cancelled ones too.', prompt)
         self.assertIn("valid_to TEXT (note: valid_to is the period's last day", prompt)
         for rule in ('not a filter on a store, brand or customer with that name',
-                     'convert each amount at the rate of its own date',
+                     'Follow the notes on what a column means',
+                     'convert each amount at the rate of its own date',          # orders has a currency column
                      'joining on the same date drops the days without a row',
-                     'with no period condition in that step',
-                     'walk it with a recursive CTE',
-                     'Subtracting them again adds them back',
-                     'Joining on a column many rows share',
-                     'another one on the same day is within 0 days'):
+                     'the one whose period covers it',                           # tier_history, prices
+                     'not from an address',
+                     'Joining on a column many rows share'):
             self.assertIn(rule, prompt)
+        # Rules for situations this question and these tables don't have are left out.
+        for rule in ('with no period condition in that step', 'walk it with a recursive CTE',
+                     'Subtracting them again adds them back', 'UNION ALL inside a subquery', 'within 0 days'):
+            self.assertNotIn(rule, prompt)
         source.refresh_from_db()
         kept = json.dumps(source.tables) + json.dumps(list(DataQuestion.objects.values()), default=str)
         self.assertNotIn('Convert with exchange_rates', kept)
@@ -160,6 +163,32 @@ class TheNotesInTheQuestion(NotesCase):
         self.assertIn("The database's own notes on its tables and columns:", fake.prompts[0])
         self.assertIn('- orders.customer_id: NULL for guest checkouts.', fake.prompts[0])
         self.assertIn('include the table of exchange rates', ' '.join(fake.prompts[0].split()))
+
+
+class RulesOnlyWhenTheyApply(NotesCase):
+
+    def test_a_plain_question_on_a_plain_database_gets_the_short_list(self):
+        source = self.source()                      # customers and orders, one currency, no notes
+        fake = FakeAI({'sql': 'SELECT COUNT(id) AS customers FROM customers'}, 'There are 3 customers.')
+        self.ask(self.admin, source, 'How many customers are there?', fake)
+        prompt = ' '.join(fake.prompts[0].split())
+        for rule in ('Follow the notes', 'convert each amount at the rate', 'joining on the same date',
+                     'whose period covers it', 'Subtracting them again', 'UNION ALL inside a subquery',
+                     'with no period condition', 'recursive CTE'):
+            self.assertNotIn(rule, prompt)
+        self.assertIn('Joining on a column many rows share', prompt)       # the general rules stay
+
+    def test_each_situation_brings_its_rule(self):
+        tree = {'name': 'categories', 'columns': [{'name': 'id'}, {'name': 'parent_id'}],
+                'fks': [{'columns': ['parent_id'], 'references': 'categories(id)'}]}
+        payments = {'name': 'payments', 'columns': [{'name': 'amount'}, {'name': 'currency_code'}], 'fks': []}
+        self.assertEqual(engine._situations([tree], 'Units per top-level category', {}), ['tree'])
+        self.assertEqual(engine._situations([payments], 'Net cash per region, and the grand total', {}),
+                         ['currency', 'rates', 'signed', 'total_row'])
+        self.assertEqual(engine._situations([payments], "Customers' first ever payment, by quarter", {}),
+                         ['currency', 'rates', 'signed', 'first_ever'])
+        self.assertEqual(engine._situations([payments], 'Payments last month', {'payments': {'amount': 'In cents'}}),
+                         ['notes', 'currency', 'rates', 'signed'])
 
 
 class SortingAUnion(NotesCase):

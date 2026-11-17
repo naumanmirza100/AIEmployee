@@ -156,9 +156,87 @@ count) is better included than left out; the query is written from the tables ch
 hold what is asked (a record of each request and a running total, say), include both. To
 count or add up what happened (approved leave days, orders, payments, tickets), the table with a row for each one is
 the source; a table of running totals or balances only for a balance or what is left.
-Amounts kept in several currencies (a currency column beside them) and asked in one: include the table of exchange
+{currency}If none fits, return {{"tables": []}}."""
+
+_CHOOSE_CURRENCY = """Amounts kept in several currencies (a currency column beside them) and asked in one: include the table of exchange
 rates, and a view that already converts them if there is one. Include what the database's notes say a figure needs.
-If none fits, return {{"tables": []}}."""
+"""
+
+# ---- Rules for particular situations (17 Nov 2026) -----------------------------------------------------------------
+# Shown only when they apply, so a simple question on a simple database gets the short list: the currency rules when
+# a chosen table has a currency column, the tree rule when a table points at itself, and so on. They came from a
+# retail test database the AI got wrong (Meridian, 17 Nov); worded for any database.
+_CURRENCY_COLUMN = re.compile(r'(^|_)(currency|currency_code|currency_id|ccy|iso_currency)$', re.I)
+_RATE_TABLE = re.compile(r'(^|_)(rates?|exchange|fx|forex|currenc(y|ies)|prices?|price_list)(_|s?$)', re.I)
+_SIGNED_TABLE = re.compile(r'(payment|refund|chargeback|transaction|ledger|credit|debit|invoice|settlement)', re.I)
+_TOTAL_WORDS = re.compile(r'\b(grand|overall|sub-?totals?|totals|in total|all together|altogether)\b', re.I)
+_FIRST_WORDS = re.compile(r'\b(first|earliest|new (customers?|users?|members?|clients?|buyers?)|newly|cohorts?|'
+                          r'repeat|returning|retention|churn)\b', re.I)
+_SITUATIONS = {
+    'notes': """- Follow the notes on what a column means and how to work with it (its currency, what an empty value means, how to
+  convert it). A note that some rows are usually left out is a default: when the question says what to leave out,
+  leave out only that.
+""",
+    'currency': """- Amounts beside a currency column are in that currency. For a total in one currency, convert each amount at the rate
+  of its own date (the order's, the payment's) unless the question names another, with the exchange-rate table or a
+  view that already converts: never add up different currencies, never leave the other currencies out, and never use
+  one day's rate for all. A rate named like rate_to_usd turns the amount into USD by multiplying.
+""",
+    'rates': """- A rate or price in force on a date, from a table with one row per date (exchange rates): take the latest date on or
+  before it, for the same currency (or product), in a subquery right where the amount is converted, ordered by that
+  date, newest first, first row only: amount * (SELECT r.rate FROM rates r WHERE r.currency = o.currency AND r.day <=
+  the order's date ORDER BY r.day DESC, first row). A CTE can't see the order it would need. Dates can be missing
+  (weekends, holidays), so joining on the same date drops the days without a row.
+""",
+    'periods': """- A table of periods (valid_from and valid_to, or the like): the row in force on a date is the one whose period covers
+  it, as its note says.
+""",
+    'signed': """- Amounts kept with their sign (refunds or chargebacks as negative amounts, as a note or the values show): a net figure
+  is their plain SUM over the rows that count. Subtracting them again adds them back.
+""",
+    'total_row': """- A total row beside the groups ("also give the grand total"): put the groups and the total row together with UNION
+  ALL inside a subquery, and sort only outside it: SELECT * FROM (SELECT region, SUM(x) AS total FROM ... GROUP BY
+  region UNION ALL SELECT 'Grand total', SUM(x) FROM ...) AS t ORDER BY CASE WHEN region = 'Grand total' THEN 1 ELSE 0
+  END, total DESC. No ORDER BY inside the union or right after it.
+""",
+    'first_ever': """- "First ever" (a first order, new customers): find each one's first over all the data, with no period condition in
+  that step (MIN over every row), then keep those whose first falls in the period asked. A period condition inside the
+  first step turns the first one in the period into the first ever.
+""",
+    'tree': """- A table that points at itself (parent_id -> the same table) is a tree that can be several levels deep: to reach the
+  top level, or everything under one, walk it with a recursive CTE (WITH RECURSIVE; in SQL Server a plain WITH). One
+  join reaches only the next level.
+""",
+}
+
+
+def _has_currency(tables) -> bool:
+    return any(_CURRENCY_COLUMN.search(str(c['name'])) for t in tables for c in t.get('columns') or [])
+
+
+def _situations(tables, question, notes) -> list:
+    """The situational rules that apply to these tables and this question, by key."""
+    names = {t['name'].lower() for t in tables}
+    texts = ' '.join(text for t in names for text in (notes.get(t) or {}).values()).lower()
+    found = []
+    if texts:
+        found.append('notes')
+    if _has_currency(tables):
+        found.append('currency')
+    if 'currency' in found or any(_RATE_TABLE.search(t['name']) for t in tables):
+        found.append('rates')
+    if any(connectors.period_pairs(t) for t in tables):
+        found.append('periods')
+    if any(_SIGNED_TABLE.search(t['name']) for t in tables) or 'negative' in texts:
+        found.append('signed')
+    if _TOTAL_WORDS.search(question):
+        found.append('total_row')
+    if _FIRST_WORDS.search(question):
+        found.append('first_ever')
+    if any(str(fk.get('references') or '').split('(')[0].strip().lower() == t['name'].lower()
+           for t in tables for fk in t.get('fks') or []):
+        found.append('tree')
+    return found
 
 _SQL = """You write one read-only SQL query for a {dialect} database, to answer a question about a company's own data.
 
@@ -189,38 +267,12 @@ Rules:
   count them all.
 - The business's own name in the question (as in "Acme's revenue", or "our orders") means all of its data, not a
   filter on a store, brand or customer with that name, unless the question says so.
-- Follow the notes on what a column means and how to work with it (its currency, what an empty value means, how to
-  convert it). A note that some rows are usually left out is a default: when the question says what to leave out,
-  leave out only that.
-- Amounts beside a currency column are in that currency. For a total in one currency, convert each amount at the rate
-  of its own date (the order's, the payment's) unless the question names another, with the exchange-rate table or a
-  view that already converts: never add up different currencies, never leave the other currencies out, and never use
-  one day's rate for all. A rate named like rate_to_usd turns the amount into USD by multiplying.
-- A rate or price in force on a date, from a table with one row per date (exchange rates): take the latest date on or
-  before it, for the same currency (or product), in a subquery right where the amount is converted, ordered by that
-  date, newest first, first row only: amount * (SELECT r.rate FROM rates r WHERE r.currency = o.currency AND r.day <=
-  the order's date ORDER BY r.day DESC, first row). A CTE can't see the order it would need. Dates can be missing
-  (weekends, holidays), so joining on the same date drops the days without a row. From a table of periods (valid_from
-  and valid_to): the period that covers the date, as its note says.
 - Compare a timestamp with a date by its date part: as text, '2024-05-03 10:00:00' comes after '2024-05-03'.
-- Take a thing's attribute from its own column when it has one: a customer's country is the customer's own country
-  column, not an address's, unless the question names the address (billing, shipping).
+- Take a thing's attribute from its own column when it has one (a person's country from their own country column,
+  not from an address), unless the question names where to take it from.
 - Join a table only on its key (its id, or a column marked ->). Joining on a column many rows share (a country, a
   date, a status) repeats every row once per match, and the totals multiply.
-- Amounts kept with their sign (refunds or chargebacks as negative amounts, as a note or the values show): a net figure
-  is their plain SUM over the rows that count. Subtracting them again adds them back.
-- A total row beside the groups ("also give the grand total"): put the groups and the total row together with UNION
-  ALL inside a subquery, and sort only outside it: SELECT * FROM (SELECT region, SUM(x) AS total FROM ... GROUP BY
-  region UNION ALL SELECT 'Grand total', SUM(x) FROM ...) AS t ORDER BY CASE WHEN region = 'Grand total' THEN 1 ELSE 0
-  END, total DESC. No ORDER BY inside the union or right after it.
-- "First ever" (a first order, new customers): find each one's first over all the data, with no period condition in
-  that step (MIN over every row), then keep those whose first falls in the period asked. A period condition inside the
-  first step turns the first one in the period into the first ever.
-- "Within N days of" something counts from its own day: another one on the same day is within 0 days.
-- A table that points at itself (parent_id -> the same table) is a tree that can be several levels deep: to reach the
-  top level, or everything under one, walk it with a recursive CTE (WITH RECURSIVE; in SQL Server a plain WITH). One
-  join reaches only the next level.
-- A list gets at most 200 rows ({limit_word}) unless the question asks for everything.
+{situational}- A list gets at most 200 rows ({limit_word}) unless the question asks for everything.
 - Work dates out from today ("last month", "this year").
 - When the tables can't answer it, or it is too unclear to write a query for, put one short sentence for the person in
   "ask_back" (what is missing, or what to make clear) and leave "sql" empty.
@@ -394,7 +446,8 @@ def _choose_tables(ai, source, question, history, notes=None) -> list:
         return _checked(source, tables)
     raw = ai._call_llm(prompt=_CHOOSE.format(dialect=DIALECT_NAMES[source.kind], history=history, question=question,
                                              tables=_choose_list(tables), limit=TABLES_CHOSEN,
-                                             notes=_notes_text(notes)),
+                                             notes=_notes_text(notes),
+                                             currency=_CHOOSE_CURRENCY if _has_currency(tables) else ''),
                        system_prompt='You choose tables. Output only one JSON object.', temperature=0,
                        max_tokens=600, json_mode=True)
     wanted = {str(n).strip().lower() for n in _json(raw).get('tables') or []}
@@ -451,6 +504,7 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
                                    notes=notes.get(t['name'].lower())) for t in tables)
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
                          source_name=str(source.name or '').replace('"', "'")[:120],
+                         situational=''.join(_SITUATIONS[key] for key in _situations(tables, question, notes)),
                          tables=listed or '(none)', history=history,
                          question=question, previous=previous,
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')
