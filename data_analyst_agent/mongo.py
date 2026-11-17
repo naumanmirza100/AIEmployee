@@ -456,7 +456,7 @@ def to_rows(docs, max_columns=100):
     return columns, rows
 
 
-def run(source, text: str, max_rows: int) -> dict:
+def run(source, text: str, max_rows: int, seconds=None) -> dict:
     """Run one already-checked aggregation. {"columns", "rows", "truncated", "duration_ms"} as for SQL."""
     from bson import json_util
     from . import connectors
@@ -467,7 +467,7 @@ def run(source, text: str, max_rows: int) -> dict:
     try:
         db = _database(client, source)
         # maxTimeMS 0 would mean no limit at all to MongoDB: never less than 1 ms.
-        limit_ms = max(1, int(connectors.QUERY_TIMEOUT * 1000))
+        limit_ms = max(1, int((seconds or connectors.QUERY_TIMEOUT) * 1000))
         cursor = db[query['collection']].aggregate(query['pipeline'], maxTimeMS=limit_ms,
                                                    batchSize=min(max_rows + 1, 1000))
         try:

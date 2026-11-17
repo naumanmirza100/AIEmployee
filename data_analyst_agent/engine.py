@@ -38,12 +38,16 @@ TABLES_WITH_LINKS = 20
 # The table list for choosing stays under about 6,000 tokens: fewer columns a table first, then names only. All 294
 # tables of a real database with 25 columns each came to 11,536 tokens, more than a Groq key allows a minute (3 Nov 2026).
 CHOOSE_LIST_CHARS = 20000
+NOTES_IN_CHOICE_CHARS = 4000
 ROWS_TO_AI = 100
 ROWS_TO_SCREEN = 200
 HISTORY_TURNS = 6
 # The site's web server cuts a request at 60 seconds. A query stopped at the time limit isn't tried again, and another
 # try is made only while it still fits: two 30-second queries came to 66 seconds and the screen got an error page.
 ASK_SECONDS = 50
+RETRY_SECONDS = 15      # a second try needs about 8 seconds to write and some time to run
+QUERY_MIN_SECONDS = 5
+QUERY_TRIES = 3         # a query and up to two corrected ones, while there is time (two until 17 Nov 2026)
 
 _Fact = namedtuple('_Fact', 'text')
 _THOUSANDS = re.compile(r'(?<=\d)[,  ](?=\d{3}(?!\d))')
@@ -92,19 +96,35 @@ def _telling(cols) -> list:
     return sorted(cols, key=rank)
 
 
-def _table_text(t, full=True, columns=25, values=None) -> str:
+def _table_text(t, full=True, columns=25, values=None, notes=None) -> str:
+    view = ' (view)' if t.get('kind') == 'view' else ''
     if not full:
         names = ', '.join(c['name'] for c in _telling(t['columns'])[:columns])
-        return f"- {_table_key(t)} ({names})" if names else f"- {_table_key(t)}"
-    values = values or {}
+        return f"- {_table_key(t)}{view} ({names})" if names else f"- {_table_key(t)}{view}"
+    values, notes = values or {}, notes or {}
 
     def column(c):
-        known = values.get(c['name'])
-        listed = f" (values: {', '.join(repr(v) for v in known)})" if known else ''
-        return f"{c['name']} {c['type']}{' PK' if c.get('pk') else ''}{listed}"
+        said = []
+        if values.get(c['name']):
+            said.append(f"values: {', '.join(repr(v) for v in values[c['name']])}")
+        if notes.get(str(c['name']).lower()):
+            said.append(f"note: {notes[str(c['name']).lower()]}")
+        extra = f" ({'; '.join(said)})" if said else ''
+        return f"{c['name']} {c['type']}{' PK' if c.get('pk') else ''}{extra}"
     cols = ', '.join(column(c) for c in t['columns'])
     fks = ''.join(f"; {', '.join(fk['columns'])} -> {fk['references']}" for fk in t.get('fks') or [])
-    return f"- {_table_key(t)}{' (view)' if t.get('kind') == 'view' else ''}: {cols}{fks}"
+    about = f"\n  Note on the table: {notes['']}" if notes.get('') else ''
+    return f"- {_table_key(t)}{view}: {cols}{fks}{about}"
+
+
+def _notes_text(notes, tables=None) -> str:
+    """The database's own notes, one line each, for the table choice ("orders.total_amount: in the order's currency;
+    convert with exchange_rates")."""
+    names = {t['name'].lower() for t in tables} if tables is not None else None
+    lines = [f"- {table}{'.' + column if column else ''}: {text}" for table, entry in (notes or {}).items()
+             if names is None or table in names for column, text in entry.items()]
+    text = '\n'.join(lines)[:NOTES_IN_CHOICE_CHARS]
+    return f"The database's own notes on its tables and columns:\n{text}\n\n" if text else ''
 
 
 def _history(conversation, source) -> str:
@@ -127,7 +147,7 @@ _CHOOSE = """You pick the tables a question needs from a company's {dialect} dat
 Tables (name and some columns):
 {tables}
 
-{history}Question: {question}
+{notes}{history}Question: {question}
 
 Return only JSON: {{"tables": ["name", ...]}} with at most {limit} names, spelled exactly as listed. Include the tables
 needed to join, and the tables that hold the names of what the answer lists (people, companies, projects, products).
@@ -136,13 +156,16 @@ count) is better included than left out; the query is written from the tables ch
 hold what is asked (a record of each request and a running total, say), include both. To
 count or add up what happened (approved leave days, orders, payments, tickets), the table with a row for each one is
 the source; a table of running totals or balances only for a balance or what is left.
+Amounts kept in several currencies (a currency column beside them) and asked in one: include the table of exchange
+rates, and a view that already converts them if there is one. Include what the database's notes say a figure needs.
 If none fits, return {{"tables": []}}."""
 
 _SQL = """You write one read-only SQL query for a {dialect} database, to answer a question about a company's own data.
 
-Today is {today}.
+Today is {today}. The database: "{source_name}".
 
-Tables (only these exist; columns with their types, PK marks the primary key, -> a foreign key):
+Tables (only these exist; columns with their types, PK marks the primary key, -> a foreign key; a note is the
+database's own description of a column or table):
 {tables}
 
 {history}Question: {question}
@@ -164,6 +187,39 @@ Rules:
   counts the empty row.
 - Add no condition the question doesn't ask for (only active ones, only a period or a kind): when it doesn't say,
   count them all.
+- The business's own name in the question (as in "Acme's revenue", or "our orders") means all of its data, not a
+  filter on a store, brand or customer with that name, unless the question says so.
+- Follow the notes on what a column means and how to work with it (its currency, what an empty value means, how to
+  convert it). A note that some rows are usually left out is a default: when the question says what to leave out,
+  leave out only that.
+- Amounts beside a currency column are in that currency. For a total in one currency, convert each amount at the rate
+  of its own date (the order's, the payment's) unless the question names another, with the exchange-rate table or a
+  view that already converts: never add up different currencies, never leave the other currencies out, and never use
+  one day's rate for all. A rate named like rate_to_usd turns the amount into USD by multiplying.
+- A rate or price in force on a date, from a table with one row per date (exchange rates): take the latest date on or
+  before it, for the same currency (or product), in a subquery right where the amount is converted, ordered by that
+  date, newest first, first row only: amount * (SELECT r.rate FROM rates r WHERE r.currency = o.currency AND r.day <=
+  the order's date ORDER BY r.day DESC, first row). A CTE can't see the order it would need. Dates can be missing
+  (weekends, holidays), so joining on the same date drops the days without a row. From a table of periods (valid_from
+  and valid_to): the period that covers the date, as its note says.
+- Compare a timestamp with a date by its date part: as text, '2024-05-03 10:00:00' comes after '2024-05-03'.
+- Take a thing's attribute from its own column when it has one: a customer's country is the customer's own country
+  column, not an address's, unless the question names the address (billing, shipping).
+- Join a table only on its key (its id, or a column marked ->). Joining on a column many rows share (a country, a
+  date, a status) repeats every row once per match, and the totals multiply.
+- Amounts kept with their sign (refunds or chargebacks as negative amounts, as a note or the values show): a net figure
+  is their plain SUM over the rows that count. Subtracting them again adds them back.
+- A total row beside the groups ("also give the grand total"): put the groups and the total row together with UNION
+  ALL inside a subquery, and sort only outside it: SELECT * FROM (SELECT region, SUM(x) AS total FROM ... GROUP BY
+  region UNION ALL SELECT 'Grand total', SUM(x) FROM ...) AS t ORDER BY CASE WHEN region = 'Grand total' THEN 1 ELSE 0
+  END, total DESC. No ORDER BY inside the union or right after it.
+- "First ever" (a first order, new customers): find each one's first over all the data, with no period condition in
+  that step (MIN over every row), then keep those whose first falls in the period asked. A period condition inside the
+  first step turns the first one in the period into the first ever.
+- "Within N days of" something counts from its own day: another one on the same day is within 0 days.
+- A table that points at itself (parent_id -> the same table) is a tree that can be several levels deep: to reach the
+  top level, or everything under one, walk it with a recursive CTE (WITH RECURSIVE; in SQL Server a plain WITH). One
+  join reaches only the next level.
 - A list gets at most 200 rows ({limit_word}) unless the question asks for everything.
 - Work dates out from today ("last month", "this year").
 - When the tables can't answer it, or it is too unclear to write a query for, put one short sentence for the person in
@@ -236,7 +292,8 @@ Write the answer plainly, in the language of the question:
 - Don't work out new numbers (differences, shares, sums of rows): give the figures as the rows have them.
 - Use only the names, numbers and dates in the rows above. When the result was cut, don't add rows up yourself:
   say what the rows shown say, and that there are more.
-- An empty result: say nothing matched.
+- An empty result, or a total that came back empty: say nothing matched the query's conditions, naming the condition
+  that matched nothing when one stands out. Never call it zero.
 - Don't explain the SQL. Under 120 words. No heading."""
 
 
@@ -331,12 +388,13 @@ def _checked(source, tables) -> list:
     return mongo.verify_references(source, tables)
 
 
-def _choose_tables(ai, source, question, history) -> list:
+def _choose_tables(ai, source, question, history, notes=None) -> list:
     tables = _known_tables(source)
     if len(tables) <= TABLES_WITHOUT_CHOOSING:
         return _checked(source, tables)
     raw = ai._call_llm(prompt=_CHOOSE.format(dialect=DIALECT_NAMES[source.kind], history=history, question=question,
-                                             tables=_choose_list(tables), limit=TABLES_CHOSEN),
+                                             tables=_choose_list(tables), limit=TABLES_CHOSEN,
+                                             notes=_notes_text(notes)),
                        system_prompt='You choose tables. Output only one JSON object.', temperature=0,
                        max_tokens=600, json_mode=True)
     wanted = {str(n).strip().lower() for n in _json(raw).get('tables') or []}
@@ -385,12 +443,14 @@ def collections(source: DataSource) -> set:
     return {t['name'] for t in source.tables or []} if source.kind == DataSource.KIND_MONGO else set()
 
 
-def _write_sql(ai, source, question, history, tables, previous='', values=None) -> dict:
+def _write_sql(ai, source, question, history, tables, previous='', values=None, notes=None) -> dict:
     if source.kind == DataSource.KIND_MONGO:
         return _write_aggregation(ai, source, question, history, tables, previous, values)
-    values = values or {}
-    listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name']))) for t in tables)
+    values, notes = values or {}, notes or {}
+    listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name'])),
+                                   notes=notes.get(t['name'].lower())) for t in tables)
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
+                         source_name=str(source.name or '').replace('"', "'")[:120],
                          tables=listed or '(none)', history=history,
                          question=question, previous=previous,
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')
@@ -398,6 +458,48 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None) 
                              temperature=0, max_tokens=1200, json_mode=True))
     return {'sql': str(out.get('sql') or '').strip(), 'ask_back': str(out.get('ask_back') or '').strip()[:500],
             'chart': out.get('chart')}
+
+
+_UNION_SORT_ERRORS = ('order by term does not match any column in the result set',      # SQLite
+                      'invalid union/intersect/except order by clause')                    # PostgreSQL
+_COMPOUND = re.compile(r'\b(union|intersect|except)\b', re.I)
+_ORDER_BY = re.compile(r'\border\s+by\b', re.I)
+
+
+def _masked(sql: str) -> str:
+    """The query with quoted text and everything inside parentheses blanked, so a keyword found in it is top-level."""
+    out, depth, quote = [], 0, ''
+    for ch in sql:
+        if quote:
+            out.append(' ')
+            if ch == quote:
+                quote = ''
+            continue
+        if ch in '\'"`':
+            quote = ch
+            out.append(' ')
+        elif ch == '(':
+            depth += 1
+            out.append(' ')
+        elif ch == ')':
+            depth = max(0, depth - 1)
+            out.append(' ')
+        else:
+            out.append(' ' if depth else ch)
+    return ''.join(out)
+
+
+def _sorted_outside(sql: str) -> str:
+    """A UNION ALL sorted by an expression ("ORDER BY CASE WHEN region = 'Grand total' ..."), which SQLite and
+    PostgreSQL refuse, as the same union in a subquery sorted outside it; '' when the query isn't one. The AI wrote it
+    again after being shown the error (17 Nov 2026), so it is turned around here, without another AI call."""
+    text = sql.strip().rstrip(';').strip()
+    masked = _masked(text)
+    orders = list(_ORDER_BY.finditer(masked))
+    if not orders or not _COMPOUND.search(masked[:orders[-1].start()]):
+        return ''
+    head, tail = text[:orders[-1].start()].strip(), text[orders[-1].end():].strip()
+    return f'SELECT * FROM ({head}) AS sorted_rows ORDER BY {tail}' if head and tail else ''
 
 
 CHART_TYPES = ('bar', 'line', 'pie')
@@ -457,14 +559,17 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
     if not source.tables:
         raise Refused('Test this database first, so its tables are known.')
     history = _history(conversation, source)
-    tables = _choose_tables(ai, source, question, history)
+    # What the database says about its own tables (comments, its dictionary table, how its periods end): read now,
+    # never kept. They describe the structure, not a record, so they are read whether or not the AI may see rows.
+    notes = connectors.notes(source, _known_tables(source))
+    tables = _choose_tables(ai, source, question, history, notes)
     # The values of the chosen tables' status-like columns, so a filter is spelled as the data has it. Only when the
     # AI may see rows: these are values of the data. Read now, never kept.
     values = connectors.sample_values(source, tables) if source.send_rows_to_ai else {}
-    attempt, result, sql, previous, too_long = 0, None, '', '', False
-    while attempt < 2:
+    attempt, result, sql, previous, too_long, limit = 0, None, '', '', False, connectors.QUERY_TIMEOUT
+    while attempt < QUERY_TRIES:
         attempt += 1
-        written = _write_sql(ai, source, question, history, tables, previous, values)
+        written = _write_sql(ai, source, question, history, tables, previous, values, notes)
         if written['ask_back'] and not written['sql']:
             record.status, record.answer = DataQuestion.STATUS_ASKED_BACK, written['ask_back']
             record.duration_ms = int((time.monotonic() - started) * 1000)
@@ -472,7 +577,17 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
             return _reply(record, rows=[])
         try:
             sql = check_query(written['sql'], source.kind, collections(source))
-            result = connectors.run(source, sql)
+            # The query gets what is left of the time, at most QUERY_TIMEOUT, so it ends before the site cuts it.
+            left = int(ASK_SECONDS - (time.monotonic() - started))
+            limit = min(connectors.QUERY_TIMEOUT, max(QUERY_MIN_SECONDS, left))
+            try:
+                result = connectors.run(source, sql, seconds=limit)
+            except Exception as exc:
+                turned = _sorted_outside(sql) if any(e in str(exc).lower() for e in _UNION_SORT_ERRORS) else ''
+                if not turned:
+                    raise
+                sql = check_query(turned, source.kind, collections(source))
+                result = connectors.run(source, sql, seconds=limit)
             break
         except Refused as exc:
             reason = str(exc)
@@ -485,12 +600,15 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
         sql = written['sql']
         previous = f'\nYour last query was:\n{sql[:1500]}\nIt failed: {reason}\nWrite a corrected one.\n'
         logger.info('data analyst: query %s failed (%s): %s', attempt, source.kind, reason[:200])
-        if too_long or time.monotonic() - started + connectors.QUERY_TIMEOUT + 10 > ASK_SECONDS:
+        # Another try while there is time to write one and run it. It used to need a whole QUERY_TIMEOUT left, so a
+        # question that took 10 seconds to reach its first query never got one, even for a query refused at once
+        # (17 Nov 2026); the second query now gets the time that is left instead.
+        if too_long or ASK_SECONDS - (time.monotonic() - started) < RETRY_SECONDS:
             break
     if result is None:
         record.status, record.sql, record.error = DataQuestion.STATUS_FAILED, sql, reason
-        record.answer = (f'The query took longer than {connectors.QUERY_TIMEOUT} seconds, the most a question may take, '
-                         'so the database stopped it. Ask about a smaller part, such as one period or one group.'
+        record.answer = (f'The query took longer than {limit} seconds, the most it could take here, so the database '
+                         'stopped it. Ask about a smaller part, such as one period or one group.'
                          if too_long else f'The query could not be run: {reason}')
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.save()
