@@ -180,7 +180,8 @@ _WITHIN_WORDS = re.compile(r'\bwithin\s+(\d+|an?|one|two|three|seven|thirty|nine
 # in the rule, table by table: told only in general, the AI kept one 'active' value (dropping people on probation),
 # and stretched it to companies and to a disabled user's meetings. Deleted and cancelled marks count on any table;
 # disabled, inactive and left only on tables of people and their logins (a product's is_active is on sale or not).
-_DELETED_COLUMN = re.compile(r'^(is_?)?(deleted|removed|cancell?ed|voided)(_?at|_?on|_?date|_?flag)?$', re.I)
+_REMOVED_COLUMN = re.compile(r'^(is_?)?(deleted|removed)(_?at|_?on|_?date|_?flag)?$', re.I)
+_CANCELLED_COLUMN = re.compile(r'^(is_?)?(cancell?ed|voided)(_?at|_?on|_?date|_?flag)?$', re.I)
 _OFF_COLUMN = re.compile(r'^(is_?)?(disabled|deactivated)(_?at|_?on|_?date|_?flag)?$', re.I)
 _ON_COLUMN = re.compile(r'^(is_?)?(active|enabled)$', re.I)
 _GONE_VALUE = re.compile(r'^(cancell?ed|void(ed)?|deleted|removed|failed|declined)$', re.I)
@@ -195,8 +196,9 @@ _LIVE = """- Some rows no longer count, and are left out even when the question 
   Here they are marked by:
 {marks}
   Leave out just those values (a status with NOT IN; an empty status counts); every other value counts (closed,
-  completed, on probation, discontinued). When the question names them ("cancelled orders", "including deleted
-  users", "active or not") or asks by status, count them as it says.
+  completed, on probation, discontinued). Asked by the column that marks them ("orders in each status", "employees by
+  employment status") or naming them ("cancelled orders", "including deleted users", "active or not"), leave none
+  out: give every value as asked.
 """
 _SITUATIONS = {
     'notes': """- Follow the notes on what a column means and how to work with it (its currency, what an empty value means, how to
@@ -243,25 +245,33 @@ def _has_currency(tables) -> bool:
 
 
 def _dead_marks(tables, values=None) -> list:
-    """What marks the rows that no longer count, one line per table: "  - orders: status 'cancelled'"."""
+    """What marks the rows that no longer count, one line per table, with where it applies: "  - orders: status
+    'cancelled' (unless the question asks by status)". On the live site (18 Nov) gpt-4.1-mini left out cancelled
+    orders from "orders in each status" and a deleted customer's orders from "order value in each city" while the rule
+    said otherwise in general words, so each line says it where the mark is."""
     values, lines = values or {}, []
     for t in tables:
         people = bool(_PEOPLE_TABLE.search(t['name']))
-        marks = []
+        marks, record = [], False          # record: deleted or disabled things, not cancelled transactions
         for c in t.get('columns') or []:
             name = str(c['name'])
-            if _DELETED_COLUMN.match(name) or (people and _OFF_COLUMN.match(name)):
+            if _REMOVED_COLUMN.match(name) or _CANCELLED_COLUMN.match(name) or (people and _OFF_COLUMN.match(name)):
                 marks.append(f"{name} {'set' if _WHEN_COLUMN.search(name) else 'true'}")
+                record = record or not _CANCELLED_COLUMN.match(name)
             elif people and _ON_COLUMN.match(name):
                 marks.append(f'{name} false')
+                record = True
         seen = values.get((t.get('schema') or '', t['name'])) or {}
         for column, vs in seen.items():
             gone = [v for v in vs or [] if _GONE_VALUE.match(str(v).strip())
                     or (people and _OFF_VALUE.match(str(v).strip()))]
             if gone:
-                marks.append(f"{column} {', '.join(repr(v) for v in gone)}")
+                marks.append(f"{column} {', '.join(repr(v) for v in gone)} (unless the question asks by {column})")
+                record = record or people or any(str(v).strip().lower() in ('deleted', 'removed') for v in gone)
         if marks:
-            lines.append(f"  - {_table_key(t)}: {'; '.join(marks)}")
+            where = (f"; left out only when counting or listing {t['name']}: joined from another table to reach a "
+                     f"name, city or region, keep them" if record else '')
+            lines.append(f"  - {_table_key(t)}: {'; '.join(marks)}{where}")
     return lines
 
 

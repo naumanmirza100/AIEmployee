@@ -312,20 +312,27 @@ class RowsThatNoLongerCount(NotesCase):
         def marks(table, *names, seen=None):
             t = {'name': table, 'columns': [{'name': n} for n in names]}
             return engine._dead_marks([t], {('', table): seen} if seen else None)
-        # Deleted or cancelled, on any table.
-        self.assertEqual(marks('customers', 'id', 'deleted_at'), ['  - customers: deleted_at set'])
-        self.assertEqual(marks('customers', 'id', 'is_deleted'), ['  - customers: is_deleted true'])
-        self.assertEqual(marks('notes', 'id', 'isDeleted'), ['  - notes: isDeleted true'])
+        # Deleted or cancelled, on any table. A deleted or disabled thing is left out only where it is counted or
+        # listed itself; a cancelled one goes with its lines; a status is kept when the question asks by it.
+        joined = ('; left out only when counting or listing {}: joined from another table to reach a name, city or '
+                  'region, keep them')
+        self.assertEqual(marks('customers', 'id', 'deleted_at'),
+                         ['  - customers: deleted_at set' + joined.format('customers')])
+        self.assertEqual(marks('customers', 'id', 'is_deleted'),
+                         ['  - customers: is_deleted true' + joined.format('customers')])
+        self.assertEqual(marks('notes', 'id', 'isDeleted'), ['  - notes: isDeleted true' + joined.format('notes')])
         self.assertEqual(marks('orders', 'id', 'cancelled_at'), ['  - orders: cancelled_at set'])
         self.assertEqual(marks('orders', 'id', 'status', seen={'status': ['delivered', 'Cancelled']}),
-                         ["  - orders: status 'Cancelled'"])
+                         ["  - orders: status 'Cancelled' (unless the question asks by status)"])
         self.assertEqual(marks('payments', 'id', 'status', seen={'status': ['captured', 'failed']}),
-                         ["  - payments: status 'failed'"])
+                         ["  - payments: status 'failed' (unless the question asks by status)"])
         # Disabled, inactive or left: only for people and their logins, and by the values that say so.
-        self.assertEqual(marks('auth_user', 'id', 'is_active'), ['  - auth_user: is_active false'])
+        self.assertEqual(marks('auth_user', 'id', 'is_active'),
+                         ['  - auth_user: is_active false' + joined.format('auth_user')])
         self.assertEqual(marks('employees', 'id', 'employment_status',
                                seen={'employment_status': ['active', 'probation', 'offboarded']}),
-                         ["  - employees: employment_status 'offboarded'"])
+                         ["  - employees: employment_status 'offboarded' (unless the question asks by employment_status)"
+                          + joined.format('employees')])
         for table, names, seen in (('products', ('id', 'is_active'), None), ('companies', ('id', 'is_active'), None),
                                    ('schools', ('id', 'status'), {'status': ['Active', 'Closed', 'Merged']}),
                                    ('tickets', ('id', 'status'), {'status': ['open', 'closed', 'resolved']}),
@@ -345,10 +352,11 @@ class RowsThatNoLongerCount(NotesCase):
         self.assertEqual(body['data']['rows'], [[160.0]])
         query = ' '.join(fake.prompts[0].split())
         self.assertIn("Some rows no longer count, and are left out even when the question doesn't say so", query)
-        self.assertIn("Here they are marked by: - orders: status 'cancelled'", query)
+        self.assertIn("Here they are marked by: - orders: status 'cancelled' (unless the question asks by status)", query)
         self.assertIn('What they did (their orders, payments, meetings, tasks) still counts: never filter a table that '
                       'is joined only to reach their name, region or segment', query)
-        self.assertIn('every other value counts (closed, completed, on probation, discontinued)', query)
+        self.assertIn('every other value counts (closed, completed, on probation, discontinued). Asked by the column '
+                      'that marks them ("orders in each status", "employees by employment status")', query)
 
         # Closed tickets are finished, not gone: no rule.
         source = self.shop("""
