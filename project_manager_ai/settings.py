@@ -578,6 +578,10 @@ LOCAL_STORAGE_ROOT = MEDIA_ROOT
 DATA_ANALYST_SERVER_IP = os.environ.get('DATA_ANALYST_SERVER_IP', '187.7.18.101').strip()
 DATA_ANALYST_BLOCKED_IPS = os.environ.get('DATA_ANALYST_BLOCKED_IPS', '').strip()
 DATA_ANALYST_MAX_FILE_MB = int(os.environ.get('DATA_ANALYST_MAX_FILE_MB', '500'))
+# The OpenAI model that writes the query for a harder question (a first-ever, a time window, a long question, or a
+# retry); every other AI call keeps OPENAI_MODEL. Empty: none.
+# Only for companies on an OpenAI key (18 Nov 2026).
+DATA_ANALYST_COMPLEX_MODEL = os.environ.get('DATA_ANALYST_COMPLEX_MODEL', 'gpt-4.1').strip()
 
 
 # --------------------

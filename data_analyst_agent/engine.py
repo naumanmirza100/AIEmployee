@@ -17,6 +17,7 @@ import re
 import time
 from collections import namedtuple
 
+from django.conf import settings
 from django.utils import timezone
 
 from core.api_key_service import KeyServiceError
@@ -176,8 +177,8 @@ _WITHIN_WORDS = re.compile(r'\bwithin\s+(\d+|an?|one|two|three|seven|thirty|nine
                            re.I)
 _SITUATIONS = {
     'notes': """- Follow the notes on what a column means and how to work with it (its currency, what an empty value means, how to
-  convert it). A note that some rows are usually left out is a default: when the question says what to leave out,
-  leave out only that.
+  convert it). Leave rows out only where the question says to: a note that some rows are usually, or should be, left
+  out (cancelled orders, deleted customers) applies only when the question says nothing about what to leave out.
 """,
     'currency': """- Amounts beside a currency column are in that currency. For a total in one currency, convert each amount at the rate
   of its own date (the order's, the payment's) unless the question names another, with the exchange-rate table or a
@@ -352,6 +353,8 @@ Write the answer plainly, in the language of the question:
   say what the rows shown say, and that there are more.
 - An empty result, or a total that came back empty: say nothing matched the query's conditions, naming the condition
   that matched nothing when one stands out. Never call it zero.
+- When the query leaves out rows the question doesn't mention (cancelled orders, deleted records, a status or a
+  segment), say so in a few words in the first sentence, so the reader can ask again without it.
 - Don't explain the SQL. Under 120 words. No heading."""
 
 
@@ -508,16 +511,39 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
     values, notes = values or {}, notes or {}
     listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name'])),
                                    notes=notes.get(t['name'].lower())) for t in tables)
+    situations = _situations(tables, question, notes)
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
                          source_name=str(source.name or '').replace('"', "'")[:120],
-                         situational=''.join(_SITUATIONS[key] for key in _situations(tables, question, notes)),
+                         situational=''.join(_SITUATIONS[key] for key in situations),
                          tables=listed or '(none)', history=history,
                          question=question, previous=previous,
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')
-    out = _json(ai._call_llm(prompt=prompt, system_prompt='You write SQL. Output only one JSON object.',
-                             temperature=0, max_tokens=1200, json_mode=True))
+    # A harder question has its query written by the stronger model (on an OpenAI key); everything else stays.
+    complex_model = getattr(settings, 'DATA_ANALYST_COMPLEX_MODEL', '') or None
+    ai.openai_model = complex_model if _complex(question, situations, bool(previous)) else None
+    try:
+        out = _json(ai._call_llm(prompt=prompt, system_prompt='You write SQL. Output only one JSON object.',
+                                 temperature=0, max_tokens=1200, json_mode=True))
+    finally:
+        ai.openai_model = None
     return {'sql': str(out.get('sql') or '').strip(), 'ask_back': str(out.get('ask_back') or '').strip()[:500],
             'chart': out.get('chart')}
+
+
+# ---- Which questions get the stronger model for their query (18 Nov 2026) ----------------------------------------
+# Measured on the Meridian questions, five runs each: gpt-4.1 got the first-ever cohort question right 5 times in 5,
+# gpt-4.1-mini 0 to 2; on the currency questions (revenue, a tier's orders, suppliers) mini was right 5 of 5 and
+# gpt-4.1 slipped on the suppliers twice (revenue left unconverted); simple questions came out the same on both, at a
+# fifth of the price. So a query goes to DATA_ANALYST_COMPLEX_MODEL only for a question asking for a first-ever or a
+# time window, a long question, or a second try after a failed query. Read from the question: on a database of 30
+# tables or fewer every table goes to the AI, so table-based signals would make every question "harder".
+COMPLEX_QUESTION_CHARS = 300
+
+
+def _complex(question, situations, retry=False) -> bool:
+    if retry or len(question) > COMPLEX_QUESTION_CHARS:
+        return True
+    return bool({'first_ever', 'window'} & set(situations))
 
 
 _UNION_SORT_ERRORS = ('order by term does not match any column in the result set',      # SQLite

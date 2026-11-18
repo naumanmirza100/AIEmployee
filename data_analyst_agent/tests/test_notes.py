@@ -194,6 +194,74 @@ class RulesOnlyWhenTheyApply(NotesCase):
         self.assertNotIn('window', engine._situations([tree], 'Orders in the last 90 days', {}))
 
 
+class ModelSeeingAI(FakeAI):
+    """Records the model each call asked for (None: the agent's usual one)."""
+
+    def __init__(self, *replies):
+        super().__init__(*replies)
+        self.models = []
+
+    def _call_llm(self, prompt, system_prompt=None, **kwargs):
+        self.models.append(getattr(self, 'openai_model', None))
+        return super()._call_llm(prompt, system_prompt, **kwargs)
+
+
+class TheStrongerModelForHarderQuestions(NotesCase):
+    """18 Nov 2026: a harder question's query is written by DATA_ANALYST_COMPLEX_MODEL (gpt-4.1); every other call,
+    and every simple question, keeps the usual model."""
+    SQL = {'sql': 'SELECT COUNT(order_id) AS orders FROM orders'}
+
+    def test_a_first_ever_or_time_window_question_gets_it_for_the_query_only(self):
+        source = self.retail()
+        for question in ("How many customers' first ever order was in 2025?",
+                         'How many customers ordered again within 90 days?'):
+            fake = ModelSeeingAI(self.SQL, '2 orders.')
+            self.ask(self.admin, source, question, fake)
+            self.assertEqual(fake.models, ['gpt-4.1', None])              # the query, then the answer
+            self.assertIsNone(getattr(fake, 'openai_model', None))
+
+    def test_a_simple_or_money_question_keeps_the_usual_model(self):
+        source = self.retail()
+        for question in ('How many customers are there?', 'What was our revenue in USD last quarter?'):
+            fake = ModelSeeingAI(self.SQL, '6 customers.')
+            self.ask(self.admin, source, question, fake)
+            self.assertEqual(fake.models, [None, None])
+
+    def test_a_second_try_gets_it_and_the_setting_can_turn_it_off(self):
+        source = self.retail()
+        fake = ModelSeeingAI({'sql': 'SELECT nothing FROM orders'}, self.SQL, '2 orders.')
+        self.ask(self.admin, source, 'How many customers are there?', fake)
+        self.assertEqual(fake.models, [None, 'gpt-4.1', None])            # the failed query was tried again
+        with self.settings(DATA_ANALYST_COMPLEX_MODEL=''):
+            fake = ModelSeeingAI(self.SQL, '2 orders.')
+            self.ask(self.admin, source, 'How many customers ordered again within 90 days?', fake)
+        self.assertEqual(fake.models, [None, None])
+
+    def test_the_rules_on_leaving_rows_out(self):
+        source = self.retail()
+        fake = ModelSeeingAI(self.SQL, '2 orders.')
+        self.ask(self.admin, source, 'How many orders did customers place?', fake)
+        query, answer = (' '.join(p.split()) for p in fake.prompts)
+        self.assertIn('Leave rows out only where the question says to', query)
+        self.assertIn("When the query leaves out rows the question doesn't mention", answer)
+
+    def test_the_shared_call_uses_the_asked_model_only_on_an_openai_key(self):
+        from project_manager_agent.ai_agents.base_agent import BaseAgent
+        agent = BaseAgent()
+        agent.company_id, agent.agent_key_name = self.company.pk, 'data_analyst_agent'
+        for provider, asked, used in (('openai', 'gpt-4.1', 'gpt-4.1'), ('openai', None, 'gpt-4.1-mini'),
+                                      ('groq', 'gpt-4.1', agent.model)):
+            client = mock.Mock()
+            client.chat.completions.create.return_value = mock.Mock(
+                choices=[mock.Mock(message=mock.Mock(content='ok'))], usage=None)
+            agent.openai_model = asked
+            with self.subTest(provider=provider, asked=asked), \
+                 mock.patch.object(agent, '_resolve_company_client', return_value=(client, mock.Mock(provider=provider))), \
+                 self.settings(OPENAI_MODEL='gpt-4.1-mini'):
+                agent._call_llm('Hello?')
+                self.assertEqual(client.chat.completions.create.call_args.kwargs['model'], used)
+
+
 class SortingAUnion(NotesCase):
 
     def test_a_union_sorted_by_an_expression_is_sorted_outside_it(self):

@@ -23,6 +23,7 @@ _PRICE_PER_MTOK = {
     'llama-3.1-70b-versatile': (0.59, 0.79),
     'mixtral-8x7b-32768': (0.24, 0.24),
     'gemma2-9b-it': (0.20, 0.20),
+    'gpt-4.1': (2.00, 8.00),
 }
 _DEFAULT_PRICE_PER_MTOK = (0.50, 0.50)
 
@@ -175,8 +176,10 @@ class BaseAgent:
         client, key_ctx = self._resolve_company_client()
         if client is not None:
             call_client = client
+            # openai_model: an agent may ask for another OpenAI model for one call (the Data Analyst's harder
+            # questions, 18 Nov 2026); unset, every call uses OPENAI_MODEL as before.
             effective_model = (
-                getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+                (getattr(self, 'openai_model', None) or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini'))
                 if key_ctx.provider == 'openai'
                 else self.model
             )
