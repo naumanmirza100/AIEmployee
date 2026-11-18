@@ -189,6 +189,9 @@ class RulesOnlyWhenTheyApply(NotesCase):
                          ['currency', 'rates', 'signed', 'first_ever'])
         self.assertEqual(engine._situations([payments], 'Payments last month', {'payments': {'amount': 'In cents'}}),
                          ['notes', 'currency', 'rates', 'signed'])
+        # "Within 90 days" counts the same day: shown only for a question with a time window (18 Nov 2026).
+        self.assertIn('window', engine._situations([tree], 'How many ordered again within 90 days of the first?', {}))
+        self.assertNotIn('window', engine._situations([tree], 'Orders in the last 90 days', {}))
 
 
 class SortingAUnion(NotesCase):

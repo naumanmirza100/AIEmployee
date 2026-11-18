@@ -39,6 +39,18 @@ const TABS = [
 const panel = 'rounded-xl border border-border bg-[var(--panel-2)]';
 const field = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-violet-400';
 
+// A database file over the size the server takes is said plainly before it is sent. Sent anyway, the refusal reached
+// the screen as "Failed to connect to server" (18 Nov 2026: a 125.6 MB file while the web server took 50 MB).
+const tooBig = (file, setup) => {
+  const most = Number(setup?.max_file_mb) || 500;
+  return file && file.size > most * 1048576
+    ? `${file.name} is ${(file.size / 1048576).toFixed(1)} MB; a database file may be up to ${most} MB. For a bigger database, connect to it instead (PostgreSQL, MySQL / MariaDB, SQL Server or MongoDB).`
+    : '';
+};
+const uploadFailed = (e) => (e?.isNetworkError
+  ? 'The file did not reach our server. Check the connection and try again: a large file can take a few minutes to send.'
+  : e?.message || 'The file could not be added.');
+
 function ResultTable({ columns, rows, more }) {
   if (!columns?.length) return null;
   return (
@@ -273,6 +285,11 @@ function AskTab({ setup, sources, reload }) {
 
   const upload = async (file) => {
     if (!file) return;
+    if (tooBig(file, setup)) {
+      setError(tooBig(file, setup)); setNote('');
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
     setUploading(true); setError(''); setNote('');
     try {
       const name = file.name.replace(/\.(sql\.gz|sqlite3|sqlite|db3|db|sql|gz)$/i, '') || file.name;
@@ -289,7 +306,7 @@ function AskTab({ setup, sources, reload }) {
         setError(added?.last_error || res?.message || 'The file could not be read.');
       }
     } catch (e) {
-      setError(e?.message || 'The file could not be added.');
+      setError(uploadFailed(e));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -562,8 +579,14 @@ function AddDatabase({ setup, logins, onAdded }) {
     return extras;
   };
 
+  const bigFile = mode === 'sqlite' ? tooBig(file, setup) : '';
+
   const submit = async (event) => {
     event.preventDefault();
+    if (bigFile) {
+      setMessage({ ok: false, text: bigFile });
+      return;
+    }
     setBusy(true); setMessage(null);
     const shared = { name: form.name, send_rows_to_ai: sendRows, everyone_may_ask: everyone, allowed_user_ids: everyone ? [] : allowed };
     try {
@@ -583,7 +606,7 @@ function AddDatabase({ setup, logins, onAdded }) {
         setMoved(false);
       }
     } catch (e) {
-      setMessage({ ok: false, text: e?.message || 'It could not be added.' });
+      setMessage({ ok: false, text: mode === 'sqlite' ? uploadFailed(e) : e?.message || 'It could not be added.' });
     } finally {
       setBusy(false);
     }
@@ -599,11 +622,14 @@ function AddDatabase({ setup, logins, onAdded }) {
       </div>
       <input className={field} placeholder="A name, e.g. Shop database" value={form.name} onChange={set('name')} aria-label="Name" />
       {mode === 'sqlite' ? (
-        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-          <FileUp className="h-5 w-5" />
-          <span>{file ? `${file.name} (${(file.size / 1048576).toFixed(1)} MB)` : `Choose a SQLite file, or a .sql dump from MySQL, PostgreSQL, SQLite or SQL Server (.sql or .sql.gz), up to ${setup?.max_file_mb || 500} MB`}</span>
-          <input type="file" className="hidden" accept=".db,.sqlite,.sqlite3,.db3,.sql,.gz" onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="analyst-file" />
-        </label>
+        <>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+            <FileUp className="h-5 w-5" />
+            <span>{file ? `${file.name} (${(file.size / 1048576).toFixed(1)} MB)` : `Choose a SQLite file, or a .sql dump from MySQL, PostgreSQL, SQLite or SQL Server (.sql or .sql.gz), up to ${setup?.max_file_mb || 500} MB`}</span>
+            <input type="file" className="hidden" accept=".db,.sqlite,.sqlite3,.db3,.sql,.gz" onChange={(e) => { setFile(e.target.files?.[0] || null); setMessage(null); }} data-testid="analyst-file" />
+          </label>
+          {bigFile && <p className="text-sm text-red-300" data-testid="analyst-file-too-big">{bigFile}</p>}
+        </>
       ) : (
         <>
           <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-3 text-xs text-violet-100">
@@ -664,7 +690,7 @@ function AddDatabase({ setup, logins, onAdded }) {
         </div>
       )}
       {message && <p className={`text-sm ${message.ok ? 'text-emerald-300' : 'text-red-300'}`} data-testid="analyst-add-message">{message.text}</p>}
-      <Button type="submit" disabled={busy || portBad || (mode === 'sqlite' && !file) || (mode === 'mongodb' && !form.connection_string.trim())}>
+      <Button type="submit" disabled={busy || portBad || Boolean(bigFile) || (mode === 'sqlite' && !file) || (mode === 'mongodb' && !form.connection_string.trim())}>
         {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />} Add and test
       </Button>
     </form>
