@@ -174,7 +174,7 @@ class RulesOnlyWhenTheyApply(NotesCase):
         prompt = ' '.join(fake.prompts[0].split())
         for rule in ('Follow the notes', 'convert each amount at the rate', 'joining on the same date',
                      'whose period covers it', 'Subtracting them again', 'UNION ALL inside a subquery',
-                     'with no period condition', 'recursive CTE'):
+                     'with no period condition', 'recursive CTE', 'Some rows no longer count'):
             self.assertNotIn(rule, prompt)
         self.assertIn('Joining on a column many rows share', prompt)       # the general rules stay
 
@@ -242,7 +242,8 @@ class TheStrongerModelForHarderQuestions(NotesCase):
         fake = ModelSeeingAI(self.SQL, '2 orders.')
         self.ask(self.admin, source, 'How many orders did customers place?', fake)
         query, answer = (' '.join(p.split()) for p in fake.prompts)
-        self.assertIn('Leave rows out only where the question says to', query)
+        self.assertIn('a note that rows of some kind are usually left out of a figure (a segment, a channel, internal '
+                      'accounts) applies only when the question says so', query)
         self.assertIn("When the query leaves out rows the question doesn't mention", answer)
 
     def test_the_shared_call_uses_the_asked_model_only_on_an_openai_key(self):
@@ -284,3 +285,84 @@ class SortingAUnion(NotesCase):
         self.assertEqual(body['data']['rows'], [['PK', 3], ['GB', 2], ['AE', 1], ['Grand total', 6]])
         self.assertEqual(len(fake.prompts), 2)           # turned around without asking the AI again
         self.assertTrue(DataQuestion.objects.get().sql.startswith('SELECT * FROM (WITH t AS'))
+
+
+class RowsThatNoLongerCount(NotesCase):
+    """18 Nov 2026: cancelled orders, deleted records and disabled accounts are left out unless the question asks for
+    them. The rule is shown only for tables that have such rows; closed, completed or discontinued ones still count."""
+
+    def shop(self, script):
+        path = os.path.join(self.storage, 'shop.sqlite')
+        conn = sqlite3.connect(path)
+        conn.executescript(script)
+        conn.commit()
+        conn.close()
+        with open(path, 'rb') as fh:
+            content = fh.read()
+        os.remove(path)
+        request = self.factory.post('/', {'name': 'Shop', 'file': SimpleUploadedFile('shop.db', content)},
+                                    format='multipart')
+        force_authenticate(request, user=self.admin)
+        response = views.sources(request)
+        response.render()
+        self.assertEqual(response.status_code, 201, response.content)
+        return DataSource.objects.get(pk=json.loads(response.content)['data']['id'])
+
+    def test_the_marks_are_read_from_the_columns_and_the_values(self):
+        def marks(table, *names, seen=None):
+            t = {'name': table, 'columns': [{'name': n} for n in names]}
+            return engine._dead_marks([t], {('', table): seen} if seen else None)
+        # Deleted or cancelled, on any table.
+        self.assertEqual(marks('customers', 'id', 'deleted_at'), ['  - customers: deleted_at set'])
+        self.assertEqual(marks('customers', 'id', 'is_deleted'), ['  - customers: is_deleted true'])
+        self.assertEqual(marks('notes', 'id', 'isDeleted'), ['  - notes: isDeleted true'])
+        self.assertEqual(marks('orders', 'id', 'cancelled_at'), ['  - orders: cancelled_at set'])
+        self.assertEqual(marks('orders', 'id', 'status', seen={'status': ['delivered', 'Cancelled']}),
+                         ["  - orders: status 'Cancelled'"])
+        self.assertEqual(marks('payments', 'id', 'status', seen={'status': ['captured', 'failed']}),
+                         ["  - payments: status 'failed'"])
+        # Disabled, inactive or left: only for people and their logins, and by the values that say so.
+        self.assertEqual(marks('auth_user', 'id', 'is_active'), ['  - auth_user: is_active false'])
+        self.assertEqual(marks('employees', 'id', 'employment_status',
+                               seen={'employment_status': ['active', 'probation', 'offboarded']}),
+                         ["  - employees: employment_status 'offboarded'"])
+        for table, names, seen in (('products', ('id', 'is_active'), None), ('companies', ('id', 'is_active'), None),
+                                   ('schools', ('id', 'status'), {'status': ['Active', 'Closed', 'Merged']}),
+                                   ('tickets', ('id', 'status'), {'status': ['open', 'closed', 'resolved']}),
+                                   ('products', ('id', 'status'), {'status': ['inactive']}),
+                                   ('t', ('id', 'closed_at', 'discontinued_date', 'active_users', 'deleted_by_note'),
+                                    None)):
+            self.assertEqual(marks(table, *names, seen=seen), [], (table, names))
+
+    def test_a_question_on_such_a_table_gets_the_rule(self):
+        source = self.shop("""
+            CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT, total REAL);
+            INSERT INTO orders VALUES (1, 'delivered', 100), (2, 'cancelled', 40), (3, 'delivered', 60);""")
+        fake = FakeAI({'sql': "SELECT SUM(total) AS total FROM orders WHERE status != 'cancelled'"},
+                      'The orders come to 160, leaving out cancelled orders.')
+        code, body = self.ask(self.admin, source, 'What do our orders come to?', fake)
+        self.assertEqual(body['data']['status'], 'answered', body)
+        self.assertEqual(body['data']['rows'], [[160.0]])
+        query = ' '.join(fake.prompts[0].split())
+        self.assertIn("Some rows no longer count, and are left out even when the question doesn't say so", query)
+        self.assertIn("Here they are marked by: - orders: status 'cancelled'", query)
+        self.assertIn('What they did (their orders, payments, meetings, tasks) still counts: never filter a table that '
+                      'is joined only to reach their name, region or segment', query)
+        self.assertIn('every other value counts (closed, completed, on probation, discontinued)', query)
+
+        # Closed tickets are finished, not gone: no rule.
+        source = self.shop("""
+            CREATE TABLE tickets (id INTEGER PRIMARY KEY, status TEXT);
+            INSERT INTO tickets VALUES (1, 'open'), (2, 'closed');""")
+        fake = FakeAI({'sql': 'SELECT COUNT(id) AS tickets FROM tickets'}, '2 tickets.')
+        self.ask(self.admin, source, 'How many tickets are there?', fake)
+        self.assertNotIn('Some rows no longer count', fake.prompts[0])
+
+    def test_a_mongodb_collection_gets_it_too(self):
+        users = {'name': 'users', 'columns': [{'name': '_id', 'type': 'objectId'}, {'name': 'isDeleted', 'type': 'bool'}]}
+        plain = {'name': 'users', 'columns': [{'name': '_id', 'type': 'objectId'}, {'name': 'name', 'type': 'string'}]}
+        for collection, shown in ((users, True), (plain, False)):
+            fake = FakeAI({'collection': 'users', 'pipeline': [{'$count': 'users'}]})
+            engine._write_aggregation(fake, None, 'How many users are there?', '', [collection])
+            self.assertEqual('Some rows no longer count' in fake.prompts[0], shown)
+            self.assertEqual('- users: isDeleted true' in fake.prompts[0], shown)
