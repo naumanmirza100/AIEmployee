@@ -175,10 +175,33 @@ _FIRST_WORDS = re.compile(r'\b(first|earliest|new (customers?|users?|members?|cl
                           r'repeat|returning|retention|churn)\b', re.I)
 _WITHIN_WORDS = re.compile(r'\bwithin\s+(\d+|an?|one|two|three|seven|thirty|ninety)\s+(days?|weeks?|months?|hours?)\b',
                            re.I)
+# Rows that no longer count (18 Nov 2026): cancelled orders, deleted records, disabled accounts and people who have
+# left are left out unless the question asks for them. Which columns and values mark them is worked out here and named
+# in the rule, table by table: told only in general, the AI kept one 'active' value (dropping people on probation),
+# and stretched it to companies and to a disabled user's meetings. Deleted and cancelled marks count on any table;
+# disabled, inactive and left only on tables of people and their logins (a product's is_active is on sale or not).
+_DELETED_COLUMN = re.compile(r'^(is_?)?(deleted|removed|cancell?ed|voided)(_?at|_?on|_?date|_?flag)?$', re.I)
+_OFF_COLUMN = re.compile(r'^(is_?)?(disabled|deactivated)(_?at|_?on|_?date|_?flag)?$', re.I)
+_ON_COLUMN = re.compile(r'^(is_?)?(active|enabled)$', re.I)
+_GONE_VALUE = re.compile(r'^(cancell?ed|void(ed)?|deleted|removed|failed|declined)$', re.I)
+_OFF_VALUE = re.compile(r'^(disabled|deactivated|inactive|terminated|offboarded)$', re.I)
+_PEOPLE_TABLE = re.compile(r'(user|employee|staff|member|person|people|login|worker)', re.I)
+_WHEN_COLUMN = re.compile(r'(_?at|_?on|_?date)$', re.I)
+_LIVE = """- Some rows no longer count, and are left out even when the question doesn't say so:
+  - a cancelled or failed order, booking, meeting or payment is left out, with its own lines;
+  - a deleted or disabled customer, user or employee is left out only where they themselves are counted or listed.
+    What they did (their orders, payments, meetings, tasks) still counts: never filter a table that is joined only to
+    reach their name, region or segment.
+  Here they are marked by:
+{marks}
+  Leave out just those values (a status with NOT IN; an empty status counts); every other value counts (closed,
+  completed, on probation, discontinued). When the question names them ("cancelled orders", "including deleted
+  users", "active or not") or asks by status, count them as it says.
+"""
 _SITUATIONS = {
     'notes': """- Follow the notes on what a column means and how to work with it (its currency, what an empty value means, how to
-  convert it). Leave rows out only where the question says to: a note that some rows are usually, or should be, left
-  out (cancelled orders, deleted customers) applies only when the question says nothing about what to leave out.
+  convert it). Apart from rows that no longer count (cancelled, deleted, disabled), a note that rows of some kind are
+  usually left out of a figure (a segment, a channel, internal accounts) applies only when the question says so.
 """,
     'currency': """- Amounts beside a currency column are in that currency. For a total in one currency, convert each amount at the rate
   of its own date (the order's, the payment's) unless the question names another, with the exchange-rate table or a
@@ -219,13 +242,43 @@ def _has_currency(tables) -> bool:
     return any(_CURRENCY_COLUMN.search(str(c['name'])) for t in tables for c in t.get('columns') or [])
 
 
-def _situations(tables, question, notes) -> list:
+def _dead_marks(tables, values=None) -> list:
+    """What marks the rows that no longer count, one line per table: "  - orders: status 'cancelled'"."""
+    values, lines = values or {}, []
+    for t in tables:
+        people = bool(_PEOPLE_TABLE.search(t['name']))
+        marks = []
+        for c in t.get('columns') or []:
+            name = str(c['name'])
+            if _DELETED_COLUMN.match(name) or (people and _OFF_COLUMN.match(name)):
+                marks.append(f"{name} {'set' if _WHEN_COLUMN.search(name) else 'true'}")
+            elif people and _ON_COLUMN.match(name):
+                marks.append(f'{name} false')
+        seen = values.get((t.get('schema') or '', t['name'])) or {}
+        for column, vs in seen.items():
+            gone = [v for v in vs or [] if _GONE_VALUE.match(str(v).strip())
+                    or (people and _OFF_VALUE.match(str(v).strip()))]
+            if gone:
+                marks.append(f"{column} {', '.join(repr(v) for v in gone)}")
+        if marks:
+            lines.append(f"  - {_table_key(t)}: {'; '.join(marks)}")
+    return lines
+
+
+def _live_rule(tables, values=None) -> str:
+    marks = _dead_marks(tables, values)
+    return _LIVE.format(marks='\n'.join(marks)) if marks else ''
+
+
+def _situations(tables, question, notes, values=None) -> list:
     """The situational rules that apply to these tables and this question, by key."""
     names = {t['name'].lower() for t in tables}
     texts = ' '.join(text for t in names for text in (notes.get(t) or {}).values()).lower()
     found = []
     if texts:
         found.append('notes')
+    if _dead_marks(tables, values):
+        found.append('live')
     if _has_currency(tables):
         found.append('currency')
     if 'currency' in found or any(_RATE_TABLE.search(t['name']) for t in tables):
@@ -270,8 +323,8 @@ Rules:
 - Count rows by the counted table's own id (COUNT(t.id)), also after a LEFT JOIN: COUNT of another column leaves out
   the rows where it is empty (COUNT(contact_id) misses the tickets without a contact), and COUNT(*) after a LEFT JOIN
   counts the empty row.
-- Add no condition the question doesn't ask for (only active ones, only a period or a kind): when it doesn't say,
-  count them all.
+- Add no condition the question doesn't ask for (only active products, only a period or a kind): when it doesn't
+  say, count them all.
 - The business's own name in the question (as in "Acme's revenue", or "our orders") means all of its data, not a
   filter on a store, brand or customer with that name, unless the question says so.
 - Compare a timestamp with a date by its date part: as text, '2024-05-03 10:00:00' comes after '2024-05-03'.
@@ -321,9 +374,9 @@ Rules:
   group by both together.
 - Count documents with {{"$sum": 1}} (or $count): counting a field leaves out the documents where it is missing.
   To count different values ($addToSet, then $size), leave out the missing and null ones first.
-- Add no condition the question doesn't ask for (only active ones, only a period or a kind): when it doesn't say,
-  count them all.
-- Write a date as {{"$date": "2026-10-01T00:00:00Z"}} and an ObjectId as {{"$oid": "..."}}.
+- Add no condition the question doesn't ask for (only active products, only a period or a kind): when it doesn't
+  say, count them all.
+{live}- Write a date as {{"$date": "2026-10-01T00:00:00Z"}} and an ObjectId as {{"$oid": "..."}}.
 - A list gets at most 200 documents ($limit 200) unless the question asks for everything.
 - Work dates out from today ("last month", "this year").
 - When the collections can't answer it, or it is too unclear to write a query for, put one short sentence for the
@@ -354,7 +407,7 @@ Write the answer plainly, in the language of the question:
 - An empty result, or a total that came back empty: say nothing matched the query's conditions, naming the condition
   that matched nothing when one stands out. Never call it zero.
 - When the query leaves out rows the question doesn't mention (cancelled orders, deleted records, a status or a
-  segment), say so in a few words in the first sentence, so the reader can ask again without it.
+  segment), say so in a few words in the first sentence, so the reader can ask again to include them.
 - Don't explain the SQL. Under 120 words. No heading."""
 
 
@@ -489,7 +542,8 @@ def _write_aggregation(ai, source, question, history, tables, previous='', value
     values = values or {}
     listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name']))) for t in tables)
     prompt = _MONGO.format(today=timezone.localdate().isoformat(), history=history, question=question,
-                           previous=previous, tables=listed or '(none)')
+                           previous=previous, tables=listed or '(none)',
+                           live=_live_rule(tables, values))
     out = _json(ai._call_llm(prompt=prompt, system_prompt='You write MongoDB aggregations. Output only one JSON object.',
                              temperature=0, max_tokens=1500, json_mode=True))
     ask_back = str(out.get('ask_back') or '').strip()[:500]
@@ -511,10 +565,11 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
     values, notes = values or {}, notes or {}
     listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name'])),
                                    notes=notes.get(t['name'].lower())) for t in tables)
-    situations = _situations(tables, question, notes)
+    situations = _situations(tables, question, notes, values)
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
                          source_name=str(source.name or '').replace('"', "'")[:120],
-                         situational=''.join(_SITUATIONS[key] for key in situations),
+                         situational=''.join(_live_rule(tables, values) if key == 'live' else _SITUATIONS[key]
+                                             for key in situations),
                          tables=listed or '(none)', history=history,
                          question=question, previous=previous,
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')
