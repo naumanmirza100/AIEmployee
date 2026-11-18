@@ -172,6 +172,8 @@ _SIGNED_TABLE = re.compile(r'(payment|refund|chargeback|transaction|ledger|credi
 _TOTAL_WORDS = re.compile(r'\b(grand|overall|sub-?totals?|totals|in total|all together|altogether)\b', re.I)
 _FIRST_WORDS = re.compile(r'\b(first|earliest|new (customers?|users?|members?|clients?|buyers?)|newly|cohorts?|'
                           r'repeat|returning|retention|churn)\b', re.I)
+_WITHIN_WORDS = re.compile(r'\bwithin\s+(\d+|an?|one|two|three|seven|thirty|ninety)\s+(days?|weeks?|months?|hours?)\b',
+                           re.I)
 _SITUATIONS = {
     'notes': """- Follow the notes on what a column means and how to work with it (its currency, what an empty value means, how to
   convert it). A note that some rows are usually left out is a default: when the question says what to leave out,
@@ -203,6 +205,8 @@ _SITUATIONS = {
   that step (MIN over every row), then keep those whose first falls in the period asked. A period condition inside the
   first step turns the first one in the period into the first ever.
 """,
+    'window': """- "Within N days of" something counts from its own day: another one on the same day is within 0 days.
+""",
     'tree': """- A table that points at itself (parent_id -> the same table) is a tree that can be several levels deep: to reach the
   top level, or everything under one, walk it with a recursive CTE (WITH RECURSIVE; in SQL Server a plain WITH). One
   join reaches only the next level.
@@ -233,6 +237,8 @@ def _situations(tables, question, notes) -> list:
         found.append('total_row')
     if _FIRST_WORDS.search(question):
         found.append('first_ever')
+    if _WITHIN_WORDS.search(question):
+        found.append('window')
     if any(str(fk.get('references') or '').split('(')[0].strip().lower() == t['name'].lower()
            for t in tables for fk in t.get('fks') or []):
         found.append('tree')
