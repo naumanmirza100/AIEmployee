@@ -460,3 +460,17 @@ class WhatTheDatabaseLooksLike(NotesCase):
         self.assertGreaterEqual(engine.SQL_TOKENS, 3000)
         self.assertIn('The walk has a row for every level it passes: keep only the row you need',
                       ' '.join(engine._SITUATIONS['tree'].split()))
+
+    def test_the_next_try_sees_the_whole_failed_query(self):
+        source = self.shop(self.SHOP)
+        long_query = ('SELECT ' + ', '.join(f'invoice_id AS c{i}' for i in range(300))
+                      + ' FROM billing_invoices JOIN no_such_table USING (invoice_id)')
+        self.assertGreater(len(long_query), 3000)
+        fake = FakeAI({'sql': long_query}, self.SQL, '2 invoices.')
+        code, body = self.ask(self.admin, source, 'How many invoices are there?', fake)
+        self.assertEqual(body['data']['status'], 'answered', body)
+        retry = fake.prompts[1]
+        self.assertIn('JOIN no_such_table USING (invoice_id)', retry)     # the end of the query, past 1,500 characters
+        self.assertIn('find where in it the error comes from and change that', retry)
+        # And a repeat within N days is another row, never the first itself (19 Nov: 100% repeat, twice).
+        self.assertIn('the first is never its own second', ' '.join(engine._SITUATIONS['window'].split()))
