@@ -50,6 +50,10 @@ ASK_SECONDS = 50
 RETRY_SECONDS = 15      # a second try needs about 8 seconds to write and some time to run
 QUERY_MIN_SECONDS = 5
 QUERY_TRIES = 3         # a query and up to two corrected ones, while there is time (two until 17 Nov 2026)
+# How much of a failed query the next try sees: all of it, up to about the longest the AI writes (SQL_TOKENS). Until
+# 19 Nov 2026 it saw the first 1,500 characters; a 3,000-character query (Lumora's retention question) failed with
+# "ambiguous column name: account_id" where it was cut off, and the next try wrote the same again.
+RETRY_QUERY_CHARS = 12000
 
 _Fact = namedtuple('_Fact', 'text')
 _THOUSANDS = re.compile(r'(?<=\d)[,  ](?=\d{3}(?!\d))')
@@ -271,7 +275,8 @@ _SITUATIONS = {
   that step (MIN over every row), then keep those whose first falls in the period asked. A period condition inside the
   first step turns the first one in the period into the first ever.
 """,
-    'window': """- "Within N days of" something counts from its own day: another one on the same day is within 0 days.
+    'window': """- "Within N days of" something counts from its own day: another one on the same day is within 0 days. The other
+  one is a different row: the first is never its own second (o2.id <> first.id), or every one counts as repeated.
 """,
     'tree': """- A table that points at itself (parent_id -> the same table) is a tree that can be several levels deep: to reach the
   top level, or everything under one, walk it with a recursive CTE (WITH RECURSIVE; in SQL Server a plain WITH). One
@@ -845,7 +850,8 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
             if connectors.timed_out(exc):
                 too_long = True
         sql = written['sql']
-        previous = f'\nYour last query was:\n{sql[:1500]}\nIt failed: {reason}\nWrite a corrected one.\n'
+        previous = (f'\nYour last query was:\n{sql[:RETRY_QUERY_CHARS]}\nIt failed: {reason}\nWrite a corrected one: '
+                    'find where in it the error comes from and change that, keeping the rest.\n')
         logger.info('data analyst: query %s failed (%s): %s', attempt, source.kind, reason[:200])
         # Another try while there is time to write one and run it. It used to need a whole QUERY_TIMEOUT left, so a
         # question that took 10 seconds to reach its first query never got one, even for a query refused at once
