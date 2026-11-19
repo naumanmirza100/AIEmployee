@@ -501,7 +501,7 @@ The query: {sql}
 
 Result: {count}. Columns: {columns}
 {rows}
-{chart}
+{chart}{doubt}
 Write the answer plainly, in the language of the question:
 - First one sentence that answers it, with the figure that answers it (the count, the total). Then, only if they
   help, up to five short bullets (the next ones, each with its own figure from the rows).
@@ -754,6 +754,144 @@ def _sorted_outside(sql: str) -> str:
     return f'SELECT * FROM ({head}) AS sorted_rows ORDER BY {tail}' if head and tail else ''
 
 
+# ---- The agent looks at its own result before answering (19 Nov 2026) -------------------------------------------
+# On the Meridian and Lumora test databases a query that ran could still be wrong in a way the result shows: amounts
+# added up in their own currencies when the database keeps a table of exchange rates ($378M where $1.1M was right),
+# every cohort's repeat rate 100% (each first order counted as its own repeat), counts five times too high (a join
+# that matched each ticket to five prices), a group that came back empty (a month written '2025-01' where the data
+# holds '2025-01-01'), names empty in every row (a join on the wrong key). Each is read from the result here, without
+# the AI. When one shows and there is time, the query is written once more with what looks wrong; the second result is
+# taken only when it no longer shows it. A doubt that remains is said in the answer. Only when the AI may see rows,
+# since the doubt names what the rows hold.
+# An AI reading the query for amounts left unconverted was tried too (the slips above that did read the rates): on
+# 15 right answers it named a problem in 11 that wasn't there, so it is not used.
+_RATE_NAME = re.compile(r'(rate|pct|percent|ratio|share|retention|conversion)', re.I)
+_MONEY_NAME = re.compile(r'(amount|revenue|sales|price|cost|profit|mrr|arr|spend|paid|income|margin|value|gross|'
+                         r'net|total_usd|usd|eur|gbp)', re.I)
+_NOT_MONEY = re.compile(r'(count|number|num_|qty|quantity|rate|pct|percent|ratio|share|days|hours|minutes|id$)',
+                        re.I)
+_CONVERTED = re.compile(r'\w*(_usd|usd_|_eur|_gbp|converted|_base\b|base_amount)\w*', re.I)
+_FX_TABLE = re.compile(r'(^|_)(fx|forex|exchange|exchange_rates?|currency_rates?|rates?)(_|$)', re.I)
+_COUNT_ALIAS = re.compile(r'\bcount\s*\((?:[^()]|\([^()]*\))*\)\s*(?:as\s+)?["`\[]?(\w+)', re.I)
+_COUNT_DOUBT_SECONDS = 5
+_TOTAL_LABEL = re.compile(r'^(grand\s+|sub-?)?totals?\b|^(all|overall|everyone|everything)$', re.I)
+
+
+def _number(value):
+    if value is None or value == '' or isinstance(value, bool):
+        return None
+    try:
+        return float(str(value).replace(',', ''))
+    except ValueError:
+        return None
+
+
+def _column(result, name):
+    at = result['columns'].index(name)
+    return [row[at] for row in result['rows']]
+
+
+def _doubt(source, question, sql, result, tables, situations, counts=True) -> str:
+    """What looks wrong in a result that ran, in a sentence for the AI, or ''. Read from the result alone, except the
+    row counts of the tables a too-high count is compared with (only with `counts`: they take a query each).
+    Never raises: a check that breaks is no doubt."""
+    try:
+        return _doubt_in(source, sql, result, tables, situations, counts)
+    except Exception:
+        logger.exception('data analyst: the result check failed')
+        return ''
+
+
+def _doubt_in(source, sql, result, tables, situations, counts) -> str:
+    columns, rows = result['columns'], result['rows']
+    if not rows:
+        return ('It returned no rows. Check that every value the query filters on is written as the data holds it '
+                '(a date or month in its full form, a status as spelled in the data).')
+    if len(rows) == 1 and all(v in (None, '') or _number(v) == 0 for v in rows[0]):
+        return ('Every figure in it is empty or zero. Check that every value the query filters on is written as the '
+                'data holds it (a date or month in its full form, a status as spelled in the data), and that its joins '
+                'match rows.')
+    if len(rows) >= 2:
+        for name in columns:
+            values = [_number(v) for v in _column(result, name)]
+            if _RATE_NAME.search(str(name)) and values and all(v is not None for v in values) \
+                    and len(set(values)) == 1 and values[0] in (1.0, 100.0):
+                return (f'{name} is {values[0]:g} in every row. Check that the part is not the whole: a row counted '
+                        'as its own match (the first order as its own repeat), or a condition that keeps everyone.')
+        first = columns[0]
+        if not _number_column(result, first) and all(v in (None, '') for v in _column(result, first)):
+            return (f'{first} is empty in every row. Check the join that brings it: the key it matches on, and that '
+                    'the table holding the names is joined.')
+    if 'currency' in situations and not any(re.search(r'currenc|ccy', str(c), re.I) for c in columns):
+        fx = [t['name'] for t in tables if _FX_TABLE.search(t['name'])]
+        money = [c for c in columns if _MONEY_NAME.search(str(c)) and not _NOT_MONEY.search(str(c))]
+        lowered = sql.lower()
+        if fx and money and not any(name.lower() in lowered for name in fx) and not _CONVERTED.search(sql):
+            return (f'Its amounts ({", ".join(money[:3])}) are added up as they are kept, but the database keeps '
+                    f'amounts in several currencies and its exchange rates in {", ".join(fx[:2])}, which the query '
+                    'never reads. Convert each amount at its own date\'s rate before adding it up.')
+    if counts and source.kind != DataSource.KIND_MONGO:
+        return _too_many(source, sql, result, tables)
+    return ''
+
+
+def _number_column(result, name) -> bool:
+    values = [v for v in _column(result, name) if v not in (None, '')]
+    return bool(values) and all(_number(v) is not None for v in values)
+
+
+def _too_many(source, sql, result, tables) -> str:
+    """Counts that add up to more rows than the largest table the query reads has: a join repeats rows."""
+    counted = {a.lower() for a in _COUNT_ALIAS.findall(sql)}
+    columns = [c for c in result['columns'] if str(c).lower() in counted or str(c).lower().startswith('count(')]
+    if not columns or result['truncated']:
+        return ''
+    # A total row ("Grand total", or ROLLUP's empty label) repeats the others: it is left out of the sum.
+    kept = [row for row in result['rows'] if not any(isinstance(v, str) and _TOTAL_LABEL.match(v.strip())
+                                                     for v in row)]
+    summed = {}
+    for name in columns:
+        at = result['columns'].index(name)
+        values = [_number(row[at]) for row in kept]
+        if not values or any(v is None or v != int(v) or v < 0 for v in values):
+            return ''
+        biggest = max(values)
+        if len(values) >= 3 and biggest == sum(values) - biggest:
+            values.remove(biggest)
+        summed[name] = int(sum(values))
+    lowered = sql.lower()
+    read = [t for t in tables if re.search(r'(^|[^\w])' + re.escape(t['name'].lower()) + r'($|[^\w])', lowered)]
+    sizes = connectors.row_counts(source, read, seconds=_COUNT_DOUBT_SECONDS)
+    if not sizes or len(sizes) < len(read):
+        return ''
+    biggest = max(sizes, key=sizes.get)
+    over = [(name, total) for name, total in summed.items() if total > sizes[biggest]]
+    if not over:
+        return ''
+    name, total = over[0]
+    return (f'{name} adds up to {total:,} over the rows, more than the {sizes[biggest]:,} rows of the largest table it '
+            f'reads ({biggest}), so a join repeats rows: a table matched several times to one row (several prices, '
+            'one row per level of a walk). Count distinct ids, or keep one row per item before joining.')
+
+
+def _second_look(ai, source, question, history, tables, values, notes, sql, doubt, seconds):
+    """The query written once more, told what looks wrong in its result; (sql, result, written) or None."""
+    previous = (f'\nYour last query was:\n{sql[:RETRY_QUERY_CHARS]}\nIt ran, but its result looks wrong: {doubt}\n'
+                'Check the query for that and write a corrected one. If the result is right after all, write the '
+                'same query again.\n')
+    try:
+        written = _write_sql(ai, source, question, history, tables, previous, values, notes)
+        if not written['sql']:
+            return None
+        checked = check_query(written['sql'], source.kind, collections(source))
+        return checked, connectors.run(source, checked, seconds=seconds), written
+    except KeyServiceError:
+        raise
+    except Exception as exc:            # a refused or failed second query: the first result stands
+        logger.info('data analyst: the second look failed: %s', str(exc)[:200])
+        return None
+
+
 CHART_TYPES = ('bar', 'line', 'pie')
 
 
@@ -784,7 +922,7 @@ def _chart(spec, columns, rows):
     return {'type': kind, 'x': x, 'y': y, 'title': str(spec.get('title') or '').strip()[:120] or f'{y} by {x}'}
 
 
-def _write_answer(ai, question, sql, result, total, chart=None) -> str:
+def _write_answer(ai, question, sql, result, total, chart=None, doubt='') -> str:
     shown = result['rows'][:ROWS_TO_AI]
     count = f'{total} row(s)' + (f', the first {len(shown)} shown below' if total > len(shown) else '')
     if result['truncated']:
@@ -793,8 +931,11 @@ def _write_answer(ai, question, sql, result, total, chart=None) -> str:
     # Asked for a picture, the answer said "I can't create graphs": it is told one is drawn under it.
     drawn = (f'A {chart["type"]} chart of {chart["y"]} by {chart["x"]} is drawn from these rows under your answer: '
              "mention it in a few words, and never say you can't draw one.\n") if chart else ''
+    # A doubt the second look didn't clear (19 Nov 2026): the reader is told, rather than handed a figure as certain.
+    doubt = (f'A check of this result found: {doubt} End the answer with one short sentence saying the figures may '
+             'be wrong for that reason, so the reader checks them.\n') if doubt else ''
     prompt = _ANSWER.format(question=question, sql=sql[:2000], count=count, columns=', '.join(result['columns']),
-                            rows=f'Rows:\n{rows}', chart=drawn)
+                            rows=f'Rows:\n{rows}', chart=drawn, doubt=doubt)
     return (ai._call_llm(prompt=prompt, system_prompt='You answer only from the rows given.', temperature=0.2,
                          max_tokens=700) or '').strip()
 
@@ -867,11 +1008,31 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
         record.save()
         return _reply(record, rows=[])
 
+    # The agent looks at its result before answering; one more query when something in it looks wrong.
+    doubt = ''
+    if source.send_rows_to_ai:
+        situations = _situations(tables, question, notes, values)
+        left = ASK_SECONDS - (time.monotonic() - started)
+        doubt = _doubt(source, question, sql, result, tables, situations,
+                       counts=left >= RETRY_SECONDS + _COUNT_DOUBT_SECONDS)
+        left = ASK_SECONDS - (time.monotonic() - started)
+        if doubt and left >= RETRY_SECONDS:
+            logger.info('data analyst: a second look (%s): %s', source.kind, doubt[:200])
+            second = _second_look(ai, source, question, history, tables, values, notes, sql, doubt,
+                                  min(connectors.QUERY_TIMEOUT, max(QUERY_MIN_SECONDS, int(left) - 8)))
+            if second is not None:
+                again = _doubt(source, question, second[0], second[1], tables, situations,
+                               counts=ASK_SECONDS - (time.monotonic() - started) >= _COUNT_DOUBT_SECONDS)
+                if not again:
+                    sql, result, written = second
+                    doubt = ''
     total = len(result['rows'])
     record.sql, record.columns, record.row_count, record.truncated = sql, result['columns'], total, result['truncated']
     record.chart = _chart(written.get('chart'), result['columns'], result['rows'])
     if source.send_rows_to_ai:
-        record.answer = _write_answer(ai, question, sql, result, total, record.chart)
+        # An empty result is already answered as "nothing matched"; any other doubt left is said in the answer.
+        record.answer = _write_answer(ai, question, sql, result, total, record.chart,
+                                      doubt=doubt if result['rows'] else '')
         seen = [_Fact(' '.join('' if v is None else str(v) for v in row)) for row in result['rows'][:ROWS_TO_AI]]
         seen.append(_Fact(f'{total} {len(result["columns"])}'))
         # "314,950" in the answer is 314950 in the rows: thousands separators don't make a figure new (3 Nov 2026).

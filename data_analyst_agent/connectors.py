@@ -252,6 +252,35 @@ def _quote(kind, name) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
 
+def row_counts(source: DataSource, tables, seconds=5) -> dict:
+    """{table name: its number of rows} for these tables, on one connection; a table that can't be counted in time is
+    left out. Used to tell a count that a join repeated (engine._too_many, 19 Nov 2026); never shown or kept."""
+    found = {}
+    if source.kind == DataSource.KIND_MONGO or not tables:
+        return found
+    try:
+        engine = _engine(source, seconds)
+    except Exception as exc:
+        logger.info('row_counts: no connection: %s', str(exc)[:200])
+        return found
+    try:
+        with engine.connect() as conn:
+            if source.kind == DataSource.KIND_MYSQL:
+                _limit_mysql_time(conn, seconds)
+            for t in tables[:8]:
+                name = (_quote(source.kind, t['schema']) + '.' if t.get('schema') else '') + _quote(source.kind, t['name'])
+                try:
+                    found[t['name']] = int(conn.execution_options(no_parameters=True)
+                                           .exec_driver_sql(f'SELECT COUNT(*) FROM {name}').scalar() or 0)
+                except Exception:
+                    conn.rollback()
+    except Exception as exc:
+        logger.info('row_counts failed: %s', str(exc)[:200])
+    finally:
+        engine.dispose()
+    return found
+
+
 def choice_columns(table) -> list:
     """The table's short text columns whose names say they hold one of a few choices (status, type, priority ...)."""
     return [c['name'] for c in table.get('columns') or []
