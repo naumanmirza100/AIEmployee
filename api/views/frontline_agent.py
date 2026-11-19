@@ -34,6 +34,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
+from api.documents import no_text_yet
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.models import CompanyUser, Company
@@ -1322,33 +1323,6 @@ def _keep_result(document, kind, value):
                                inside='ai_results')
 
 
-def _no_text_yet(document, action):
-    """Why a document has no text, in plain words. The text is saved when the background job has read the file
-    (about two minutes for a 10 MB PDF), and Summarize used to say "no text content" during that time."""
-    state = document.processing_status
-    if state in ('pending', 'processing'):
-        return Response({
-            'status': 'error',
-            'processing_status': state,
-            'message': (f"This document is still being read, so it can't be {action} yet. Try again when its card "
-                        "shows Indexed: usually within a minute, a few minutes for a large PDF."),
-        }, status=status.HTTP_409_CONFLICT)
-    if state == 'failed':
-        reason = (document.processing_error or '').strip()
-        return Response({
-            'status': 'error',
-            'processing_status': state,
-            'message': ("This document could not be read" + (f" ({reason})" if reason else '')
-                        + ". Press Retry on its card."),
-        }, status=status.HTTP_400_BAD_REQUEST)
-    return Response({
-        'status': 'error',
-        'processing_status': state,
-        'message': ("No text could be read from this document. A scanned picture without readable text, "
-                    "for example; upload a copy with text in it."),
-    }, status=status.HTTP_400_BAD_REQUEST)
-
-
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1361,7 +1335,7 @@ def summarize_document(request, document_id):
         document = get_object_or_404(_readable_documents(company_user), id=document_id)
         content = document.document_content or ""
         if not content.strip():
-            return _no_text_yet(document, 'summarized')
+            return no_text_yet(document, 'summarized')
         data = json.loads(request.body) if request.body else {}
         max_sentences = _bounded_int(data.get('max_sentences'), 1, 50, None)
         by_section = bool(data.get('by_section', False))
@@ -1410,7 +1384,7 @@ def extract_document(request, document_id):
         document = get_object_or_404(_readable_documents(company_user), id=document_id)
         content = document.document_content or ""
         if not content.strip():
-            return _no_text_yet(document, 'read for data')
+            return no_text_yet(document, 'read for data')
         data = json.loads(request.body) if request.body else {}
         schema = data.get('schema')
         schema = ([str(f).strip()[:60] for f in schema[:20] if str(f).strip()] or None) if isinstance(schema, list) \

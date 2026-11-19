@@ -28,6 +28,7 @@ from django.http import Http404
 from django.utils import timezone
 from django.db.models import Count, Q
 
+from api.documents import no_text_yet
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser
@@ -1216,8 +1217,7 @@ def summarize_hr_document(request, document_id):
         company = request.user.company
         d = get_object_or_404(_readable_hr_documents(request.user), id=document_id)
         if not (d.document_content or '').strip():
-            return Response({'status': 'error', 'message': 'Document has no extracted text yet'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return no_text_yet(d, 'summarized')
         try:
             max_sentences = max(1, min(30, int((request.data or {}).get('max_sentences') or 5)))
         except (TypeError, ValueError):
@@ -1259,8 +1259,7 @@ def extract_hr_document(request, document_id):
         company = request.user.company
         d = get_object_or_404(_readable_hr_documents(request.user), id=document_id)
         if not (d.document_content or '').strip():
-            return Response({'status': 'error', 'message': 'Document has no extracted text yet'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return no_text_yet(d, 'read for data')
         schema = (request.data or {}).get('schema')
         schema = ([str(f).strip()[:60] for f in schema[:20] if str(f).strip()] or None) if isinstance(schema, list) \
             else None
