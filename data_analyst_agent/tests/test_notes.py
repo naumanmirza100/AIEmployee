@@ -423,6 +423,7 @@ class WhatTheDatabaseLooksLike(NotesCase):
         self.assertIn('json_each(col) AS j gives one row per element, with the columns key', query)
         self.assertIn('no idx', query)
         self.assertIn('for a question about an earlier date or period', query)
+        self.assertIn('A deleted record is not one of these: it stays out whatever the date', query)
         self.assertNotIn('Time between two timestamps', query)
 
     def test_no_example_when_the_ai_may_not_see_rows(self):
