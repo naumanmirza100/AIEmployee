@@ -11,6 +11,7 @@ time limit.
 """
 import datetime
 import decimal
+import json
 import logging
 import os
 import re
@@ -257,32 +258,92 @@ def choice_columns(table) -> list:
             if _CHOICE_COLUMN.search(c['name']) and _TEXT_TYPE.search(str(c.get('type') or ''))]
 
 
+# What a value looks like (19 Nov 2026). A test database kept its exchange-rate months as '2025-04-01'; the AI, never
+# shown one, compared them with '2025-04' and took the previous month's rate, or matched nothing at all. Date-like
+# text columns (month, issued_at, valid_to) and JSON ones (tags, properties, stage_history) now come with one example
+# value, read with the choices and on the same terms (only when the AI may see rows; never kept).
+EXAMPLE_ROWS = 50
+EXAMPLE_CHARS = 160
+_DATE_NAME = re.compile(r'(^|_)(month|date|day|week|year|period|time|timestamp|datetime|ts|dt|start|end|from|until)$'
+                        r'|_(at|on)$|^(created|updated|modified)$|(valid|effective|date)_to$', re.I)
+_JSON_NAME = re.compile(r'json|properties|metadata|payload|attributes|tags|history|settings|config|features|details|'
+                        r'extra', re.I)
+
+
+class Samples(dict):
+    """sample_values' result: {(schema, table): {column: [values]}} for the choice columns, and in .examples
+    {(schema, table): {column: one value}} for the date-like and JSON text columns."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.examples = {}
+
+
+def example_columns(table) -> list:
+    """The table's text columns whose values' form matters to a query: dates kept as text, and JSON."""
+    choices, out = set(choice_columns(table)), []
+    for c in table.get('columns') or []:
+        name, kind = str(c['name']), str(c.get('type') or '')
+        if name in choices:
+            continue
+        if 'json' in kind.lower() or ((not kind or _TEXT_TYPE.search(kind))
+                                      and (_DATE_NAME.search(name) or _JSON_NAME.search(name))):
+            out.append(name)
+    return out
+
+
+def _example(value):
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, default=str)
+    text = value if isinstance(value, str) else str(value)
+    return text if len(text) <= EXAMPLE_CHARS else text[:EXAMPLE_CHARS] + '…'
+
+
 def sample_values(source: DataSource, tables) -> dict:
     """{(schema, table): {column: [values]}} for the tables' choice columns, read from their first SAMPLE_SCAN_ROWS
-    rows on one connection. Anything that fails is left out: the query is written without it."""
+    rows on one connection, and one example of each date-like or JSON text column (Samples.examples). Anything that
+    fails is left out: the query is written without it."""
     if source.kind == DataSource.KIND_MONGO:
         from . import mongo
         return mongo.sample_values(source, tables)
-    wanted = [(t, choice_columns(t)) for t in tables if t.get('kind', 'table') in ('table', 'view')]
-    wanted = [(t, cols) for t, cols in wanted if cols][:SAMPLE_TABLES]
+    wanted = [(t, choice_columns(t), example_columns(t)) for t in tables if t.get('kind', 'table') in ('table', 'view')]
+    wanted = [w for w in wanted if w[1] or w[2]][:SAMPLE_TABLES]
+    found = Samples()
     if not wanted:
-        return {}
-    found = {}
+        return found
     engine = _engine(source)
     try:
         with engine.connect() as conn:
             if source.kind == DataSource.KIND_MYSQL:
                 _limit_mysql_time(conn)
-            for table, cols in wanted:
+
+            def first_rows(table, cols, count):
                 name = (_quote(source.kind, table['schema']) + '.' if table.get('schema') else '') + \
                     _quote(source.kind, table['name'])
                 listed = ', '.join(_quote(source.kind, c) for c in cols)
-                sql = (f'SELECT TOP {SAMPLE_SCAN_ROWS} {listed} FROM {name}' if source.kind == DataSource.KIND_MSSQL
-                       else f'SELECT {listed} FROM {name} LIMIT {SAMPLE_SCAN_ROWS}')
+                sql = (f'SELECT TOP {count} {listed} FROM {name}' if source.kind == DataSource.KIND_MSSQL
+                       else f'SELECT {listed} FROM {name} LIMIT {count}')
                 try:
-                    rows = conn.execution_options(no_parameters=True).exec_driver_sql(sql).fetchall()
+                    return conn.execution_options(no_parameters=True).exec_driver_sql(sql).fetchall()
                 except Exception:
                     conn.rollback()
+                    return None
+
+            for table, cols, shown in wanted:
+                key = (table.get('schema') or '', table['name'])
+                if shown:
+                    rows = first_rows(table, shown, EXAMPLE_ROWS) or []
+                    examples = {}
+                    for i, col in enumerate(shown):
+                        value = next((r[i] for r in rows if r[i] is not None and r[i] != ''), None)
+                        if value is not None:
+                            examples[col] = _example(value)
+                    if examples:
+                        found.examples[key] = examples
+                if not cols:
+                    continue
+                rows = first_rows(table, cols, SAMPLE_SCAN_ROWS)
+                if rows is None:
                     continue
                 values = {}
                 for i, col in enumerate(cols):
@@ -423,8 +484,10 @@ def notes(source: DataSource, tables) -> dict:
     found = {}
 
     def add(table, column, text):
+        # A note filed under no table is about the whole database, as one filed under '*' (19 Nov 2026).
+        table = str(table or '').strip() or '*'
         text = ' '.join(str(text or '').split())[:NOTE_CHARS]
-        if not table or not text or sum(len(v) for v in found.values()) >= NOTES_MAX:
+        if not text or sum(len(v) for v in found.values()) >= NOTES_MAX:
             return
         entry = found.setdefault(str(table).lower(), {})
         key = str(column or '').lower()

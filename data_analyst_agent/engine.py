@@ -11,6 +11,7 @@
 MongoDB (6 Nov 2026): the same steps, with an aggregation {"collection", "pipeline"} in place of the SQL, written from
 the collections' fields and checked by guards.check_pipeline.
 """
+import fnmatch
 import json
 import logging
 import re
@@ -97,17 +98,19 @@ def _telling(cols) -> list:
     return sorted(cols, key=rank)
 
 
-def _table_text(t, full=True, columns=25, values=None, notes=None) -> str:
+def _table_text(t, full=True, columns=25, values=None, notes=None, examples=None) -> str:
     view = ' (view)' if t.get('kind') == 'view' else ''
     if not full:
         names = ', '.join(c['name'] for c in _telling(t['columns'])[:columns])
         return f"- {_table_key(t)}{view} ({names})" if names else f"- {_table_key(t)}{view}"
-    values, notes = values or {}, notes or {}
+    values, notes, examples = values or {}, notes or {}, examples or {}
 
     def column(c):
         said = []
         if values.get(c['name']):
             said.append(f"values: {', '.join(repr(v) for v in values[c['name']])}")
+        if examples.get(c['name']):
+            said.append(f"e.g. {examples[c['name']]!r}")
         if notes.get(str(c['name']).lower()):
             said.append(f"note: {notes[str(c['name']).lower()]}")
         extra = f" ({'; '.join(said)})" if said else ''
@@ -193,6 +196,9 @@ _LIVE = """- Some rows no longer count, and are left out even when the question 
   - a deleted or disabled customer, user or employee is left out only where they themselves are counted or listed.
     What they did (their orders, payments, meetings, tasks) still counts: never filter a table that is joined only to
     reach their name, region or segment.
+  - for a question about an earlier date or period (MRR on 31 Dec 2025, revenue in 2025), something with dates (a
+    subscription, an account, an employee) that was cancelled, ended or left after it still counts for it: judge it
+    by its dates (when it started, was cancelled or ended), not by its status today.
   Here they are marked by:
 {marks}
   Leave out just those values (a status with NOT IN; an empty status counts); every other value counts (closed,
@@ -200,6 +206,38 @@ _LIVE = """- Some rows no longer count, and are left out even when the question 
   employment status") or naming them ("cancelled orders", "including deleted users", "active or not"), leave none
   out: give every value as asked.
 """
+# Time between two timestamps, and JSON (19 Nov 2026). A test database (Lumora) had the AI round response times down
+# to whole minutes (60 min 59 s passed a 60-minute target: 23 late replies counted as on time), and invent a column of
+# SQLite's json_each (idx; it is key), on the first try and the second. Both rules are worded for each kind of database.
+_DURATION_WORDS = re.compile(r'\b(minutes?|hours?|sla|targets?|deadlines?|response times?|resolution times?|turnaround|'
+                             r'durations?|how long|time to|(number of|average|avg) (days|weeks)|'
+                             r'days? (spent|between|from|in|to|taken))\b', re.I)
+_DURATION_HOW = {
+    'sqlite': '(julianday(b) - julianday(a)) * 1440 for minutes, * 24 for hours, as it is for days',
+    'mysql': 'TIMESTAMPDIFF(SECOND, a, b) / 60.0 for minutes (TIMESTAMPDIFF(MINUTE, ...) drops the seconds)',
+    'postgres': 'EXTRACT(EPOCH FROM (b - a)) / 60 for minutes, / 3600 for hours, / 86400 for days',
+    'mssql': 'DATEDIFF_BIG(second, a, b) / 60.0 for minutes (DATEDIFF(minute, ...) counts minute boundaries)',
+}
+_DURATION = """- Time between two timestamps (against a target, or averaged): work it out exactly, from seconds or as a fraction:
+  {how}. Never round it or cut it to whole minutes, hours or days before comparing or averaging (no integer division,
+  no CAST to an integer): 60 minutes 59 seconds is over a 60-minute target.
+"""
+_JSON = {
+    'sqlite': """- JSON kept as text: json_extract(col, '$.field') reads a value ('$[0].field' in an array). json_each(col) AS j gives
+  one row per element, with the columns key (the element's position from 0, or the field's name), value, type,
+  fullkey and path, and no others (no idx, no index): a field of each element is json_extract(j.value, '$.field'),
+  the next element's is json_extract(col, '$[' || (j.key + 1) || '].field').
+""",
+    'postgres': """- JSON: col->>'field' reads a field as text (cast it for a number or a date); jsonb_array_elements(col::jsonb) WITH
+  ORDINALITY AS e(value, n) gives the elements with their position n from 1, a field of each being e.value->>'field'.
+""",
+    'mysql': """- JSON: JSON_UNQUOTE(JSON_EXTRACT(col, '$.field')) reads a value; JSON_TABLE(col, '$[*]' COLUMNS (n FOR
+  ORDINALITY, field VARCHAR(200) PATH '$.field')) AS j gives the elements with their position n from 1.
+""",
+    'mssql': """- JSON: JSON_VALUE(col, '$.field') reads a value; OPENJSON(col) gives the elements with [key] (their position from
+  0), [value] and [type], a field of each being JSON_VALUE([value], '$.field').
+""",
+}
 _SITUATIONS = {
     'notes': """- Follow the notes on what a column means and how to work with it (its currency, what an empty value means, how to
   convert it). Apart from rows that no longer count (cancelled, deleted, disabled), a note that rows of some kind are
@@ -214,7 +252,8 @@ _SITUATIONS = {
   before it, for the same currency (or product), in a subquery right where the amount is converted, ordered by that
   date, newest first, first row only: amount * (SELECT r.rate FROM rates r WHERE r.currency = o.currency AND r.day <=
   the order's date ORDER BY r.day DESC, first row). A CTE can't see the order it would need. Dates can be missing
-  (weekends, holidays), so joining on the same date drops the days without a row.
+  (weekends, holidays), so joining on the same date drops the days without a row. A table of monthly rates: match the
+  amount's month in the form the table keeps it (a month kept as '2025-04-01' is the first day of that month).
 """,
     'periods': """- A table of periods (valid_from and valid_to, or the like): the row in force on a date is the one whose period covers
   it, as its note says.
@@ -235,7 +274,9 @@ _SITUATIONS = {
 """,
     'tree': """- A table that points at itself (parent_id -> the same table) is a tree that can be several levels deep: to reach the
   top level, or everything under one, walk it with a recursive CTE (WITH RECURSIVE; in SQL Server a plain WITH). One
-  join reaches only the next level.
+  join reaches only the next level. The walk has a row for every level it passes: keep only the row you need (the
+  top, or the first that matches, one per starting row) before joining it to other tables, or each of their rows is
+  counted once per level.
 """,
 }
 
@@ -280,10 +321,35 @@ def _live_rule(tables, values=None) -> str:
     return _LIVE.format(marks='\n'.join(marks)) if marks else ''
 
 
+def _shared_notes(notes, tables) -> list:
+    """The database's notes filed under a pattern of table names ('*', 'billing_*') that matches a chosen table, one
+    line each. 19 Nov 2026: a test database (Lumora) kept "convert with ref_fx_monthly using the first day of the month"
+    under 'billing_*' and "all timestamps are UTC text" under '*'; they were looked up by exact table name only, and
+    never shown."""
+    names = [t['name'].lower() for t in tables]
+    return [f"- {key}{'.' + column if column else ''}: {text}" for key, entry in (notes or {}).items()
+            if ('*' in key or '?' in key) and any(fnmatch.fnmatchcase(n, key) for n in names)
+            for column, text in entry.items()]
+
+
+def _has_json(tables, notes, examples) -> bool:
+    """Whether a chosen table keeps JSON: a JSON column type, an example value that is JSON, or a note that says so."""
+    for t in tables:
+        if any('json' in str(c.get('type') or '').lower() for c in t.get('columns') or []):
+            return True
+        shown = (examples or {}).get((t.get('schema') or '', t['name'])) or {}
+        if any(str(v).lstrip()[:1] in ('[', '{') for v in shown.values()):
+            return True
+        if 'json' in ' '.join((notes.get(t['name'].lower()) or {}).values()).lower():
+            return True
+    return False
+
+
 def _situations(tables, question, notes, values=None) -> list:
     """The situational rules that apply to these tables and this question, by key."""
     names = {t['name'].lower() for t in tables}
-    texts = ' '.join(text for t in names for text in (notes.get(t) or {}).values()).lower()
+    shared = _shared_notes(notes, tables)
+    texts = ' '.join([text for t in names for text in (notes.get(t) or {}).values()] + shared).lower()
     found = []
     if texts:
         found.append('notes')
@@ -306,7 +372,23 @@ def _situations(tables, question, notes, values=None) -> list:
     if any(str(fk.get('references') or '').split('(')[0].strip().lower() == t['name'].lower()
            for t in tables for fk in t.get('fks') or []):
         found.append('tree')
+    if _DURATION_WORDS.search(question):
+        found.append('duration')
+    if _has_json(tables, notes, getattr(values, 'examples', None)):
+        found.append('json')
     return found
+
+
+def _situation_text(key, kind, tables, values) -> str:
+    """One situational rule as shown: the marks of rows that no longer count, and the duration and JSON rules worded
+    for this kind of database."""
+    if key == 'live':
+        return _live_rule(tables, values)
+    if key == 'duration':
+        return _DURATION.format(how=_DURATION_HOW.get(kind, _DURATION_HOW['sqlite']))
+    if key == 'json':
+        return _JSON.get(kind, '')
+    return _SITUATIONS[key]
 
 _SQL = """You write one read-only SQL query for a {dialect} database, to answer a question about a company's own data.
 
@@ -315,7 +397,7 @@ Today is {today}. The database: "{source_name}".
 Tables (only these exist; columns with their types, PK marks the primary key, -> a foreign key; a note is the
 database's own description of a column or table):
 {tables}
-
+{shared}
 {history}Question: {question}
 {previous}
 Rules:
@@ -333,11 +415,17 @@ Rules:
 - Count rows by the counted table's own id (COUNT(t.id)), also after a LEFT JOIN: COUNT of another column leaves out
   the rows where it is empty (COUNT(contact_id) misses the tickets without a contact), and COUNT(*) after a LEFT JOIN
   counts the empty row.
+- Group by a column of the table that has every row being counted: after a LEFT JOIN the joined table's columns are
+  empty where it has no match, and grouping by them puts those rows together under no name. To count some of the rows
+  beside all of them (won of closed, late of all), use SUM(CASE WHEN ... THEN 1 ELSE 0 END) in the same group, not a
+  second join.
 - Add no condition the question doesn't ask for (only active products, only a period or a kind): when it doesn't
   say, count them all.
 - The business's own name in the question (as in "Acme's revenue", or "our orders") means all of its data, not a
   filter on a store, brand or customer with that name, unless the question says so.
-- Compare a timestamp with a date by its date part: as text, '2024-05-03 10:00:00' comes after '2024-05-03'.
+- Compare a timestamp with a date by its date part: as text, '2024-05-03 10:00:00' comes after '2024-05-03'. Match a
+  date kept as text in the form its column holds (its e.g. shows it): a month kept as '2025-04-01' is not '2025-04',
+  and as text comes after it.
 - Take a thing's attribute from its own column when it has one (a person's country from their own country column,
   not from an address), unless the question names where to take it from.
 - Join a table only on its key (its id, or a column marked ->). Joining on a column many rows share (a country, a
@@ -555,7 +643,7 @@ def _write_aggregation(ai, source, question, history, tables, previous='', value
                            previous=previous, tables=listed or '(none)',
                            live=_live_rule(tables, values))
     out = _json(ai._call_llm(prompt=prompt, system_prompt='You write MongoDB aggregations. Output only one JSON object.',
-                             temperature=0, max_tokens=1500, json_mode=True))
+                             temperature=0, max_tokens=SQL_TOKENS, json_mode=True))
     ask_back = str(out.get('ask_back') or '').strip()[:500]
     collection, pipeline = str(out.get('collection') or '').strip(), out.get('pipeline')
     if ask_back and not pipeline:
@@ -573,13 +661,17 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
     if source.kind == DataSource.KIND_MONGO:
         return _write_aggregation(ai, source, question, history, tables, previous, values)
     values, notes = values or {}, notes or {}
+    examples = getattr(values, 'examples', None) or {}
     listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name'])),
-                                   notes=notes.get(t['name'].lower())) for t in tables)
+                                   notes=notes.get(t['name'].lower()),
+                                   examples=examples.get((t.get('schema') or '', t['name']))) for t in tables)
+    shared = _shared_notes(notes, tables)
     situations = _situations(tables, question, notes, values)
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
                          source_name=str(source.name or '').replace('"', "'")[:120],
-                         situational=''.join(_live_rule(tables, values) if key == 'live' else _SITUATIONS[key]
-                                             for key in situations),
+                         situational=''.join(_situation_text(key, source.kind, tables, values) for key in situations),
+                         shared=("The database's own notes on several tables (* stands for any name):\n"
+                                 + '\n'.join(shared) + '\n') if shared else '',
                          tables=listed or '(none)', history=history,
                          question=question, previous=previous,
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')
@@ -588,7 +680,7 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
     ai.openai_model = complex_model if _complex(question, situations, bool(previous)) else None
     try:
         out = _json(ai._call_llm(prompt=prompt, system_prompt='You write SQL. Output only one JSON object.',
-                                 temperature=0, max_tokens=1200, json_mode=True))
+                                 temperature=0, max_tokens=SQL_TOKENS, json_mode=True))
     finally:
         ai.openai_model = None
     return {'sql': str(out.get('sql') or '').strip(), 'ask_back': str(out.get('ask_back') or '').strip()[:500],
@@ -603,6 +695,9 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
 # time window, a long question, or a second try after a failed query. Read from the question: on a database of 30
 # tables or fewer every table goes to the AI, so table-based signals would make every question "harder".
 COMPLEX_QUESTION_CHARS = 300
+# The longest a query's reply may be. 19 Nov 2026: at 1,200 tokens gpt-4.1's query for a long question (Lumora's
+# retention question, two dates and four steps) was cut off on every try, so it never ran; a cap, not a cost.
+SQL_TOKENS = 3000
 
 
 def _complex(question, situations, retry=False) -> bool:

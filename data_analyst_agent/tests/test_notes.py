@@ -62,6 +62,23 @@ def _make_retail(path):
 
 class NotesCase(AnalystCase):
 
+    def shop(self, script):
+        path = os.path.join(self.storage, 'shop.sqlite')
+        conn = sqlite3.connect(path)
+        conn.executescript(script)
+        conn.commit()
+        conn.close()
+        with open(path, 'rb') as fh:
+            content = fh.read()
+        os.remove(path)
+        request = self.factory.post('/', {'name': 'Shop', 'file': SimpleUploadedFile('shop.db', content)},
+                                    format='multipart')
+        force_authenticate(request, user=self.admin)
+        response = views.sources(request)
+        response.render()
+        self.assertEqual(response.status_code, 201, response.content)
+        return DataSource.objects.get(pk=json.loads(response.content)['data']['id'])
+
     def retail(self, name='Meridian'):
         path = os.path.join(self.storage, 'retail.sqlite')
         _make_retail(path)
@@ -291,23 +308,6 @@ class RowsThatNoLongerCount(NotesCase):
     """18 Nov 2026: cancelled orders, deleted records and disabled accounts are left out unless the question asks for
     them. The rule is shown only for tables that have such rows; closed, completed or discontinued ones still count."""
 
-    def shop(self, script):
-        path = os.path.join(self.storage, 'shop.sqlite')
-        conn = sqlite3.connect(path)
-        conn.executescript(script)
-        conn.commit()
-        conn.close()
-        with open(path, 'rb') as fh:
-            content = fh.read()
-        os.remove(path)
-        request = self.factory.post('/', {'name': 'Shop', 'file': SimpleUploadedFile('shop.db', content)},
-                                    format='multipart')
-        force_authenticate(request, user=self.admin)
-        response = views.sources(request)
-        response.render()
-        self.assertEqual(response.status_code, 201, response.content)
-        return DataSource.objects.get(pk=json.loads(response.content)['data']['id'])
-
     def test_the_marks_are_read_from_the_columns_and_the_values(self):
         def marks(table, *names, seen=None):
             t = {'name': table, 'columns': [{'name': n} for n in names]}
@@ -374,3 +374,88 @@ class RowsThatNoLongerCount(NotesCase):
             engine._write_aggregation(fake, None, 'How many users are there?', '', [collection])
             self.assertEqual('Some rows no longer count' in fake.prompts[0], shown)
             self.assertEqual('- users: isDeleted true' in fake.prompts[0], shown)
+
+
+class WhatTheDatabaseLooksLike(NotesCase):
+    """19 Nov 2026, a test database (Lumora): its exchange-rate months were '2025-04-01', and the AI, never shown one,
+    compared them with '2025-04' (the previous month's rate, or no rate at all); its notes on all tables ('*') and on
+    the billing tables ('billing_*') were never shown; response times were cut to whole minutes; and json_each was
+    given a column it doesn't have. Now: an example of each date-like or JSON text column, the notes filed under a
+    pattern, and rules on time between timestamps and on JSON, worded for each kind of database."""
+    SHOP = """
+        CREATE TABLE fx_monthly (month TEXT, currency TEXT, usd_rate REAL);
+        INSERT INTO fx_monthly VALUES ('2025-04-01', 'EUR', 1.1), ('2025-05-01', 'EUR', 1.12);
+        CREATE TABLE billing_invoices (invoice_id INTEGER PRIMARY KEY, issued_at TEXT, currency TEXT, subtotal REAL,
+                                       status TEXT, tags TEXT);
+        INSERT INTO billing_invoices VALUES (1, '2025-04-04 19:55:23', 'EUR', 100, 'paid', '["sso"]'),
+                                            (2, '2025-05-02 10:00:00', 'EUR', 50, 'void', '[]');
+        CREATE TABLE data_dictionary (table_name TEXT, column_name TEXT, description TEXT);
+        INSERT INTO data_dictionary VALUES ('*', NULL, 'All timestamps are UTC text.'),
+            ('billing_*', NULL, 'Convert with fx_monthly using the first day of the month.'),
+            ('crm_*', NULL, 'A note on tables this database does not have.'),
+            ('', NULL, 'Money is in minor units nowhere.');"""
+    SQL = {'sql': 'SELECT COUNT(invoice_id) AS invoices FROM billing_invoices'}
+
+    def test_which_columns_get_an_example(self):
+        table = {'name': 'billing_invoices', 'columns': [
+            {'name': 'month', 'type': 'TEXT'}, {'name': 'issued_at', 'type': 'TEXT'}, {'name': 'tags', 'type': 'TEXT'},
+            {'name': 'currency', 'type': 'TEXT'}, {'name': 'status', 'type': 'TEXT'}, {'name': 'subtotal', 'type': 'REAL'},
+            {'name': 'created_at', 'type': 'TIMESTAMP'}, {'name': 'payload', 'type': 'jsonb'}, {'name': 'note', 'type': 'TEXT'}]}
+        self.assertEqual(connectors.example_columns(table), ['month', 'issued_at', 'tags', 'payload'])
+
+    def test_the_prompt_shows_examples_and_the_notes_on_several_tables(self):
+        source = self.shop(self.SHOP)
+        fake = FakeAI(self.SQL, '1 invoice.')
+        code, body = self.ask(self.admin, source, 'How many invoices are there?', fake)
+        self.assertEqual(body['data']['status'], 'answered', body)
+        query = ' '.join(fake.prompts[0].split())
+        self.assertIn("month TEXT (e.g. '2025-04-01')", query)
+        self.assertIn("issued_at TEXT (e.g. '2025-04-04 19:55:23')", query)
+        self.assertIn("tags TEXT (e.g. '[\"sso\"]')", query)
+        self.assertIn("The database's own notes on several tables (* stands for any name): "
+                      "- *: All timestamps are UTC text.; Money is in minor units nowhere. "
+                      "- billing_*: Convert with fx_monthly using the first day of the month.", query)
+        self.assertNotIn('tables this database does not have', query)
+        self.assertIn("a month kept as '2025-04-01' is not '2025-04', and as text comes after it", query)
+        self.assertIn('Group by a column of the table that has every row being counted', query)
+        # A JSON column brings SQLite's JSON rule; the void invoice brings the rows that no longer count, which say
+        # that something ended after a past date still counts for it.
+        self.assertIn('json_each(col) AS j gives one row per element, with the columns key', query)
+        self.assertIn('no idx', query)
+        self.assertIn('for a question about an earlier date or period', query)
+        self.assertNotIn('Time between two timestamps', query)
+
+    def test_no_example_when_the_ai_may_not_see_rows(self):
+        source = self.shop(self.SHOP)
+        DataSource.objects.filter(pk=source.pk).update(send_rows_to_ai=False)
+        source.refresh_from_db()
+        fake = FakeAI(self.SQL, '1 invoice.')
+        self.ask(self.admin, source, 'How many invoices are there?', fake)
+        self.assertNotIn("(e.g. '", fake.prompts[0])
+        self.assertIn("The database's own notes on several tables", fake.prompts[0])    # notes are structure
+
+    def test_time_between_timestamps_is_worked_out_exactly(self):
+        source = self.shop(self.SHOP)
+        fake = FakeAI(self.SQL, 'All 2 met it.')
+        self.ask(self.admin, source, 'What share of invoices were paid within the 60-minute target?', fake)
+        query = ' '.join(fake.prompts[0].split())
+        self.assertIn('(julianday(b) - julianday(a)) * 1440 for minutes', query)
+        self.assertIn('60 minutes 59 seconds is over a 60-minute target', query)
+        for kind, words in (('mysql', 'TIMESTAMPDIFF(SECOND, a, b)'), ('postgres', 'EXTRACT(EPOCH FROM (b - a))'),
+                            ('mssql', 'DATEDIFF_BIG(second, a, b)')):
+            self.assertIn(words, engine._situation_text('duration', kind, [], None))
+        for kind, words in (('postgres', 'WITH ORDINALITY'), ('mysql', 'JSON_TABLE'), ('mssql', 'OPENJSON')):
+            self.assertIn(words, ' '.join(engine._situation_text('json', kind, [], None).split()))
+
+    def test_a_long_query_has_room_and_a_tree_walk_keeps_one_row(self):
+        class CapSeeingAI(FakeAI):
+            def _call_llm(self, prompt, system_prompt=None, **kwargs):
+                self.caps = getattr(self, 'caps', []) + [kwargs.get('max_tokens')]
+                return super()._call_llm(prompt, system_prompt, **kwargs)
+        source = self.shop(self.SHOP)
+        fake = CapSeeingAI(self.SQL, '1 invoice.')
+        self.ask(self.admin, source, 'How many invoices are there?', fake)
+        self.assertEqual(fake.caps[0], engine.SQL_TOKENS)      # cut off at 1,200 on Lumora's retention question
+        self.assertGreaterEqual(engine.SQL_TOKENS, 3000)
+        self.assertIn('The walk has a row for every level it passes: keep only the row you need',
+                      ' '.join(engine._SITUATIONS['tree'].split()))
