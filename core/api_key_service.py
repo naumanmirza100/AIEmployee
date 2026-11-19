@@ -224,15 +224,85 @@ def _is_provider_auth_error(exc: Exception) -> bool:
     )
 
 
+class AIServiceUnavailable(KeyServiceError):
+    """The AI provider refused the call for want of credit, or couldn't be reached.
+
+    19 Nov 2026: the platform's OpenAI account ran out of credit at 05:59 UTC. Every agent on it answered with a
+    server error ("HTTP 500"), and nobody who runs the site was told. Raised from every agent's AI call through
+    `raise_if_auth_error`; the DRF handler answers it with 503 and these words. When the platform's own account is
+    the one out of credit, the people who run the site are emailed (core.error_alerts.ai_out_of_credit).
+    """
+    reason = 'ai_unavailable'
+
+    def __init__(self, kind: str = 'down', mode: Optional[str] = None, provider: Optional[str] = None):
+        from core.models import PROVIDER_CHOICES
+        self.kind = kind
+        name = dict(PROVIDER_CHOICES).get(provider, provider or 'AI')
+        if kind == 'out_of_credit':
+            self.reason = 'ai_out_of_credit'
+            if mode == 'byok':
+                self.user_message = (
+                    f"Your own {name} key has run out of credit with {name}, so the AI can't answer. "
+                    f"Add credit on your {name} account, or replace the key in Settings → API Keys."
+                )
+            else:
+                self.user_message = (
+                    "The AI service is unavailable right now: the platform's AI account has run out of credit. "
+                    "The site's team has been told. Please try again a little later."
+                )
+        else:
+            self.user_message = "The AI service can't be reached right now. Please try again in a few minutes."
+        super().__init__(self.user_message)
+
+
+# What a provider says when the account behind a key has no money left. OpenAI: 429 "insufficient_quota" ("You
+# have no credits remaining" / "You exceeded your current quota"); Anthropic: "credit balance is too low";
+# OpenRouter / DeepSeek: 402 "Insufficient Balance" / "insufficient credits".
+_OUT_OF_CREDIT = ('insufficient_quota', 'exceeded your current quota', 'no credits remaining',
+                  'credit balance is too low', 'insufficient balance', 'insufficient credits',
+                  'billing_hard_limit_reached')
+
+
+def _provider_failure(exc: Exception) -> Optional[str]:
+    """'out_of_credit', 'down' (the provider couldn't be reached, or said it is unavailable), or None.
+
+    A rate limit or a timeout is None on purpose: callers retry those or fall back to a smaller prompt (a whole
+    document too big for the minute's tokens is answered from its passages instead)."""
+    status = getattr(exc, 'status_code', None)
+    said = f"{getattr(exc, 'code', '') or ''} {exc}".lower()
+    if status == 402 or any(phrase in said for phrase in _OUT_OF_CREDIT):
+        return 'out_of_credit'
+    if 'Timeout' in type(exc).__name__ or 'timed out' in said:
+        return None
+    if type(exc).__name__ == 'APIConnectionError' or status in (502, 503):
+        return 'down'
+    return None
+
+
 def raise_if_auth_error(exc: Exception, ctx=None) -> None:
-    """Convert a provider 401/auth error into BadAPIKey so the DRF handler surfaces a clear message.
+    """Turn a provider's refusal into a KeyServiceError, so the DRF handler shows the person a clear message:
+
+    * a rejected key (401) → BadAPIKey;
+    * an account with no credit left → AIServiceUnavailable('out_of_credit'); on the platform's own key (free tokens
+      or a managed key) the people who run the site are emailed too;
+    * a provider that can't be reached → AIServiceUnavailable('down').
 
     Call this inside every LLM call's except block before re-raising the original error.
-    Does nothing if the exception is not an auth error.
+    Does nothing for any other error.
     """
+    if isinstance(exc, KeyServiceError):
+        return
+    mode = getattr(ctx, 'mode', None)
     if _is_provider_auth_error(exc):
-        mode = getattr(ctx, 'mode', None)
         raise BadAPIKey(mode=mode) from exc
+    kind = _provider_failure(exc)
+    if kind is None:
+        return
+    provider = getattr(ctx, 'provider', None)
+    if kind == 'out_of_credit' and mode != 'byok':
+        from core.error_alerts import ai_out_of_credit
+        ai_out_of_credit(provider, exc)
+    raise AIServiceUnavailable(kind, mode=mode, provider=provider) from exc
 
 
 @dataclass

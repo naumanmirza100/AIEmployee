@@ -18,6 +18,7 @@ from rest_framework.throttling import SimpleRateThrottle
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.assistant import engine
+from core.drf_exceptions import key_error_status
 from core.modules import INCLUDED_WITH, has_module
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ def assistant_ask(request):
         result = engine.ask(request.user, question, history)
     except KeyServiceError as exc:
         return Response({'status': 'error', 'code': exc.reason, 'message': exc.user_message},
-                        status=status.HTTP_402_PAYMENT_REQUIRED)
+                        status=key_error_status(exc))
     except Exception:
         logger.exception('assistant_ask failed')
         return Response({'status': 'error', 'message': 'The assistant could not answer just now. Please try again.'},
@@ -109,7 +110,7 @@ def assistant_ask_stream(request):
         first = next(events)            # planning and the lookups run here, so their refusals can still be a 402
     except KeyServiceError as exc:
         return Response({'status': 'error', 'code': exc.reason, 'message': exc.user_message},
-                        status=status.HTTP_402_PAYMENT_REQUIRED)
+                        status=key_error_status(exc))
     except Exception:
         logger.exception('assistant_ask_stream failed before the answer')
         return Response({'status': 'error', 'message': 'The assistant could not answer just now. Please try again.'},

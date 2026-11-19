@@ -25,8 +25,11 @@ export function toastForError(error, fallback = 'Something went wrong. Please tr
     error?.status === 402 ||
     error?.status === 403 ||
     error?.data?.hard_block === true;
+  // The AI provider out of credit or unreachable (code ai_out_of_credit / ai_unavailable, 19 Nov 2026) isn't the
+  // company's token limit.
+  const aiDown = String(error?.data?.code || '').startsWith('ai_');
   return {
-    title: isQuota ? 'Token Limit Reached' : 'Error',
+    title: aiDown ? 'AI service unavailable' : isQuota ? 'Token Limit Reached' : 'Error',
     description: apiErrorMessage(error, fallback),
     variant: 'destructive',
     duration: isQuota ? 8000 : 4000,
