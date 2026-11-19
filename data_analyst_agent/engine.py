@@ -198,7 +198,8 @@ _LIVE = """- Some rows no longer count, and are left out even when the question 
     reach their name, region or segment.
   - for a question about an earlier date or period (MRR on 31 Dec 2025, revenue in 2025), something with dates (a
     subscription, an account, an employee) that was cancelled, ended or left after it still counts for it: judge it
-    by its dates (when it started, was cancelled or ended), not by its status today.
+    by its dates (when it started, was cancelled or ended), not by its status today. A deleted record is not one of
+    these: it stays out whatever the date.
   Here they are marked by:
 {marks}
   Leave out just those values (a status with NOT IN; an empty status counts); every other value counts (closed,
