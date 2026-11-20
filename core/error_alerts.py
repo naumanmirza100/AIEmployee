@@ -28,6 +28,8 @@ from django.utils import timezone
 REPEAT_SECONDS = 6 * 3600
 MAX_PER_HOUR = 10
 
+logger = logging.getLogger(__name__)
+
 
 def recipients():
     return list(getattr(settings, 'ERROR_ALERT_EMAILS', None) or [])
@@ -103,6 +105,58 @@ def compose(record):
 
 def _send(subject, body, to):
     send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, to, fail_silently=True)
+
+
+# ---- The platform's AI account is out of credit ---------------------------------------------------------------
+# 19 Nov 2026: the platform's OpenAI account ran out of credit at 05:59 UTC and every agent's AI stopped. The screens
+# showed a server error and nobody was emailed (ERROR_ALERT_EMAILS was empty), so it was found only by testing.
+
+AI_CREDIT_REPEAT_SECONDS = 3600
+
+
+def people_to_tell():
+    """ERROR_ALERT_EMAILS or, while that is empty, the active super admins: something everyone's AI depends on has
+    stopped, so it must reach someone even on a server where no alert address was set."""
+    to = recipients()
+    if to:
+        return to
+    from django.contrib.auth.models import User
+    return sorted({(u.email or '').strip() for u in User.objects.filter(is_superuser=True, is_active=True)} - {''})
+
+
+def ai_out_of_credit(provider, exc=None):
+    """Tell the people who run the site that the platform's account with `provider` has no credit left: every AI call
+    on the platform's key is refused until someone adds credit. Logged every time; emailed once an hour per provider
+    (per server process: the cache is the process's own). Never raises. True when an email was sent."""
+    from core.models import PROVIDER_CHOICES
+    name = dict(PROVIDER_CHOICES).get(provider, provider or 'AI')
+    logger.warning("The platform's %s account is out of credit: its AI calls are refused (%s)", name, str(exc)[:300])
+    try:
+        if not cache.add(f'ai-out-of-credit:{provider}', 1, AI_CREDIT_REPEAT_SECONDS):
+            return False
+        to = people_to_tell()
+        if not to:
+            logger.error("The platform's %s account is out of credit, and there is nobody to email "
+                         "(no ERROR_ALERT_EMAILS and no super admin with an address)", name)
+            return False
+        subject = f"[Pay Per Project] The platform's {name} account is out of credit: the agents' AI has stopped"
+        body = '\n'.join([
+            f'When:  {timezone.now():%Y-%m-%d %H:%M} UTC',
+            f"What:  {name} refuses every AI call on the platform's key because the account has no credit left.",
+            '       Every agent on free tokens or a managed key shows "The AI service is unavailable right now".',
+            '       Companies using their own key are not affected.',
+            f'Said:  {str(exc)[:300]}' if exc else '',
+            '',
+            f'To fix: add credit on the {name} account (for OpenAI: platform.openai.com > Settings > Billing).',
+            '        The agents work again as soon as the credit is there; nothing needs restarting.',
+            '',
+            f'You will not be emailed about this again for {AI_CREDIT_REPEAT_SECONDS // 60} minutes while it lasts.',
+        ])
+        threading.Thread(target=_send, args=(subject, body, to), daemon=True).start()
+        return True
+    except Exception:                   # alerting must never break what it reports on
+        logger.exception('ai_out_of_credit: the alert could not be sent')
+        return False
 
 
 class AlertEmailHandler(logging.Handler):

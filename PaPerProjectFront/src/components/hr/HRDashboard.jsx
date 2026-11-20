@@ -525,6 +525,37 @@ const HRDashboard = () => {
     setUploadDescription('');
   };
 
+  // Documents still being read move on to Indexed (or Failed) by themselves, also when the upload was not started
+  // from this page (19 Nov 2026, as Frontline since 12 Nov).
+  const busyDocIds = documents
+    .filter((d) => d.processing_status === 'pending' || d.processing_status === 'processing')
+    .map((d) => d.id)
+    .join(',');
+  useEffect(() => {
+    if (!busyDocIds) return undefined;
+    const ids = busyDocIds.split(',').map(Number).slice(0, 10);
+    let stopped = false;
+    const tick = async () => {
+      const found = await Promise.all(ids.map((id) => hrAgentService.getHRDocumentStatus(id)
+        .then((r) => r?.data || null).catch(() => null)));
+      if (stopped) return;
+      setDocuments((arr) => arr.map((x) => {
+        const st = found.find((f) => f && f.id === x.id);
+        if (!st || st.processing_status === x.processing_status) return x;
+        return {
+          ...x,
+          processing_status: st.processing_status,
+          processing_error: st.processing_error,
+          chunks_processed: st.chunks_processed,
+          chunks_total: st.chunks_total,
+          is_indexed: st.processing_status === 'ready' ? true : x.is_indexed,
+        };
+      }));
+    };
+    const timer = setInterval(tick, 8000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [busyDocIds]);
+
   // ---------- Document actions ----------
   // Process a failed document again (including one the server marked failed
   // after it got stuck). Same background pill and polling as an upload.
@@ -1364,6 +1395,10 @@ ${note}` : '');
                             ? `${(sizeKB / 1024).toFixed(1)} MB`
                             : (sizeKB ? `${sizeKB} KB` : null);
                           const procStatus = d.processing_status || (d.is_indexed ? 'ready' : 'pending');
+                          // Nothing to summarize until the background job has read the file (19 Nov 2026, as
+                          // Frontline since 12 Nov): the buttons wait, and the server says "still being read".
+                          const reading = procStatus === 'pending' || procStatus === 'processing';
+                          const waitTitle = 'Available once the document has been read and shows Indexed';
                           const procLabel = {
                             ready: 'Indexed', processing: 'Processing',
                             pending: 'Queued', failed: 'Failed',
@@ -1426,6 +1461,12 @@ ${note}` : '');
                                     </span>
                                   )}
                                 </div>
+                                {reading && (
+                                  <div className="mt-2 text-[11px] text-white/60 flex items-center gap-1.5">
+                                    <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                                    <span>Reading the document. Summarize and Extract work once it shows Indexed.</span>
+                                  </div>
+                                )}
                                 {d.processing_error && (
                                   <div className="mt-2 text-[11px] text-rose-300/80 line-clamp-2" title={d.processing_error}>
                                     {d.processing_error}
@@ -1444,11 +1485,13 @@ ${note}` : '');
                                     </Button>
                                   )}
                                   <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
-                                    onClick={() => handleSummarizeDoc(d)} title="Summarize">
+                                    onClick={() => handleSummarizeDoc(d)} disabled={reading}
+                                    title={reading ? waitTitle : 'Summarize'}>
                                     <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize
                                   </Button>
                                   <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
-                                    onClick={() => handleExtractDoc(d)} title="Extract structured fields">
+                                    onClick={() => handleExtractDoc(d)} disabled={reading}
+                                    title={reading ? waitTitle : 'Extract structured fields'}>
                                     <ListChecks className="h-3.5 w-3.5 mr-1" /> Extract
                                   </Button>
                                 </div>

@@ -41,6 +41,7 @@ from rest_framework.throttling import SimpleRateThrottle
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.api_key_service import KeyServiceError
+from core.drf_exceptions import key_error_status
 from data_analyst_agent import connectors, dumps, engine, mongo, mssql, sources as source_work
 from data_analyst_agent.guards import Refused, check_query
 from data_analyst_agent.models import DataQuestion, DataSource
@@ -455,7 +456,7 @@ def ask(request):
         return _err(str(exc))
     except KeyServiceError as exc:
         return Response({'status': 'error', 'code': exc.reason, 'message': exc.user_message},
-                        status=status.HTTP_402_PAYMENT_REQUIRED)
+                        status=key_error_status(exc))
     except Exception:
         logger.exception('data analyst ask failed')
         return _err('The question could not be answered just now. Please try again.',
