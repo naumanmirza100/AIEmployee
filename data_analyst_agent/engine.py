@@ -791,6 +791,12 @@ def _column(result, name):
     return [row[at] for row in result['rows']]
 
 
+def _nothing(result) -> bool:
+    """No rows, or one row of empties and zeros: nothing matched."""
+    rows = result['rows']
+    return not rows or (len(rows) == 1 and all(v in (None, '') or _number(v) == 0 for v in rows[0]))
+
+
 def _doubt(source, question, sql, result, tables, situations, counts=True) -> str:
     """What looks wrong in a result that ran, in a sentence for the AI, or ''. Read from the result alone, except the
     row counts of the tables a too-high count is compared with (only with `counts`: they take a query each).
@@ -807,7 +813,7 @@ def _doubt_in(source, sql, result, tables, situations, counts) -> str:
     if not rows:
         return ('It returned no rows. Check that every value the query filters on is written as the data holds it '
                 '(a date or month in its full form, a status as spelled in the data).')
-    if len(rows) == 1 and all(v in (None, '') or _number(v) == 0 for v in rows[0]):
+    if _nothing(result):
         return ('Every figure in it is empty or zero. Check that every value the query filters on is written as the '
                 'data holds it (a date or month in its full form, a status as spelled in the data), and that its joins '
                 'match rows.')
@@ -932,8 +938,10 @@ def _write_answer(ai, question, sql, result, total, chart=None, doubt='') -> str
     drawn = (f'A {chart["type"]} chart of {chart["y"]} by {chart["x"]} is drawn from these rows under your answer: '
              "mention it in a few words, and never say you can't draw one.\n") if chart else ''
     # A doubt the second look didn't clear (19 Nov 2026): the reader is told, rather than handed a figure as certain.
+    # 20 Nov 2026: told "for that reason", the answer ended "may be wrong for that reason" without one, so it says why.
     doubt = (f'A check of this result found: {doubt} End the answer with one short sentence saying the figures may '
-             'be wrong for that reason, so the reader checks them.\n') if doubt else ''
+             'be wrong and why, in plain words a reader without the query understands, so they check them.\n'
+             ) if doubt else ''
     prompt = _ANSWER.format(question=question, sql=sql[:2000], count=count, columns=', '.join(result['columns']),
                             rows=f'Rows:\n{rows}', chart=drawn, doubt=doubt)
     return (ai._call_llm(prompt=prompt, system_prompt='You answer only from the rows given.', temperature=0.2,
@@ -1030,9 +1038,11 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
     record.sql, record.columns, record.row_count, record.truncated = sql, result['columns'], total, result['truncated']
     record.chart = _chart(written.get('chart'), result['columns'], result['rows'])
     if source.send_rows_to_ai:
-        # An empty result is already answered as "nothing matched"; any other doubt left is said in the answer.
+        # Nothing matched (no rows, or one row of zeros) is answered as it stands: after the second look has checked
+        # how its filters are written, a zero is most often right. Live on 20 Nov 2026, "How many orders came from
+        # Islamabad?" (none) was answered 0 "...may be wrong". Any other doubt left is said in the answer.
         record.answer = _write_answer(ai, question, sql, result, total, record.chart,
-                                      doubt=doubt if result['rows'] else '')
+                                      doubt='' if _nothing(result) else doubt)
         seen = [_Fact(' '.join('' if v is None else str(v) for v in row)) for row in result['rows'][:ROWS_TO_AI]]
         seen.append(_Fact(f'{total} {len(result["columns"])}'))
         # "314,950" in the answer is 314950 in the rows: thousands separators don't make a figure new (3 Nov 2026).

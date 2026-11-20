@@ -289,15 +289,16 @@ const HRDashboard = () => {
   const [docAccess, setDocAccess] = useState({ open: false, doc: null, rows: [], loading: false, allowed: true });
 
   // ---------- Loaders ----------
-  const loadStats = async () => {
-    setStatsLoading(true);
+  // `quiet`: the numbers change in place, without "Loading HR overview..." or an error toast.
+  const loadStats = async ({ quiet = false } = {}) => {
+    if (!quiet) setStatsLoading(true);
     try {
       const res = await hrAgentService.getHRDashboard();
       setStats(res?.data || null);
     } catch (e) {
-      toast({ title: 'Failed to load HR overview', description: e.message, variant: 'destructive' });
+      if (!quiet) toast({ title: 'Failed to load HR overview', description: e.message, variant: 'destructive' });
     } finally {
-      setStatsLoading(false);
+      if (!quiet) setStatsLoading(false);
     }
   };
 
@@ -551,6 +552,10 @@ const HRDashboard = () => {
           is_indexed: st.processing_status === 'ready' ? true : x.is_indexed,
         };
       }));
+      // The "Indexed documents" tile counts them too (live, 20 Nov 2026: the card said Indexed, the tile didn't).
+      if (found.some((f) => f && (f.processing_status === 'ready' || f.processing_status === 'failed'))) {
+        loadStats({ quiet: true });
+      }
     };
     const timer = setInterval(tick, 8000);
     return () => { stopped = true; clearInterval(timer); };

@@ -107,6 +107,16 @@ class ASecondLook(AnalystCase):
         self.assertIn('A check of this result found: repeat_rate is 100 in every row', fake.prompts[2])
         self.assertEqual(len(fake.prompts), 3)
 
+    def test_a_zero_that_stays_zero_is_answered_without_a_warning(self):
+        # Live, 20 Nov 2026: none came from Islamabad, and the answer said "0 ... the figures may be wrong".
+        zero = ("SELECT count(o.id) AS orders FROM orders o JOIN customers c ON c.id = o.customer_id "
+                "WHERE c.city = 'Islamabad'")
+        fake = FakeAI({'sql': zero}, {'sql': zero}, 'No orders came from Islamabad.')
+        code, body = self.ask(self.member, self.shop, 'How many orders came from Islamabad?', fake)
+        self.assertEqual((code, body['data']['rows']), (200, [[0]]), body)
+        self.assertIn('Every figure in it is empty or zero', fake.prompts[1])
+        self.assertNotIn('A check of this result found', fake.prompts[2])
+
     def test_a_second_query_that_fails_leaves_the_first_result(self):
         fake = FakeAI({'sql': "SELECT id FROM orders WHERE created_at = '2026-10'"}, {'sql': 'SELECT nope FROM orders'},
                       'Nothing matched.')
