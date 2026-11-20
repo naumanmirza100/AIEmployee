@@ -516,7 +516,7 @@ const HRDashboard = () => {
         onProgress,
       }),
       poll: (documentId) => hrAgentService.getHRDocumentStatus(documentId),
-      onDone: () => loadDocuments(),
+      onDone: () => { loadDocuments(); loadStats({ quiet: true }); },  // the tiles count it too (20 Nov 2026)
     });
 
     // Close the dialog + reset inputs immediately — the pill takes over.
@@ -572,7 +572,7 @@ const HRDashboard = () => {
       agent: 'hr',
       upload: () => hrAgentService.reingestHRDocument(d.id),
       poll: (documentId) => hrAgentService.getHRDocumentStatus(documentId),
-      onDone: () => loadDocuments(),
+      onDone: () => { loadDocuments(); loadStats({ quiet: true }); },  // the tiles count it too (20 Nov 2026)
     });
   };
 
