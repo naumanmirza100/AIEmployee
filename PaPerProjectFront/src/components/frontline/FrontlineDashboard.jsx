@@ -720,6 +720,12 @@ const FrontlineDashboard = () => {
           is_indexed: s.processing_status === 'ready' ? true : d.is_indexed,
         };
       }));
+      // The tile's "indexed" count too, in place (20 Nov 2026: the card said Indexed, the tile didn't).
+      if (found.some((s) => s && (s.processing_status === 'ready' || s.processing_status === 'failed'))) {
+        frontlineAgentService.getFrontlineDashboard()
+          .then((r) => { if (r?.status === 'success') setStats(r.data.stats); })
+          .catch(() => {});
+      }
     };
     const timer = setInterval(tick, 8000);
     return () => { stopped = true; clearInterval(timer); };
