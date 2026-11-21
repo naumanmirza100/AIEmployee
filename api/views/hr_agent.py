@@ -2616,8 +2616,11 @@ def hr_meeting_availability(request):
 # Leave requests — bonus first-class HR object
 # ============================================================================
 
-def make_leave_request(emp, company, d):
+def make_leave_request(emp, company, d, *, may_set_days=False):
     """Create a pending LeaveRequest for `emp` from request data `d`.
+
+    `may_set_days`: the caller is an HR admin, who may book a full-day request at fewer days than the dates hold (a
+    correction), never fewer than 0 or more than the working days. Anyone else gets the working days.
 
     Works out the working days (weekends and company holidays skipped) and the
     approver (the manager, or HR). Used by HR's own screen and by an employee
@@ -2659,15 +2662,12 @@ def make_leave_request(emp, company, d):
         else:  # morning / afternoon
             days_requested = 0.5
     else:
-        # Caller can override (e.g. legacy half-day requests); otherwise compute.
-        days_requested = d.get('days_requested')
-        if days_requested in (None, ''):
-            days_requested = working_days_between(sd, ed, company)
-        else:
-            try:
-                days_requested = float(days_requested)
-            except (TypeError, ValueError):
-                days_requested = working_days_between(sd, ed, company)
+        # Any caller could set the day count, at any number: 10 working days booked as 0.5, a sick day of -5 that
+        # added five days to the balance (21 Nov 2026, the test report's HR 1). Half days and hours have their own
+        # fields above.
+        days_requested, refused = _days_for_dates(sd, ed, company, d.get('days_requested'), may_set_days)
+        if refused:
+            return refuse(refused)
 
     leave_type = d.get('leave_type') or 'vacation'
     if leave_type not in dict(LeaveBalance.LEAVE_TYPE_CHOICES):
@@ -2699,6 +2699,22 @@ def make_leave_request(emp, company, d):
     return lr, None
 
 
+def _days_for_dates(sd, ed, company, given, may_set_days):
+    """(days, None) for a full-day request from `sd` to `ed`, or (None, why not). The working days, unless an HR admin
+    gave a count, which must lie between 0 and them."""
+    from hr_agent.leave_helpers import working_days_between
+    days = float(working_days_between(sd, ed, company))
+    if not may_set_days or given in (None, ''):
+        return days, None
+    try:
+        given = float(given)
+    except (TypeError, ValueError):
+        return days, None
+    if not 0 <= given <= days:
+        return None, (f'days_requested must be between 0 and {days:g}, the working days from {sd} to {ed}.')
+    return given, None
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2720,7 +2736,7 @@ def submit_leave_request(request):
                 f'You can put in leave for yourself or for someone who reports to you, and {emp.full_name} does not '
                 f"report to you. Ask an HR admin (the company's owner, an admin, or a login with the HR admin role), "
                 f'or {first} can ask for it under My HR.')}, status=status.HTTP_403_FORBIDDEN)
-        lr, refused = make_leave_request(emp, company, d)
+        lr, refused = make_leave_request(emp, company, d, may_set_days=_is_hr_admin(request.user))
         if refused is not None:
             return refused
         return Response({'status': 'success', 'data': {
@@ -2773,6 +2789,9 @@ def update_leave_request(request, request_id):
                   'days_requested': float(lr.days_requested or 0)}
         if 'leave_type' in d:
             lr.leave_type = d['leave_type'] or lr.leave_type
+            if lr.leave_type not in dict(LeaveBalance.LEAVE_TYPE_CHOICES):
+                return Response({'status': 'error', 'message': 'Unknown leave type.'},
+                                status=status.HTTP_400_BAD_REQUEST)
             fields.append('leave_type')
         if 'reason' in d:
             lr.reason = (d['reason'] or '')[:2000]
@@ -2787,20 +2806,29 @@ def update_leave_request(request, request_id):
             if ed < sd:
                 return Response({'status': 'error', 'message': 'end_date must be on or after start_date'},
                                 status=status.HTTP_400_BAD_REQUEST)
+            if lr.partial_day_period and sd != ed:
+                return Response({'status': 'error', 'message': (
+                    'A part-day request covers one day. Cancel it and ask for the new dates instead.')},
+                    status=status.HTTP_400_BAD_REQUEST)
             lr.start_date, lr.end_date = sd, ed
             fields += ['start_date', 'end_date']
-            # Recompute working days unless the caller overrides explicitly.
-            days = d.get('days_requested')
-            if days in (None, ''):
-                from hr_agent.leave_helpers import working_days_between
-                lr.days_requested = working_days_between(sd, ed, company)
-            else:
-                try:
-                    lr.days_requested = float(days)
-                except (TypeError, ValueError):
-                    from hr_agent.leave_helpers import working_days_between
-                    lr.days_requested = working_days_between(sd, ed, company)
-            fields.append('days_requested')
+            if not lr.partial_day_period:
+                # The day count comes from the dates, as for a new request (21 Nov 2026, the test report's HR 9).
+                days, refused = _days_for_dates(sd, ed, company, d.get('days_requested'), is_admin)
+                if refused:
+                    return Response({'status': 'error', 'message': refused}, status=status.HTTP_400_BAD_REQUEST)
+                lr.days_requested = days
+                fields.append('days_requested')
+        if ('leave_type' in fields or 'days_requested' in fields) and lr.leave_type != 'unpaid':
+            # An edit skipped the balance check: 1 day asked for and approved-ready, then edited to 19 (HR 9).
+            from hr_agent import allowances
+            left = allowances.available(lr.employee, lr.leave_type, excluding=lr)
+            if left is not None and float(lr.days_requested) > left:
+                label = dict(LeaveBalance.LEAVE_TYPE_CHOICES)[lr.leave_type]
+                return Response({'status': 'error', 'message': (
+                    f'Only {max(left, 0):g} day{"" if max(left, 0) == 1 else "s"} of {label} left this year (after '
+                    f'other requests still waiting), and this request would be {float(lr.days_requested):g}.')},
+                    status=status.HTTP_400_BAD_REQUEST)
         if fields:
             fields.append('updated_at')
             lr.save(update_fields=fields)
@@ -2934,12 +2962,27 @@ def withdraw_leave_request(request, request_id):
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             prev_status = lr.status
-            lr.status = 'withdrawn'
-            lr.decided_at = timezone.now()
-            note_prefix = '[withdraw] ' + reason
-            lr.approval_note = (note_prefix + (('\n\nPrev note:\n' + lr.approval_note)
-                                               if lr.approval_note else ''))[:2000]
-            lr.save(update_fields=['status', 'decided_at', 'approval_note', 'updated_at'])
+            # A leave under way, withdrawn by the person: it ends yesterday and only the days from today on come
+            # back. It used to give back every day, so a ten-day leave withdrawn on day five cost nothing
+            # (21 Nov 2026, the test report's HR 10). An HR admin can still withdraw the whole of it.
+            shortened = not is_admin and lr.start_date < today <= lr.end_date
+            if shortened:
+                from hr_agent.leave_helpers import working_days_between
+                taken = float(working_days_between(lr.start_date, today - timedelta(days=1), company))
+                give_back = max(0.0, float(lr.days_requested or 0) - taken)
+                old_end = lr.end_date
+                lr.end_date = today - timedelta(days=1)
+                lr.days_requested = taken
+                lr.approval_note = (f'[ended early] {reason}'.strip() + f' (was to end {old_end.isoformat()})'
+                                    + (('\n\nPrev note:\n' + lr.approval_note) if lr.approval_note else ''))[:2000]
+                lr.save(update_fields=['end_date', 'days_requested', 'approval_note', 'updated_at'])
+            else:
+                lr.status = 'withdrawn'
+                lr.decided_at = timezone.now()
+                note_prefix = '[withdraw] ' + reason
+                lr.approval_note = (note_prefix + (('\n\nPrev note:\n' + lr.approval_note)
+                                                   if lr.approval_note else ''))[:2000]
+                lr.save(update_fields=['status', 'decided_at', 'approval_note', 'updated_at'])
 
             # Restore used_days. Mirror-image of the approve deduction: same
             # F() atomic update, same year-scoped LeaveBalance row. If the
@@ -2954,7 +2997,7 @@ def withdraw_leave_request(request, request_id):
                     period_start=year_start,
                 ).first()
                 if bal:
-                    days = float(lr.days_requested or 0)
+                    days = give_back if shortened else float(lr.days_requested or 0)
                     # Floor at 0 — never let used_days go negative. If the
                     # balance was manually zeroed since approval, we can't
                     # restore more than what's there.
@@ -2982,6 +3025,13 @@ def withdraw_leave_request(request, request_id):
                    'after_end_date': bool(already_taken),
                    'reason': reason[:500]},
         )
+        if shortened:
+            return Response({'status': 'success', 'message': (
+                f'This leave had started, so it now ends on {lr.end_date.isoformat()}: '
+                f'{restored:g} day{"" if restored == 1 else "s"} went back to the balance.'),
+                'data': {'id': lr.id, 'status': lr.status, 'end_date': lr.end_date.isoformat(),
+                         'days_requested': float(lr.days_requested), 'days_restored': restored,
+                         'ended_early': True}})
         hr_alerts.leave_decided(lr, decided_by=request.user, note=reason)
         return Response({'status': 'success',
                          'data': {'id': lr.id, 'status': lr.status,
