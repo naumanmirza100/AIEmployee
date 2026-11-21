@@ -376,7 +376,9 @@ class Command(BaseCommand):
         mail = None
 
         try:
-            # Connect to IMAP server
+            # Connect to IMAP server, if it may be connected to (core/mail_hosts.py, 21 Nov 2026)
+            from core.mail_hosts import check_mail_server
+            check_mail_server(account.imap_host, account.imap_port or (993 if account.imap_use_ssl else 143), 'imap')
             if account.imap_use_ssl:
                 mail = imaplib.IMAP4_SSL(account.imap_host, account.imap_port or 993, timeout=60)
             else:

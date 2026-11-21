@@ -560,6 +560,8 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
   const docs = data?.personal_documents || [];
   const leaves = data?.leave_requests || [];
   const meetings = data?.meetings || [];
+  // A colleague's directory entry only: the rest is for HR, the person and their managers (21 Nov 2026).
+  const limited = !!data?.limited;
 
   const setCompField = (k, v) => setCompForm((s) => ({ ...s, payload: { ...s.payload, [k]: v } }));
 
@@ -590,7 +592,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-1 gap-x-4 flex-1 text-sm">
-                  <div className="col-span-2 flex justify-end -mt-1 mb-1 gap-2">
+                  {!limited && <div className="col-span-2 flex justify-end -mt-1 mb-1 gap-2">
                     {e.anonymized_at && (
                       <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-400/30">
                         <Shield className="h-2.5 w-2.5 mr-1" /> Anonymized
@@ -641,18 +643,18 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                         <Shield className="h-3 w-3 mr-1" /> Anonymize (GDPR)
                       </Button>
                     )}
-                  </div>
+                  </div>}
                   <KV icon={Mail} label="Email" value={e.work_email} />
                   <KV icon={Briefcase} label="Title" value={e.job_title} />
                   <KV icon={Building2} label="Department" value={e.department_name || e.department} />
                   <KV icon={User} label="Status" value={labelOf(e.employment_status)} />
-                  <KV icon={CalendarClock} label="Type" value={labelOf(e.employment_type)} />
-                  <KV icon={CalendarClock} label="Start" value={e.start_date} />
+                  {!limited && <KV icon={CalendarClock} label="Type" value={labelOf(e.employment_type)} />}
+                  {!limited && <KV icon={CalendarClock} label="Start" value={e.start_date} />}
                   {e.probation_end_date && <KV icon={CalendarClock} label="Probation ends" value={e.probation_end_date} />}
                   <KV icon={CalendarClock} label="Time zone" value={e.timezone_name || "The company's"} />
                 </div>
               </div>
-              {!e.anonymized_at && (
+              {!e.anonymized_at && !limited && (
                 <HREmployeeLogins
                   employee={e}
                   logins={data.logins}
@@ -680,6 +682,12 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
               )}
             </section>
 
+            {limited ? (
+              <p className="text-sm text-white/50 px-1">
+                You see a colleague's directory details. Their leave, reviews, goals and documents are for HR,
+                {' '}{e.full_name || 'them'} and their managers.
+              </p>
+            ) : (<>
             {/* LEAVE BALANCES */}
             <section>
               <div className="flex items-center justify-between mb-2">
@@ -1013,6 +1021,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                 </div>
               )}
             </section>
+            </>)}
           </div>
         )}
       </DialogContent>

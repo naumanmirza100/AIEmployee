@@ -895,6 +895,10 @@ else:
     print("  EMAIL_HOST_PASSWORD=your-app-password")
     print("="*60 + "\n")
 
+# Mail servers a company types in (Marketing, Reply Draft) must be public hosts on mail ports, as AI SDR's are, so
+# nobody can aim the server at its own network (core/mail_hosts.py, 21 Nov 2026). On for a local mail catcher.
+ALLOW_PRIVATE_MAIL_HOSTS = os.getenv('ALLOW_PRIVATE_MAIL_HOSTS', 'False').lower().strip() == 'true'
+
 # A demo company on the live site: mail to addresses under this domain goes to a practice mail server instead of out
 # through the account above (core/demo_mail.py). Unset, nothing changes.
 DEMO_MAIL_DOMAIN = os.getenv('DEMO_MAIL_DOMAIN', '').strip().lower()

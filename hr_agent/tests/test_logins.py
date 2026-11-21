@@ -109,12 +109,14 @@ class LinkTests(HRTestCase):
 
     def test_the_record_shows_its_logins_and_who_may_change_them(self):
         self.set_login(self.sam, self.bo)
-        for actor, may in ((self.admin, True), (self.member, False)):
-            code, body = self.call(views.get_employee_detail, actor, method='get', employee_id=self.sam.id)
-            self.assertEqual(code, 200, body)
-            found = body['data']['logins']
-            self.assertEqual((found['employee_login']['username'], found['dashboard_login']['full_name'],
-                              found['on_calendar'], found['can_manage']), ('sam', 'Bo Boss', True, may))
+        code, body = self.call(views.get_employee_detail, self.admin, method='get', employee_id=self.sam.id)
+        self.assertEqual(code, 200, body)
+        found = body['data']['logins']
+        self.assertEqual((found['employee_login']['username'], found['dashboard_login']['full_name'],
+                          found['on_calendar'], found['can_manage']), ('sam', 'Bo Boss', True, True))
+        # A colleague sees a directory entry, without their logins (21 Nov 2026, the test report's HR 5).
+        code, body = self.call(views.get_employee_detail, self.member, method='get', employee_id=self.sam.id)
+        self.assertEqual((code, body['data']['limited'], body['data']['logins']), (200, True, {}))
 
     def test_the_picker_lists_this_companys_logins_and_what_each_is_linked_to(self):
         self.set_login(self.sam, self.bo)

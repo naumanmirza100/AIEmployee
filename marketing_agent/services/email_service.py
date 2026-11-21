@@ -314,7 +314,9 @@ class EmailService:
             
             # Use custom SMTP backend if account is configured
             from django.core.mail.backends.smtp import EmailBackend
-            
+            from core.mail_hosts import check_mail_server
+            check_mail_server(email_account.smtp_host, email_account.smtp_port, 'smtp')
+
             smtp_backend = EmailBackend(
                 host=email_account.smtp_host,
                 port=email_account.smtp_port,
@@ -487,6 +489,8 @@ class EmailService:
 
         try:
             from django.core.mail.backends.smtp import EmailBackend
+            from core.mail_hosts import check_mail_server
+            check_mail_server(email_account.smtp_host, email_account.smtp_port, 'smtp')
             smtp_backend = EmailBackend(
                 host=email_account.smtp_host,
                 port=email_account.smtp_port,
@@ -610,6 +614,9 @@ class EmailService:
             return  # malformed message; nothing useful to APPEND
 
         port = email_account.imap_port or (993 if email_account.imap_use_ssl else 143)
+        from core.mail_hosts import mail_server_error
+        if mail_server_error(host, port, 'imap'):
+            return                  # refused (core/mail_hosts.py): the mail went; only the Sent copy is skipped
         if email_account.imap_use_ssl:
             mail = imaplib.IMAP4_SSL(host, port, timeout=MAIL_TIMEOUT)
         else:

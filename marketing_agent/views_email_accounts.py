@@ -178,6 +178,8 @@ def test_email_account(request, account_id):
         import smtplib
         
         try:
+            from core.mail_hosts import check_mail_server
+            check_mail_server(account.smtp_host, account.smtp_port, 'smtp')
             # Create backend with timeout
             backend = EmailBackend(
                 host=account.smtp_host,

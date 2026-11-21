@@ -336,6 +336,10 @@ def integration_ping(request, integration_id: int):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def integration_sync_leads(request, integration_id: int):
+    # Any login could push the company's mail into the CRM, or retry all of it (21 Nov 2026, the test report's CRM 2).
+    refused = _admins_only(request)
+    if refused:
+        return refused
     company_user = request.user
     company = company_user.company
 
@@ -436,6 +440,10 @@ def queue_status(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def retry_failed(request):
+    # Any login could push the company's mail into the CRM, or retry all of it (21 Nov 2026, the test report's CRM 2).
+    refused = _admins_only(request)
+    if refused:
+        return refused
     company_user = request.user
     company = company_user.company
 
