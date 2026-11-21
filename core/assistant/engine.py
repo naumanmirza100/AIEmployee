@@ -159,6 +159,7 @@ Rules:
 - Names exactly as the asker wrote them; "me" for the asker ("my", "I", "mera", "mujhe"). Never make a name up.
 - Dates as YYYY-MM-DD worked out from today: "this week" is today to Sunday; "next week" Monday to Friday of next
   week; "tomorrow", "kal" (Roman Urdu, here: tomorrow), "parson" (the day after tomorrow).
+- The asker's own meetings ("my meetings", "what's on my week"): calendar for "me" and exec_meetings, same dates.
 - "Free"/"available" questions use the calendar lookups. Over several days ("next week", "this month") use
   who_is_free with start and end, not one date.
 - Taking on more work ("can I give someone a task?", "who should I give a task, and what task?", "who has room?")
@@ -233,7 +234,18 @@ def _sure_calls(calls, text, usable) -> list:
     have = {c.get('lookup') for c in calls}
     extra = [{'lookup': name, 'args': {}} for name, wanted in (('workload', _GIVE_WORK), ('unassigned_tasks', _PICK_TASK))
              if wanted.search(text) and name in usable and name not in have]
+    # "What meetings do I have next week?" read only the shared calendar, which knows people with an HR record: an
+    # owner with five Executive meetings was told they had none (21 Nov 2026, the test report's final check 1). The
+    # Executive meetings are read for the same dates too.
+    calendar = next((c for c in calls if c.get('lookup') == 'calendar'), None)
+    if (calendar is not None and _MY_MEETINGS.search(text) and 'exec_meetings' in usable
+            and 'exec_meetings' not in have):
+        args = calendar.get('args') if isinstance(calendar.get('args'), dict) else {}
+        extra.append({'lookup': 'exec_meetings', 'args': {k: args[k] for k in ('start', 'end') if args.get(k)}})
     return calls[:MAX_CALLS - len(extra)] + extra
+
+
+_MY_MEETINGS = re.compile(r'\b(meetings?|calls?|schedule|calendar|busy)\b', re.I)
 
 
 # ---- 2. fetch -----------------------------------------------------------------------------------------------------

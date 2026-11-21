@@ -1648,6 +1648,22 @@ def timeline_gantt(request):
         )
 
 
+def _task_dates(t, today):
+    """A task's due date and, when it is late and not done, by how many days. The Q&A was never sent them, so "which
+    tasks are overdue?" was answered "none" with a task three days late (21 Nov 2026, the test report's PM 1)."""
+    if not t.due_date:
+        return {'due_date': None}
+    due = timezone.localtime(t.due_date).date() if timezone.is_aware(t.due_date) else t.due_date.date()
+    out = {'due_date': due.isoformat()}
+    if t.status != 'done' and due < today:
+        out['overdue_days'] = (today - due).days
+    return out
+
+
+def _project_dates(p):
+    return {k: getattr(p, k).isoformat() for k in ('start_date', 'end_date', 'deadline') if getattr(p, k, None)}
+
+
 def _knowledge_qa_inputs(request):
     """What Knowledge Q&A answers from — the question, the caller's projects,
     tasks and people, and the chat so far — for both the plain and the
@@ -1710,7 +1726,8 @@ def _knowledge_qa_inputs(request):
                 'id': task.id,
                 'title': task.title,
                 'status': task.status,
-                'priority': task.priority
+                'priority': task.priority,
+                **_task_dates(task, timezone.localdate()),
             })
         
         user_assignments.append({
@@ -1733,6 +1750,7 @@ def _knowledge_qa_inputs(request):
                 "description": project.description,
                 "status": project.status,
                 "priority": project.priority,
+                **_project_dates(project),
             "tasks": [
                 {
                     "id": t.id,
@@ -1742,6 +1760,7 @@ def _knowledge_qa_inputs(request):
                     "description": t.description,
                     "assignee_id": t.assignee.id if t.assignee else None,
                     "assignee_username": t.assignee.username if t.assignee else None,
+                    **_task_dates(t, timezone.localdate()),
                     "subtasks": [
                         {
                             "id": st.id,
@@ -1763,6 +1782,7 @@ def _knowledge_qa_inputs(request):
                     "priority": p.priority,
                     "tasks_count": p.tasks.count(),
                     "description": p.description[:100] if p.description else "",
+                    **_project_dates(p),
                 }
                 for p in all_projects
             ],
@@ -1778,6 +1798,7 @@ def _knowledge_qa_inputs(request):
                     "priority": p.priority,
                     "tasks_count": p.tasks.count(),
                     "description": p.description[:100] if p.description else "",
+                    **_project_dates(p),
                 }
                 for p in all_projects
             ],
@@ -1791,6 +1812,7 @@ def _knowledge_qa_inputs(request):
                     "project_name": t.project.name,
                     "assignee_id": t.assignee.id if t.assignee else None,
                     "assignee_username": t.assignee.username if t.assignee else None,
+                    **_task_dates(t, timezone.localdate()),
                     "subtasks": [
                         {
                             "id": st.id,
@@ -1805,6 +1827,17 @@ def _knowledge_qa_inputs(request):
             ],
             "user_assignments": user_assignments,
         }
+
+    # Today, and every late task in scope, ready-made: the prompt lists only some tasks (21 Nov 2026).
+    today = timezone.localdate()
+    context['today'] = today.isoformat()
+    in_scope = tasks if project_id else all_tasks
+    context['overdue'] = [
+        {'title': t.title, 'project_name': t.project.name, 'assignee_username': t.assignee.username if t.assignee else None,
+         **_task_dates(t, today)}
+        for t in in_scope.exclude(status='done').filter(due_date__isnull=False).select_related('project', 'assignee')
+        if _task_dates(t, today).get('overdue_days')
+    ][:30]
 
     # ========== RICH CONTEXT: include additional data based on question relevance ==========
     q_lower = question.lower()

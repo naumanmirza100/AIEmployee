@@ -340,6 +340,11 @@ def _serialize_inbox_email(m, *, include_body=False):
         'needs_reply': getattr(m, 'needs_reply', None),
         'triaged': bool(getattr(m, 'triaged_at', None)),
     }
+    if m.direction != 'out':
+        # A faked sender, or a request to change payment details (core/mail_spoof.py, 21 Nov 2026).
+        from core.mail_spoof import warning
+        out['sender_warning'] = warning(m.from_name, m.from_email, m.subject,
+                                        m.body if include_body else preview)
     if include_body:
         out['thread_summary'] = _stored_json(getattr(m, 'thread_summary', ''))
         out['thread_summary_count'] = getattr(m, 'thread_summary_count', 0) or 0
