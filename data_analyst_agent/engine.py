@@ -26,7 +26,7 @@ from core.assistant.engine import unchecked_numbers
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 
 from . import connectors, mongo
-from .guards import Refused, check_query
+from .guards import NO_TABLE, Refused, check_query
 from .models import DataQuestion, DataSource
 
 logger = logging.getLogger(__name__)
@@ -642,6 +642,20 @@ def _with_references(tables, chosen) -> list:
     return out
 
 
+#: The reply the prompts give a request to change data. MongoDB's prompt also gave it to "What is our employee
+#: headcount?", a question about data that isn't there (21 Nov 2026, the test report's Data Analyst 2).
+_READ_ONLY = "I only read your database"
+_CHANGE_WORDS = re.compile(r'\b(delete|remove|erase|drop|update|change|edit|modify|add|insert|create|cancel|fix|'
+                           r'rename|merge|mark|restore|undo|truncate|alter|write|set)\b', re.I)
+NO_DATA = "This database doesn't seem to hold data that answers this: none of its tables has it."
+
+
+def _plain_ask_back(question, ask_back):
+    if ask_back.startswith(_READ_ONLY) and not _CHANGE_WORDS.search(question or ''):
+        return NO_DATA
+    return ask_back
+
+
 def _write_aggregation(ai, source, question, history, tables, previous='', values=None) -> dict:
     values = values or {}
     listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name']))) for t in tables)
@@ -650,7 +664,7 @@ def _write_aggregation(ai, source, question, history, tables, previous='', value
                            live=_live_rule(tables, values))
     out = _json(ai._call_llm(prompt=prompt, system_prompt='You write MongoDB aggregations. Output only one JSON object.',
                              temperature=0, max_tokens=SQL_TOKENS, json_mode=True))
-    ask_back = str(out.get('ask_back') or '').strip()[:500]
+    ask_back = _plain_ask_back(question, str(out.get('ask_back') or '').strip()[:500])
     collection, pipeline = str(out.get('collection') or '').strip(), out.get('pipeline')
     if ask_back and not pipeline:
         return {'sql': '', 'ask_back': ask_back}
@@ -689,7 +703,8 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
                                  temperature=0, max_tokens=SQL_TOKENS, json_mode=True))
     finally:
         ai.openai_model = None
-    return {'sql': str(out.get('sql') or '').strip(), 'ask_back': str(out.get('ask_back') or '').strip()[:500],
+    return {'sql': str(out.get('sql') or '').strip(),
+            'ask_back': _plain_ask_back(question, str(out.get('ask_back') or '').strip()[:500]),
             'chart': out.get('chart')}
 
 
@@ -1007,6 +1022,12 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
         # (17 Nov 2026); the second query now gets the time that is left instead.
         if too_long or ASK_SECONDS - (time.monotonic() - started) < RETRY_SECONDS:
             break
+    if result is None and reason == NO_TABLE:
+        # Every try made a figure up rather than read a table: the data isn't there (21 Nov 2026).
+        record.status, record.answer = DataQuestion.STATUS_ASKED_BACK, NO_DATA
+        record.duration_ms = int((time.monotonic() - started) * 1000)
+        record.save()
+        return _reply(record, rows=[])
     if result is None:
         record.status, record.sql, record.error = DataQuestion.STATUS_FAILED, sql, reason
         record.answer = (f'The query took longer than {limit} seconds, the most it could take here, so the database '

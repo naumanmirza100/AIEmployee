@@ -132,12 +132,14 @@ def ai_out_of_credit(provider, exc=None):
     name = dict(PROVIDER_CHOICES).get(provider, provider or 'AI')
     logger.warning("The platform's %s account is out of credit: its AI calls are refused (%s)", name, str(exc)[:300])
     try:
-        if not cache.add(f'ai-out-of-credit:{provider}', 1, AI_CREDIT_REPEAT_SECONDS):
-            return False
+        # Who to tell is found first: the hour's silence used to be set even when nobody could be emailed, so a
+        # super admin added a minute later heard nothing (21 Nov 2026, the test report's retest).
         to = people_to_tell()
         if not to:
             logger.error("The platform's %s account is out of credit, and there is nobody to email "
                          "(no ERROR_ALERT_EMAILS and no super admin with an address)", name)
+            return False
+        if not cache.add(f'ai-out-of-credit:{provider}', 1, AI_CREDIT_REPEAT_SECONDS):
             return False
         subject = f"[Pay Per Project] The platform's {name} account is out of credit: the agents' AI has stopped"
         body = '\n'.join([

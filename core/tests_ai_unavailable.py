@@ -145,6 +145,36 @@ class OutOfCredit(TestCase):
                 events.append(event)
         self.assertEqual(events, [])
 
+    def test_marketing_operations_and_reply_draft_say_it_too(self):
+        """Their shared call took any 429 for a busy provider, so out of credit was "busy, try again" and nobody was
+        told (21 Nov 2026, the test report's Retest A). An ordinary rate limit is still waited out and called busy."""
+        from django.core import mail
+        from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
+        client = mock.Mock()
+        client.chat.completions.create.side_effect = out_of_credit()
+        agent = MarketingBaseAgent()
+        with mock.patch.object(MarketingBaseAgent, '_resolve_company_client', return_value=(client, context('platform'))), \
+             mock.patch('marketing_agent.agents.marketing_base_agent.time.sleep') as slept, \
+             self.assertRaises(AIServiceUnavailable):
+            agent._call_groq_qa('How did the campaign do?')
+        self.assertEqual((client.chat.completions.create.call_count, slept.call_count, len(mail.outbox)), (1, 0, 1))
+        client.chat.completions.create.side_effect = rate_limited()
+        with mock.patch.object(MarketingBaseAgent, '_resolve_company_client', return_value=(client, context('platform'))), \
+             mock.patch('marketing_agent.agents.marketing_base_agent.time.sleep'), \
+             self.assertRaisesMessage(RuntimeError, 'The service is busy'):
+            agent._call_groq_qa('How did the campaign do?')
+
+    def test_with_nobody_to_email_the_hour_is_not_spent(self):
+        """The hour's silence was set before looking for someone to tell, so a super admin added a minute later was
+        never emailed (21 Nov 2026)."""
+        from django.core import mail
+        User.objects.filter(is_superuser=True).delete()
+        self.refused('platform')
+        self.assertEqual(mail.outbox, [])
+        User.objects.create_superuser('late', 'late@example.com', 'x')
+        self.refused('platform')
+        self.assertEqual([m.to for m in mail.outbox], [['late@example.com']])
+
 
 from data_analyst_agent.tests.test_data_analyst import AnalystCase  # noqa: E402
 

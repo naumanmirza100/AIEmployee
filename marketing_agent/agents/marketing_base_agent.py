@@ -402,6 +402,11 @@ class MarketingBaseAgent:
                 return content
             except Exception as e:
                 last_error = e
+                # Out of credit comes as a 429 too: it was taken for a busy provider, waited out and called "busy",
+                # and nobody was told (21 Nov 2026, the test report's Retest A). Out of credit, a refused key or a
+                # provider that is down are raised at once; an ordinary rate limit or a timeout falls through.
+                from core.api_key_service import raise_if_auth_error
+                raise_if_auth_error(e, key_ctx)
                 err_str = str(e)
                 is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower()
                 is_timeout = "timeout" in err_str.lower() or "timed out" in err_str.lower() or "ReadTimeout" in err_str
