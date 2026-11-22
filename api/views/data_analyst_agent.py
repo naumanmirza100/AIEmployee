@@ -26,6 +26,7 @@ Gated by the module middleware (prefix `data-analyst` -> data_analyst_agent).
 import csv
 import io
 import logging
+from decimal import Decimal, InvalidOperation
 import os
 import re
 
@@ -44,13 +45,14 @@ from core.api_key_service import KeyServiceError
 from core.drf_exceptions import key_error_status
 from data_analyst_agent import connectors, dumps, engine, mongo, mssql, sources as source_work
 from data_analyst_agent.guards import Refused, check_query
-from data_analyst_agent.models import DataQuestion, DataSource
+from data_analyst_agent.models import DataQuestion, DataSource, SavedQuestion
 
 logger = logging.getLogger(__name__)
 
 MAX_QUESTION = 2000
 SQLITE_HEADER = b'SQLite format 3\x00'
 CSV_MAX_ROWS = 50_000
+COMPANY_NOTES_MAX = 8000
 
 
 class AnalystThrottle(SimpleRateThrottle):
@@ -114,6 +116,8 @@ def _serialize(source: DataSource, request) -> dict:
         'user_can_write': source.user_can_write, 'send_rows_to_ai': source.send_rows_to_ai,
         'everyone_may_ask': source.everyone_may_ask,
         'created_at': source.created_at.isoformat() if source.created_at else None,
+        # What the company says its data means (22 Nov 2026): everyone who may ask reads it, admins write it.
+        'company_notes': source.company_notes,
     }
     if source.is_connection:
         out.update({'host': source.host, 'port': source.port, 'database': source.database,
@@ -255,6 +259,12 @@ def _apply_shared_fields(source: DataSource, data):
         source.send_rows_to_ai = _bool(data.get('send_rows_to_ai'), True)
     if 'everyone_may_ask' in data:
         source.everyone_may_ask = _bool(data.get('everyone_may_ask'), True)
+    if 'company_notes' in data:
+        notes = str(data.get('company_notes') or '').strip()
+        if len(notes) > COMPANY_NOTES_MAX:
+            raise Refused(f'Keep the notes under {COMPANY_NOTES_MAX:,} characters; the agent reads up to '
+                          f'{engine.COMPANY_NOTES_CHARS:,} of them.')
+        source.company_notes = notes
 
 
 def _apply_allowed(source: DataSource, data):
@@ -603,3 +613,171 @@ def question_csv(request, question_id):
     response = StreamingHttpResponse(lines(), content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = f'attachment; filename="question-{record.pk}.csv"'
     return response
+
+
+# ---- Saved reports (22 Nov 2026) --------------------------------------------------------------------------------
+# A question answered right can be kept: run again on a schedule and emailed, or watched and emailed only when a
+# figure crosses a line. It re-runs its own query, read-only and without the AI (data_analyst_agent/reports.py).
+
+from data_analyst_agent import reports  # noqa: E402
+
+SAVED_MAX = 30
+
+
+def _serialize_saved(saved, request) -> dict:
+    return {
+        'id': saved.pk, 'title': saved.title, 'question': saved.question, 'columns': saved.columns,
+        'source': {'id': saved.source_id, 'name': saved.source.name},
+        'schedule': saved.schedule, 'weekday': saved.weekday, 'month_day': saved.month_day, 'hour': saved.hour,
+        'when': reports.when_text(saved),
+        'recipients': [{'id': cu.pk, 'name': cu.full_name or cu.email, 'email': cu.email}
+                       for cu in saved.recipients.all()],
+        'alert_column': saved.alert_column, 'alert_op': saved.alert_op,
+        'alert_value': float(saved.alert_value) if saved.alert_value is not None else None,
+        'is_active': saved.is_active,
+        'next_run_at': saved.next_run_at.isoformat() if saved.next_run_at else None,
+        'last_run_at': saved.last_run_at.isoformat() if saved.last_run_at else None,
+        'last_status': saved.last_status, 'last_error': saved.last_error, 'last_value': saved.last_value,
+        'created_by': (saved.created_by.full_name or saved.created_by.email) if saved.created_by else '',
+        'may_change': saved.created_by_id == request.user.pk or _is_admin(request),
+    }
+
+
+def _apply_saved_fields(saved, data, request):
+    """Check and set what the person chose. Raises Refused with words for the screen."""
+    from core.models import CompanyUser
+    if 'title' in data:
+        saved.title = str(data.get('title') or '').strip()[:120] or saved.question[:120]
+    if 'schedule' in data:
+        schedule = str(data.get('schedule') or 'off')
+        if schedule not in dict(SavedQuestion.SCHEDULE_CHOICES):
+            raise Refused('Choose how often: not scheduled, every day, every week or every month.')
+        saved.schedule = schedule
+    for field, low, high, words in (('weekday', 0, 6, 'The day of the week'), ('month_day', 1, 28,
+                                    'The day of the month (1 to 28)'), ('hour', 0, 23, 'The hour (0 to 23)')):
+        if field in data:
+            try:
+                value = int(data.get(field))
+            except (TypeError, ValueError):
+                raise Refused(f'{words} must be a number.')
+            if not low <= value <= high:
+                raise Refused(f'{words} must be from {low} to {high}.')
+            setattr(saved, field, value)
+    if 'is_active' in data:
+        saved.is_active = _bool(data.get('is_active'), True)
+    if 'alert_op' in data:
+        op = str(data.get('alert_op') or '')
+        if op not in ('', 'above', 'below'):
+            raise Refused('Choose when to send: always, or only when a figure is above or below a value.')
+        saved.alert_op = op
+        if op:
+            column = str(data.get('alert_column') or '').strip()
+            known = {str(c).lower(): str(c) for c in saved.columns or []}
+            if column.lower() not in known:
+                raise Refused('Choose which figure to watch, from the answer\'s columns.')
+            saved.alert_column = known[column.lower()]
+            try:
+                saved.alert_value = Decimal(str(data.get('alert_value')).replace(',', ''))
+            except (InvalidOperation, ValueError, TypeError):
+                raise Refused('Give the value to compare the figure with, as a number.')
+        else:
+            saved.alert_column, saved.alert_value = '', None
+    if 'recipient_ids' in data:
+        ids = data.get('recipient_ids') or []
+        wanted = [int(i) for i in (ids if isinstance(ids, (list, tuple)) else [ids]) if str(i).isdigit()]
+        people = list(CompanyUser.objects.filter(company_id=request.user.company_id, pk__in=wanted, is_active=True))
+        barred = [cu.full_name or cu.email for cu in people if not saved.source.may_ask(cu)]
+        if barred:
+            raise Refused(f'{", ".join(barred)} may not ask {saved.source.name}, so they can\'t be sent its reports.')
+        saved._recipients = people
+
+
+def _saved_for(request, pk, *, change=False):
+    saved = (SavedQuestion.objects.select_related('source', 'created_by')
+             .filter(company_id=request.user.company_id, pk=pk).first())
+    if saved is None or not (saved.created_by_id == request.user.pk or _is_admin(request)
+                             or (not change and saved.recipients.filter(pk=request.user.pk).exists())):
+        return None, _err('That saved report was not found.', status.HTTP_404_NOT_FOUND)
+    return saved, None
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def saved_reports(request):
+    """GET: the saved reports this login made or receives (an owner or admin: all of the company's).
+    POST: keep an answered question: {question_id, title?, schedule, weekday, month_day, hour, recipient_ids,
+    alert_op, alert_column, alert_value}."""
+    from django.db.models import Q
+    company_id = request.user.company_id
+    if request.method == 'GET':
+        qs = SavedQuestion.objects.filter(company_id=company_id).select_related('source', 'created_by')
+        if not _is_admin(request):
+            qs = qs.filter(Q(created_by=request.user) | Q(recipients=request.user)).distinct()
+        return Response({'status': 'success', 'data': [_serialize_saved(s, request) for s in qs.prefetch_related('recipients')]})
+    data = request.data or {}
+    record, refused = _question_for(request, data.get('question_id'))
+    if refused:
+        return refused
+    if record.status != DataQuestion.STATUS_ANSWERED or not record.sql:
+        return _err('Only an answered question, with its query, can be saved.')
+    if not record.source.may_ask(request.user):
+        return _err('You may not ask this database any more.', status.HTTP_403_FORBIDDEN)
+    if SavedQuestion.objects.filter(company_id=company_id).count() >= SAVED_MAX:
+        return _err(f'Your company has {SAVED_MAX} saved reports, the most it can keep. Remove one first.')
+    saved = SavedQuestion(company_id=company_id, source=record.source, created_by=request.user,
+                          title=record.question[:120], question=record.question, sql=record.sql,
+                          columns=record.columns or [])
+    data = {'recipient_ids': [request.user.pk], **data}
+    try:
+        _apply_saved_fields(saved, data, request)
+    except Refused as exc:
+        return _err(str(exc))
+    saved.next_run_at = reports.next_run(saved)
+    saved.save()
+    saved.recipients.set(getattr(saved, '_recipients', None) or [request.user])     # nobody chosen: the creator
+    return Response({'status': 'success', 'data': _serialize_saved(saved, request)}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def saved_report_detail(request, saved_id):
+    saved, refused = _saved_for(request, saved_id, change=request.method != 'GET')
+    if refused:
+        return refused
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': _serialize_saved(saved, request)})
+    if request.method == 'DELETE':
+        saved.delete()
+        return Response({'status': 'success', 'message': 'Removed.'})
+    try:
+        _apply_saved_fields(saved, request.data or {}, request)
+    except Refused as exc:
+        return _err(str(exc))
+    saved.next_run_at = reports.next_run(saved)
+    saved.save()
+    if hasattr(saved, '_recipients'):
+        saved.recipients.set(saved._recipients)
+    return Response({'status': 'success', 'data': _serialize_saved(saved, request)})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([AnalystConnectThrottle])
+def saved_report_run(request, saved_id):
+    """Run it now and show the result; {"send": true} also emails it, as its time would (only when it crosses the
+    line, for a watched figure)."""
+    saved, refused = _saved_for(request, saved_id, change=True)
+    if refused:
+        return refused
+    send = _bool((request.data or {}).get('send'), False)
+    out = reports.run(saved, send=send)
+    if out['status'] == 'failed':
+        return _err(f'It could not run: {out["error"]}')
+    return Response({'status': 'success', 'data': {
+        'columns': out['columns'], 'rows': out['rows'][:engine.ROWS_TO_SCREEN], 'more_rows': out['more'],
+        'outcome': out['status'], 'value': reports._shown(out['value']), 'emailed': out['emailed'],
+        'as_of': timezone.now().isoformat(), 'saved': _serialize_saved(saved, request)}})
+

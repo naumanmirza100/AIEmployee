@@ -1108,6 +1108,12 @@ from celery.schedules import crontab as _crontab
 # IMPORTANT: Sequence emails run every 5 minutes to check for ready emails
 # Actual email timing respects user-defined delays (delay_days, delay_hours, delay_minutes)
 CELERY_BEAT_SCHEDULE = {
+    # Saved Data Analyst reports whose time has come (data_analyst_agent/reports.py, 22 Nov 2026)
+    'data-analyst-due-reports': {
+        'task': 'data_analyst_agent.run_due_reports',
+        'schedule': 900.0,
+        'options': {'expires': 900},
+    },
     # The platform's AI spend against its budget, and spikes (core/ai_spend.py, 22 Nov 2026)
     'check-ai-spend': {
         'task': 'core.tasks.check_ai_spend',

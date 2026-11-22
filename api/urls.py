@@ -1015,6 +1015,9 @@ urlpatterns = [
     re_path(r'^data-analyst/questions/(?P<question_id>\d+)/?$', analyst_api.question_detail, name='analyst_question_detail'),  # GET
     re_path(r'^data-analyst/questions/(?P<question_id>\d+)/run/?$', analyst_api.question_run, name='analyst_question_run'),  # POST
     re_path(r'^data-analyst/questions/(?P<question_id>\d+)/csv/?$', analyst_api.question_csv, name='analyst_question_csv'),  # GET
+    re_path(r'^data-analyst/saved/?$', analyst_api.saved_reports, name='analyst_saved'),  # GET, POST
+    re_path(r'^data-analyst/saved/(?P<saved_id>\d+)/?$', analyst_api.saved_report_detail, name='analyst_saved_detail'),  # GET, PATCH, DELETE
+    re_path(r'^data-analyst/saved/(?P<saved_id>\d+)/run/?$', analyst_api.saved_report_run, name='analyst_saved_run'),  # POST
     # Built-in workflow templates — clone-to-instantiate
     re_path(r'^hr/workflow-templates/?$', hr_agent.list_workflow_templates, name='hr_list_workflow_templates'),  # GET
     re_path(r'^hr/workflows/from-template/?$', hr_agent.create_workflow_from_template, name='hr_create_workflow_from_template'),  # POST

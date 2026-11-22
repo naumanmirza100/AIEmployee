@@ -135,6 +135,20 @@ def _notes_text(notes, tables=None) -> str:
     return f"The database's own notes on its tables and columns:\n{text}\n\n" if text else ''
 
 
+#: How much of the company's own notes goes into a prompt.
+COMPANY_NOTES_CHARS = 4000
+
+
+def _company_notes(source) -> str:
+    """What the company wrote about its data (DataSource.company_notes, 22 Nov 2026), first in every prompt: its
+    meanings beat the AI's guesses and the database's own notes."""
+    text = str(getattr(source, 'company_notes', '') or '').strip()[:COMPANY_NOTES_CHARS]
+    if not text:
+        return ''
+    return ("What this company says its data means (follow it: it overrides your own guesses and the database's notes):"
+            f"\n{text}\n\n")
+
+
 def _history(conversation, source) -> str:
     if not conversation:
         return ''
@@ -612,7 +626,7 @@ def _choose_tables(ai, source, question, history, notes=None) -> list:
         return _checked(source, tables)
     raw = ai._call_llm(prompt=_CHOOSE.format(dialect=DIALECT_NAMES[source.kind], history=history, question=question,
                                              tables=_choose_list(tables), limit=TABLES_CHOSEN,
-                                             notes=_notes_text(notes),
+                                             notes=_company_notes(source) + _notes_text(notes),
                                              currency=_CHOOSE_CURRENCY if _has_currency(tables) else ''),
                        system_prompt='You choose tables. Output only one JSON object.', temperature=0,
                        max_tokens=600, json_mode=True)
@@ -659,7 +673,8 @@ def _plain_ask_back(question, ask_back):
 def _write_aggregation(ai, source, question, history, tables, previous='', values=None) -> dict:
     values = values or {}
     listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name']))) for t in tables)
-    prompt = _MONGO.format(today=timezone.localdate().isoformat(), history=history, question=question,
+    prompt = _MONGO.format(today=timezone.localdate().isoformat(), history=_company_notes(source) + history,
+                           question=question,
                            previous=previous, tables=listed or '(none)',
                            live=_live_rule(tables, values))
     out = _json(ai._call_llm(prompt=prompt, system_prompt='You write MongoDB aggregations. Output only one JSON object.',
@@ -690,8 +705,9 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
                          source_name=str(source.name or '').replace('"', "'")[:120],
                          situational=''.join(_situation_text(key, source.kind, tables, values) for key in situations),
-                         shared=("The database's own notes on several tables (* stands for any name):\n"
-                                 + '\n'.join(shared) + '\n') if shared else '',
+                         shared=_company_notes(source) + (
+                             ("The database's own notes on several tables (* stands for any name):\n"
+                              + '\n'.join(shared) + '\n') if shared else ''),
                          tables=listed or '(none)', history=history,
                          question=question, previous=previous,
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')

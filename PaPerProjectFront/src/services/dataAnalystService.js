@@ -44,3 +44,10 @@ export const downloadCsv = async (id) => {
 };
 
 export const listLogins = () => companyApi.get('/company/logins');
+
+// Saved reports (22 Nov 2026): an answered question kept to run again on a schedule, or when a figure crosses a line.
+export const listSaved = () => companyApi.get('/data-analyst/saved');
+export const saveQuestion = (questionId, fields) => companyApi.post('/data-analyst/saved', { question_id: questionId, ...fields });
+export const updateSaved = (id, fields) => companyApi.patch(`/data-analyst/saved/${id}`, fields);
+export const removeSaved = (id) => companyApi.delete(`/data-analyst/saved/${id}`);
+export const runSaved = (id, send = false) => companyApi.post(`/data-analyst/saved/${id}/run`, { send });

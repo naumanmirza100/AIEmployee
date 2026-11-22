@@ -13,3 +13,11 @@ def load_dump(source_id):
         return {'skipped': 'not loading'}
     ok, message = read_into_copy(source)
     return {'ok': ok, 'message': message[:300]}
+
+
+@shared_task(name='data_analyst_agent.run_due_reports')
+def run_due_reports():
+    """Every 15 minutes: saved reports whose time has come run and are emailed (data_analyst_agent/reports.py)."""
+    from .reports import run_due
+    return run_due()
+
