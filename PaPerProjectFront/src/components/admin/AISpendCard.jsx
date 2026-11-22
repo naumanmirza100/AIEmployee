@@ -77,6 +77,18 @@ export const AISpendCard = () => {
                 <p className="text-[11px] text-white/50">calls before 22 Nov, counted as the platform's</p>
               </div>
             </div>
+            {data.openai_bill ? (
+              <p className="text-[11px] text-white/60" data-testid="ai-spend-openai-bill">
+                OpenAI's own bill this month: {usd(data.openai_bill.month_usd)} (today {usd(data.openai_bill.today_usd)}).
+                It counts every use of the account, the site's and anything else on the same key; the warnings go by
+                the higher figure.
+              </p>
+            ) : (
+              <p className="text-[11px] text-amber-300/80" data-testid="ai-spend-no-bill">
+                These figures are the site's own calls. Anything else using the same OpenAI key (a laptop's test runs)
+                isn't counted. Add an OpenAI admin key (OPENAI_ADMIN_KEY on the server) to read OpenAI's own bill.
+              </p>
+            )}
             {data.groq_today && (data.groq_today.limit_calls > 0 || data.groq_today.limit_tokens > 0) && (
               <p className="text-[11px] text-white/60" data-testid="ai-spend-groq">
                 Groq today (AI SDR's free tier): {data.groq_today.calls.toLocaleString()} of{' '}

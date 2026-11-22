@@ -112,6 +112,42 @@ class Alerts(SpendCase):
         self.assertEqual(SentAlert.objects.count(), 0)
 
 
+@override_settings(AI_MONTHLY_BUDGET_USD=10.0, AI_DAILY_SPIKE_USD=1.0, GROQ_DAILY_REQUESTS=0, GROQ_DAILY_TOKENS=0,
+                   ERROR_ALERT_EMAILS=['ops@example.com'], OPENAI_ADMIN_KEY='sk-admin-test')
+class OpenAIsOwnBill(SpendCase):
+    """The site's log had $2.57 for November where OpenAI billed $10.69: test runs on a laptop used the same key."""
+
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def bill(self, daily_usd):
+        from unittest import mock
+        start = int(ai_spend.month_start().timestamp())
+        buckets = [{'start_time': start + i * 86400, 'end_time': start + (i + 1) * 86400,
+                    'results': [{'amount': {'value': v, 'currency': 'usd'}}]} for i, v in enumerate(daily_usd)]
+        answer = mock.Mock(status_code=200, **{'json.return_value': {'data': buckets, 'has_more': False}})
+        return mock.patch('requests.get', return_value=answer)
+
+    def test_the_bill_is_read_and_the_warning_goes_by_the_higher_figure(self):
+        self.call(self.acme, 'platform', tokens=100_000)           # the site's log: $0.04
+        with self.bill([9.0]) as got:
+            report = ai_spend.platform_report(days=3)
+            sent = ai_spend.check_and_alert()
+        self.assertEqual(report['openai_bill']['month_usd'], 9.0)
+        self.assertEqual(got.call_args.kwargs['headers'], {'Authorization': 'Bearer sk-admin-test'})
+        self.assertIn('ai-budget:%s:80' % timezone.localtime().strftime('%Y-%m'), sent)
+        self.assertIn("OpenAI's own bill says $9.00", mail.outbox[0].body)
+
+    @override_settings(OPENAI_ADMIN_KEY='')
+    def test_without_an_admin_key_nothing_is_asked(self):
+        with self.bill([9.0]) as got:
+            self.assertIsNone(ai_spend.platform_report(days=2)['openai_bill'])
+        got.assert_not_called()
+
+
 class Screens(SpendCase):
 
     def test_the_super_admin_page_gets_the_report(self):

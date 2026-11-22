@@ -9,7 +9,7 @@ platform's bill; 'byok' is the company's own. Rows written before the mode was r
 platform's: over-counting a little is better than missing spend.
 """
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime as dt, timedelta, timezone as dt_timezone
 from decimal import Decimal
 
 from django.db.models import Count, Q, Sum
@@ -111,7 +111,59 @@ def platform_report(days=14, top=15) -> dict:
         'unpriced_models': unknown,
         'groq_today': {**groq_today(), 'limit_calls': int(getattr(settings, 'GROQ_DAILY_REQUESTS', 0) or 0),
                        'limit_tokens': int(getattr(settings, 'GROQ_DAILY_TOKENS', 0) or 0)},
+        # OpenAI's own figures (every use of the account), when an admin key is set; None otherwise.
+        'openai_bill': openai_bill(),
     }
+
+
+# ---- The provider's own bill ---------------------------------------------------------------------------------
+# The site's log counts only the site's calls. On 19 Nov 2026 test runs on a laptop used the same OpenAI key: the log
+# had $2.57 for November where OpenAI billed $10.69, and the day's $4.28 showed as $1.30. With an admin key, OpenAI's
+# Costs API gives the account's real spend, and the alerts go by whichever figure is higher.
+
+OPENAI_COSTS_URL = 'https://api.openai.com/v1/organization/costs'
+
+
+def openai_bill(now=None):
+    """{'month_usd', 'today_usd', 'daily': {date: usd}} from OpenAI's Costs API for this month, or None (no admin key
+    set, or OpenAI didn't answer). Cached for 30 minutes. Never raises."""
+    import logging
+    import requests
+    from django.conf import settings
+    from django.core.cache import cache
+    key = getattr(settings, 'OPENAI_ADMIN_KEY', '') or ''
+    if not key:
+        return None
+    now = timezone.localtime(now or timezone.now())
+    start = month_start(now)
+    cached = cache.get(f'openai-bill:{start:%Y-%m}')
+    if cached is not None:
+        return cached
+    try:
+        daily, page = {}, None
+        for _ in range(5):
+            params = {'start_time': int(start.timestamp()), 'bucket_width': '1d', 'limit': 31}
+            if page:
+                params['page'] = page
+            r = requests.get(OPENAI_COSTS_URL, params=params, timeout=15, headers={'Authorization': f'Bearer {key}'})
+            if r.status_code != 200:
+                logging.getLogger(__name__).warning('OpenAI costs: %s %s', r.status_code, r.text[:200])
+                return None
+            body = r.json()
+            for bucket in body.get('data') or []:
+                day = timezone.localtime(dt.fromtimestamp(bucket['start_time'], tz=dt_timezone.utc)).date()
+                usd = sum(float((res.get('amount') or {}).get('value') or 0) for res in bucket.get('results') or [])
+                daily[day.isoformat()] = daily.get(day.isoformat(), 0.0) + usd
+            page = body.get('next_page') if body.get('has_more') else None
+            if not page:
+                break
+        bill = {'month_usd': round(sum(daily.values()), 4), 'today_usd': round(daily.get(now.date().isoformat(), 0.0), 4),
+                'daily': daily}
+        cache.set(f'openai-bill:{start:%Y-%m}', bill, 1800)
+        return bill
+    except Exception:
+        logging.getLogger(__name__).exception('OpenAI costs: could not be read')
+        return None
 
 
 # ---- Alerts to the site's team ---------------------------------------------------------------------------------
@@ -152,6 +204,12 @@ def check_and_alert(now=None) -> list:
             return sent
         report = platform_report(days=8)
         month_usd, budget = report['month_usd'], report['budget_usd']
+        bill = report.get('openai_bill')
+        if bill:
+            # OpenAI's bill counts what the site's log can't see (a laptop's test runs on the same key): the higher.
+            month_usd = max(month_usd, bill['month_usd'])
+            for d in report['daily']:
+                d['usd'] = max(d['usd'], bill['daily'].get(d['date'], 0.0))
         crossed = [t for t in THRESHOLDS if budget and month_usd >= budget * t / 100]
         if crossed:
             new = [t for t in crossed if _once(f"ai-budget:{now:%Y-%m}:{t}")]
@@ -161,7 +219,9 @@ def check_and_alert(now=None) -> list:
                            f"${budget:.2f} budget")
                 body = '\n'.join([
                     f"The platform's AI keys have spent ${month_usd:.2f} since {report['month_start']} "
-                    f"({report['budget_used_pct']}% of the ${budget:.2f} monthly budget).",
+                    f"({month_usd / budget * 100:.0f}% of the ${budget:.2f} monthly budget)"
+                    + (f"; OpenAI's own bill says ${bill['month_usd']:.2f}, the site's log ${report['month_usd']:.2f}."
+                       if bill else '.'),
                     f"Today so far: ${report['daily'][-1]['usd']:.2f}.",
                     '',
                     f"By provider: {_top(report['by_provider'], 'provider')}",

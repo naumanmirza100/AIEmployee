@@ -907,6 +907,9 @@ AI_DAILY_SPIKE_USD = float(os.getenv('AI_DAILY_SPIKE_USD', '1') or 0)
 # minute, 1,000 requests a day; the tier allows 200,000 tokens a day), and every company's AI SDR runs on it. The
 # team is emailed at 80% of a day's allowance. Set both to 0 once the key is on a paid tier.
 GROQ_DAILY_REQUESTS = int(os.getenv('GROQ_DAILY_REQUESTS', '1000') or 0)
+# An OpenAI admin key (platform.openai.com > Settings > Organization > Admin keys), read-only use: OpenAI's own
+# bill for the month, which counts every use of the account, not only the site's (core/ai_spend.py).
+OPENAI_ADMIN_KEY = os.getenv('OPENAI_ADMIN_KEY', '').strip()
 GROQ_DAILY_TOKENS = int(os.getenv('GROQ_DAILY_TOKENS', '200000') or 0)
 
 # A demo company on the live site: mail to addresses under this domain goes to a practice mail server instead of out
