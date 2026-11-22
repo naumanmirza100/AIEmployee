@@ -52,7 +52,7 @@ def _log_call(ctx, model, started, success, usage=None):
     from project_manager_agent.ai_agents.base_agent import _record_llm_usage
     _record_llm_usage(company_id=getattr(ctx, 'company_id', None), agent_name='AISDRAgent', model=model,
                       usage_dict=usage, duration_ms=(time.monotonic() - started) * 1000, success=success,
-                      agent=AGENT_KEY)
+                      agent=AGENT_KEY, key_ctx=ctx)
 
 
 class _CheckedGroq:

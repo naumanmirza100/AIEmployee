@@ -17,6 +17,8 @@ const req = async (path, options = {}) => {
 };
 
 export const getOverview = () => req('/admin/api-keys/overview');
+// The platform's AI spend in dollars this month (22 Nov 2026).
+export const getAISpend = () => req('/admin/api-keys/spend');
 
 export const listAllKeys = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
@@ -107,6 +109,7 @@ export const listCompaniesSimple = (search = '') =>
 
 export default {
   getOverview,
+  getAISpend,
   listAllKeys,
   assignManagedKey,
   revokeKey,

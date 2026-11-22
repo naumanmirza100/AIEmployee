@@ -770,6 +770,7 @@ urlpatterns = [
 
     # Super Admin — API keys, pricing, quotas, requests
     re_path(r'^admin/api-keys/overview/?$', admin_api_keys.admin_overview, name='admin_overview'),  # GET
+    re_path(r'^admin/api-keys/spend/?$', admin_api_keys.admin_ai_spend, name='admin_ai_spend'),  # GET
     re_path(r'^admin/api-keys/?$', admin_api_keys.list_all_keys, name='admin_list_keys'),  # GET
     re_path(r'^admin/api-keys/assign/?$', admin_api_keys.assign_managed_key, name='admin_assign_key'),  # POST
     re_path(r'^admin/api-keys/(?P<key_id>\d+)/revoke/?$', admin_api_keys.revoke_key, name='admin_revoke_key'),  # POST

@@ -1117,6 +1117,15 @@ def list_companies_simple(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
+def admin_ai_spend(request):
+    """The platform's AI spend in dollars this month: by provider, company, agent and day (core/ai_spend.py,
+    22 Nov 2026)."""
+    from core.ai_spend import platform_report
+    return Response({'status': 'success', 'data': platform_report()})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
 def admin_overview(request):
     """Top-level stats for the admin dashboard landing."""
     from django.db.models import F, Sum
