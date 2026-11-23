@@ -573,6 +573,10 @@ else:
 # that never go to S3. The same folder as MEDIA_ROOT, with or without S3.
 LOCAL_STORAGE_ROOT = MEDIA_ROOT
 
+# The super admin's whole-system backups (core.backups). Outside MEDIA_ROOT on purpose: /media/ is served, and a
+# backup holds every company's data, so it is only ever handed out by the admin-only download endpoint.
+BACKUP_ROOT = Path(os.getenv('BACKUP_ROOT', '') or (BASE_DIR / 'backups'))
+
 # AI Data Analyst (data_analyst_agent). The address companies allow in their database's firewall, shown on its
 # Sources page; also refused as a database host, with any others listed, so the agent can never reach this server.
 DATA_ANALYST_SERVER_IP = os.environ.get('DATA_ANALYST_SERVER_IP', '187.7.18.101').strip()

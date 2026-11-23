@@ -46,6 +46,7 @@ import CompanyProfilePage from '@/pages/CompanyProfilePage';
 import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
 import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
 import NotificationsPage from '@/pages/NotificationsPage';
+import AdminBackupsPage from '@/pages/AdminBackupsPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
 import UserDashboardPage from '@/pages/UserDashboardPage';
 import UserDashboardRedirect from '@/pages/UserDashboardRedirect';
@@ -125,6 +126,14 @@ import { useTranslation } from 'react-i18next';
               element={
                 <ProtectedRoute requireAdmin={true}>
                   <SuperAdminApiKeysPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/backups"
+              element={
+                <ProtectedRoute requireAdmin={true}>
+                  <AdminBackupsPage />
                 </ProtectedRoute>
               }
             />
