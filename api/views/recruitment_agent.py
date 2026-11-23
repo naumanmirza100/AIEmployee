@@ -688,10 +688,13 @@ def generate_job_description(request):
     except KeyServiceError:
         raise
     except Exception as e:
+        # Busy: 503 "busy, try again"; it showed "AI request failed: Error code: 429 - …" (Retest B, 24 Nov 2026).
+        from core.api_key_service import raise_if_busy
+        raise_if_busy(e)
         logger.exception(f"Error generating job description: {e}")
         return Response({
             'status': 'error',
-            'message': getattr(e, 'message', None) or str(e)
+            'message': "The job description couldn't be written. Please try again."
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

@@ -32,13 +32,19 @@ export default function HRManagerTeamTab({ onOpenEmployee }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [noRecord, setNoRecord] = useState(null);
 
   const load = async () => {
-    setLoading(true); setError(null);
+    setLoading(true); setError(null); setNoRecord(null);
     try {
       const res = await hrAgentService.getManagerTeamSummary();
       setData(res?.data || null);
     } catch (e) {
+      // A login with no HR record of its own (an owner, usually) has no team: said plainly, as My HR does.
+      if (e?.status === 404 || e?.data?.code === 'no_hr_record') {
+        setNoRecord(e?.data?.message || e.message || 'This login has no HR record of its own.');
+        return;
+      }
       setError(e.message || 'Failed to load team');
       toast({ title: 'Failed to load team', description: e.message, variant: 'destructive' });
     } finally {
@@ -53,6 +59,16 @@ export default function HRManagerTeamTab({ onOpenEmployee }) {
       <div className="flex justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-white/40" />
       </div>
+    );
+  }
+  if (noRecord) {
+    return (
+      <Card className="border-white/10 bg-black/20">
+        <CardContent className="py-10 text-center">
+          <Users className="h-8 w-8 text-white/40 mx-auto mb-2" />
+          <div className="text-white/70 text-sm max-w-md mx-auto">{noRecord}</div>
+        </CardContent>
+      </Card>
     );
   }
   if (error) {

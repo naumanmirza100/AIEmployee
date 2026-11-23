@@ -64,6 +64,7 @@ class EmbeddingService:
         self.provider = None  # 'local', 'openrouter', 'deepseek', 'groq', or 'openai'
         self.client = None
         self.embedding_model = None
+        self.last_error = None  # why the last generate_embedding gave None, when the provider refused it
         self.available = False
         self.company_id = company_id
         self.agent_key_name = agent_key_name
@@ -475,6 +476,7 @@ class EmbeddingService:
         Returns:
             Embedding vector as list of floats, or None if unavailable.
         """
+        self.last_error = None
         if not self.available or not self.client:
             logger.warning("Embedding service not available")
             return None
@@ -515,6 +517,8 @@ class EmbeddingService:
             return embedding
             
         except Exception as e:
+            # Kept, so a search can tell "the AI was busy" from "nothing matched" (HR's Q&A, 24 Nov 2026).
+            self.last_error = e
             # Handle specific API errors gracefully
             error_str = str(e)
             

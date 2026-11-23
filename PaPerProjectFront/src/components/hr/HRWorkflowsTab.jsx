@@ -438,7 +438,7 @@ export default function HRWorkflowsTab() {
                   <input type="checkbox" checked={!!wfDialog.wf.requires_approval}
                     onChange={(e) => setWfDialog((s) => ({ ...s, wf: { ...s.wf, requires_approval: e.target.checked } }))}
                     className="h-4 w-4" />
-                  <span>Requires approval before running</span>
+                  <span>Requires approval before running (when an event starts it; running it yourself approves it)</span>
                 </label>
                 <div>
                   <Label className="mr-2">Give up after (seconds, 0 = never)</Label>

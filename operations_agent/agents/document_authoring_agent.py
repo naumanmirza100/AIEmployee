@@ -199,11 +199,12 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             }
 
         except Exception as e:
-            from core.api_key_service import KeyServiceError
+            from core.api_key_service import KeyServiceError, raise_if_busy
             if isinstance(e, KeyServiceError):
                 raise
+            raise_if_busy(e)
             logger.error(f'DocumentAuthoringAgent.generate error: {e}', exc_info=True)
-            return {'success': False, 'error': str(e)}
+            return {'success': False, 'error': "The document couldn't be written. Please try again."}
 
     def generate_stream(
         self,
@@ -270,9 +271,11 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 except TypeError:
                     stream = stream_client.chat.completions.create(**create_kwargs)
             except Exception as call_error:
-                self._log_call(model, started, False)
-                from core.api_key_service import raise_if_auth_error
-                raise_if_auth_error(call_error, key_ctx)
+                self._log_call(model, started, False, key_ctx=key_ctx)
+                from core.api_key_service import raise_if_busy
+                # Out of credit, a refused key, a provider down or busy: the plain 503 words, not the provider's own
+                # ("Error code: 429 - … organization org_… Upgrade to Dev Tier", the test report's Operations 2).
+                raise_if_busy(call_error, key_ctx)
                 raise
 
             full_text = ''
@@ -307,12 +310,13 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                         except Exception as _ru_err:
                             logger.warning('DocumentAuthoringAgent: usage of a stopped stream not recorded: %s', _ru_err)
                     self._log_call(model, started, False, {'provider': provider, 'model': model,
-                                                           'total_tokens': spent, 'estimated': usage is None})
+                                                           'total_tokens': spent, 'estimated': usage is None},
+                                   key_ctx=key_ctx)
 
             # Normalize result
             content = full_text.strip()
             if not content:
-                self._log_call(model, started, False)
+                self._log_call(model, started, False, key_ctx=key_ctx)
                 yield ('error', {'message': 'The AI returned an empty response. Please try again.'})
                 return
 
@@ -350,7 +354,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                     record_usage(key_ctx, total_tokens)
                 except Exception as _ru_err:
                     logger.warning('DocumentAuthoringAgent stream record_usage failed: %s', _ru_err)
-            self._log_call(model, started, True, tokens_used)
+            self._log_call(model, started, True, tokens_used, key_ctx=key_ctx)
 
             yield ('done', {
                 'title': prepared['resolved_title'],
@@ -361,11 +365,12 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             })
 
         except Exception as e:
-            from core.api_key_service import KeyServiceError
+            from core.api_key_service import KeyServiceError, raise_if_busy
             if isinstance(e, KeyServiceError):
                 raise
+            raise_if_busy(e)
             logger.error(f'DocumentAuthoringAgent.generate_stream error: {e}', exc_info=True)
-            yield ('error', {'message': str(e)})
+            yield ('error', {'message': "The document couldn't be written. Please try again."})
 
     # ──────────────────────────────────────────────
     # Internal helpers shared by generate + generate_stream

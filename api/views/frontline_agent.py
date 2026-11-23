@@ -1367,7 +1367,7 @@ def summarize_document(request, document_id):
     except Exception as e:
         logger.exception("summarize_document failed")
         return Response(
-            {'status': 'error', 'message': 'Failed to summarize document', 'error': str(e)},
+            {'status': 'error', 'message': 'Failed to summarize document'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -1416,7 +1416,7 @@ def extract_document(request, document_id):
     except Exception as e:
         logger.exception("extract_document failed")
         return Response(
-            {'status': 'error', 'message': 'Failed to extract from document', 'error': str(e)},
+            {'status': 'error', 'message': 'Failed to extract from document'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
