@@ -340,6 +340,11 @@ def _serialize_inbox_email(m, *, include_body=False):
         'needs_reply': getattr(m, 'needs_reply', None),
         'triaged': bool(getattr(m, 'triaged_at', None)),
     }
+    if m.direction != 'out':
+        # A faked sender, or a request to change payment details (core/mail_spoof.py, 21 Nov 2026).
+        from core.mail_spoof import warning
+        out['sender_warning'] = warning(m.from_name, m.from_email, m.subject,
+                                        m.body if include_body else preview)
     if include_body:
         out['thread_summary'] = _stored_json(getattr(m, 'thread_summary', ''))
         out['thread_summary_count'] = getattr(m, 'thread_summary_count', 0) or 0
@@ -1096,6 +1101,11 @@ def fetch_inbox_attachments(request, email_id):
         InboxEmail.objects.filter(pk=inbox.pk).update(attachments_fetched=True)
         return Response({'status': 'success', 'data': [], 'fetched': True})
 
+    from core.mail_hosts import mail_server_error
+    refused = mail_server_error(reply_account.imap_host,
+                                reply_account.imap_port or (993 if reply_account.imap_use_ssl else 143), 'imap')
+    if refused:
+        return Response({'status': 'error', 'message': refused}, status=status.HTTP_400_BAD_REQUEST)
     mail = None
     try:
         if reply_account.imap_use_ssl:
@@ -1859,6 +1869,11 @@ def create_reply_account(request):
                 {'status': 'error', 'message': 'SMTP host and password are required.', 'error': 'validation'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        from core.mail_hosts import mail_server_error
+        refused = mail_server_error(smtp_host, smtp_port, 'smtp')   # 21 Nov 2026, as Marketing's (core/mail_hosts.py)
+        if refused:
+            return Response({'status': 'error', 'message': refused, 'error': 'mail_server_refused'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         # IMAP is the whole point of a Reply Draft account — always required.
         imap_host = (data.get('imap_host') or '').strip()

@@ -124,13 +124,13 @@ class MarketingBaseAgent:
             return self._call_openai(prompt, system_prompt, temperature, max_tokens, model)
         return self._call_groq_qa(prompt, system_prompt, temperature, max_tokens, timeout=timeout)
     
-    def _log_call(self, model, started, success, usage=None):
+    def _log_call(self, model, started, success, usage=None, key_ctx=None):
         """One LLMUsage row per AI call, as BaseAgent writes for PM, HR, Frontline and Recruitment, so the API Keys
         page counts Marketing's, Operations' and Reply Draft's calls and failures. It showed 0 for them (CO-69)."""
         from project_manager_agent.ai_agents.base_agent import _record_llm_usage
         _record_llm_usage(company_id=getattr(self, 'company_id', None), agent_name=self.agent_name, model=model,
                           usage_dict=usage, duration_ms=(time.monotonic() - started) * 1000, success=success,
-                          agent=getattr(self, 'agent_key_name', None) or '')
+                          agent=getattr(self, 'agent_key_name', None) or '', key_ctx=key_ctx)
 
     def _call_openai(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
         """
@@ -229,13 +229,13 @@ class MarketingBaseAgent:
                     record_usage(key_ctx, total_tokens)
                 except Exception as e:
                     logger.warning("marketing quota decrement failed: %s", e)
-            self._log_call(model_to_use, started, True, self.last_token_usage)
+            self._log_call(model_to_use, started, True, self.last_token_usage, key_ctx=key_ctx)
 
             return content
 
         except Exception as e:
             logger.error(f"Error in {self.agent_name} OpenAI LLM call: {str(e)}")
-            self._log_call(model_to_use, started, False)
+            self._log_call(model_to_use, started, False, key_ctx=key_ctx)
             from core.api_key_service import raise_if_auth_error
             raise_if_auth_error(e, key_ctx)
             raise
@@ -398,10 +398,15 @@ class MarketingBaseAgent:
                         record_usage(key_ctx, total_tokens)
                     except Exception as e:
                         logger.warning("marketing quota decrement failed: %s", e)
-                self._log_call(effective_model, started, True, self.last_token_usage)
+                self._log_call(effective_model, started, True, self.last_token_usage, key_ctx=key_ctx)
                 return content
             except Exception as e:
                 last_error = e
+                # Out of credit comes as a 429 too: it was taken for a busy provider, waited out and called "busy",
+                # and nobody was told (21 Nov 2026, the test report's Retest A). Out of credit, a refused key or a
+                # provider that is down are raised at once; an ordinary rate limit or a timeout falls through.
+                from core.api_key_service import raise_if_auth_error
+                raise_if_auth_error(e, key_ctx)
                 err_str = str(e)
                 is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower()
                 is_timeout = "timeout" in err_str.lower() or "timed out" in err_str.lower() or "ReadTimeout" in err_str
@@ -414,7 +419,7 @@ class MarketingBaseAgent:
                     time.sleep(wait_sec)
                 else:
                     logger.error(f"Error in {self.agent_name} Groq Q&A call: {err_str}")
-                    self._log_call(effective_model, started, False)
+                    self._log_call(effective_model, started, False, key_ctx=key_ctx)
                     if is_rate_limit:
                         raise RuntimeError("The service is busy. Please try again in a moment.")
                     if is_timeout:
@@ -457,7 +462,7 @@ class MarketingBaseAgent:
             from core.api_key_service import KeyServiceError, raise_if_auth_error
             if isinstance(e, KeyServiceError):
                 raise
-            self._log_call(model, started, False)
+            self._log_call(model, started, False, key_ctx=key_ctx)
             raise_if_auth_error(e, key_ctx)
             logger.warning("%s web search failed, answering without it: %s", self.agent_name, str(e)[:300])
             return None
@@ -472,7 +477,7 @@ class MarketingBaseAgent:
                 record_usage(key_ctx, total)
             except Exception as e:
                 logger.warning("marketing quota decrement failed: %s", e)
-        self._log_call(model, started, True, self.last_token_usage)
+        self._log_call(model, started, True, self.last_token_usage, key_ctx=key_ctx)
         if not (text or '').strip():
             return None
         return text, sources
@@ -508,7 +513,7 @@ class MarketingBaseAgent:
             from core.api_key_service import KeyServiceError, raise_if_auth_error
             if isinstance(e, KeyServiceError):
                 raise
-            self._log_call(model, started, False)
+            self._log_call(model, started, False, key_ctx=key_ctx)
             raise_if_auth_error(e, key_ctx)
             logger.warning("%s image failed: %s", self.agent_name, str(e)[:300])
             said = str(e).lower()
@@ -531,7 +536,7 @@ class MarketingBaseAgent:
                 record_usage(key_ctx, total)
             except Exception as e:
                 logger.warning("marketing quota decrement failed: %s", e)
-        self._log_call(model, started, True, self.last_token_usage)
+        self._log_call(model, started, True, self.last_token_usage, key_ctx=key_ctx)
         return picture
 
     def _call_llm_for_writing(self, prompt, system_prompt=None, temperature=0.7, max_tokens=4000, timeout=WRITING_TIMEOUT):

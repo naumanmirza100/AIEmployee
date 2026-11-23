@@ -37,10 +37,14 @@ _ANSWER_CACHE_MAX = 2000
 
 
 def _answer_cache_key(company_id, asker_role, question) -> str:
+    from core.answer_cache import documents_version
+    from hr_agent.models import HRDocument
     payload = {
         'c': int(company_id or 0),
         'r': (asker_role or '').lower(),
         'q': (question or '').strip().lower(),
+        # As Frontline's: a removed or changed HR document is not quoted from the cache (21 Nov 2026).
+        'docs': documents_version(HRDocument, company_id),
     }
     return hashlib.sha256(_json_top.dumps(payload, sort_keys=True).encode('utf-8')).hexdigest()
 

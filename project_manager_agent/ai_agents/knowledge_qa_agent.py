@@ -637,6 +637,8 @@ class KnowledgeQAAgent(BaseAgent):
         # Build context string
         context_str = ""
         if context:
+            if context.get('today'):
+                context_str += f"\nToday is {context['today']}.\n"
             # Always show all projects first
             if 'all_projects' in context:
                 projects = context['all_projects']
@@ -645,7 +647,11 @@ class KnowledgeQAAgent(BaseAgent):
                     context_str += f"- ID: {proj.get('id', 'N/A')}, Name: {proj.get('name', 'Unknown')}, "
                     context_str += f"Status: {proj.get('status', 'Unknown')}, "
                     context_str += f"Priority: {proj.get('priority', 'Unknown')}, "
-                    context_str += f"Tasks: {proj.get('tasks_count', 0)}\n"
+                    context_str += f"Tasks: {proj.get('tasks_count', 0)}"
+                    for key, label in (('start_date', 'Starts'), ('end_date', 'Ends'), ('deadline', 'Deadline')):
+                        if proj.get(key):
+                            context_str += f", {label}: {proj[key]}"
+                    context_str += "\n"
                     if proj.get('description'):
                         context_str += f"  Description: {proj.get('description', '')}\n"
             
@@ -664,6 +670,8 @@ class KnowledgeQAAgent(BaseAgent):
                         task_line = f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
                         if task.get('due_date'):
                             task_line += f" [Deadline: {task.get('due_date')}]"
+                        if task.get('overdue_days'):
+                            task_line += f" [OVERDUE by {task['overdue_days']} day(s)]"
                         if task.get('assignee_username'):
                             task_line += f" [Assigned to: {task.get('assignee_username')}]"
                         else:
@@ -682,6 +690,8 @@ class KnowledgeQAAgent(BaseAgent):
                     task_line = f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
                     if task.get('due_date'):
                         task_line += f" [Deadline: {task.get('due_date')}]"
+                    if task.get('overdue_days'):
+                        task_line += f" [OVERDUE by {task['overdue_days']} day(s)]"
                     if task.get('assignee_username'):
                         task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
@@ -693,6 +703,16 @@ class KnowledgeQAAgent(BaseAgent):
                     for st in subtasks:
                         context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
         
+        if context and 'overdue' in context:
+            late = context['overdue']
+            context_str += ("\nOverdue right now (due before today and not done): "
+                            + ("none" if not late else "") + "\n")
+            for t in late:
+                context_str += (f"- {t.get('title', '')} [Project: {t.get('project_name', '')}] [Due: {t.get('due_date')}]"
+                                f" [{t.get('overdue_days')} day(s) late]"
+                                + (f" [Assigned to: {t['assignee_username']}]" if t.get('assignee_username') else '')
+                                + "\n")
+
         # Add available users information to context string
         if available_users:
             context_str += f"\n\n📋 COMPANY USERS ({len(available_users)} total):\n"

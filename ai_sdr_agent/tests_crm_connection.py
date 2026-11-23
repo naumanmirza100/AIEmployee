@@ -117,6 +117,15 @@ class WhoMayChangeItTests(ConnectionBase):
         integration.refresh_from_db()
         self.assertEqual((integration.is_active, integration.get_credentials()), (True, {'access_token': SECRET}))
 
+    def test_a_member_cannot_start_a_full_sync_or_retry_but_may_test_the_connection(self):
+        # 21 Nov 2026, the test report's CRM 2: any login could push the company's mail into the CRM, again and again.
+        code, body = self.call(views.integration_sync_leads, self.member, {}, integration_id=self.integration.id)
+        self.assertEqual(code, 403, body)
+        code, body = self.call(views.retry_failed, self.member, {})
+        self.assertEqual(code, 403, body)
+        code, _ = self.call(views.integration_ping, self.member, {}, integration_id=self.integration.id)
+        self.assertNotEqual(code, 403)
+
     def test_an_admin_can(self):
         code, _ = self.call(views.integration_detail, self.cu, {'sync_notes': False}, method='patch',
                             integration_id=self.integration.id)
@@ -191,7 +200,8 @@ class SyncEverythingTests(ConnectionBase):
         integration = CRMIntegration.objects.get()
         with mock.patch.object(sync_sdr_leads_to_crm, 'delay', side_effect=ConnectionError('no broker')), \
                 mock.patch.object(agent_module.CRMSyncAgent, 'process_pending', return_value={'processed': 4}):
-            code, body = self.call(views.integration_sync_leads, self.member, integration_id=integration.id)
+            # An owner or admin's button (21 Nov 2026): a member is refused, WhoMayChangeItTests.
+            code, body = self.call(views.integration_sync_leads, self.cu, integration_id=integration.id)
         self.assertEqual((code, body['status']), (200, 'done'), body)
         self.assertEqual(body['message'], 'Synced 2 leads, 1 emails, 1 meetings, 0 inbox emails, 0 replies, '
                                           '0 support customers, 0 tickets and 0 campaign replies.')

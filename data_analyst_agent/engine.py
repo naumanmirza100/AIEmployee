@@ -26,7 +26,7 @@ from core.assistant.engine import unchecked_numbers
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 
 from . import connectors, mongo
-from .guards import Refused, check_query
+from .guards import NO_TABLE, Refused, check_query
 from .models import DataQuestion, DataSource
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,20 @@ def _notes_text(notes, tables=None) -> str:
              if names is None or table in names for column, text in entry.items()]
     text = '\n'.join(lines)[:NOTES_IN_CHOICE_CHARS]
     return f"The database's own notes on its tables and columns:\n{text}\n\n" if text else ''
+
+
+#: How much of the company's own notes goes into a prompt.
+COMPANY_NOTES_CHARS = 4000
+
+
+def _company_notes(source) -> str:
+    """What the company wrote about its data (DataSource.company_notes, 22 Nov 2026), first in every prompt: its
+    meanings beat the AI's guesses and the database's own notes."""
+    text = str(getattr(source, 'company_notes', '') or '').strip()[:COMPANY_NOTES_CHARS]
+    if not text:
+        return ''
+    return ("What this company says its data means (follow it: it overrides your own guesses and the database's notes):"
+            f"\n{text}\n\n")
 
 
 def _history(conversation, source) -> str:
@@ -612,7 +626,7 @@ def _choose_tables(ai, source, question, history, notes=None) -> list:
         return _checked(source, tables)
     raw = ai._call_llm(prompt=_CHOOSE.format(dialect=DIALECT_NAMES[source.kind], history=history, question=question,
                                              tables=_choose_list(tables), limit=TABLES_CHOSEN,
-                                             notes=_notes_text(notes),
+                                             notes=_company_notes(source) + _notes_text(notes),
                                              currency=_CHOOSE_CURRENCY if _has_currency(tables) else ''),
                        system_prompt='You choose tables. Output only one JSON object.', temperature=0,
                        max_tokens=600, json_mode=True)
@@ -642,15 +656,30 @@ def _with_references(tables, chosen) -> list:
     return out
 
 
+#: The reply the prompts give a request to change data. MongoDB's prompt also gave it to "What is our employee
+#: headcount?", a question about data that isn't there (21 Nov 2026, the test report's Data Analyst 2).
+_READ_ONLY = "I only read your database"
+_CHANGE_WORDS = re.compile(r'\b(delete|remove|erase|drop|update|change|edit|modify|add|insert|create|cancel|fix|'
+                           r'rename|merge|mark|restore|undo|truncate|alter|write|set)\b', re.I)
+NO_DATA = "This database doesn't seem to hold data that answers this: none of its tables has it."
+
+
+def _plain_ask_back(question, ask_back):
+    if ask_back.startswith(_READ_ONLY) and not _CHANGE_WORDS.search(question or ''):
+        return NO_DATA
+    return ask_back
+
+
 def _write_aggregation(ai, source, question, history, tables, previous='', values=None) -> dict:
     values = values or {}
     listed = '\n'.join(_table_text(t, values=values.get((t.get('schema') or '', t['name']))) for t in tables)
-    prompt = _MONGO.format(today=timezone.localdate().isoformat(), history=history, question=question,
+    prompt = _MONGO.format(today=timezone.localdate().isoformat(), history=_company_notes(source) + history,
+                           question=question,
                            previous=previous, tables=listed or '(none)',
                            live=_live_rule(tables, values))
     out = _json(ai._call_llm(prompt=prompt, system_prompt='You write MongoDB aggregations. Output only one JSON object.',
                              temperature=0, max_tokens=SQL_TOKENS, json_mode=True))
-    ask_back = str(out.get('ask_back') or '').strip()[:500]
+    ask_back = _plain_ask_back(question, str(out.get('ask_back') or '').strip()[:500])
     collection, pipeline = str(out.get('collection') or '').strip(), out.get('pipeline')
     if ask_back and not pipeline:
         return {'sql': '', 'ask_back': ask_back}
@@ -676,8 +705,9 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
     prompt = _SQL.format(dialect=DIALECT_NAMES[source.kind], today=timezone.localdate().isoformat(),
                          source_name=str(source.name or '').replace('"', "'")[:120],
                          situational=''.join(_situation_text(key, source.kind, tables, values) for key in situations),
-                         shared=("The database's own notes on several tables (* stands for any name):\n"
-                                 + '\n'.join(shared) + '\n') if shared else '',
+                         shared=_company_notes(source) + (
+                             ("The database's own notes on several tables (* stands for any name):\n"
+                              + '\n'.join(shared) + '\n') if shared else ''),
                          tables=listed or '(none)', history=history,
                          question=question, previous=previous,
                          limit_word='TOP 200' if source.kind == 'mssql' else 'LIMIT 200')
@@ -689,7 +719,8 @@ def _write_sql(ai, source, question, history, tables, previous='', values=None, 
                                  temperature=0, max_tokens=SQL_TOKENS, json_mode=True))
     finally:
         ai.openai_model = None
-    return {'sql': str(out.get('sql') or '').strip(), 'ask_back': str(out.get('ask_back') or '').strip()[:500],
+    return {'sql': str(out.get('sql') or '').strip(),
+            'ask_back': _plain_ask_back(question, str(out.get('ask_back') or '').strip()[:500]),
             'chart': out.get('chart')}
 
 
@@ -1007,6 +1038,12 @@ def ask(company_user, source: DataSource, question: str, conversation=None, ai=N
         # (17 Nov 2026); the second query now gets the time that is left instead.
         if too_long or ASK_SECONDS - (time.monotonic() - started) < RETRY_SECONDS:
             break
+    if result is None and reason == NO_TABLE:
+        # Every try made a figure up rather than read a table: the data isn't there (21 Nov 2026).
+        record.status, record.answer = DataQuestion.STATUS_ASKED_BACK, NO_DATA
+        record.duration_ms = int((time.monotonic() - started) * 1000)
+        record.save()
+        return _reply(record, rows=[])
     if result is None:
         record.status, record.sql, record.error = DataQuestion.STATUS_FAILED, sql, reason
         record.answer = (f'The query took longer than {limit} seconds, the most it could take here, so the database '

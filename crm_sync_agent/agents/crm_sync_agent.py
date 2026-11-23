@@ -384,10 +384,17 @@ class CRMSyncAgent:
         from core.do_not_email import is_blocked
         if is_blocked(self.company, sender):
             return
+        # A sender disguised as another address, or mail asking to change payment details, stays out: a scam from
+        # "billing@bank.com" <attacker@...> became a contact named after the bank, its email on the timeline
+        # (21 Nov 2026, the test report's CRM Sync 1).
+        from core.mail_spoof import asks_to_change_payment_details, disguised_as, looks_like_an_address
+        if disguised_as(email.from_name, email.from_email) or asks_to_change_payment_details(email.subject, email.body):
+            return
         from reply_draft_agent.text import own_words
+        name = (email.from_name or '').strip() if not email.reply_to else ''
         payload = {
             'email': sender,
-            'contact_name': (email.from_name or '').strip() if not email.reply_to else '',
+            'contact_name': '' if looks_like_an_address(name) else name,
             'subject': email.subject or '',
             'body': own_words(email.body or '')[:5000],
             'sent_at': email.received_at.isoformat() if email.received_at else None,
@@ -404,6 +411,12 @@ class CRMSyncAgent:
         name = ''
         if inbox is not None and not inbox.reply_to and (inbox.from_email or '').lower() == to_email.lower():
             name = (inbox.from_name or '').strip()
+        from core.mail_spoof import asks_to_change_payment_details, disguised_as, looks_like_an_address
+        if inbox is not None and (disguised_as(inbox.from_name, inbox.from_email)
+                                  or asks_to_change_payment_details(inbox.subject, inbox.body)):
+            return                      # our answer to a disguised or payment-change email stays out too
+        if looks_like_an_address(name):
+            name = ''
         payload = {
             'email': to_email.strip().lower(),
             'contact_name': name,

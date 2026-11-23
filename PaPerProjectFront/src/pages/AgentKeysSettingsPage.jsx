@@ -316,6 +316,17 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                 {agent.usage_30d.tokens > 0 && ` · ${formatTokens(agent.usage_30d.tokens)} tokens`}
               </p>
             )}
+            {/* This month in dollars (22 Nov 2026): the platform's tokens are part of the plan; a company's own key
+                is billed by its provider. */}
+            {agent.spend_month && agent.spend_month.usd > 0 && (
+              <p data-testid={`agent-spend-${agent.agent_name}`} className="text-[11px] text-white/50">
+                This month: about ${agent.spend_month.usd < 0.01 ? '<0.01' : agent.spend_month.usd.toFixed(2)} of AI
+                {agent.spend_month.own_key_usd > 0 && agent.spend_month.platform_usd > 0
+                  ? ` (your own key: $${agent.spend_month.own_key_usd.toFixed(2)}, billed by your provider)`
+                  : agent.spend_month.own_key_usd > 0 ? ', on your own key, billed by your provider'
+                    : ", on the platform's AI, part of your plan"}
+              </p>
+            )}
             {q && q.included_tokens > 0 && (
               <div>
                 <div className="flex justify-between text-[10px] text-white/40 mb-1">

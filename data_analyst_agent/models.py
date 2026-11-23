@@ -70,6 +70,11 @@ class DataSource(models.Model):
     #: Who may ask it: every dashboard login of the company, or only the ones listed (owners and admins always).
     everyone_may_ask = models.BooleanField(default=True)
     allowed_users = models.ManyToManyField('core.CompanyUser', blank=True, related_name='data_sources_allowed')
+    #: What the company's data means, in its own words (22 Nov 2026): "revenue is invoices.total_usd of paid
+    #: invoices", "an active customer ordered in the last 90 days". The agent reads it before it picks tables and
+    #: writes a query. Most of the misses on the Meridian and Lumora test databases were meanings like these that the
+    #: AI had to guess. Owners and admins write it; everyone who may ask sees it.
+    company_notes = models.TextField(blank=True, default='')
 
     #: Tables and columns only: [{"name", "schema", "columns": [{"name", "type", "nullable", "pk"}], "fks": [...]}]
     tables = models.JSONField(default=list, blank=True)
@@ -147,3 +152,50 @@ class DataQuestion(models.Model):
 
     def __str__(self):
         return self.question[:60]
+
+
+class SavedQuestion(models.Model):
+    """A question kept to run again: on a schedule, emailed to the people chosen, or only when a figure crosses a line
+    (22 Nov 2026). It keeps the query that answered it and runs that again, read-only and without the AI, so the
+    figures come the same way each time and a run costs nothing. The person checked the answer when they saved it."""
+
+    SCHEDULE_OFF, SCHEDULE_DAILY, SCHEDULE_WEEKLY, SCHEDULE_MONTHLY = 'off', 'daily', 'weekly', 'monthly'
+    SCHEDULE_CHOICES = [(SCHEDULE_OFF, 'Not scheduled'), (SCHEDULE_DAILY, 'Every day'),
+                        (SCHEDULE_WEEKLY, 'Every week'), (SCHEDULE_MONTHLY, 'Every month')]
+    ALERT_CHOICES = [('', 'Always send'), ('above', 'Only when above'), ('below', 'Only when below')]
+
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='saved_data_questions')
+    source = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name='saved_questions')
+    created_by = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='saved_data_questions')
+    title = models.CharField(max_length=120)
+    question = models.TextField()
+    sql = models.TextField()
+    columns = models.JSONField(default=list, blank=True)
+
+    schedule = models.CharField(max_length=10, choices=SCHEDULE_CHOICES, default=SCHEDULE_OFF)
+    #: Monday is 0 (weekly); the day of the month, 1 to 28 (monthly); the hour on the company's clock.
+    weekday = models.PositiveSmallIntegerField(default=0)
+    month_day = models.PositiveSmallIntegerField(default=1)
+    hour = models.PositiveSmallIntegerField(default=9)
+    recipients = models.ManyToManyField('core.CompanyUser', blank=True, related_name='data_reports')
+    #: "Only when": the first row's `alert_column` above or below `alert_value`; blank op sends every time.
+    alert_column = models.CharField(max_length=120, blank=True, default='')
+    alert_op = models.CharField(max_length=5, choices=ALERT_CHOICES, blank=True, default='')
+    alert_value = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
+
+    is_active = models.BooleanField(default=True)
+    next_run_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    #: 'sent' (emailed), 'quiet' (ran; the figure didn't cross the line), 'failed' (the query didn't run).
+    last_status = models.CharField(max_length=10, blank=True, default='')
+    last_error = models.TextField(blank=True, default='')
+    last_value = models.CharField(max_length=60, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['title', 'id']
+
+    def __str__(self):
+        return self.title

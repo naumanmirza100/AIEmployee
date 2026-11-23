@@ -29,16 +29,18 @@ _DEFAULT_PRICE_PER_MTOK = (0.50, 0.50)
 
 
 def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> Decimal:
-    """Cheap best-effort $ estimate. Returns Decimal with 6 dp for the DB field."""
-    in_price, out_price = _PRICE_PER_MTOK.get(model or '', _DEFAULT_PRICE_PER_MTOK)
-    cost = ((prompt_tokens or 0) * in_price + (completion_tokens or 0) * out_price) / 1_000_000.0
-    return Decimal(str(round(cost, 6)))
+    """Dollars for one call, from core/ai_prices.py (22 Nov 2026: the map above priced gpt-4.1-mini, the live
+    model, at its $0.50 default). Kept for the stored estimate; spend is read from the tokens with today's prices."""
+    from core.ai_prices import cost_usd
+    return cost_usd(model, prompt_tokens, completion_tokens)
 
 
-def _record_llm_usage(*, company_id, agent_name, model, usage_dict, duration_ms, success, agent=None):
+def _record_llm_usage(*, company_id, agent_name, model, usage_dict, duration_ms, success, agent=None, key_ctx=None):
     """Persist a single LLM call row. Silent no-op if company_id is missing or the
     write fails — cost tracking must never break the request. `agent` is the
-    agent the call is for ('hr_agent', ...); `agent_name` the class making it."""
+    agent the call is for ('hr_agent', ...); `agent_name` the class making it.
+    `key_ctx` says whose money it was (22 Nov 2026): the platform's key ('platform', free tokens), a key the
+    platform assigned ('managed'), or the company's own ('byok')."""
     if not company_id:
         return
     try:
@@ -59,6 +61,8 @@ def _record_llm_usage(*, company_id, agent_name, model, usage_dict, duration_ms,
             duration_ms=int(duration_ms or 0),
             success=bool(success),
             estimated_cost_usd=cost,
+            key_mode=str(getattr(key_ctx, 'mode', '') or '')[:10],
+            provider=str(getattr(key_ctx, 'provider', '') or '')[:20],
         )
     except Exception as exc:
         logger.warning("LLM usage tracking failed: %s", exc)
@@ -249,7 +253,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
-                agent=getattr(self, 'agent_key_name', None),
+                agent=getattr(self, 'agent_key_name', None), key_ctx=key_ctx,
                 model=effective_model,
                 usage_dict=usage_dict,
                 duration_ms=int((_time.time() - _start) * 1000),
@@ -276,7 +280,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
-                agent=getattr(self, 'agent_key_name', None),
+                agent=getattr(self, 'agent_key_name', None), key_ctx=key_ctx,
                 model=effective_model,
                 usage_dict=None,
                 duration_ms=int((_time.time() - _start) * 1000),
@@ -311,7 +315,7 @@ class BaseAgent:
                     _record_llm_usage(
                         company_id=getattr(self, 'company_id', None),
                         agent_name=self.agent_name,
-                        agent=getattr(self, 'agent_key_name', None),
+                        agent=getattr(self, 'agent_key_name', None), key_ctx=key_ctx,
                         model=self.fallback_model,
                         usage_dict=fb_usage_dict,
                         duration_ms=int((_time.time() - _fallback_start) * 1000),
@@ -332,7 +336,7 @@ class BaseAgent:
                     _record_llm_usage(
                         company_id=getattr(self, 'company_id', None),
                         agent_name=self.agent_name,
-                        agent=getattr(self, 'agent_key_name', None),
+                        agent=getattr(self, 'agent_key_name', None), key_ctx=key_ctx,
                         model=self.fallback_model,
                         usage_dict=None,
                         duration_ms=int((_time.time() - _fallback_start) * 1000),
@@ -426,7 +430,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
-                agent=getattr(self, 'agent_key_name', None),
+                agent=getattr(self, 'agent_key_name', None), key_ctx=key_ctx,
                 model=effective_model,
                 usage_dict=usage_dict,
                 duration_ms=elapsed_ms,
@@ -447,7 +451,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
-                agent=getattr(self, 'agent_key_name', None),
+                agent=getattr(self, 'agent_key_name', None), key_ctx=key_ctx,
                 model=effective_model,
                 usage_dict=None,
                 duration_ms=elapsed_ms,
@@ -476,7 +480,7 @@ class BaseAgent:
                         logger.warning("quota decrement failed on a stopped stream: %s", e)
                 _record_llm_usage(
                     company_id=getattr(self, 'company_id', None),
-                    agent=getattr(self, 'agent_key_name', None),
+                    agent=getattr(self, 'agent_key_name', None), key_ctx=key_ctx,
                     agent_name=self.agent_name,
                     model=effective_model,
                     usage_dict=usage_dict,

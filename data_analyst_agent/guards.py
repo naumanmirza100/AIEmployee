@@ -93,6 +93,13 @@ def _function_name(node) -> str:
         return ''
 
 
+#: A query that reads no table answers with a figure it made up: "What is our employee headcount?" of a shop's database
+#: was answered "SELECT 0 AS employee_headcount" and "The employee headcount is 0." (21 Nov 2026, the test report's
+#: Data Analyst 1). The words steer the next try to say what is missing.
+NO_TABLE = ('The query reads no table, so its figures would be made up. If the tables cannot answer the question, '
+            'leave "sql" empty and say in "ask_back" what is missing.')
+
+
 def check_sql(sql: str, kind: str) -> str:
     """`sql` cleaned of a trailing semicolon, if it is one read-only SELECT for this kind of database; else Refused."""
     text = str(sql or '').strip()
@@ -118,6 +125,8 @@ def check_sql(sql: str, kind: str) -> str:
             raise Refused('A table on another server (a four-part name) may not be read.')
         if isinstance(node, (exp.Func, exp.Anonymous)) and _function_name(node) in _FORBIDDEN_FUNCTIONS:
             raise Refused(f'The function {_function_name(node)}() is not allowed.')
+    if not any(isinstance(node, exp.Table) for node in root.walk()):
+        raise Refused(NO_TABLE)
     return text
 
 

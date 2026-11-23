@@ -1095,6 +1095,10 @@ class LLMUsage(models.Model):
     duration_ms = models.IntegerField(default=0)
     success = models.BooleanField(default=True)
     estimated_cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0)
+    # Whose money (22 Nov 2026): 'platform' (the platform's key, free tokens), 'managed' (a key the platform
+    # assigned), 'byok' (the company's own key); blank on rows written before.
+    key_mode = models.CharField(max_length=10, blank=True, default='')
+    provider = models.CharField(max_length=20, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

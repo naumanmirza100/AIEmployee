@@ -52,6 +52,10 @@ def verify_imap_credentials(host, port, use_ssl, username, password):
     """
     if not host or not username or not password:
         return False, 'IMAP host, username, and password are required.'
+    from core.mail_hosts import mail_server_error
+    refused = mail_server_error(host, port or (993 if use_ssl else 143), 'imap')
+    if refused:
+        return False, refused
     try:
         port = int(port) if port else (993 if use_ssl else 143)
         if use_ssl:
@@ -3327,6 +3331,13 @@ def create_email_account(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         smtp_port = int(data.get('smtp_port', 587))
+        from core.mail_hosts import mail_server_error
+        refused = mail_server_error(smtp_host, smtp_port, 'smtp') or (
+            mail_server_error((data.get('imap_host') or '').strip(), data.get('imap_port') or None, 'imap')
+            if (data.get('imap_host') or '').strip() else None)
+        if refused:
+            return Response({'status': 'error', 'message': refused, 'error': 'mail_server_refused'},
+                            status=status.HTTP_400_BAD_REQUEST)
         smtp_username = (data.get('smtp_username') or '').strip() or email
         smtp_password = data.get('smtp_password') or ''
         if not smtp_password:
@@ -3551,6 +3562,13 @@ def update_email_account(request, account_id):
         account.email = (data.get('email') or account.email or '').strip() or account.email
         account.smtp_host = (data.get('smtp_host') or account.smtp_host or '').strip() or account.smtp_host
         account.smtp_port = int(data.get('smtp_port', account.smtp_port))
+        from core.mail_hosts import mail_server_error
+        new_imap = (data.get('imap_host', account.imap_host) or '').strip()
+        refused = mail_server_error(account.smtp_host, account.smtp_port, 'smtp') or (
+            mail_server_error(new_imap, data.get('imap_port', account.imap_port) or None, 'imap') if new_imap else None)
+        if refused:
+            return Response({'status': 'error', 'message': refused, 'error': 'mail_server_refused'},
+                            status=status.HTTP_400_BAD_REQUEST)
         account.smtp_username = (data.get('smtp_username') or account.smtp_username or '').strip() or account.smtp_username
         if data.get('smtp_password'):
             account.smtp_password = data['smtp_password']
@@ -3755,6 +3773,11 @@ def test_email_account(request, account_id):
             )
         from django.core.mail import EmailMessage
         from django.core.mail.backends.smtp import EmailBackend
+        from core.mail_hosts import mail_server_error
+        refused = mail_server_error(account.smtp_host, account.smtp_port, 'smtp')
+        if refused:
+            return Response({'status': 'error', 'message': refused, 'error': 'mail_server_refused'},
+                            status=status.HTTP_400_BAD_REQUEST)
         backend = EmailBackend(
             host=account.smtp_host,
             port=account.smtp_port,

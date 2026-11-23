@@ -206,6 +206,8 @@ def list_agent_keys(request):
     }
 
     usage_by_agent = _ai_calls_by_agent(company)
+    from core.ai_spend import company_month
+    spend_by_agent = company_month(company)
 
     rows = []
     for agent_name, agent_label in AGENT_CHOICES:
@@ -225,6 +227,9 @@ def list_agent_keys(request):
             # None when the agent logs no calls: Marketing, Operations, AI SDR and Reply Draft count tokens
             # but write no per-call rows, so the page said "0 AI calls" beside 30K tokens used.
             'usage_30d': usage_by_agent.get(agent_name),
+            # This month in dollars (22 Nov 2026, core/ai_spend.py): what the platform's tokens cost, and what
+            # the company's own key cost them with their provider.
+            'spend_month': spend_by_agent.get(agent_name),
         })
 
     return Response({

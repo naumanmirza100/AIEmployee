@@ -2661,6 +2661,19 @@ class AgentProviderUsage(models.Model):
         return f"{self.quota} / {self.provider}: {self.used_tokens}"
 
 
+class SentAlert(models.Model):
+    """An alert to the people who run the site that has gone out, so it goes once (22 Nov 2026).
+
+    `key` names it and its period ('ai-budget:2026-11:80', 'ai-spike:2026-11-19'). Written by whichever worker sends
+    first; the unique key makes a second worker's write fail, so it doesn't send again. The in-memory cache can't do
+    this: each process has its own."""
+    key = models.CharField(max_length=120, unique=True)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.key
+
+
 class KeyRequest(models.Model):
     """User → superadmin request to be assigned a managed key for an agent."""
     STATUS_CHOICES = [

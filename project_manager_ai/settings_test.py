@@ -77,3 +77,6 @@ LOGGING = {
     'handlers': {'null': {'class': 'logging.NullHandler'}},
     'root': {'handlers': ['null'], 'level': 'CRITICAL'},
 }
+
+# Tests use made-up mail hosts (smtp.test, localhost); the check itself has its own tests (core/mail_hosts.py).
+ALLOW_PRIVATE_MAIL_HOSTS = True
