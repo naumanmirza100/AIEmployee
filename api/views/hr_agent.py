@@ -306,6 +306,67 @@ def _serialize_employee(e: Employee) -> dict:
     }
 
 
+# ---- What a colleague may see (21 Nov 2026, the test report's HR 5) ------------------------------------------------
+# Any login could open any colleague's whole HR record: their released performance reviews with the manager's summary,
+# leave requests with the reasons given, balances, goals and the list of their personal documents. The staff list gave
+# everyone's date of birth and login name. Now HR admins, the person and their managers (up the chain) see the whole
+# record; everyone else sees a directory entry: name, title, department, manager, work email.
+
+def _directory_entry(e: Employee) -> dict:
+    """A colleague as a staff directory shows them. Their status only says whether they have left: probation and
+    notice (someone resigning) are theirs and HR's business."""
+    return {
+        'id': e.id,
+        'user_id': e.user_id,
+        'full_name': e.full_name,
+        'work_email': e.work_email,
+        'job_title': e.job_title,
+        'department': e.department,
+        'department_id': e.department_obj_id,
+        'department_name': e.department_obj.name if e.department_obj_id else None,
+        'manager_id': e.manager_id,
+        'employment_status': 'offboarded' if e.employment_status == 'offboarded' else 'active',
+        'timezone_name': e.timezone_name,
+    }
+
+
+def _hr_caller_employee(request):
+    """The Employee row behind the signed-in login: linked to it, or with its email."""
+    company = request.user.company
+    return (Employee.objects.filter(company=company, company_user=request.user).first()
+            or Employee.objects.filter(company=company, work_email__iexact=request.user.email).first())
+
+
+def _whole_record_ids(request):
+    """Ids of the employees whose whole HR record the caller may see, or None for every one (HR admins): their own
+    record and the people who report to them, directly or further down."""
+    if _is_hr_admin(request.user):
+        return None
+    company = request.user.company
+    ids = set()
+    caller_user_id = _caller_login_user_id(request.user)
+    if caller_user_id:
+        ids.update(Employee.objects.filter(company=company, user_id=caller_user_id).values_list('id', flat=True))
+    me = _hr_caller_employee(request)
+    if me:
+        ids.add(me.id)
+        reports = {}
+        for eid, mid in Employee.objects.filter(company=company).values_list('id', 'manager_id'):
+            reports.setdefault(mid, []).append(eid)
+        todo = [me.id]
+        while todo:                     # a reporting loop ends here: each id is taken once
+            for rid in reports.get(todo.pop(), []):
+                if rid not in ids:
+                    ids.add(rid)
+                    todo.append(rid)
+    return ids
+
+
+def _sees_whole_record(request, emp, ids=False) -> bool:
+    ids = _whole_record_ids(request) if ids is False else ids
+    return ids is None or emp.id in ids
+
+
 def _serialize_department(d) -> dict:
     return {
         'id': d.id, 'name': d.name, 'code': d.code,
@@ -354,15 +415,23 @@ def list_employees(request):
             qs = qs.filter(department_obj_id=request.GET['department_id'])
         elif request.GET.get('department'):
             qs = qs.filter(department__iexact=request.GET['department'])
-        if request.GET.get('status'):
-            qs = qs.filter(employment_status=request.GET['status'])
+        whole = _whole_record_ids(request)
+        wanted = request.GET.get('status')
+        if wanted and whole is not None and wanted not in ('active', 'offboarded'):
+            # Filtering on probation or notice would name the people on it.
+            qs = qs.filter(id__in=whole)
+        if wanted == 'active' and whole is not None:
+            qs = qs.exclude(employment_status='offboarded')
+        elif wanted:
+            qs = qs.filter(employment_status=wanted)
         try:
             limit = max(1, min(int(request.GET.get('limit') or 50), 200))
             offset = max(0, int(request.GET.get('offset') or 0))
         except ValueError:
             limit, offset = 50, 0
         total = qs.count()
-        rows = [_serialize_employee(e) for e in qs.order_by('full_name')[offset:offset + limit]]
+        rows = [_serialize_employee(e) if _sees_whole_record(request, e, whole) else _directory_entry(e)
+                for e in qs.order_by('full_name')[offset:offset + limit]]
         return Response({'status': 'success', 'data': rows,
                          'pagination': {'total': total, 'limit': limit, 'offset': offset}})
     except Exception:
@@ -376,6 +445,9 @@ def list_employees(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def create_employee(request):
+    # Any login could add employee records (21 Nov 2026, found reviewing the test report).
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY}, status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.company
         d = request.data or {}
@@ -1071,7 +1143,11 @@ def upload_hr_document(request):
         document_type = (request.POST.get('document_type') or 'policy').strip()
         confidentiality = (request.POST.get('confidentiality') or 'employee').strip().lower()
         if confidentiality not in ('public', 'employee', 'manager', 'hr_only'):
-            confidentiality = 'employee'
+            # It used to become 'employee': salary bands uploaded as "confidential" were open to everyone
+            # (21 Nov 2026, the test report's HR 15).
+            return Response({'status': 'error', 'message': (
+                f'"{confidentiality[:40]}" is not a confidentiality level. Choose public, employee, manager or '
+                'hr_only.')}, status=status.HTTP_400_BAD_REQUEST)
 
         # Optional personal-doc link
         employee = None
@@ -1879,6 +1955,8 @@ def list_hr_notification_templates(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def create_hr_notification_template(request):
+    if not _is_hr_admin(request.user):   # any login could change these (21 Nov 2026, the test report's HR 8)
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY}, status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = request.data or {}
     name = (d.get('name') or '').strip()
@@ -1940,6 +2018,8 @@ def update_hr_notification_template(request, template_id):
     keys present in the request body are updated. Mirrors the same event
     validation as create so a bad `trigger_config.on` fails cleanly instead
     of silently persisting garbage that would fire nothing at run time."""
+    if not _is_hr_admin(request.user):   # any login could change these (21 Nov 2026, the test report's HR 8)
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY}, status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     try:
         t = HRNotificationTemplate.objects.get(id=template_id, company=company)
@@ -2034,6 +2114,8 @@ def delete_hr_notification_template(request, template_id):
     row via FK-null-on-delete, if the model allows; otherwise cascade). The
     template is company-scoped, so this endpoint only ever touches the
     caller's own data."""
+    if not _is_hr_admin(request.user):   # any login could change these (21 Nov 2026, the test report's HR 8)
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY}, status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     try:
         t = HRNotificationTemplate.objects.get(id=template_id, company=company)
@@ -2194,7 +2276,8 @@ def list_hr_meetings(request):
     qs = HRMeeting.objects.filter(company=company)
     if role != 'hr':
         emp_id = viewer_emp.id if viewer_emp else None
-        public_or_mine = Q(visibility='company')
+        # A colleague's one-to-one is theirs (21 Nov 2026): company-visible meetings of other kinds stay listed.
+        public_or_mine = (Q(visibility='company') & ~Q(meeting_type='one_on_one')) | Q(booked_by=cu)
         if emp_id:
             public_or_mine |= Q(participants__id=emp_id) | Q(organizer_id=emp_id)
         qs = qs.filter(public_or_mine).distinct()
@@ -2533,8 +2616,11 @@ def hr_meeting_availability(request):
 # Leave requests — bonus first-class HR object
 # ============================================================================
 
-def make_leave_request(emp, company, d):
+def make_leave_request(emp, company, d, *, may_set_days=False):
     """Create a pending LeaveRequest for `emp` from request data `d`.
+
+    `may_set_days`: the caller is an HR admin, who may book a full-day request at fewer days than the dates hold (a
+    correction), never fewer than 0 or more than the working days. Anyone else gets the working days.
 
     Works out the working days (weekends and company holidays skipped) and the
     approver (the manager, or HR). Used by HR's own screen and by an employee
@@ -2576,15 +2662,12 @@ def make_leave_request(emp, company, d):
         else:  # morning / afternoon
             days_requested = 0.5
     else:
-        # Caller can override (e.g. legacy half-day requests); otherwise compute.
-        days_requested = d.get('days_requested')
-        if days_requested in (None, ''):
-            days_requested = working_days_between(sd, ed, company)
-        else:
-            try:
-                days_requested = float(days_requested)
-            except (TypeError, ValueError):
-                days_requested = working_days_between(sd, ed, company)
+        # Any caller could set the day count, at any number: 10 working days booked as 0.5, a sick day of -5 that
+        # added five days to the balance (21 Nov 2026, the test report's HR 1). Half days and hours have their own
+        # fields above.
+        days_requested, refused = _days_for_dates(sd, ed, company, d.get('days_requested'), may_set_days)
+        if refused:
+            return refuse(refused)
 
     leave_type = d.get('leave_type') or 'vacation'
     if leave_type not in dict(LeaveBalance.LEAVE_TYPE_CHOICES):
@@ -2616,6 +2699,22 @@ def make_leave_request(emp, company, d):
     return lr, None
 
 
+def _days_for_dates(sd, ed, company, given, may_set_days):
+    """(days, None) for a full-day request from `sd` to `ed`, or (None, why not). The working days, unless an HR admin
+    gave a count, which must lie between 0 and them."""
+    from hr_agent.leave_helpers import working_days_between
+    days = float(working_days_between(sd, ed, company))
+    if not may_set_days or given in (None, ''):
+        return days, None
+    try:
+        given = float(given)
+    except (TypeError, ValueError):
+        return days, None
+    if not 0 <= given <= days:
+        return None, (f'days_requested must be between 0 and {days:g}, the working days from {sd} to {ed}.')
+    return given, None
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2637,7 +2736,7 @@ def submit_leave_request(request):
                 f'You can put in leave for yourself or for someone who reports to you, and {emp.full_name} does not '
                 f"report to you. Ask an HR admin (the company's owner, an admin, or a login with the HR admin role), "
                 f'or {first} can ask for it under My HR.')}, status=status.HTTP_403_FORBIDDEN)
-        lr, refused = make_leave_request(emp, company, d)
+        lr, refused = make_leave_request(emp, company, d, may_set_days=_is_hr_admin(request.user))
         if refused is not None:
             return refused
         return Response({'status': 'success', 'data': {
@@ -2690,6 +2789,9 @@ def update_leave_request(request, request_id):
                   'days_requested': float(lr.days_requested or 0)}
         if 'leave_type' in d:
             lr.leave_type = d['leave_type'] or lr.leave_type
+            if lr.leave_type not in dict(LeaveBalance.LEAVE_TYPE_CHOICES):
+                return Response({'status': 'error', 'message': 'Unknown leave type.'},
+                                status=status.HTTP_400_BAD_REQUEST)
             fields.append('leave_type')
         if 'reason' in d:
             lr.reason = (d['reason'] or '')[:2000]
@@ -2704,20 +2806,29 @@ def update_leave_request(request, request_id):
             if ed < sd:
                 return Response({'status': 'error', 'message': 'end_date must be on or after start_date'},
                                 status=status.HTTP_400_BAD_REQUEST)
+            if lr.partial_day_period and sd != ed:
+                return Response({'status': 'error', 'message': (
+                    'A part-day request covers one day. Cancel it and ask for the new dates instead.')},
+                    status=status.HTTP_400_BAD_REQUEST)
             lr.start_date, lr.end_date = sd, ed
             fields += ['start_date', 'end_date']
-            # Recompute working days unless the caller overrides explicitly.
-            days = d.get('days_requested')
-            if days in (None, ''):
-                from hr_agent.leave_helpers import working_days_between
-                lr.days_requested = working_days_between(sd, ed, company)
-            else:
-                try:
-                    lr.days_requested = float(days)
-                except (TypeError, ValueError):
-                    from hr_agent.leave_helpers import working_days_between
-                    lr.days_requested = working_days_between(sd, ed, company)
-            fields.append('days_requested')
+            if not lr.partial_day_period:
+                # The day count comes from the dates, as for a new request (21 Nov 2026, the test report's HR 9).
+                days, refused = _days_for_dates(sd, ed, company, d.get('days_requested'), is_admin)
+                if refused:
+                    return Response({'status': 'error', 'message': refused}, status=status.HTTP_400_BAD_REQUEST)
+                lr.days_requested = days
+                fields.append('days_requested')
+        if ('leave_type' in fields or 'days_requested' in fields) and lr.leave_type != 'unpaid':
+            # An edit skipped the balance check: 1 day asked for and approved-ready, then edited to 19 (HR 9).
+            from hr_agent import allowances
+            left = allowances.available(lr.employee, lr.leave_type, excluding=lr)
+            if left is not None and float(lr.days_requested) > left:
+                label = dict(LeaveBalance.LEAVE_TYPE_CHOICES)[lr.leave_type]
+                return Response({'status': 'error', 'message': (
+                    f'Only {max(left, 0):g} day{"" if max(left, 0) == 1 else "s"} of {label} left this year (after '
+                    f'other requests still waiting), and this request would be {float(lr.days_requested):g}.')},
+                    status=status.HTTP_400_BAD_REQUEST)
         if fields:
             fields.append('updated_at')
             lr.save(update_fields=fields)
@@ -2851,12 +2962,27 @@ def withdraw_leave_request(request, request_id):
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             prev_status = lr.status
-            lr.status = 'withdrawn'
-            lr.decided_at = timezone.now()
-            note_prefix = '[withdraw] ' + reason
-            lr.approval_note = (note_prefix + (('\n\nPrev note:\n' + lr.approval_note)
-                                               if lr.approval_note else ''))[:2000]
-            lr.save(update_fields=['status', 'decided_at', 'approval_note', 'updated_at'])
+            # A leave under way, withdrawn by the person: it ends yesterday and only the days from today on come
+            # back. It used to give back every day, so a ten-day leave withdrawn on day five cost nothing
+            # (21 Nov 2026, the test report's HR 10). An HR admin can still withdraw the whole of it.
+            shortened = not is_admin and lr.start_date < today <= lr.end_date
+            if shortened:
+                from hr_agent.leave_helpers import working_days_between
+                taken = float(working_days_between(lr.start_date, today - timedelta(days=1), company))
+                give_back = max(0.0, float(lr.days_requested or 0) - taken)
+                old_end = lr.end_date
+                lr.end_date = today - timedelta(days=1)
+                lr.days_requested = taken
+                lr.approval_note = (f'[ended early] {reason}'.strip() + f' (was to end {old_end.isoformat()})'
+                                    + (('\n\nPrev note:\n' + lr.approval_note) if lr.approval_note else ''))[:2000]
+                lr.save(update_fields=['end_date', 'days_requested', 'approval_note', 'updated_at'])
+            else:
+                lr.status = 'withdrawn'
+                lr.decided_at = timezone.now()
+                note_prefix = '[withdraw] ' + reason
+                lr.approval_note = (note_prefix + (('\n\nPrev note:\n' + lr.approval_note)
+                                                   if lr.approval_note else ''))[:2000]
+                lr.save(update_fields=['status', 'decided_at', 'approval_note', 'updated_at'])
 
             # Restore used_days. Mirror-image of the approve deduction: same
             # F() atomic update, same year-scoped LeaveBalance row. If the
@@ -2871,7 +2997,7 @@ def withdraw_leave_request(request, request_id):
                     period_start=year_start,
                 ).first()
                 if bal:
-                    days = float(lr.days_requested or 0)
+                    days = give_back if shortened else float(lr.days_requested or 0)
                     # Floor at 0 — never let used_days go negative. If the
                     # balance was manually zeroed since approval, we can't
                     # restore more than what's there.
@@ -2899,6 +3025,13 @@ def withdraw_leave_request(request, request_id):
                    'after_end_date': bool(already_taken),
                    'reason': reason[:500]},
         )
+        if shortened:
+            return Response({'status': 'success', 'message': (
+                f'This leave had started, so it now ends on {lr.end_date.isoformat()}: '
+                f'{restored:g} day{"" if restored == 1 else "s"} went back to the balance.'),
+                'data': {'id': lr.id, 'status': lr.status, 'end_date': lr.end_date.isoformat(),
+                         'days_requested': float(lr.days_requested), 'days_restored': restored,
+                         'ended_early': True}})
         hr_alerts.leave_decided(lr, decided_by=request.user, note=reason)
         return Response({'status': 'success',
                          'data': {'id': lr.id, 'status': lr.status,
@@ -4230,16 +4363,33 @@ def hr_meeting_schedule(request):
 
 # ----- Per-meeting CRUD ---------------------------------------------------
 
-def _hr_meeting_or_404(request, meeting_id):
+def _hr_meeting_or_404(request, meeting_id, *, change=False):
+    """The company's meeting, if the caller may see it (and, with `change`, edit or cancel it).
+
+    Anyone in the company could open, move or cancel any HR meeting, a colleague's one-to-one included (21 Nov 2026,
+    the test report's HR 11). Seeing: HR, the people in it and whoever booked it; others only company-visible
+    meetings that aren't one-to-ones, as the list shows them. Changing: whoever booked or organises it, and HR. The
+    people in it answer through Respond."""
     company = request.user.company
     m = (HRMeeting.objects
          .filter(pk=meeting_id, company=company)
          .select_related('organizer')
          .prefetch_related('participant_rows__employee', 'responses__responder')
          .first())
+    not_found = Response({'status': 'error', 'message': 'Meeting not found'}, status=status.HTTP_404_NOT_FOUND)
     if not m:
-        return None, Response({'status': 'error', 'message': 'Meeting not found'},
-                              status=status.HTTP_404_NOT_FOUND)
+        return None, not_found
+    if _is_hr_admin(request.user):
+        return m, None
+    me = _hr_viewer_employee(request)
+    runs_it = m.booked_by_id == request.user.id or bool(me and m.organizer_id == me.id)
+    in_it = runs_it or bool(me and m.participant_rows.filter(employee=me).exists())
+    if not in_it and (m.visibility != 'company' or m.meeting_type == 'one_on_one'):
+        return None, not_found
+    if change and not runs_it:
+        return None, Response({'status': 'error', 'message': (
+            'Only whoever booked this meeting, or HR, can change or cancel it. '
+            'You can answer it from your invitation.')}, status=status.HTTP_403_FORBIDDEN)
     return m, None
 
 
@@ -4268,7 +4418,7 @@ def update_hr_meeting(request, meeting_id):
     attendees, a cancelled meeting brought back) is checked first and refused
     on a clash, with nothing saved.
     """
-    m, err = _hr_meeting_or_404(request, meeting_id)
+    m, err = _hr_meeting_or_404(request, meeting_id, change=True)
     if err:
         return err
     company = request.user.company
@@ -4397,7 +4547,7 @@ def update_hr_meeting(request, meeting_id):
 def cancel_hr_meeting(request, meeting_id):
     """Cancel a meeting (status='cancelled'). Body may include a `reason`
     that goes into `notes`."""
-    m, err = _hr_meeting_or_404(request, meeting_id)
+    m, err = _hr_meeting_or_404(request, meeting_id, change=True)
     if err:
         return err
     reason = (request.data or {}).get('reason') or ''
@@ -4751,7 +4901,7 @@ def _hr_respond(m, *, data, viewer_emp, is_hr, fallback_name, actor_cu):
 def extract_hr_meeting_action_items(request, meeting_id):
     """LLM-extract structured action items from a meeting's transcript and
     save them onto `HRMeeting.action_items`. Returns the extracted list."""
-    m, err = _hr_meeting_or_404(request, meeting_id)
+    m, err = _hr_meeting_or_404(request, meeting_id, change=True)
     if err:
         return err
     transcript = (m.transcript or '').strip()
@@ -5085,6 +5235,8 @@ def list_accrual_policies(request):
 @throttle_classes([HRCRUDThrottle])
 def upsert_accrual_policy(request):
     """Create or update an accrual policy for (company, leave_type)."""
+    if not _is_hr_admin(request.user):   # any login could change these (21 Nov 2026, the test report's HR 8)
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY}, status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import LeaveAccrualPolicy
     company = request.user.company
     d = request.data or {}
@@ -5129,6 +5281,8 @@ def upsert_accrual_policy(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def delete_accrual_policy(request, policy_id):
+    if not _is_hr_admin(request.user):   # any login could change these (21 Nov 2026, the test report's HR 8)
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY}, status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import LeaveAccrualPolicy
     company = request.user.company
     p = LeaveAccrualPolicy.objects.filter(pk=policy_id, company=company).first()
@@ -5233,6 +5387,17 @@ def get_employee_detail(request, employee_id):
         emp, err = _company_employee_or_404(request, employee_id)
         if err:
             return err
+        if not _sees_whole_record(request, emp):
+            # A colleague's directory entry; the drawer says the rest is for HR, them and their managers.
+            chain, cur, seen = [], emp.manager, set()
+            while cur and cur.id not in seen and len(chain) < 5:
+                chain.append({'id': cur.id, 'full_name': cur.full_name, 'job_title': cur.job_title})
+                seen.add(cur.id)
+                cur = cur.manager
+            return Response({'status': 'success', 'data': {
+                'employee': _directory_entry(emp), 'limited': True, 'manager_chain': chain,
+                'logins': {}, 'leave_balances': [], 'personal_documents': [], 'leave_requests': [],
+                'meetings': [], 'goals': [], 'released_reviews': []}})
         data = _build_employee_bundle(emp, request.user.company)
         data['logins']['can_manage'] = _is_hr_admin(request.user)
         return Response({'status': 'success', 'data': data})
@@ -6159,12 +6324,16 @@ def reopen_review_cycle(request, cycle_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def list_employee_reviews(request, employee_id):
-    """Performance review history for one employee. The reviewee, their manager
-    chain, and HR-admins see everything; everyone else only sees ``visible_to_employee``."""
+    """Performance review history for one employee: for HR admins, the reviewee and their managers up the chain.
+    Everyone else used to get the released reviews, rating and manager's summary included (21 Nov 2026)."""
     from hr_agent.models import PerformanceReview
     emp, err = _company_employee_or_404(request, employee_id)
     if err:
         return err
+    if not _sees_whole_record(request, emp):
+        return Response({'status': 'error',
+                         'message': "Only HR, the person and their managers can see someone's reviews."},
+                        status=status.HTTP_403_FORBIDDEN)
     qs = PerformanceReview.objects.filter(employee=emp).select_related('cycle', 'reviewer')
     if not _is_hr_admin(request.user):
         # Self-view only sees released reviews.
@@ -7104,7 +7273,14 @@ def list_company_user_roles(request):
         'is_self': cu.id == request.user.id,
     } for cu in CompanyUser.objects.filter(company=company).order_by('created_at', 'id')]
     return Response({'status': 'success', 'data': rows,
-                     'assignable_roles': list(HR_ASSIGNABLE_ROLES)})
+                     'assignable_roles': list(_roles_this_login_gives(request.user))})
+
+
+def _roles_this_login_gives(company_user):
+    """The roles a login may hand out through HR: an owner or admin any of HR's; an HR-only login never `admin`."""
+    if (company_user.role or '').lower() in ('owner', 'admin'):
+        return HR_ASSIGNABLE_ROLES
+    return tuple(r for r in HR_ASSIGNABLE_ROLES if r != 'admin')
 
 
 @api_view(['PATCH', 'POST'])
@@ -7147,6 +7323,24 @@ def set_company_user_role(request, company_user_id):
     if previous_role == new_role:
         return Response({'status': 'success',
                          'data': {'id': target.id, 'role': target.role, 'changed': False}})
+
+    # An HR-only login could make itself a company admin and demote the owner (21 Nov 2026, the test report's HR 7).
+    # Now: nobody changes their own role; only the owner changes the owner's; only an owner or admin gives `admin`
+    # or changes an admin's role. An HR-only login hands out the roles below it, and HR admin.
+    caller_role = (request.user.role or '').lower()
+    target_role = (previous_role or '').lower()
+    refuse = None
+    if target.id == request.user.id:
+        return Response({'status': 'error', 'message': (
+            'You cannot change your own role. Ask an owner or admin of your company.')},
+            status=status.HTTP_400_BAD_REQUEST)
+    if target_role == 'owner' and caller_role != 'owner':
+        refuse = "Only the owner can change the owner's role."
+    elif new_role not in _roles_this_login_gives(request.user) or (
+            caller_role not in ('owner', 'admin') and target_role in ('owner', 'admin')):
+        refuse = 'Only an owner or admin of your company can make someone an admin or change an admin.'
+    if refuse:
+        return Response({'status': 'error', 'message': refuse}, status=status.HTTP_403_FORBIDDEN)
 
     losing_admin = _is_hr_admin(target) and new_role not in HR_ADMIN_ROLES
     if losing_admin:

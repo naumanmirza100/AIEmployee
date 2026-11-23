@@ -218,9 +218,10 @@ export default function HRLeaveTab() {
     try {
       const res = await hrAgentService.withdrawLeaveRequest(lr.id, reason.trim());
       const restored = res?.data?.days_restored;
+      // A leave under way ends yesterday instead, and only the days from today come back (21 Nov 2026).
       toast({
-        title: 'Leave withdrawn',
-        description: restored != null ? `${restored} day(s) restored to balance` : undefined,
+        title: res?.data?.ended_early ? 'Leave ended early' : 'Leave withdrawn',
+        description: res?.message || (restored != null ? `${restored} day(s) restored to balance` : undefined),
       });
       load();
     } catch (e) {

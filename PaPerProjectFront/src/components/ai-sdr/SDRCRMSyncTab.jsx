@@ -6,6 +6,7 @@ import {
   Calendar, FileText, Database, Zap, KeyRound, LifeBuoy, Megaphone, Briefcase,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import companyAuthService from '@/services/companyAuthService';
 import {
   listCrmIntegrations, createCrmIntegration, updateCrmIntegration, deleteCrmIntegration,
   pingCrmIntegration, syncCrmLeads, getCrmQueueStatus, retryCrmFailed, getCrmPipelines,
@@ -62,6 +63,10 @@ const btnSecondary = {
 // ---------------------------------------------------------------------------
 // Confirm delete modal
 // ---------------------------------------------------------------------------
+// Connecting, changing, syncing everything and retrying are for an owner or admin; the server refuses anyone else.
+// A member sees the page read-only, with Test Connection (21 Nov 2026, the test report's CRM 2).
+const canManageCrm = () => ['owner', 'admin'].includes(companyAuthService.getCompanyUser()?.role);
+
 const PROVIDER_META = {
   hubspot:    { label: 'HubSpot',     logo: '🟠' },
   salesforce: { label: 'Salesforce',  logo: '🔵' },
@@ -314,13 +319,13 @@ function DealsRow({ integration, label, onRefresh }) {
             ? <>Deals go to <b>{settings.pipeline_label}</b> · <b>{settings.stage_label}</b></>
             : 'Deals (off)'}
         </span>
-        {!open && (
+        {!open && canManageCrm() && (
           <button type="button" data-testid="crm-deals-setup" onClick={openPicker}
             style={{ ...btnSecondary, padding: '3px 10px', fontSize: 12 }}>
             {integration.sync_deals ? 'Change' : 'Set up'}
           </button>
         )}
-        {!open && integration.sync_deals && (
+        {!open && integration.sync_deals && canManageCrm() && (
           <button type="button" data-testid="crm-deals-off" onClick={() => save(false)} disabled={saving}
             style={{ ...btnSecondary, padding: '3px 10px', fontSize: 12 }}>Turn off</button>
         )}
@@ -463,12 +468,14 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
             </div>
           </div>
         </div>
+        {canManageCrm() && (
         <button
           style={{ ...btnSecondary, color: '#ef4444', borderColor: 'rgba(239,68,68,0.2)' }}
           onClick={() => setShowDeleteModal(true)}
         >
           <Trash2 size={14} /> Remove
         </button>
+        )}
       </div>
 
       {/* Account limit banner — shown when the CRM rejected writes because the
@@ -491,11 +498,6 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
               New leads are saved locally and will sync automatically once you free
               up space or upgrade your {cfg.label} plan.
             </div>
-            {integration.limit_message && (
-              <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 11, marginTop: 6, fontFamily: 'monospace' }}>
-                {integration.limit_message}
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -545,10 +547,11 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
               ? `Names, phones, job titles and companies corrected in ${cfg.label} are copied to your agents every 15 minutes. Click to stop.`
               : `Click to copy names, phones, job titles and companies corrected in ${cfg.label} back to your agents, every 15 minutes.` },
         ].map(({ key, icon: Icon, label, title }) => (
-          <button key={key} type="button" data-testid={`crm-toggle-${key}`} onClick={() => handleToggle(key, label)}
+          <button key={key} type="button" data-testid={`crm-toggle-${key}`} disabled={!canManageCrm()}
+            onClick={() => canManageCrm() && handleToggle(key, label)}
             title={title || (integration[key] ? `${label} go to ${cfg.label}. Click to stop.` : `Click to send ${label.toLowerCase()} to ${cfg.label}.`)}
             style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', cursor: canManageCrm() ? 'pointer' : 'default',
             borderRadius: 20, fontSize: 12,
             background: integration[key] ? 'rgba(16,185,129,0.1)' : 'hsl(var(--surface-invert) / 0.04)',
             color: integration[key] ? '#10b981' : '#6b7280',
@@ -567,6 +570,7 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           {pinging ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
           Test Connection
         </button>
+        {canManageCrm() && (<>
         <button data-testid="crm-change-key" style={btnSecondary} onClick={() => setEditing(true)}>
           <KeyRound size={13} /> {integration.provider === 'salesforce' ? 'Change Details' : 'Change Key'}
         </button>
@@ -574,6 +578,7 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
           Sync Everything
         </button>
+        </>)}
       </div>
     </div>
     </>
@@ -680,7 +685,7 @@ const SDRCRMSyncTab = () => {
             <Database size={13} /> Sync Queue Status
           </div>
           <QueueStats stats={queueStats} />
-          {(queueStats.failed + (queueStats.waiting || 0) + (queueStats.skipped || 0)) > 0 && (
+          {canManageCrm() && (queueStats.failed + (queueStats.waiting || 0) + (queueStats.skipped || 0)) > 0 && (
             <button data-testid="crm-retry" style={{ ...btnSecondary, marginTop: 10 }} onClick={handleRetry} disabled={retrying}>
               {retrying ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               Retry {queueStats.failed + (queueStats.waiting || 0) + (queueStats.skipped || 0)} Items Not Sent
@@ -717,7 +722,12 @@ const SDRCRMSyncTab = () => {
       </div>
 
       {/* Connect New CRM */}
-      {availableProviders.length > 0 && (
+      {!canManageCrm() && (
+        <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>
+          Only an owner or admin of your company can connect a CRM, change it or start a sync.
+        </div>
+      )}
+      {availableProviders.length > 0 && canManageCrm() && (
         <div>
           <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={13} /> Connect a CRM

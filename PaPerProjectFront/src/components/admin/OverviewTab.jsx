@@ -2,9 +2,12 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Key, ShieldCheck, AlertTriangle, Gauge, Inbox, Building2, Globe } from 'lucide-react';
 import { CARD_CLASS, ProviderLogo, formatTokens, StatCard } from './apiKeysShared';
+import AISpendCard from './AISpendCard';
 
 export const OverviewTab = ({ stats }) => (
   <div className="space-y-6">
+    {/* The platform's AI bill in dollars, first: the credit running out stops every agent (22 Nov 2026). */}
+    <AISpendCard />
     {/* Row 1: Company & request health */}
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <StatCard icon={Building2} label="Companies" value={stats.total_companies ?? '—'} accent="bg-violet-500/15 text-violet-300" />

@@ -261,3 +261,11 @@ def fill_missing_vectors(company_id, agent):
     """Make a company's HR or Frontline document parts searchable by meaning when they were saved without (CO-70)."""
     from core.document_search import fill_missing_vectors as fill
     return fill(company_id, agent)
+
+
+@shared_task(name='core.tasks.check_ai_spend')
+def check_ai_spend():
+    """Hourly: email the site's team when the platform's AI spend crosses 50/80/100% of the month's budget, or a day
+    spends far more than usual (core/ai_spend.py). Each alert goes once."""
+    from core.ai_spend import check_and_alert
+    return check_and_alert()

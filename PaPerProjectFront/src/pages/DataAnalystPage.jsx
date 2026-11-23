@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, CheckCircle2, Database, Download, FileUp, Loader2, Lock, MessageCircle, Play, Plus, RefreshCw,
-  Send, ShieldCheck, Trash2, Upload,
+  AlertTriangle, CalendarClock, CheckCircle2, Database, Download, FileUp, Loader2, Lock, MessageCircle, Play, Plus,
+  RefreshCw, Send, ShieldCheck, Trash2, Upload,
 } from 'lucide-react';
 
 import AgentLocked from '@/components/common/AgentLocked';
@@ -11,6 +11,9 @@ import { renderChart } from '@/components/common/ChartRenderer';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import ChatShell from '@/components/shared/ChatShell';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
@@ -33,6 +36,7 @@ import {
 const TABS = [
   { key: 'ask', label: 'Chats' },
   { key: 'databases', label: 'Databases' },
+  { key: 'saved', label: 'Saved reports' },
   { key: 'history', label: 'History' },
 ];
 
@@ -122,8 +126,142 @@ function AnalystChart({ chart, columns, rows }) {
   );
 }
 
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+/**
+ * Save an answered question as a report, or change one (22 Nov 2026): how often it runs, who gets it, and "only
+ * when" a figure is above or below a value. It runs its own query again, read-only and without the AI.
+ */
+function SaveReportDialog({ open, onClose, item, saved, onSaved }) {
+  const [logins, setLogins] = useState([]);
+  const [form, setForm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const me = getCompanyUser();
+  const columns = saved?.columns || item?.columns || [];
+  useEffect(() => {
+    if (!open) return;
+    setError('');
+    setForm(saved ? {
+      title: saved.title, schedule: saved.schedule, weekday: saved.weekday, month_day: saved.month_day, hour: saved.hour,
+      recipient_ids: saved.recipients.map((r) => r.id), alert_op: saved.alert_op || '',
+      alert_column: saved.alert_column || columns[0] || '', alert_value: saved.alert_value ?? '',
+    } : {
+      title: (item?.question || '').slice(0, 120), schedule: 'weekly', weekday: 0, month_day: 1, hour: 9,
+      recipient_ids: me?.id ? [me.id] : [], alert_op: '', alert_column: columns[0] || '', alert_value: '',
+    });
+    analyst.listLogins().then((r) => setLogins((r?.data?.logins || []).filter((l) => l.is_active !== false))).catch(() => {});
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!open || !form) return null;
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const toggle = (id) => set('recipient_ids', form.recipient_ids.includes(id)
+    ? form.recipient_ids.filter((x) => x !== id) : [...form.recipient_ids, id]);
+  const save = async () => {
+    setBusy(true); setError('');
+    const fields = { ...form, alert_value: form.alert_op ? form.alert_value : null };
+    try {
+      const r = saved ? await analyst.updateSaved(saved.id, fields) : await analyst.saveQuestion(item.id, fields);
+      onSaved?.(r?.data); onClose();
+    } catch (e) { setError(e?.message || 'It could not be saved.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{saved ? 'Change the saved report' : 'Save as a report'}</DialogTitle>
+          <DialogDescription>
+            It runs this question's query again, read-only and without the AI, and emails the table.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <label className="block">Name
+            <input className={field} value={form.title} maxLength={120} onChange={(e) => set('title', e.target.value)} />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <label className="flex-1 min-w-[140px]">How often
+              <select className={field} value={form.schedule} onChange={(e) => set('schedule', e.target.value)}>
+                <option value="off">Only when I run it</option>
+                <option value="daily">Every day</option>
+                <option value="weekly">Every week</option>
+                <option value="monthly">Every month</option>
+              </select>
+            </label>
+            {form.schedule === 'weekly' && (
+              <label className="flex-1 min-w-[120px]">On
+                <select className={field} value={form.weekday} onChange={(e) => set('weekday', Number(e.target.value))}>
+                  {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+                </select>
+              </label>
+            )}
+            {form.schedule === 'monthly' && (
+              <label className="flex-1 min-w-[100px]">On day
+                <select className={field} value={form.month_day} onChange={(e) => set('month_day', Number(e.target.value))}>
+                  {Array.from({ length: 28 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
+                </select>
+              </label>
+            )}
+            {form.schedule !== 'off' && (
+              <label className="w-36">At (company time)
+                <select className={field} value={form.hour} onChange={(e) => set('hour', Number(e.target.value))}>
+                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{`${String(h).padStart(2, '0')}:00`}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+          <div>
+            <p>Send it</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select className={`${field} w-auto`} value={form.alert_op} onChange={(e) => set('alert_op', e.target.value)}>
+                <option value="">every time</option>
+                <option value="above">only when a figure is above</option>
+                <option value="below">only when a figure is below</option>
+              </select>
+              {form.alert_op && (
+                <>
+                  <input className={`${field} w-28`} inputMode="decimal" value={form.alert_value}
+                    onChange={(e) => set('alert_value', e.target.value)} placeholder="10" />
+                </>
+              )}
+            </div>
+            {form.alert_op && (
+              <label className="mt-2 block">The figure to watch
+                <select className={field} value={form.alert_column} onChange={(e) => set('alert_column', e.target.value)}>
+                  {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <span className="mt-1 block text-[11px] text-muted-foreground">Read from the first row of the result.</span>
+              </label>
+            )}
+          </div>
+          <div>
+            <p>To</p>
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
+              {logins.length === 0 && <p className="text-xs text-muted-foreground">Loading…</p>}
+              {logins.map((l) => (
+                <label key={l.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={form.recipient_ids.includes(l.id)} onChange={() => toggle(l.id)} />
+                  <span>{l.full_name || l.email}</span><span className="text-xs text-muted-foreground">{l.email}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          {error && <p className="text-red-300">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={busy || !form.title.trim()}>
+            {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CalendarClock className="mr-1 h-3.5 w-3.5" />} Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function Answer({ item, onRun, onCsv }) {
   const [busy, setBusy] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [savedNote, setSavedNote] = useState('');
   const run = async () => { setBusy('run'); try { await onRun(item); } finally { setBusy(''); } };
   const csv = async () => { setBusy('csv'); try { await onCsv(item); } finally { setBusy(''); } };
   const failed = item.status === 'failed';
@@ -149,8 +287,16 @@ function Answer({ item, onRun, onCsv }) {
             {busy === 'csv' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1 h-3.5 w-3.5" />} Download CSV
           </Button>
         )}
+        {item.sql && item.status === 'answered' && item.id && (
+          <Button size="sm" variant="outline" onClick={() => setSaving(true)} data-testid="analyst-save-report">
+            <CalendarClock className="mr-1 h-3.5 w-3.5" /> Save or schedule
+          </Button>
+        )}
         {item.duration_ms != null && <span className="text-[11px] text-muted-foreground">{(item.duration_ms / 1000).toFixed(1)} s</span>}
       </div>
+      {savedNote && <p className="mt-2 text-xs text-emerald-300">{savedNote}</p>}
+      <SaveReportDialog open={saving} onClose={() => setSaving(false)} item={item}
+        onSaved={(s) => setSavedNote(`Saved as "${s?.title}": ${s?.when}. It's under Saved reports.`)} />
       {item.sql && (
         <details className="mt-2">
           <summary className="cursor-pointer text-xs text-violet-300">{item.query_kind === 'mongodb' ? 'The MongoDB query that ran' : 'The SQL that ran'}</summary>
@@ -758,6 +904,7 @@ function DatabasesTab({ setup, sources, reload }) {
               {s.send_rows_to_ai ? 'The AI reads the first rows of each result.' : 'The AI never sees rows: answers are the table.'}{' '}
               {s.everyone_may_ask ? 'Everyone may ask it.' : 'Only the chosen people may ask it.'}
             </p>
+            <CompanyNotes source={s} canManage={!!setup?.can_manage} onSaved={reload} />
             {setup?.can_manage && (
               <div className="mt-3 flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => test(s)} disabled={!!busy}>
@@ -774,6 +921,147 @@ function DatabasesTab({ setup, sources, reload }) {
       {setup?.can_manage
         ? <AddDatabase setup={setup} logins={logins} onAdded={reload} />
         : <p className={`${panel} h-fit p-4 text-sm text-muted-foreground`}>Only an owner or admin of your company can add or remove a database.</p>}
+    </div>
+  );
+}
+
+/**
+ * What the company says its data means (22 Nov 2026): the agent reads it before it picks tables and writes a query.
+ * Most of the misses on the test databases were meanings the AI had to guess. Owners and admins write it.
+ */
+function CompanyNotes({ source, canManage, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(source.company_notes || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { setText(source.company_notes || ''); }, [source.company_notes]);
+  if (!canManage && !source.company_notes) return null;
+  const save = async () => {
+    setBusy(true); setError('');
+    try { await analyst.updateSource(source.id, { company_notes: text }); setEditing(false); onSaved?.(); }
+    catch (e) { setError(e?.message || 'The notes could not be saved.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-3 rounded-lg border border-border p-3" data-testid="analyst-company-notes">
+      <p className="text-xs font-semibold text-foreground">What our data means</p>
+      {editing ? (
+        <>
+          <Textarea rows={6} value={text} maxLength={8000} className="mt-1 text-xs" onChange={(e) => setText(e.target.value)}
+            placeholder={'Revenue is invoices.total_usd of paid invoices.\nAn active customer ordered in the last 90 days.\nAmounts are in PKR unless the currency column says otherwise.'} />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            The agent reads this before every query. Say what your words mean, which table holds what, and what to leave out.
+          </p>
+          {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" onClick={save} disabled={busy}>{busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null} Save</Button>
+            <Button size="sm" variant="outline" onClick={() => { setEditing(false); setText(source.company_notes || ''); }}>Cancel</Button>
+          </div>
+        </>
+      ) : (
+        <>
+          {source.company_notes
+            ? <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{source.company_notes}</p>
+            : <p className="mt-1 text-xs text-muted-foreground">Nothing yet. Tell the agent what your words mean: it reads this before every query.</p>}
+          {canManage && (
+            <Button size="sm" variant="outline" className="mt-2" onClick={() => setEditing(true)}>
+              {source.company_notes ? 'Change' : 'Add notes'}
+            </Button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Saved reports (22 Nov 2026): run again on a schedule and emailed, or only when a figure crosses a line. */
+function SavedTab() {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [shown, setShown] = useState({});
+  const [editing, setEditing] = useState(null);
+  const load = useCallback(() => (
+    analyst.listSaved().then((r) => setItems(r?.data || [])).catch((e) => { setItems([]); setError(e?.message || ''); })
+  ), []);
+  useEffect(() => { load(); }, [load]);
+  const run = async (s, send) => {
+    setBusy(`${send ? 's' : 'r'}${s.id}`); setError('');
+    try { const r = await analyst.runSaved(s.id, send); setShown((m) => ({ ...m, [s.id]: r?.data })); load(); }
+    catch (e) { setError(e?.message || 'It could not run.'); }
+    finally { setBusy(''); }
+  };
+  const toggle = async (s) => {
+    try { await analyst.updateSaved(s.id, { is_active: !s.is_active }); load(); } catch (e) { setError(e?.message || ''); }
+  };
+  const remove = async (s) => {
+    if (!window.confirm(`Remove "${s.title}"? Nobody gets it any more.`)) return;
+    try { await analyst.removeSaved(s.id); load(); } catch (e) { setError(e?.message || ''); }
+  };
+  if (items === null) return <Loader2 className="h-6 w-6 animate-spin text-primary" />;
+  const outcome = (s, r) => (r.emailed > 0 ? `Sent to ${r.emailed} ${r.emailed === 1 ? 'person' : 'people'}.`
+    : r.outcome === 'quiet' ? `${s.alert_column} is ${r.value}: not ${s.alert_op} ${s.alert_value}, so nothing would be sent.`
+      : 'As of now. Nothing was sent.');
+  const badge = { sent: 'bg-emerald-500/15 text-emerald-300', quiet: 'bg-muted text-muted-foreground', failed: 'bg-red-500/15 text-red-300' };
+  const said = { sent: 'Sent', quiet: 'Ran, nothing to send', failed: 'Could not run' };
+  return (
+    <div className="space-y-3">
+      {error && <p className="text-sm text-red-300">{error}</p>}
+      {items.length === 0 && (
+        <p className={`${panel} p-6 text-sm text-muted-foreground`}>
+          No saved reports yet. Under any answer, press "Save or schedule" to have it run again by itself and emailed.
+        </p>
+      )}
+      {items.map((s) => {
+        const result = shown[s.id];
+        return (
+          <div key={s.id} className={`${panel} p-4`} data-testid="analyst-saved">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-semibold text-foreground">{s.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {s.source.name} · {s.is_active ? s.when : 'Paused'}
+                  {s.alert_op ? ` · only when ${s.alert_column} is ${s.alert_op} ${s.alert_value}` : ''}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  To {s.recipients.map((r) => r.name).join(', ') || 'nobody'}{s.created_by ? ` · set up by ${s.created_by}` : ''}
+                </p>
+              </div>
+              {s.last_status && (
+                <span className={`rounded-full px-2 py-0.5 text-xs ${badge[s.last_status] || ''}`}>
+                  {said[s.last_status]}{s.last_run_at ? ` · ${new Date(s.last_run_at).toLocaleString()}` : ''}
+                </span>
+              )}
+            </div>
+            {s.last_status === 'failed' && s.last_error && <p className="mt-2 text-sm text-red-300">{s.last_error}</p>}
+            {s.is_active && s.next_run_at && (
+              <p className="mt-1 text-[11px] text-muted-foreground">Next: {new Date(s.next_run_at).toLocaleString()}</p>
+            )}
+            {result && (
+              <>
+                <p className="mt-2 text-xs text-muted-foreground">{outcome(s, result)}</p>
+                <ResultTable columns={result.columns} rows={result.rows} more={result.more_rows} />
+              </>
+            )}
+            {s.may_change && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => run(s, false)} disabled={!!busy}>
+                  {busy === `r${s.id}` ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1 h-3.5 w-3.5" />} Run now
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => run(s, true)} disabled={!!busy}>
+                  {busy === `s${s.id}` ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1 h-3.5 w-3.5" />} Send now
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setEditing(s)}>Change</Button>
+                <Button size="sm" variant="outline" onClick={() => toggle(s)}>{s.is_active ? 'Pause' : 'Resume'}</Button>
+                <Button size="sm" variant="outline" className="text-red-300" onClick={() => remove(s)}>
+                  <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <SaveReportDialog open={!!editing} onClose={() => setEditing(null)} saved={editing} onSaved={load} />
     </div>
   );
 }
@@ -832,7 +1120,11 @@ export default function DataAnalystPage() {
   const navigate = useNavigate();
   const { purchasedModules, allPurchases, modulesLoaded } = usePurchasedModules();
   const companyUser = useMemo(() => getCompanyUser(), []);
-  const [tab, setTab] = useState('ask');
+  // ?tab=saved opens Saved reports: the reports' emails link there (22 Nov 2026).
+  const [tab, setTab] = useState(() => {
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    return TABS.some((t) => t.key === wanted) ? wanted : 'ask';
+  });
   const [setup, setSetup] = useState(null);
   const [sources, setSources] = useState(null);
   const [error, setError] = useState('');
@@ -881,7 +1173,8 @@ export default function DataAnalystPage() {
               {sources === null ? <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 : tab === 'ask' ? <AskTab setup={setup} sources={sources} reload={reload} />
                   : tab === 'databases' ? <DatabasesTab setup={setup} sources={sources} reload={reload} />
-                    : <HistoryTab setup={setup} />}
+                    : tab === 'saved' ? <SavedTab />
+                      : <HistoryTab setup={setup} />}
             </>
           )}
         </div>

@@ -191,6 +191,9 @@ def company_login(request, login_id):
                   .filter(company_id=viewer.company_id, pk=login_id).first())
         if target is None:
             return _error('That login was not found.', status.HTTP_404_NOT_FOUND)
+        if target.role == 'owner' and viewer.role != 'owner' and ('role' in data or 'is_active' in data):
+            # An admin could demote or switch off the owner (21 Nov 2026, with the test report's HR 7).
+            return _error("Only the owner can change the owner's login.", status.HTTP_403_FORBIDDEN)
         was_role, was_active = target.role, target.is_active
         if data.get('is_active') and not was_active and target.id in _seat_ids(viewer.company_id, [target]):
             return _error(f'{target.full_name or target.email} takes part in executive meetings as an employee, '

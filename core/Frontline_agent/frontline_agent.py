@@ -49,11 +49,15 @@ def _answer_cache_key(company_id, scope_document_ids, scope_document_type,
     """Deterministic cache key. Normalises question (strip + lowercase) so
     trivial whitespace / casing differences share a hit. The website chat's
     short answer and the team's full one are kept apart."""
+    from core.answer_cache import documents_version
+    from Frontline_agent.models import Document
     payload = {
         'c': int(company_id or 0),
         'ids': sorted([int(x) for x in (scope_document_ids or [])]),
         'types': sorted([str(x) for x in (scope_document_type or [])]),
         'q': (question or '').strip().lower(),
+        # A deleted or outdated document stopped being quoted only after five minutes (21 Nov 2026).
+        'docs': documents_version(Document, company_id),
     }
     if for_customer:
         payload['customer'] = True
@@ -92,6 +96,10 @@ def invalidate_answer_cache_for_company(company_id):
     with _ANSWER_CACHE_LOCK:
         _ANSWER_CACHE.clear()
 
+
+#: The answer when the AI could not write one just now (busy, or an error) and the match is a document's raw text.
+AI_BUSY = ("Our assistant is busy right now, so I can't answer this reliably. Please try again in a moment, or ask to "
+           "talk to a person.")
 
 #: The answer when the documents hold nothing reliable. It used to say "Let me create a ticket for a human agent to
 #: assist you", which on the website only opened a knowledge-gap ticket for the team's records: nobody was asked to reply.
@@ -382,7 +390,12 @@ class FrontlineAgent(BaseAgent):
             if isinstance(e, KeyServiceError):
                 raise
             logger.error(f"Error generating answer: {e}", exc_info=True)
-            # Fallback to direct answer from knowledge base
+            if knowledge_result.get('type') != 'faq':
+                # A document's "answer" here is its raw passages ("--- Document: refund_policy.txt --- ..."), and it was
+                # sent as a verified answer, to website visitors too, whenever the AI was busy (21 Nov 2026, the
+                # test report's retest). A saved question-and-answer is a real answer and is still given below.
+                return {'success': True, 'answer': AI_BUSY, 'has_verified_info': False, 'ai_busy': True,
+                        'citations': []}
             return {
                 'success': True,
                 'answer': knowledge_result.get('answer', ''),

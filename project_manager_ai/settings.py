@@ -895,6 +895,23 @@ else:
     print("  EMAIL_HOST_PASSWORD=your-app-password")
     print("="*60 + "\n")
 
+# Mail servers a company types in (Marketing, Reply Draft) must be public hosts on mail ports, as AI SDR's are, so
+# nobody can aim the server at its own network (core/mail_hosts.py, 21 Nov 2026). On for a local mail catcher.
+ALLOW_PRIVATE_MAIL_HOSTS = os.getenv('ALLOW_PRIVATE_MAIL_HOSTS', 'False').lower().strip() == 'true'
+
+# The platform's AI bill (core/ai_spend.py, 22 Nov 2026): the site's team is emailed at 50%, 80% and 100% of this a
+# month, and on a day that spends at least AI_DAILY_SPIKE_USD and three times the past week's average.
+AI_MONTHLY_BUDGET_USD = float(os.getenv('AI_MONTHLY_BUDGET_USD', '10') or 0)
+AI_DAILY_SPIKE_USD = float(os.getenv('AI_DAILY_SPIKE_USD', '1') or 0)
+# The platform's Groq key is on Groq's free tier (read from its rate-limit headers on 22 Nov 2026: 8,000 tokens a
+# minute, 1,000 requests a day; the tier allows 200,000 tokens a day), and every company's AI SDR runs on it. The
+# team is emailed at 80% of a day's allowance. Set both to 0 once the key is on a paid tier.
+GROQ_DAILY_REQUESTS = int(os.getenv('GROQ_DAILY_REQUESTS', '1000') or 0)
+# An OpenAI admin key (platform.openai.com > Settings > Organization > Admin keys), read-only use: OpenAI's own
+# bill for the month, which counts every use of the account, not only the site's (core/ai_spend.py).
+OPENAI_ADMIN_KEY = os.getenv('OPENAI_ADMIN_KEY', '').strip()
+GROQ_DAILY_TOKENS = int(os.getenv('GROQ_DAILY_TOKENS', '200000') or 0)
+
 # A demo company on the live site: mail to addresses under this domain goes to a practice mail server instead of out
 # through the account above (core/demo_mail.py). Unset, nothing changes.
 DEMO_MAIL_DOMAIN = os.getenv('DEMO_MAIL_DOMAIN', '').strip().lower()
@@ -1091,6 +1108,18 @@ from celery.schedules import crontab as _crontab
 # IMPORTANT: Sequence emails run every 5 minutes to check for ready emails
 # Actual email timing respects user-defined delays (delay_days, delay_hours, delay_minutes)
 CELERY_BEAT_SCHEDULE = {
+    # Saved Data Analyst reports whose time has come (data_analyst_agent/reports.py, 22 Nov 2026)
+    'data-analyst-due-reports': {
+        'task': 'data_analyst_agent.run_due_reports',
+        'schedule': 900.0,
+        'options': {'expires': 900},
+    },
+    # The platform's AI spend against its budget, and spikes (core/ai_spend.py, 22 Nov 2026)
+    'check-ai-spend': {
+        'task': 'core.tasks.check_ai_spend',
+        'schedule': 3600.0,
+        'options': {'expires': 3600},
+    },
     # Weekly token quota reset — runs every hour, acts only on quotas whose next_reset_at has passed
     'reset-weekly-token-quotas': {
         'task': 'core.tasks.reset_weekly_token_quotas',

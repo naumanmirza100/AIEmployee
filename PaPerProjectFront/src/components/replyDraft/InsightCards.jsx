@@ -69,6 +69,11 @@ export const TriageCard = ({ email }) => {
               (Reply-To), not {email.from_email}.
             </div>
           )}
+          {email.sender_warning && (
+            <div data-testid="rd-sender-warning-open" className="text-xs text-rose-300 mt-1.5 leading-snug">
+              ⚠ {email.sender_warning}
+            </div>
+          )}
         </div>
         {!summary && (
           <button

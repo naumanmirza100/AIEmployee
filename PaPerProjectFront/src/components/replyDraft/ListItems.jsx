@@ -32,12 +32,22 @@ export const InboxItem = ({ reply, active, onClick }) => {
               <span title={`${priority.label} priority`} className={`h-2 w-2 rounded-full shrink-0 ${priority.dot}`} />
             )}
             {isOutgoing ? `To: ${personName}` : personName}
+            {/* The real address beside the name: "billing@bank.com" was shown for mail from another address
+                (21 Nov 2026, the test report's Reply Draft 1). */}
+            {!isOutgoing && reply.from_name && reply.from_email && reply.from_name !== reply.from_email && (
+              <span className="text-[11px] font-normal text-gray-500 truncate">&lt;{reply.from_email}&gt;</span>
+            )}
           </span>
           <span className="text-[10px] text-gray-500 shrink-0">{formatRelative(reply.replied_at)}</span>
         </div>
         <div className="text-xs text-gray-300 truncate font-medium mb-1">
           {reply.subject || '(no subject)'}
         </div>
+        {!isOutgoing && reply.sender_warning && (
+          <div data-testid="rd-sender-warning" className="text-[11px] text-rose-300 leading-snug mb-1">
+            ⚠ {reply.sender_warning}
+          </div>
+        )}
         {(!isOutgoing && reply.ai_summary) || reply.preview ? (
           <div className="text-xs text-gray-500 line-clamp-2 leading-snug mb-1.5">
             {(!isOutgoing && reply.ai_summary) || reply.preview}
@@ -95,7 +105,8 @@ export const DraftItem = ({ draft, active, onClick }) => {
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2 mb-0.5">
           <span className="text-sm font-semibold truncate text-gray-100">
-            To: {draft.to_name || draft.to_email || 'Unknown'}
+            To: {draft.to_name && draft.to_email && draft.to_name !== draft.to_email
+              ? `${draft.to_name} <${draft.to_email}>` : (draft.to_name || draft.to_email || 'Unknown')}
           </span>
           <span className="text-[10px] text-gray-500 shrink-0">{formatRelative(draft.created_at)}</span>
         </div>

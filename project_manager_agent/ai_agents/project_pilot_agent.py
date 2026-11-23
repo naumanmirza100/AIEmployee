@@ -1078,7 +1078,7 @@ Return ONLY text - NO JSON, NO actions."""
 CRITICAL ASSIGNMENT INSTRUCTION:
 The user wants tasks assigned to ALL available developers/users. You MUST distribute tasks across ALL available users listed above.
 - If there are {len(available_users)} users, create at least {len(available_users)} tasks (one per user minimum)
-- Distribute tasks evenly across all users (round-robin style)
+- Distribute tasks evenly across all users (round-robin style), except a task the request gives to a named person: it goes to that person, and only the others are spread
 - Each task should have a different assignee_id from the available users list
 - Use ALL user IDs from the available users list above
 - Example: If there are 3 users (IDs: 1, 2, 3) and you create 6 tasks, assign: task1→user1, task2→user2, task3→user3, task4→user1, task5→user2, task6→user3"""
@@ -1086,11 +1086,16 @@ The user wants tasks assigned to ALL available developers/users. You MUST distri
                         # User specified specific users (e.g. "only 2 users, hamza and abdullah") – give exact IDs so the LLM cannot assign to others
                         usernames_list = ', '.join([u.get('username', u.get('name', 'Unknown')) for u in specific_usernames])
                         ids_list = ', '.join([str(u.get('id')) for u in specific_usernames])
+                        # Each name with its ID: the plan handed tasks out in turn, so "build the order API (Usman)"
+                        # went to Zara (21 Nov 2026, the test report's PM 2).
+                        pairs = ', '.join(f"{u.get('name') or u.get('username', '?')} = ID {u.get('id')}"
+                                          for u in specific_usernames)
                         assignment_instruction = f"""
 CRITICAL ASSIGNMENT INSTRUCTION:
 The user asked to assign tasks to ONLY these people: {usernames_list}. You MUST use ONLY these user IDs: {ids_list}.
 - Every assignee_id in every create_task MUST be one of: {ids_list}. No other user IDs are allowed.
-- Distribute tasks evenly between these users only (e.g. round-robin: first task → first ID, second → second ID, then repeat).
+- A task the request gives to a named person goes to that person: "build the order API (Usman)" or "Usman builds the order API" is assigned to Usman's ID. Who is who: {pairs}.
+- Spread only the tasks nobody was named for, in turn between these people. Never move a named task to someone else to even things out.
 - DO NOT assign to any user whose ID is not in {{ {ids_list} }}."""
                     elif wants_assign_to_all and not available_users:
                         assignment_instruction = "\nNOTE: User wants tasks assigned to all developers, but no users are available. Leave assignee_id as null."
@@ -1241,17 +1246,22 @@ Ask for each task: "Is this required for the project to work? Is it blocking oth
                     if specific_usernames:
                         usernames_list = ', '.join([u.get('username', u.get('name', 'Unknown')) for u in specific_usernames])
                         ids_list = ', '.join([str(u.get('id')) for u in specific_usernames])
+                        # Each name with its ID: the plan handed tasks out in turn, so "build the order API (Usman)"
+                        # went to Zara (21 Nov 2026, the test report's PM 2).
+                        pairs = ', '.join(f"{u.get('name') or u.get('username', '?')} = ID {u.get('id')}"
+                                          for u in specific_usernames)
                         assignment_instruction = f"""
 CRITICAL ASSIGNMENT INSTRUCTION:
 The user asked to assign tasks to ONLY these people: {usernames_list}. You MUST use ONLY these user IDs: {ids_list}.
 - Every assignee_id MUST be one of: {ids_list}. Do NOT use any other user ID.
-- Distribute tasks evenly between these users only (round-robin)."""
+- A task the request gives to a named person goes to that person: "build the order API (Usman)" or "Usman builds the order API" is assigned to Usman's ID. Who is who: {pairs}.
+- Spread only the tasks nobody was named for, in turn between these people. Never move a named task to someone else to even things out."""
                     elif wants_assign_to_all and available_users:
                         assignment_instruction = f"""
 CRITICAL ASSIGNMENT INSTRUCTION:
 The user wants tasks assigned to ALL available developers/users. You MUST distribute tasks across ALL available users listed above.
 - If there are {len(available_users)} users, create at least {len(available_users)} tasks (one per user minimum)
-- Distribute tasks evenly across all users (round-robin style)
+- Distribute tasks evenly across all users (round-robin style), except a task the request gives to a named person: it goes to that person, and only the others are spread
 - Each task should have a different assignee_id from the available users list
 - Use ALL user IDs from the available users list above
 - Example: If there are 3 users (IDs: 1, 2, 3) and you create 6 tasks, assign: task1→user1, task2→user2, task3→user3, task4→user1, task5→user2, task6→user3"""
