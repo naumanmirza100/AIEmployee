@@ -157,6 +157,25 @@ export const bulkSetLeadIndustry = async ({ industry, ids, filters } = {}) => {
   }
 };
 
+/**
+ * Move many leads to one ICP. Pass `ids` for the ticked leads, or `filters`
+ * (the list's current filters) for every matching lead. `rescore` also queues
+ * the already-scored ones to be scored again with that ICP.
+ */
+export const bulkSetLeadIcp = async ({ icpId, ids, filters, rescore = false } = {}) => {
+  try {
+    const body = { icp_id: icpId, rescore };
+    if (filters) {
+      const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
+      return await companyApi.post(`/sdr/leads/bulk-icp/${query ? `?${query}` : ''}`, { ...body, all_matching: true });
+    }
+    return await companyApi.post('/sdr/leads/bulk-icp/', { ...body, ids });
+  } catch (error) {
+    console.error('Bulk set lead ICP error:', error);
+    throw error;
+  }
+};
+
 export const createLead = async (data) => {
   try {
     return await companyApi.post('/sdr/leads/', data);

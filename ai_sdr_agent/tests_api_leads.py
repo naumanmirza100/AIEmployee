@@ -537,6 +537,61 @@ class BulkSetIndustryTests(LeadApiBase):
         self.assertRefused(self.bulk({'industry': 'X', 'ids': ['abc']}))
 
 
+class BulkSetIcpTests(LeadApiBase):
+    def setUp(self):
+        super().setUp()
+        self.dentistry = self.icp(name='Dentistry')
+        self.saas = SDRIcpProfile.objects.create(company_user=self.cu, name='SaaS', is_active=False, job_titles=['CEO'])
+
+    def bulk(self, data, path='/x'):
+        return self.call(views.sdr_bulk_set_icp, 'post', path=path, data=data)
+
+    def test_only_my_listed_leads_are_moved(self):
+        a, b = self.make_lead(email='a@acme.com'), self.make_lead(email='b@acme.com')
+        theirs = self.their_lead()
+        r = self.bulk({'icp_id': self.saas.id, 'ids': [a.id, theirs.id]})
+        self.assertEqual((r.status_code, r.data['updated']), (200, 1), r.data)
+        got = {l.pk: l.icp_profile_id for l in SDRLead.all_objects.filter(pk__in=[a.pk, b.pk, theirs.pk])}
+        self.assertEqual(got, {a.pk: self.saas.id, b.pk: None, theirs.pk: None})
+
+    def test_all_matching_with_no_icp_moves_the_leads_that_have_none(self):
+        old = self.make_lead(email='old@x.example', score=70, temperature='warm', qualification_status='done')
+        saas_lead = self.make_lead(email='s@x.example', icp_profile=self.saas)
+        r = self.bulk({'icp_id': self.dentistry.id, 'all_matching': True}, path='/x?icp=none')
+        self.assertEqual((r.data['updated'], r.data['queued']), (1, 0), r.data)
+        old.refresh_from_db()
+        self.assertEqual((old.icp_profile_id, old.score, old.qualification_status), (self.dentistry.id, 70, 'done'))
+        self.assertEqual(SDRLead.objects.get(pk=saas_lead.pk).icp_profile_id, self.saas.id)
+
+    def test_rescore_queues_the_scored_leads_only(self):
+        scored = self.make_lead(email='s@x.example', score=40, temperature='cold', qualification_status='done')
+        unscored = self.make_lead(email='u@x.example')
+        r = self.bulk({'icp_id': self.saas.id, 'ids': [scored.id, unscored.id], 'rescore': True})
+        self.assertEqual((r.data['updated'], r.data['queued']), (2, 1), r.data)
+        scored.refresh_from_db()
+        self.assertEqual((scored.icp_profile_id, scored.qualification_status, scored.score), (self.saas.id, 'pending', 40))
+        self.assertEqual(SDRLead.objects.get(pk=unscored.pk).qualification_status, 'none')
+
+    def test_a_lead_being_scored_is_left_alone(self):
+        busy = self.make_lead(qualification_status='processing')
+        r = self.bulk({'icp_id': self.saas.id, 'ids': [busy.id], 'rescore': True})
+        self.assertEqual((r.data['updated'], r.data['skipped']), (0, 1), r.data)
+        self.assertIsNone(SDRLead.objects.get(pk=busy.pk).icp_profile_id)
+
+    def test_a_missing_or_someone_elses_icp_is_refused(self):
+        lead = self.make_lead()
+        theirs = self.icp(owner=self.outsider, name='Theirs')
+        for icp_id in (None, '', 'abc', theirs.id, 999999):
+            with self.subTest(icp_id):
+                self.assertRefused(self.bulk({'icp_id': icp_id, 'ids': [lead.id]}))
+        self.assertIsNone(SDRLead.objects.get(pk=lead.pk).icp_profile_id)
+
+    def test_bad_ids_are_refused(self):
+        for ids in (None, [], 'all', ['abc']):
+            with self.subTest(ids):
+                self.assertRefused(self.bulk({'icp_id': self.saas.id, 'ids': ids}))
+
+
 # ==========================================================================
 # CSV import / export
 # ==========================================================================

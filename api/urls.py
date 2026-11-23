@@ -800,6 +800,7 @@ urlpatterns = [
     re_path(r'^sdr/leads/bulk-delete/?$', sdr_api.sdr_bulk_delete_leads, name='sdr_bulk_delete_leads'),  # POST
     re_path(r'^sdr/leads/bulk-restore/?$', sdr_api.sdr_bulk_restore_leads, name='sdr_bulk_restore_leads'),  # POST
     re_path(r'^sdr/leads/bulk-industry/?$', sdr_api.sdr_bulk_set_industry, name='sdr_bulk_set_industry'),  # POST
+    re_path(r'^sdr/leads/bulk-icp/?$', sdr_api.sdr_bulk_set_icp, name='sdr_bulk_set_icp'),  # POST
     re_path(r'^sdr/lead-industries/?$', sdr_api.sdr_lead_industries, name='sdr_lead_industries'),  # GET
     re_path(r'^sdr/lead-industries/rename/?$', sdr_api.sdr_rename_lead_industry, name='sdr_rename_lead_industry'),  # POST
     re_path(r'^sdr/dashboard/?$', sdr_api.sdr_dashboard, name='sdr_dashboard'),  # GET
