@@ -2956,6 +2956,47 @@ class AgentPlan(models.Model):
 AGENT_DEFAULT_PROVIDER = _AgentDefaultProvider()
 
 
+class PersonalCalendar(models.Model):
+    """A person's own Google or Outlook calendar, connected by them (24 Nov 2026, core/personal_calendars.py).
+
+    The agents checked only the meetings they booked, so a person's real diary (a dentist at 11, a client call made
+    outside the product) never counted, and nothing the agents booked reached that diary either. Connected, its busy
+    times (times only) count in every agent's clash check, and the meetings the agents book for the person are put
+    in it. One per employee login: the identity the shared calendar uses."""
+    PROVIDER_CHOICES = [('google', 'Google Calendar'), ('microsoft', 'Outlook / Microsoft 365')]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='personal_calendar')
+    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='personal_calendars')
+    provider = models.CharField(max_length=12, choices=PROVIDER_CHOICES)
+    account_email = models.CharField(max_length=254, blank=True, default='')
+    refresh_token = models.TextField(help_text='Encrypted (core.crypto_utils), as the CRM passwords are.')
+    read_busy = models.BooleanField(default=True, help_text='Its busy times count in clash checks.')
+    push_events = models.BooleanField(default=True, help_text="Meetings the agents book go into it.")
+    connected_at = models.DateTimeField(auto_now_add=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True, default='')
+    #: Set while a sync runs, so the 15-minute job and "Sync now" never write the same events twice.
+    sync_started_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = 'core'
+
+
+class PersonalCalendarEvent(models.Model):
+    """An event the platform put in a personal calendar, for a booking (a CalendarBlock's source and source_id): so
+    it is moved or removed with the booking, and not read back as busy time."""
+    calendar = models.ForeignKey(PersonalCalendar, on_delete=models.CASCADE, related_name='events')
+    block_source = models.CharField(max_length=20)
+    block_source_id = models.PositiveBigIntegerField()
+    external_id = models.CharField(max_length=255)
+    state = models.CharField(max_length=300, blank=True, default='', help_text='start|end|title as last written.')
+
+    class Meta:
+        app_label = 'core'
+        constraints = [models.UniqueConstraint(fields=['calendar', 'block_source', 'block_source_id'],
+                                               name='personal_event_unique')]
+
+
 class SystemBackup(models.Model):
     """One whole-system backup the super admin made: the database and the uploaded files in one zip (core.backups).
     The zip is in BACKUP_ROOT; this row says how far it got, so the admin page can show it and hand it out."""
