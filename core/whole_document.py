@@ -234,7 +234,10 @@ def stream(agent, whole, *, system_prompt):
         raise
     except Exception as exc:
         logger.warning("whole document: the stream failed (%s)", exc)
-        yield {'type': 'error', 'message': str(exc)}
+        # Shown when text was already out; the provider's words stay in the log (24 Nov 2026).
+        from core.api_key_service import BUSY_MESSAGE, is_busy_error
+        yield {'type': 'error', 'message': BUSY_MESSAGE if is_busy_error(exc) else
+               "The AI couldn't finish the answer. Please try again."}
 
 
 # ---- One document read whole: Summarize and Extract -----------------------------------------------------------

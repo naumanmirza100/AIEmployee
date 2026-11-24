@@ -339,9 +339,14 @@ Return ONLY this JSON (no markdown):
             pass
         return {'decisions': [], 'action_items': []}
 
-    def create_briefing(self, topic: str, context: str, key_points: list = None, audience: str = 'Executive Team') -> str:
-        """Create an executive briefing document."""
+    def create_briefing(self, topic: str, context: str, key_points: list = None, audience: str = 'Executive Team',
+                        prepared_by: str = '', date: str = '') -> str:
+        """Create an executive briefing document. `prepared_by` and `date` are written into its header as given: left
+        to the AI, "[Name / Department]" became "Rita Recruiter / HR Department", a department nobody said, and the
+        context's own lines ("Prepared by: … Today: …") were pasted as its Background (Executive 6, 24 Nov 2026)."""
         self.log_action("create_briefing")
+        by_line = prepared_by or '[Name / Department]'
+        date_line = date or '[DD MMM YYYY]'
         has_context = bool(context and context.strip())
         has_points = bool(key_points)
         points_text = '\n'.join([f"- {p}" for p in (key_points or [])[:10]])
@@ -351,8 +356,8 @@ Return ONLY this JSON (no markdown):
             return f"""# {topic} — Executive Briefing
 
 **Prepared for:** {audience}
-**Date:** [DD MMM YYYY]
-**Prepared by:** [Name / Department]
+**Date:** {date_line}
+**Prepared by:** {by_line}
 
 ---
 
@@ -408,14 +413,15 @@ Return ONLY this JSON (no markdown):
             actions_section = '1. [Action 1 — Owner — Due date]\n2. [Action 2 — Owner — Due date]'
         points_for_prompt = points_text if has_points else ''
 
+        facts = f"<facts>\n{context_for_prompt}\n</facts>\n\n" if has_context else ''
         prompt = f"""Write an executive briefing document in markdown using ONLY the data provided below. Follow the EXACT structure.
 
----
+{facts}---
 # {topic} — Executive Briefing
 
 **Prepared for:** {audience}
-**Date:** [DD MMM YYYY]
-**Prepared by:** [Name / Department]
+**Date:** {date_line}
+**Prepared by:** {by_line}
 
 ---
 
@@ -427,7 +433,7 @@ Return ONLY this JSON (no markdown):
 
 ## Background / Context
 
-{context_for_prompt}
+{'Write 2-4 sentences of background in your own words from the facts above. Do not copy their lines.' if has_context else '[Describe the situation, problem, or opportunity that led to this briefing.]'}
 
 ---
 
@@ -459,6 +465,7 @@ Rules (STRICT):
 - Output the EXACT sections above in the EXACT order.
 - Use only # and ## for headings. No === or --- as underlines. No plain text headers.
 - {'Write only from the context and key points provided — do not invent facts or statistics.' if (has_context or has_points) else 'Keep [square-bracket placeholders] for all specific content.'}
+- Copy the Prepared for, Date and Prepared by lines exactly as given. Add no department, role or team that is not given.
 - Keep it concise — under 400 words total.
 - Return markdown only, no explanation."""
 

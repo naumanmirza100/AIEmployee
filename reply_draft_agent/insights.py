@@ -99,7 +99,8 @@ DOCUMENT_PROMPT = """Summarise this document, which came attached to an email, f
 Return ONLY this JSON:
 {"what": "...", "points": ["..."], "figures": ["..."]}
 
-- what: what the document is, in a few words ("An invoice from Shifa Clinic", "A signed lease").
+- what: what the document is, in a few words ("An invoice from <the company named in it>", "A signed lease"), naming
+  only who the document itself names.
 - points: 2 to 6 short points on what it says.
 - figures: amounts, dates, deadlines and names that matter, each as written in the document; [] when none.
 Use only what the document says. Write in English, whatever language it is in."""
@@ -322,24 +323,41 @@ def _answered(ids):
 
 def _email_block(m, files=(), answered=frozenset()):
     text = f'{_head(m, answered)}\n{for_ai(m.body, 700)}'
-    for name, summary in files:
-        text += f'\nAttached file "{name}", as summarised: {summary}'
+    for name, said in files:
+        text += f'\nAttached file "{name}", {said}'
     return text
 
 
+FILE_TEXT_CHARS = 1500        # what Ask reads of an attachment nobody has summarised
+FILES_READ = 3
+
+
 def _file_summaries(emails):
-    """The summaries made of the emails' attached files, by email: an invoice's amount is in its PDF, not in the
-    email ("Please find attached our invoice")."""
+    """What the emails' attached files say, by email: an invoice's amount is in its PDF, not in the email ("Please
+    find attached our invoice"). A file summarised already gives its summary; one nobody has summarised gives the
+    start of its text, read here with no AI call (decision D11): "How much was the invoice?" had no amount until
+    someone pressed "summarise" (the test report's Reply Draft 5, 24 Nov 2026)."""
     out = {}
-    rows = (InboxAttachment.objects.filter(inbox_email_id__in=[m.id for m in emails]).exclude(summary='')
-            .values_list('inbox_email_id', 'filename', 'summary'))
-    for email_id, name, raw in rows:
-        try:
-            data = json.loads(raw)
-        except ValueError:
-            continue
-        parts = [data.get('what') or ''] + list(data.get('points') or []) + list(data.get('figures') or [])
-        out.setdefault(email_id, []).append((name, '; '.join(p for p in parts if p)[:600]))
+    rows = InboxAttachment.objects.filter(inbox_email_id__in=[m.id for m in emails], is_inline=False)
+    read = 0
+    for att in rows.order_by('id')[:20]:
+        if att.summary:
+            try:
+                data = json.loads(att.summary)
+            except ValueError:
+                continue
+            parts = [data.get('what') or ''] + list(data.get('points') or []) + list(data.get('figures') or [])
+            out.setdefault(att.inbox_email_id, []).append(
+                (att.filename, 'as summarised: ' + '; '.join(p for p in parts if p)[:600]))
+        elif read < FILES_READ and can_summarize(att.filename, att.content_type):
+            read += 1
+            try:
+                text = ' '.join(attachment_text(att).split())
+            except Exception as exc:              # a scanned picture, a file gone from storage
+                logger.info('ask_inbox: attachment %s not read (%s)', att.id, exc)
+                continue
+            out.setdefault(att.inbox_email_id, []).append(
+                (att.filename, 'its text begins: ' + for_ai(text, FILE_TEXT_CHARS)))
     return out
 
 
@@ -388,10 +406,17 @@ def ask_inbox(question, account, agent, history=()) -> dict:
     # Asked what still needs an answer, the AI named two of three on live, a different two each time: the list is
     # worked out here and given to it.
     waiting = ''
+    # "Which emails need a reply urgently?" listed a normal one and the scam, and left out the high-priority refund:
+    # the list triage made is worked out here and given to it (the test report's Reply Draft 5, 24 Nov 2026).
+    if plan.get('priorities'):
+        wanted = set(plan['priorities'])
+        ids = [m.id for m in emails + others if m.direction == 'in' and m.priority in wanted]
+        waiting += (f"\n\nEMAILS TRIAGE MARKED {' OR '.join(sorted(wanted)).upper()} (name every one, and call no "
+                    "other email urgent): " + (', '.join(f'[#{i}]' for i in ids) if ids else 'none'))
     if plan.get('waiting'):
         ids = [m.id for m in emails + others if m.direction == 'in' and m.needs_reply and m.id not in answered]
-        waiting = ('\n\nEMAILS THAT WAIT FOR AN ANSWER, none answered yet (name every one): '
-                   + (', '.join(f'[#{i}]' for i in ids) if ids else 'none'))
+        waiting += ('\n\nEMAILS THAT WAIT FOR AN ANSWER, none answered yet (name every one): '
+                    + (', '.join(f'[#{i}]' for i in ids) if ids else 'none'))
     earlier = '\n'.join(f'Q: {q}\nA: {a}' for q, a in history)
     today = timezone.localtime().strftime('%A %d %B %Y')
     prompt = (f'Today is {today}.\n\n' + (f'Earlier in this conversation:\n{earlier}\n\n' if earlier else '')

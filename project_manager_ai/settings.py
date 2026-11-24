@@ -381,6 +381,8 @@ MIDDLEWARE = [
     # before the agent middlewares below, so an unsubscribed company's request is
     # rejected instead of triggering their background work.
     'api.middleware.module_access.ModuleAccessMiddleware',
+    # What a Recruitment role may change (recruiter / hiring manager / interviewer, 24 Nov 2026).
+    'api.middleware.recruitment_roles.RecruitmentRoleMiddleware',
     # Reports a logged-in screen calling an API address that doesn't exist here
     # (a frontend newer than this backend). Only looks at 404 responses.
     'api.middleware.unknown_endpoint.UnknownEndpointMiddleware',
@@ -1026,6 +1028,13 @@ GOOGLE_REFRESH_TOKEN = os.getenv('GOOGLE_REFRESH_TOKEN', '')  # legacy/global; p
 # "Connect Google Calendar" flow. Must exactly match a redirect URI whitelisted
 # in the console, e.g. http://localhost:8000/api/company/integrations/google-calendar/callback
 GOOGLE_OAUTH_REDIRECT_URI = os.getenv('GOOGLE_OAUTH_REDIRECT_URI', '')
+# A person's own Outlook / Microsoft 365 calendar (core/personal_calendars.py, 24 Nov 2026). An app registered in
+# Microsoft Entra (Azure) with the delegated permissions offline_access, User.Read and Calendars.ReadWrite, and this
+# redirect URI, e.g. https://<api host>/api/me/calendar/microsoft/callback. Unset: Outlook is not offered.
+# Google's own calendars use the GOOGLE_* values above and the same Google redirect URI.
+MICROSOFT_CLIENT_ID = os.getenv('MICROSOFT_CLIENT_ID', '')
+MICROSOFT_CLIENT_SECRET = os.getenv('MICROSOFT_CLIENT_SECRET', '')
+MICROSOFT_OAUTH_REDIRECT_URI = os.getenv('MICROSOFT_OAUTH_REDIRECT_URI', '')
 
 # Jitsi Meet base URL — used as a fallback video link for online interviews
 # when a Google Meet link can't be created. Default is the public Jitsi server;
@@ -1119,6 +1128,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.tasks.check_ai_spend',
         'schedule': 3600.0,
         'options': {'expires': 3600},
+    },
+    # People's own Google / Outlook calendars: their busy times in, the agents' bookings out (core/personal_calendars.py)
+    'sync-personal-calendars': {
+        'task': 'core.tasks.sync_personal_calendars',
+        'schedule': 900.0,
+        'options': {'expires': 900},
     },
     # Weekly token quota reset — runs every hour, acts only on quotas whose next_reset_at has passed
     'reset-weekly-token-quotas': {

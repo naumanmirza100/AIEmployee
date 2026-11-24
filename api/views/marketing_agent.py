@@ -1047,7 +1047,8 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
     is set. Otherwise result_dict is:
         {
             'total_rows': int,
-            'created_count': int,        # rows successfully added/updated
+            'created_count': int,        # leads newly added to the campaign
+            'updated_count': int,        # rows for a lead already in it (its blank fields filled)
             'rejected_count': int,       # rows skipped — missing required fields
             'rejected_reasons': {'missing_email': int, 'missing_name': int, 'do_not_email': int, 'other': int},
         }
@@ -1079,6 +1080,8 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
         return ''
     total_rows = len(df)
     created_count = 0
+    updated_count = 0
+    in_campaign = set(campaign.leads.values_list('id', flat=True))
     rejected_reasons = {'missing_email': 0, 'missing_name': 0, 'do_not_email': 0, 'other': 0}
     # Addresses the company must not email are left out (core/do_not_email.py).
     from core.do_not_email import blocked_among
@@ -1132,9 +1135,14 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                         'source': _get(row, 'source'),
                     }
                 )
-                if created:
+                # Counted once each: a lead already in the campaign (or twice in the file) is "updated", not "added"
+                # ("4 added" for 3 leads, the test report's Marketing 4, 24 Nov 2026).
+                if created or lead.id not in in_campaign:
                     created_count += 1
                 else:
+                    updated_count += 1
+                in_campaign.add(lead.id)
+                if not created:
                     if not lead.first_name and first:
                         lead.first_name = first
                     if not lead.last_name and last:
@@ -1152,7 +1160,6 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                     if not lead.source and v:
                         lead.source = v
                     lead.save()
-                    created_count += 1
                 campaign.leads.add(lead)    # the m2m hook makes its sequence rows (models.create_campaign_contact)
             except Exception as row_exc:
                 rejected_reasons['other'] += 1
@@ -1162,6 +1169,7 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
     return ({
         'total_rows': total_rows,
         'created_count': created_count,
+        'updated_count': updated_count,
         'rejected_count': rejected_count,
         'rejected_reasons': rejected_reasons,
         # Cap the list so a huge bad file doesn't bloat the response.
@@ -1198,6 +1206,8 @@ def upload_campaign_leads(request, campaign_id):
         created_count = result['created_count']
         rejected_count = result['rejected_count']
         message = f"{result['total_rows']} row(s) found — {created_count} added as lead(s)"
+        if result.get('updated_count'):
+            message += f", {result['updated_count']} already in the campaign (updated)"
         if rejected_count:
             message += f", {rejected_count} rejected (missing required fields)."
         else:

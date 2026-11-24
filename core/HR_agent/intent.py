@@ -121,3 +121,7 @@ def redirect(reading, where):
 
 NOT_IN_THE_DOCUMENTS = ("I couldn't find this in the company's HR documents, so I can't answer it reliably. "
                         "Please ask HR directly.")
+# The AI was busy (or failed) while searching or writing: said so, rather than "not in the documents" (which told
+# staff a policy didn't exist) or the passages pasted raw as a verified answer (24 Nov 2026, the test report's HR 16).
+AI_BUSY_ANSWER = ("I'm busy right now, so I can't answer this reliably. Please try again in a moment, "
+                  "or ask HR directly.")

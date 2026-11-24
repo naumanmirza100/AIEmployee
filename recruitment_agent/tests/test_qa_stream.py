@@ -73,7 +73,8 @@ class AgentTests(RecruitmentStreamTestCase):
     def test_an_api_error_ends_with_the_usual_friendly_answer(self):
         events, _ = self.stream(GENERAL, FakeGroq(fail=True))
         self.assertEqual(events[-1]['type'], 'done')
-        self.assertIn('API error', events[-1]['result']['answer'])
+        # Which failure it was, not "check your API key" for all of them (24 Nov 2026, core/tests_ai_busy.py).
+        self.assertIn('the AI call failed', events[-1]['result']['answer'])
 
 
 class EndpointTests(RecruitmentStreamTestCase):

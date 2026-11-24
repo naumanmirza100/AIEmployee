@@ -472,6 +472,8 @@ const Documents = () => {
       {/* Create form — now a pop-up dialog (was an inline expanding card). */}
       <Dialog open={createExpanded} onOpenChange={(o) => { if (!o) closeCreateForm(); }}>
         <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar p-0 border-white/10 bg-pure-black/40 backdrop-blur-sm">
+          {/* Named for screen readers; the heading below is what everyone else sees (the test report's Marketing 6). */}
+          <DialogTitle className="sr-only">Create a new document</DialogTitle>
           <div className="relative">
               {/* Close button */}
               <Button

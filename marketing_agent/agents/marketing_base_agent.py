@@ -35,6 +35,15 @@ class ImageNotMade(Exception):
     """A picture could not be made; the message says why, for the screen."""
 
 
+def _busy(message, cause):
+    """The same words as before, as core.api_key_service.ProviderBusy (a RuntimeError), so a view can answer 503
+    "busy" for it rather than 500 (24 Nov 2026, Retest B)."""
+    from core.api_key_service import ProviderBusy
+    busy = ProviderBusy(message)
+    busy.__cause__ = cause
+    return busy
+
+
 class MarketingBaseAgent:
     """
     Base class for all Marketing AI agents.
@@ -421,16 +430,16 @@ class MarketingBaseAgent:
                     logger.error(f"Error in {self.agent_name} Groq Q&A call: {err_str}")
                     self._log_call(effective_model, started, False, key_ctx=key_ctx)
                     if is_rate_limit:
-                        raise RuntimeError("The service is busy. Please try again in a moment.")
+                        raise _busy("The service is busy. Please try again in a moment.", e)
                     if is_timeout:
-                        raise RuntimeError("The AI took too long to respond. Please try again.")
+                        raise _busy("The AI took too long to respond. Please try again.", e)
                     from core.api_key_service import raise_if_auth_error
                     raise_if_auth_error(e, key_ctx)
                     raise
         if last_error:
             err_str = str(last_error)
             if "429" in err_str or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower():
-                raise RuntimeError("The service is busy. Please try again in a moment.")
+                raise _busy("The service is busy. Please try again in a moment.", last_error)
             from core.api_key_service import raise_if_auth_error
             raise_if_auth_error(last_error, key_ctx)
             raise last_error

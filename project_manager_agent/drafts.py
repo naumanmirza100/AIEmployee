@@ -376,6 +376,9 @@ def inspect(actions, available_users=None, *, today=None, project=None):
                 'due_date': given.isoformat() if given else (dated or {}).get('suggested'),
                 'suggested': given is None and dated is not None,
                 'weight': (dated or {}).get('weight'),
+                # Not one of the tasks the user listed: shown unticked, as a suggestion (decision D10, 24 Nov 2026).
+                # Asked for exact tasks, the Pilot added 7 to 9 more, all made unless unticked (the test report's PM 3).
+                'extra': action.get('extra') is True,
                 'missing': missing_by_index.get(index, []),
                 # The assignee is on approved leave before this is due. A
                 # warning, not a block: the user decides.
@@ -385,7 +388,7 @@ def inspect(actions, available_users=None, *, today=None, project=None):
     return {
         # Someone on leave is reason enough to review before creating, even
         # with nothing missing; otherwise the warning would never be seen.
-        'needs_input': any_gap or leave_warnings > 0,
+        'needs_input': any_gap or leave_warnings > 0 or any(r.get('extra') for r in rows),
         'leave_warnings': leave_warnings,
         'no_users': no_users and any_gap,
         'items': items,

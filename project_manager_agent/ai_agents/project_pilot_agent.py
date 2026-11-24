@@ -1126,7 +1126,7 @@ ANALYSIS:
 
 REQUIRED ACTIONS:
 1. First: create_project action with a descriptive name and comprehensive description
-2. Then: 10-20 create_task actions breaking down all features/modules/services mentioned
+2. Then: 10-20 create_task actions breaking down all features/modules/services mentioned (when the user listed the tasks: those, as LISTED TASKS below says)
 
 {assignment_instruction}
 
@@ -1151,6 +1151,7 @@ Return ONLY this JSON format (no other text):
         "due_date": "YYYY-MM-DD",
         "priority": "high|medium|low",
         "status": "todo",
+        "extra": false,
         "reasoning": "DETAILED AI reasoning (5-7 sentences) including: (1) WHY this task matters and how it contributes to the project, (2) ESTIMATED EFFORT and why this due_date was chosen RELATIVE TO THE PROJECT START AND END (not just 'today'), (3) PRIORITY justification (why high/medium/low based on importance and urgency), (4) TASK BREAKDOWN and efficiency, (5) TECHNICAL DECISIONS, (6) RISK and best practices, (7) COMPLETION STRATEGY."
     }}
 ]
@@ -1173,7 +1174,8 @@ CRITICAL RULES:
   (3) Compute due_date = start_date + cumulative offset from where this task sits in the dependency order. Do NOT just use today+N — anchor every date to the project's start_date.
   (4) The last task's due_date should land on or before the project's deadline.
   Do not leave due_date empty. Each due_date should reflect realistic effort AND the task's position in the project plan.
-- Create 10-20 tasks that comprehensively cover:
+- LISTED TASKS: when the user lists the tasks they want (a numbered or bulleted list, or "tasks: A, B and C"), create exactly those, each with "extra": false. You may add at most 5 more that are clearly missing, each with "extra": true: the user sees them unticked, as suggestions. Otherwise every task has "extra": false.
+- Unless the user listed the tasks, create 10-20 tasks that comprehensively cover:
   * Core Infrastructure Layer (Auth, Data Warehouse, Event Bus, Audit, Notifications)
   * All modules/services mentioned (e.g., creator-profile-service, avatar-classification-service, etc.)
   * External API integrations (Meta Graph API, TikTok API, YouTube API, etc.)
@@ -1306,6 +1308,7 @@ Return ONLY this JSON format (no other text):
         "due_date": "YYYY-MM-DD",
         "priority": "high|medium|low",
         "status": "todo",
+        "extra": false,
         "reasoning": "Include: (1) why this task matters, (2) estimated effort and why this due_date was chosen, (3) why this priority (importance + urgency), (4) task breakdown and efficiency, (5) technical rationale, (6) completion strategy."
     }}
 ]
@@ -1317,7 +1320,8 @@ Rules:
 - Set due_date for every task: estimate effort and pick a date that fits the project's existing schedule (or today + that effort if the project has no dates). Justify in reasoning. Do not leave due_date empty.
 - Set priority by importance and urgency; justify in reasoning.
 - When user asked for ONE task only (e.g. "add only 1 task", "add a task for X"), return exactly one create_task with a short title and concise description.
-- When multiple tasks requested: break down into logical tasks (8-15 tasks covering features)
+- LISTED TASKS: when the user lists the tasks they want (a numbered or bulleted list, or "tasks: A, B and C"), create exactly those, each with "extra": false. You may add at most 5 more that are clearly missing, each with "extra": true: the user sees them unticked, as suggestions. Otherwise every task has "extra": false.
+- When multiple tasks are requested and not listed: break down into logical tasks (8-15 tasks covering features)
 - Create comprehensive tasks that cover: database design, backend API, frontend UI, authentication, core features, testing, deployment
 - For each task's "task_description" field, provide COMPREHENSIVE description (4-6 sentences) covering:
   * WHAT the task is - clear explanation
@@ -1401,6 +1405,7 @@ Return ONLY this JSON format (no other text):
         "due_date": "YYYY-MM-DD",
         "priority": "high|medium|low",
         "status": "todo",
+        "extra": false,
         "reasoning": "Include: (1) why this task matters, (2) estimated effort and why this due_date was chosen, (3) why this priority (importance + urgency), (4) task breakdown and efficiency, (5) technical rationale, (6) risks and completion strategy."
     }}
 ]
@@ -1408,7 +1413,8 @@ Return ONLY this JSON format (no other text):
 CRITICAL RULES:
 - Return ONLY the JSON array, no explanations
 - NEVER include update_task actions - this is a NEW project creation
-- Create 10-20 tasks covering ALL features/modules/services mentioned
+- LISTED TASKS: when the user lists the tasks they want (a numbered or bulleted list, or "tasks: A, B and C"), create exactly those, each with "extra": false. You may add at most 5 more that are clearly missing, each with "extra": true: the user sees them unticked, as suggestions. Otherwise every task has "extra": false.
+- Unless the user listed the tasks, create 10-20 tasks covering ALL features/modules/services mentioned
 - Break down each major component into separate tasks
 - PROJECT TIMELINE: If the user's own instruction says when the project must be finished ("deadline 10 days from now", "within 2 weeks", "by 15 Nov"), the deadline is exactly that date counted from today, and every task is due on or before it. Otherwise: if user mentions a start date use it, otherwise use {_today}. Set deadline = start_date + estimated total duration based on project complexity (small=2-6 weeks, medium=2-4 months, large=4-9 months, enterprise=9+ months). The deadline is the project's single end / due date — there is no separate end_date field.
 - TASK DUE DATES: Anchor every task to the project's start_date, not to today. (1) Estimate effort: small=3-7 days, medium=1-2 weeks, large=2-4 weeks. (2) Order tasks by dependency — foundational tasks first. (3) Compute due_date = start_date + cumulative offset. The final task's due_date must be ≤ the project's deadline. Justify in reasoning. Do not leave due_date empty.

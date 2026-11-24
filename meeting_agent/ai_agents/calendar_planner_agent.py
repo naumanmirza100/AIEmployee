@@ -156,7 +156,11 @@ class CalendarPlannerAgent(BaseAgent):
         for task in task_queue:
             due = (task.get('due_date') or '')[:10]
             placed = False
-            # Prefer the due-date day, but only if it actually has a free slot.
+            # Prefer the due-date day, but only if it actually has a free slot. A task due at the weekend is done
+            # in the working week before it: the plan put tasks "mostly on the weekend" (Executive 6, 24 Nov 2026).
+            if due and due in week_date_set and datetime.strptime(due, '%Y-%m-%d').weekday() >= 5:
+                friday = [d['date'] for d in work_days if d['date'] < due]
+                due = friday[-1] if friday else ''
             if due and due in week_date_set and _free_slot_count(due) > 0:
                 tasks_by_date[due].append(task)
                 placed = True
@@ -171,17 +175,26 @@ class CalendarPlannerAgent(BaseAgent):
             if not placed:
                 unscheduled_tasks.append(task.get('title', ''))
 
-        # Ask AI only for summary, recommendations, focus blocks per day
-        days_summary = '\n'.join(
-            f"  {d['date']} ({d['day_name']}): meetings={[m['title'] for m in meetings_by_date.get(d['date'], [])][:8]}, "
-            f"tasks ({len(tasks_by_date.get(d['date'], []))})={[t.get('title') for t in tasks_by_date.get(d['date'], [])][:8]}"
-            for d in week_dates
-        )
+        # Ask AI only for summary, recommendations, focus blocks per day. Each day with its figures, worked out
+        # here: given only titles, it called a Monday with one 30-minute meeting "heavily front-loaded, back-to-back",
+        # and recommended a focus block on Sunday (the test report's Executive 6).
+        def _day_line(d):
+            day_meetings = meetings_by_date.get(d['date'], [])
+            day_tasks = tasks_by_date.get(d['date'], [])
+            minutes = sum(int(m.get('duration_minutes') or 0) for m in day_meetings)
+            load = len(day_meetings) + len(day_tasks)
+            weekend = ' (weekend: not a working day)' if d['day_name'] in ('Saturday', 'Sunday') else ''
+            return (f"  {d['date']} ({d['day_name']}){weekend}: {len(day_meetings)} meeting(s), {minutes} minutes in "
+                    f"all {[m['title'] for m in day_meetings][:8]}; {len(day_tasks)} task(s) "
+                    f"{[t.get('title') for t in day_tasks][:8]}; load: "
+                    f"{'heavy' if load >= 4 else 'moderate' if load >= 2 else 'light'}")
+        days_summary = '\n'.join(_day_line(d) for d in week_dates)
         prompt = f"""You are a calendar assistant. Given this weekly schedule, write a brief summary and 2-3 practical recommendations.
 
 Schedule:
 {days_summary}
 
+Describe each day only by the figures given: its number of meetings, their minutes and its load. Saturday and Sunday are not working days: suggest no work, meetings or focus time on them.
 Do NOT list time conflicts — those are computed separately. Tasks are always scheduled around meetings, so a task and a meeting are never in conflict.
 
 Return ONLY this JSON (no markdown):

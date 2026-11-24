@@ -141,9 +141,30 @@ def tell_customer(meeting, what):
             _send(meeting, subject, heading, lines, cancel=what == 'cancelled')
         except Exception:
             logger.exception('Frontline meeting %s: the customer was not emailed (%s)', meeting.pk, what)
+            _tell_organizer_not_emailed(meeting, what)
 
     transaction.on_commit(send)
     return True
+
+
+def _tell_organizer_not_emailed(meeting, what):
+    """The organiser hears, in the bell, that the customer was not emailed: it was only logged, so a booking reported
+    success while the customer got no invite, new time or cancellation (the test report's Frontline 3, 24 Nov 2026).
+    Never raises."""
+    try:
+        from core.models import CompanyUser
+        from core.notification_utils import notify_company_users, notify_employees
+        title = f'{meeting.customer_email} was not emailed about "{meeting.title}"'[:255]
+        message = (f'The {what} email to the customer could not be sent. Tell them another way, or change the call '
+                   'again to send it once more.')
+        login = CompanyUser.objects.filter(login_user=meeting.organizer_id, is_active=True).first()
+        if login is not None:
+            notify_company_users([login], title=title, message=message, link='/frontline/dashboard?tab=meetings',
+                                 kind='frontline_customer_not_emailed', data={'meeting_id': meeting.pk})
+        else:
+            notify_employees([meeting.organizer], title=title, message=message, kind='frontline_customer_not_emailed')
+    except Exception:
+        logger.exception('Frontline meeting %s: the organiser could not be told either', meeting.pk)
 
 
 def remind_customer(meeting, minutes_left):

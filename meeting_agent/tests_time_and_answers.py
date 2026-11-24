@@ -180,12 +180,17 @@ class AnswerTests(EmployeeCase):
         self.assertIn('/api/meetings/exec-email-answer/rejected/', html)
         self.assertIn('Asia/Karachi', html)
 
-    def email_answer(self, action, token=None):
+    def email_answer(self, action, token=None, method='post'):
         token = token or views.answer_link(self.seat, action).rstrip('/').rsplit('/', 1)[1]
-        response = views.meeting_email_answer(RequestFactory().get('/'), action, token)
+        response = views.meeting_email_answer(getattr(RequestFactory(), method)('/'), action, token)
         return response.content.decode()
 
     def test_the_email_buttons_answer_without_a_login(self):
+        # Opening the link (a mail scanner does) only shows the button; pressing it answers (24 Nov 2026).
+        page = self.email_answer('accepted', method='get')
+        self.assertIn('<form method="post">', page)
+        self.seat.refresh_from_db()
+        self.assertNotEqual(self.seat.response, 'accepted')
         self.assertIn('Accepted', self.email_answer('accepted'))
         self.seat.refresh_from_db()
         self.assertEqual(self.seat.response, 'accepted')

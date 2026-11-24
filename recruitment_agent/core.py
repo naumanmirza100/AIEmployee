@@ -92,7 +92,8 @@ class RecruitmentAIClient(BaseAgent):
             if kind == 'token':
                 yield event['value']
             elif kind == 'error':
-                raise GroqClientError(f"AI request failed: {event.get('message')}")
+                raise GroqClientError(f"AI request failed: {event.get('message')}",
+                                      is_rate_limit=event.get('code') == 'ai_busy')
 
 
 # The name the Recruitment agents' type hints use.

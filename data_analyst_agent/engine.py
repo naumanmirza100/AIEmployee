@@ -223,7 +223,9 @@ _LIVE = """- Some rows no longer count, and are left out even when the question 
   Leave out just those values (a status with NOT IN; an empty status counts); every other value counts (closed,
   completed, on probation, discontinued). Asked by the column that marks them ("orders in each status", "employees by
   employment status") or naming them ("cancelled orders", "including deleted users", "active or not"), leave none
-  out: give every value as asked.
+  out: give every value as asked. Asked for "all" of them or a figure "in total" ("how many orders in total"), count
+  every row, those included, and return beside it, in its own column, how many of them are cancelled, deleted or
+  disabled.
 """
 # Time between two timestamps, and JSON (19 Nov 2026). A test database (Lumora) had the AI round response times down
 # to whole minutes (60 min 59 s passed a 60-minute target: 23 late replies counted as on time), and invent a column of
@@ -426,7 +428,9 @@ Rules:
   database, so I can't change it." and leave "sql" empty.
 - Return the figures the question is about as columns (a count, a total, an average, a share), named plainly, not
   only names. For "which ... the most / least / top", return the top 5 with their figures, in order, so the answer
-  can say by how much.
+  can say by how much. For a top N (a number given: "top 3"), return N + 2 rows in order, so a place shared at the
+  cut-off shows; never cut ties with LIMIT N.
+- Round money, averages and shares to 2 decimal places (ROUND(x, 2)), and give counts as whole numbers.
 - Use only the tables and columns listed, spelled exactly; quote names the way {dialect} needs when they have capitals,
   spaces or reserved words.
 - Show what things are called, not only their ids: for companies, people, projects, campaigns, products and the like,
@@ -481,7 +485,8 @@ Rules:
   database, so I can't change it." and leave "pipeline" empty.
 - Return the figures the question is about as fields, named plainly (a count, a total, an average, a share), not only
   names. For "which ... the most / least / top", return the top 5 with their figures, in order, so the answer can say
-  by how much.
+  by how much. For a top N (a number given: "top 3"), $limit N + 2, so a place shared at the cut-off shows.
+- Round money, averages and shares to 2 decimal places ($round), and give counts as whole numbers.
 - Use only the fields listed, spelled exactly. Leave _id out unless it is asked for ({{"$project": {{"_id": 0, ...}}}}).
 - Show what things are called, not only their ids: $lookup the collection that holds the name and return it.
 - A field listed with its values holds only those: match them exactly as spelled there.
@@ -520,6 +525,8 @@ Write the answer plainly, in the language of the question:
 - First one sentence that answers it, with the figure that answers it (the count, the total). Then, only if they
   help, up to five short bullets (the next ones, each with its own figure from the rows).
 - Don't work out new numbers (differences, shares, sums of rows): give the figures as the rows have them.
+- Asked for a top N ("top 3"), give N, and only add those level with the Nth: the rows after it are there to show a
+  tie at the cut-off.
 - Use only the names, numbers and dates in the rows above. When the result was cut, don't add rows up yourself:
   say what the rows shown say, and that there are more.
 - An empty result, or a total that came back empty: say nothing matched the query's conditions, naming the condition
@@ -959,6 +966,30 @@ def _chart(spec, columns, rows):
     return {'type': kind, 'x': x, 'y': y, 'title': str(spec.get('title') or '').strip()[:120] or f'{y} by {x}'}
 
 
+_TOP_N = re.compile(r'\b(?:top|first|best|biggest|largest|highest|lowest|worst|leading)\s+(\d{1,3})\b|\b(\d{1,3})\s+'
+                    r'(?:best|biggest|largest|highest|top|leading|most)\b', re.I)
+
+
+def _tie_at_cut(question, result) -> str:
+    """For "top 3", a sentence for the answer when the row after the 3rd has the same figure: the place is shared.
+    Three customers tied for third, and each source named a different one, none saying so (the test report's Data
+    Analyst 3, 24 Nov 2026)."""
+    found = _TOP_N.search(question or '')
+    rows = result.get('rows') or []
+    if not found or not rows:
+        return ''
+    n = int(found.group(1) or found.group(2))
+    if not 0 < n < len(rows):
+        return ''
+    figure = next((i for i in range(len(result['columns']) - 1, -1, -1)
+                   if _number(rows[n - 1][i]) is not None), None)
+    if figure is None or _number(rows[n][figure]) != _number(rows[n - 1][figure]):
+        return ''
+    level = [row for row in rows if _number(row[figure]) == _number(rows[n - 1][figure])]
+    return (f'Place {n} is shared: {len(level)} rows have {result["columns"][figure]} {rows[n - 1][figure]}. Say that '
+            f'place {n} is a tie, and name every one of them; do not pick one as number {n}.\n')
+
+
 def _write_answer(ai, question, sql, result, total, chart=None, doubt='') -> str:
     shown = result['rows'][:ROWS_TO_AI]
     count = f'{total} row(s)' + (f', the first {len(shown)} shown below' if total > len(shown) else '')
@@ -974,7 +1005,7 @@ def _write_answer(ai, question, sql, result, total, chart=None, doubt='') -> str
              'be wrong and why, in plain words a reader without the query understands, so they check them.\n'
              ) if doubt else ''
     prompt = _ANSWER.format(question=question, sql=sql[:2000], count=count, columns=', '.join(result['columns']),
-                            rows=f'Rows:\n{rows}', chart=drawn, doubt=doubt)
+                            rows=f'Rows:\n{rows}', chart=drawn, doubt=_tie_at_cut(question, result) + doubt)
     return (ai._call_llm(prompt=prompt, system_prompt='You answer only from the rows given.', temperature=0.2,
                          max_tokens=700) or '').strip()
 

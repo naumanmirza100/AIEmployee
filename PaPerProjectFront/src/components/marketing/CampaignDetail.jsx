@@ -522,7 +522,9 @@ const CampaignDetail = () => {
         if (reasons.other) reasonParts.push(`${reasons.other} error(s)`);
         toast({
           title: d.rejected_count ? 'Leads uploaded with some rejected' : 'Leads uploaded',
+          // A lead already in the campaign is "updated", not "added" (the test report's Marketing 4).
           description: `${d.total_rows} row(s) found — ${d.created_count} added as lead(s)${
+            d.updated_count ? `, ${d.updated_count} already in the campaign (updated)` : ''}${
             d.rejected_count ? `, ${d.rejected_count} rejected (${reasonParts.join(', ')}).` : '.'
           }`,
         });
@@ -1235,6 +1237,9 @@ const CampaignDetail = () => {
                 <div className="rounded-md border bg-muted/30 p-3 mb-3 text-sm">
                   <p className="text-foreground">
                     Last upload: <strong>{lastUploadSummary.total_rows}</strong> row{lastUploadSummary.total_rows !== 1 ? 's' : ''} found — <strong>{lastUploadSummary.created_count}</strong> added as lead{lastUploadSummary.created_count !== 1 ? 's' : ''}
+                    {lastUploadSummary.updated_count > 0 && (
+                      <>, <strong>{lastUploadSummary.updated_count}</strong> already in the campaign (updated)</>
+                    )}
                     {lastUploadSummary.rejected_count > 0 && (
                       <>, <strong>{lastUploadSummary.rejected_count}</strong> rejected ({lastUploadSummary.reasonParts.join(', ')})</>
                     )}
@@ -1665,7 +1670,7 @@ const CampaignDetail = () => {
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06]">
                 <div className="px-3 py-2 border-b border-amber-500/20 text-xs font-semibold text-amber-300 flex items-center gap-1.5">
                   <AlertTriangle className="h-3.5 w-3.5" />
-                  {uploadResult.created_count} added · {uploadResult.rejected_count} rejected
+                  {uploadResult.created_count} added{uploadResult.updated_count ? ` · ${uploadResult.updated_count} updated` : ''} · {uploadResult.rejected_count} rejected
                 </div>
                 {Array.isArray(uploadResult.rejected_rows) && uploadResult.rejected_rows.length > 0 ? (
                   <div className="max-h-56 overflow-auto no-scrollbar">

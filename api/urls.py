@@ -15,6 +15,7 @@ from api.views import notification
 from api.views import company
 from api.views import company_auth
 from api.views import company_integrations
+from api.views import personal_calendar
 from api.views import company_users
 from api.views import user_tasks
 from api.views import company_user_tasks
@@ -199,6 +200,14 @@ urlpatterns = [
     re_path(r'^company/integrations/google-calendar/connect/?$', company_integrations.google_calendar_connect, name='company_gcal_connect'),  # POST
     re_path(r'^company/integrations/google-calendar/callback/?$', company_integrations.google_calendar_callback, name='company_gcal_callback'),  # GET (public)
     re_path(r'^company/integrations/google-calendar/disconnect/?$', company_integrations.google_calendar_disconnect, name='company_gcal_disconnect'),  # DELETE
+    # A person's own Google / Outlook calendar (core/personal_calendars.py, 24 Nov 2026)
+    re_path(r'^company/my-calendar/?$', personal_calendar.company_my_calendar, name='company_my_calendar'),  # GET / PATCH / DELETE
+    re_path(r'^company/my-calendar/connect/?$', personal_calendar.company_my_calendar_connect, name='company_my_calendar_connect'),  # POST
+    re_path(r'^company/my-calendar/sync/?$', personal_calendar.company_my_calendar_sync, name='company_my_calendar_sync'),  # POST
+    re_path(r'^me/calendar/?$', personal_calendar.my_calendar, name='my_calendar'),  # GET / PATCH / DELETE
+    re_path(r'^me/calendar/connect/?$', personal_calendar.my_calendar_connect, name='my_calendar_connect'),  # POST
+    re_path(r'^me/calendar/sync/?$', personal_calendar.my_calendar_sync, name='my_calendar_sync'),  # POST
+    re_path(r'^me/calendar/microsoft/callback/?$', personal_calendar.microsoft_callback, name='my_calendar_ms_callback'),  # GET (public)
     re_path(r'^company/forgot-password/?$', company_auth.forgot_password, name='company_forgot_password'),
     re_path(r'^company/verify-otp/?$', company_auth.verify_reset_otp, name='company_verify_reset_otp'),
     re_path(r'^company/reset-password/?$', company_auth.reset_password, name='company_reset_password'),
@@ -299,6 +308,7 @@ urlpatterns = [
     # The Company Assistant: one chat that asks across the agents (core/assistant, CO-18).
     re_path(r'^company/assistant/?$', company_assistant.assistant_status, name='company_assistant'),  # GET
     re_path(r'^company/assistant/ask/?$', company_assistant.assistant_ask, name='company_assistant_ask'),  # POST
+    re_path(r'^company/assistant/act/?$', company_assistant.assistant_act, name='company_assistant_act'),  # POST: do a confirmed proposal
     re_path(r'^company/assistant/ask-stream/?$', company_assistant.assistant_ask_stream,
             name='company_assistant_ask_stream'),  # POST, ndjson
     re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET
@@ -361,6 +371,8 @@ urlpatterns = [
 
     # Recruitment Agent endpoints (Company User)
     re_path(r'^recruitment/process-cvs/?$', recruitment_agent.process_cvs, name='recruitment_process_cvs'),  # POST (full pipeline)
+    re_path(r'^recruitment/cv-batches/?$', recruitment_agent.list_cv_batches, name='recruitment_cv_batches'),  # GET
+    re_path(r'^recruitment/cv-batches/(?P<batch_id>\d+)/?$', recruitment_agent.cv_batch_detail, name='recruitment_cv_batch'),  # GET
     re_path(r'^recruitment/agents/cv/parse/?$', recruitment_agent.api_cv_parse, name='recruitment_api_cv_parse'),  # POST
     re_path(r'^recruitment/agents/cv/summarize/?$', recruitment_agent.api_cv_summarize, name='recruitment_api_cv_summarize'),  # POST
     re_path(r'^recruitment/agents/cv/enrich/?$', recruitment_agent.api_cv_enrich, name='recruitment_api_cv_enrich'),  # POST
@@ -373,6 +385,8 @@ urlpatterns = [
     re_path(r'^recruitment/qa/chats/create/?$', recruitment_agent.create_qa_chat, name='recruitment_qa_chats_create'),  # POST
     re_path(r'^recruitment/qa/chats/(?P<chat_id>\d+)/update/?$', recruitment_agent.update_qa_chat, name='recruitment_qa_chats_update'),  # PATCH/PUT
     re_path(r'^recruitment/qa/chats/(?P<chat_id>\d+)/delete/?$', recruitment_agent.delete_qa_chat, name='recruitment_qa_chats_delete'),  # DELETE
+    re_path(r'^recruitment/roles/?$', recruitment_agent.recruitment_roles, name='recruitment_roles'),  # GET/POST (24 Nov 2026)
+    re_path(r'^recruitment/job-descriptions/(?P<job_description_id>\d+)/hiring-managers/?$', recruitment_agent.job_hiring_managers, name='recruitment_job_hiring_managers'),  # POST
     re_path(r'^recruitment/job-descriptions/?$', recruitment_agent.list_job_descriptions, name='recruitment_list_job_descriptions'),  # GET
     re_path(r'^recruitment/job-descriptions/generate/?$', recruitment_agent.generate_job_description, name='recruitment_generate_job_description'),  # POST
     re_path(r'^recruitment/job-descriptions/create/?$', recruitment_agent.create_job_description, name='recruitment_create_job_description'),  # POST
@@ -903,6 +917,7 @@ urlpatterns = [
 
     # Workflows / SOPs
     re_path(r'^hr/workflows/?$', hr_agent.list_hr_workflows, name='hr_list_workflows'),  # GET
+    re_path(r'^hr/workflows/builder-options/?$', hr_agent.hr_workflow_builder_options, name='hr_workflow_builder_options'),  # GET
     re_path(r'^hr/workflows/create/?$', hr_agent.create_hr_workflow, name='hr_create_workflow'),  # POST
     re_path(r'^hr/workflows/(?P<workflow_id>\d+)/?$', hr_agent.get_hr_workflow, name='hr_get_workflow'),  # GET
     re_path(r'^hr/workflows/(?P<workflow_id>\d+)/update/?$', hr_agent.update_hr_workflow, name='hr_update_workflow'),  # PATCH

@@ -55,7 +55,7 @@ from core.scheduling import (
     people_for, suggest_slots, zone_name,
 )
 from core.scheduling.identity import login_user_ids_for_employees, member_ids
-from core.api_key_service import KeyServiceError
+from core.api_key_service import KeyServiceError, raise_if_busy
 from api.streaming import error_event
 # Re-use Frontline's hardened helpers — file validation + broker probe.
 from Frontline_agent.document_processor import DocumentProcessor
@@ -1682,6 +1682,30 @@ def list_hr_workflow_executions(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
+def hr_workflow_builder_options(request):
+    """What the workflow step builder offers to pick from (24 Nov 2026): the company's message templates, its Project
+    Manager projects (when it has the agent) and the employees. The steps were typed as JSON."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY}, status=status.HTTP_403_FORBIDDEN)
+    from core.models import Project
+    from core.modules import has_module
+    company = request.user.company
+    has_pm = has_module(company.id, 'project_manager_agent')
+    return Response({'status': 'success', 'data': {
+        'templates': list(HRNotificationTemplate.objects.filter(company=company).order_by('name')
+                          .values('id', 'name', 'channel')),
+        'has_project_manager': has_pm,
+        'projects': list(Project.objects.filter(company=company).order_by('name').values('id', 'name')[:200])
+        if has_pm else [],
+        'employees': list(Employee.objects.filter(company=company).exclude(employment_status='offboarded')
+                          .order_by('full_name').values('id', 'full_name', 'job_title')[:500]),
+    }})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
 def list_hr_workflows(request):
     company = request.user.company
     qs = HRWorkflow.objects.filter(company=company).order_by('-updated_at')[:200]
@@ -1764,6 +1788,14 @@ def execute_hr_workflow(request, workflow_id):
                              'data': {'simulated': True, 'ok': success, 'error': err,
                                       'result_data': result_data}})
 
+        # "Requires approval": a run started by an event waits for an HR admin (hr_agent/signals.py). Run by hand,
+        # which only an HR admin may do, it is that approval (decision D6, 21 Nov 2026), and the run records whose.
+        # It ran with no record and no word of it, so HR took it for a run that skipped its sign-off (HR 12).
+        approved = None
+        if w.requires_approval:
+            approved = {'by_company_user_id': request.user.id, 'by': request.user.full_name or request.user.email,
+                        'at': timezone.now().isoformat(), 'how': 'ran it by hand'}
+            context_data['approved'] = approved
         exec_obj = HRWorkflowExecution.objects.create(
             workflow=w, workflow_name=w.name, executed_by=user,
             employee_id=context_data.get('employee_id') or None,
@@ -1779,6 +1811,7 @@ def execute_hr_workflow(request, workflow_id):
                     'status': 'paused',
                     'wait_seconds': result_data.get('wait_seconds'),
                     'resume_at': exec_obj.resume_at.isoformat() if exec_obj.resume_at else None,
+                    'approved': approved,
                     'result_data': result_data,
                 },
             }, status=status.HTTP_202_ACCEPTED)
@@ -1791,6 +1824,7 @@ def execute_hr_workflow(request, workflow_id):
         return Response({'status': 'success',
                          'data': {'execution_id': exec_obj.id,
                                   'status': exec_obj.status,
+                                  'approved': approved,
                                   'result_data': result_data}})
     except Exception:
         logger.exception("execute_hr_workflow failed")
@@ -2197,25 +2231,26 @@ def send_hr_notification_now(request):
                         status=status.HTTP_400_BAD_REQUEST)
 
     # ── Render the subject + body using the caller's context. ────
-    context = d.get('context') or {}
-    # Provide a couple of automatic keys for convenience so simple templates
-    # like "Welcome {{employee_name}}" work when a recipient_employee is set.
+    context = dict(d.get('context') or {}) if isinstance(d.get('context'), dict) else {}
+    # The person the email goes to, from the address when no employee was picked, so their details fill the template.
+    if recipient_employee is None and recipient_email:
+        recipient_employee = Employee.objects.filter(company=company, work_email__iexact=recipient_email).first()
     if recipient_employee:
-        context.setdefault('employee_name', recipient_employee.full_name)
-    # `format_map` with a defaultdict-like tolerates missing keys instead of
-    # raising KeyError, which is the friendlier behaviour for a manual
-    # "send now" (the sender might be testing before filling every slot).
-    class _SafeDict(dict):
-        def __missing__(self, key):
-            return f'{{{key}}}'  # leave the placeholder visible so it's obvious what's unresolved
-    safe = _SafeDict(context)
-    try:
-        rendered_subject = (template.subject or '').format_map(safe)
-        rendered_body = (template.body or '').format_map(safe)
-    except (IndexError, ValueError):
-        # e.g. template used `{0}` positional; fall back to raw
-        rendered_subject = template.subject or ''
-        rendered_body = template.body or ''
+        from hr_agent.signals import _employee_context
+        for key, value in _employee_context(recipient_employee, event='send_now').items():
+            context.setdefault(key, value)
+    # `{{employee_name}}`, as the scheduled sender, workflows, the template's help text and the screen's own default
+    # body write it. This used Python's `{name}`, so a template saved as the screen suggests went out as
+    # "Reminder for {employee_name}" (the test report's HR 14). A `{name}` some older template has still works.
+    from hr_agent.tasks import _render_template_body
+
+    def render(text):
+        out = _render_template_body(text or '', context)
+        for key, value in context.items():
+            out = out.replace('{' + str(key) + '}', '' if value is None else str(value))
+        return out
+    rendered_subject = render(template.subject)
+    rendered_body = render(template.body)
 
     ok, channel_used = _dispatch_hr_notification(
         template, recipient_email, rendered_subject, rendered_body, company,
@@ -2324,11 +2359,21 @@ _HR_PRIVATE_TYPES = ('exit_interview', 'grievance_hearing', 'performance_review'
 _HR_BUSY_ANSWERS = ('pending', 'accepted', 'counter_proposed')
 
 
-def _hr_aware(dt):
+def _hr_aware(dt, zone=None):
+    """`dt` with a zone. A time sent without an offset is read in `zone` (the meeting's, else the company's), as the
+    Executive agent reads it: "2026-11-25T15:15:00" with "Asia/Karachi" was booked at 15:15 UTC, 20:15 in Karachi
+    (the test report's Final 4, 24 Nov 2026). With no zone, UTC as before."""
     if dt is not None and timezone.is_naive(dt):
         from datetime import timezone as _dt_tz
-        return timezone.make_aware(dt, _dt_tz.utc)
+        from zoneinfo import ZoneInfo
+        return timezone.make_aware(dt, ZoneInfo(zone) if zone else _dt_tz.utc)
     return dt
+
+
+def _meeting_zone(d, company, meeting=None):
+    """The zone a meeting's typed time is in: the one sent, the meeting's own, then the company's; '' for none."""
+    return (zone_name(d.get('timezone_name'), default='') or zone_name(getattr(meeting, 'timezone_name', ''), default='')
+            or zone_name(getattr(company, 'timezone_name', ''), default=''))
 
 
 def _hr_duration(raw, default=30):
@@ -2499,7 +2544,7 @@ def create_hr_meeting(request):
     if not sched_raw or not d.get('title'):
         return Response({'status': 'error', 'message': 'title and scheduled_at are required'},
                         status=status.HTTP_400_BAD_REQUEST)
-    sched = _hr_aware(_parse_iso_dt(sched_raw))
+    sched = _hr_aware(_parse_iso_dt(sched_raw), _meeting_zone(d, company))
     if sched is None:
         return Response({'status': 'error', 'message': 'scheduled_at must be ISO-8601'},
                         status=status.HTTP_400_BAD_REQUEST)
@@ -2952,7 +2997,10 @@ def withdraw_leave_request(request, request_id):
                                 f"Use cancel for a pending request."),
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            today = timezone.now().date()
+            # The company's own date: before 5 am in Karachi the server's (UTC) date is still yesterday, so a leave
+            # under way ended a day early and a day already taken came back (24 Nov 2026).
+            from meeting_agent.clock import today as _company_today
+            today = _company_today(company)
             already_taken = lr.end_date and lr.end_date < today
             if already_taken and not is_admin:
                 return Response({
@@ -4004,9 +4052,12 @@ def hr_meeting_schedule(request):
             except KeyServiceError:
                 raise
             except Exception as exc:
+                # Busy: 503 "busy, try again". It showed the provider's words ("LLM call failed: Error code: 429 …").
+                raise_if_busy(exc)
                 logger.exception("hr_meeting_schedule: LLM call failed")
                 return Response({'status': 'error',
-                                 'data': {'reply': f"LLM call failed: {exc}", 'meeting': None}},
+                                 'data': {'reply': "I couldn't read that request just now. Please try again.",
+                                          'meeting': None}},
                                 status=status.HTTP_502_BAD_GATEWAY)
 
             s = (raw or '').strip()
@@ -4442,7 +4493,7 @@ def update_hr_meeting(request, meeting_id):
         m.description = str(d['description'] or '')[:5000]
         dirty.append('description')
     if 'scheduled_at' in d:
-        sched = _hr_aware(_parse_iso_dt(d['scheduled_at']))
+        sched = _hr_aware(_parse_iso_dt(d['scheduled_at']), _meeting_zone(d, m.company, m))
         if sched is None:
             return Response({'status': 'error', 'message': 'scheduled_at must be ISO-8601'},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -4925,8 +4976,9 @@ def extract_hr_meeting_action_items(request, meeting_id):
     except KeyServiceError:
         raise
     except Exception as exc:
+        raise_if_busy(exc)
         logger.exception("extract_hr_meeting_action_items LLM failed")
-        return Response({'status': 'error', 'message': f'LLM call failed: {exc}'},
+        return Response({'status': 'error', 'message': "The action items couldn't be read. Please try again."},
                         status=status.HTTP_502_BAD_GATEWAY)
     s = (raw or '').strip()
     if s.startswith('```'):
@@ -4953,6 +5005,25 @@ def extract_hr_meeting_action_items(request, meeting_id):
 # ============================================================================
 # Leave requests — list with mine / pending filters
 # ============================================================================
+
+def _others_off(lr, most=5) -> list:
+    """Others in `lr`'s team (the same manager, else the same department) on approved or waiting leave that overlaps
+    it: names and dates, never the reasons."""
+    emp = lr.employee
+    if emp is None or not (lr.start_date and lr.end_date):
+        return []
+    team = Q(employee__manager_id=emp.manager_id) if emp.manager_id else (
+        Q(employee__department_obj_id=emp.department_obj_id) if emp.department_obj_id else
+        Q(employee__department=emp.department) if emp.department else None)
+    if team is None:
+        return []
+    overlapping = (LeaveRequest.objects.filter(team, employee__company_id=emp.company_id,
+                                               status__in=['approved', 'pending'],
+                                               start_date__lte=lr.end_date, end_date__gte=lr.start_date)
+                   .exclude(employee_id=emp.id).select_related('employee').order_by('start_date')[:most])
+    return [{'employee_name': o.employee.full_name, 'start_date': o.start_date.isoformat(),
+             'end_date': o.end_date.isoformat(), 'status': o.status} for o in overlapping]
+
 
 def _serialize_leave_request(lr) -> dict:
     return {
@@ -5033,6 +5104,12 @@ def list_leave_requests(request):
         from api.pagination import paginate
         page, pagination = paginate(request, qs, default_limit=200, max_limit=500)
         rows = [_serialize_leave_request(lr) for lr in page]
+        # Who else in the team is off then, for the one who decides (decision D21): "Clashes" were meetings only, so
+        # two people of one team off on the same days raised nothing (the test report's HR 6, 24 Nov 2026).
+        is_admin = _is_hr_admin(request.user)
+        for lr, row in zip(page, rows):
+            if lr.status == 'pending' and (is_admin or (asker_emp and lr.approver_id == asker_emp.id)):
+                row['others_off'] = _others_off(lr)
         return Response({'status': 'success', 'data': rows, 'count': len(rows),
                          'pagination': pagination})
     except Exception:
@@ -5077,12 +5154,12 @@ def _booked_on(company, day):
 
     A company holiday makes every agent refuse new bookings that day, but it
     cancels nothing: whoever adds one is shown what is already there, so they
-    can tell the people involved. Leave is not a booking and is left out.
+    can tell the people involved. Leave is not a booking and is left out, nor is a person's own calendar.
     """
     from core.models import CalendarBlock
     seen, found = set(), []
     blocks = (CalendarBlock.objects.filter(company=company, starts_at__date=day)
-              .exclude(source='leave').order_by('starts_at'))
+              .exclude(source__in=('leave', 'personal')).order_by('starts_at'))
     for block in blocks:
         key = (block.source, block.source_id)
         if key in seen:
@@ -5338,8 +5415,11 @@ def _build_employee_bundle(emp: Employee, company) -> dict:
     ).select_related('cycle', 'reviewer').order_by('-cycle__period_start')[:10]
 
     from hr_agent import logins as hr_logins
+    profile = _serialize_employee(emp)
+    # My HR shows "Manager: …" from this; only the id was sent, so it always said "—" (the test report's HR 4).
+    profile['manager_name'] = chain[0]['full_name'] if chain else None
     return {
-        'employee': _serialize_employee(emp),
+        'employee': profile,
         'logins': hr_logins.describe(emp),
         'manager_chain': chain,
         'leave_balances': balances,
@@ -5559,6 +5639,52 @@ def _write_audit_log(actor_cu, company, action: str, target_type: str, target_id
 # Employee — update (PATCH/POST)
 # ============================================================================
 
+
+def _manager_problem(emp, mgr):
+    """Why `mgr` can't be `emp`'s manager, or None. Two people reporting to each other was accepted, and the org chart
+    and the approver lookup then walked a loop (the test report's HR 15); "their own manager" was ignored silently."""
+    if mgr is None:
+        return "That manager isn't in this company."
+    if mgr.pk == emp.pk:
+        return "Someone can't be their own manager."
+    seen, cur = set(), mgr
+    while cur is not None and cur.pk not in seen:
+        if cur.manager_id == emp.pk:
+            return (f"That would make a loop: {mgr.full_name} reports to {emp.full_name}"
+                    + ("" if cur.pk == mgr.pk else f" (through {cur.full_name})") + ".")
+        seen.add(cur.pk)
+        cur = cur.manager
+    return None
+
+
+_HR_ONLY_FIELDS = (('full_name', 'name'), ('job_title', 'job title'), ('personal_email', 'personal email'),
+                   ('employment_status', 'status'), ('employment_type', 'employment type'),
+                   ('start_date', 'start date'), ('probation_end_date', 'probation end date'),
+                   ('manager_id', 'manager'), ('department_id', 'department'), ('department', 'department'))
+
+
+def _hr_only_changes(emp, data):
+    """The HR-only fields `data` would change on `emp`, as words ("job title", "manager")."""
+    def same(key, sent):
+        if key in ('manager_id', 'department_id'):
+            now = emp.manager_id if key == 'manager_id' else emp.department_obj_id
+            sent = None if sent in (None, '', 0, '0', 'none') else str(sent)
+            return sent == (None if now is None else str(now))
+        sent = '' if sent is None else str(sent).strip()
+        if key == 'department':
+            names = {(emp.department or '').strip().lower()}
+            if emp.department_obj_id:
+                names.add(emp.department_obj.name.strip().lower())
+            return sent.lower() in names
+        now = getattr(emp, key)
+        now = now.isoformat() if hasattr(now, 'isoformat') else ('' if now is None else str(now))
+        return sent == now
+    changed = []
+    for key, words in _HR_ONLY_FIELDS:
+        if key in data and not same(key, data[key]) and words not in changed:
+            changed.append(words)
+    return changed
+
 @api_view(['PATCH', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -5587,6 +5713,17 @@ def update_employee(request, employee_id):
         d = request.data or {}
         fields = []
         before = _serialize_employee(emp)
+
+        # An employee may change their own phone and time zone only. A change to anything else came back 200 with
+        # the old values (the test report's HR 15); the edit form sends every field, so unchanged ones pass.
+        if not is_admin:
+            changed = _hr_only_changes(emp, d)
+            if changed:
+                return Response({
+                    'status': 'error',
+                    'message': (f"Only HR can change your {', '.join(changed)}. You can change your phone and "
+                                "time zone here."),
+                }, status=status.HTTP_403_FORBIDDEN)
 
         # Self-service fields (any authenticated caller, for themselves).
         if 'phone' in d:
@@ -5659,12 +5796,15 @@ def update_employee(request, employee_id):
                 fields.append('probation_end_date')
             if 'manager_id' in d:
                 mid = d['manager_id']
-                if mid in (None, '', 0, '0'):
+                if mid in (None, '', 0, '0', 'none'):
                     emp.manager = None
                 else:
                     mgr = Employee.objects.filter(company=company, pk=mid).first()
-                    if mgr and mgr.pk != emp.pk:
-                        emp.manager = mgr
+                    problem = _manager_problem(emp, mgr)
+                    if problem:
+                        return Response({'status': 'error', 'message': problem},
+                                        status=status.HTTP_400_BAD_REQUEST)
+                    emp.manager = mgr
                 fields.append('manager')
             # Department — prefer FK, fall back to string, auto-create if needed.
             dept_id = d.get('department_id')
@@ -6165,6 +6305,10 @@ def create_review_cycle(request):
     if period_end < period_start:
         return Response({'status': 'error', 'message': 'period_end must be after period_start'},
                         status=status.HTTP_400_BAD_REQUEST)
+    # A name the company already has hit the database's rule and answered 500 (HR 3); the screen can send one.
+    if PerformanceReviewCycle.objects.filter(company=company, name__iexact=name[:120]).exists():
+        return Response({'status': 'error', 'message': f'A review cycle called "{name[:120]}" already exists.'},
+                        status=status.HTTP_400_BAD_REQUEST)
     user = _hr_get_or_create_user_for_company_user(request.user)
     cycle = PerformanceReviewCycle.objects.create(
         company=company, name=name[:120],
@@ -6335,13 +6479,25 @@ def list_employee_reviews(request, employee_id):
                          'message': "Only HR, the person and their managers can see someone's reviews."},
                         status=status.HTTP_403_FORBIDDEN)
     qs = PerformanceReview.objects.filter(employee=emp).select_related('cycle', 'reviewer')
-    if not _is_hr_admin(request.user):
-        # Self-view only sees released reviews.
-        caller_user_id = _caller_login_user_id(request.user)
-        if str(caller_user_id) != str(emp.user_id):
-            qs = qs.filter(visible_to_employee=True)
+    # It was back to front: the person saw the manager's unreleased rating and summary, and their manager saw only
+    # released reviews, not the one they were writing. Now HR and the managers see every review; the person sees
+    # every review too (they write their own part), with the manager's part once HR releases it.
+    is_self = not _is_hr_admin(request.user) and str(_caller_login_user_id(request.user)) == str(emp.user_id)
     return Response({'status': 'success',
-                     'data': [_serialize_perf_review(r) for r in qs.order_by('-cycle__period_start')]})
+                     'data': [_review_as_seen(r, is_self) for r in qs.order_by('-cycle__period_start')]})
+
+
+_MANAGER_PART = ('manager_summary', 'strengths', 'growth_areas', 'goals', 'overall_rating')
+
+
+def _review_as_seen(review, by_the_person):
+    """A review as shown: to the person it is about, the manager's part only once released."""
+    data = _serialize_perf_review(review)
+    if by_the_person and not review.visible_to_employee:
+        for key in _MANAGER_PART:
+            data[key] = [] if key == 'goals' else (None if key == 'overall_rating' else '')
+        data['manager_part_hidden'] = True
+    return data
 
 
 @api_view(['PATCH', 'POST'])
@@ -6353,7 +6509,7 @@ def update_perf_review(request, review_id):
     submitted; manager-review fields by the reviewer or HR-admin."""
     from hr_agent.models import PerformanceReview
     company = request.user.company
-    r = (PerformanceReview.objects.select_related('cycle', 'employee', 'reviewer')
+    r = (PerformanceReview.objects.select_related('cycle', 'employee', 'employee__manager', 'reviewer')
          .filter(pk=review_id, cycle__company=company).first())
     if not r:
         return Response({'status': 'error', 'message': 'Review not found'},
@@ -6362,7 +6518,12 @@ def update_perf_review(request, review_id):
     caller_user_id = _caller_login_user_id(request.user)
     is_admin = _is_hr_admin(request.user)
     is_reviewee = caller_user_id and str(caller_user_id) == str(r.employee.user_id)
-    is_reviewer = caller_user_id and r.reviewer_id and str(caller_user_id) == str(r.reviewer.user_id)
+    # The manager's part is the employee's manager's now, not whoever it was when the cycle started (decision D7):
+    # a manager given or changed after that got 403, and a review with nobody set could be written by no manager
+    # (HR 13). A former manager loses it. With no manager now, the one recorded keeps it.
+    writer = r.employee.manager if r.employee.manager_id else r.reviewer
+    is_reviewer = bool(caller_user_id and writer is not None and writer.user_id
+                       and str(caller_user_id) == str(writer.user_id))
     if not (is_admin or is_reviewee or is_reviewer):
         return Response({'status': 'error', 'message': 'Not authorized to edit this review'},
                         status=status.HTTP_403_FORBIDDEN)
@@ -6456,12 +6617,16 @@ def update_perf_review(request, review_id):
         if 'status' not in fields:
             fields.append('status')
 
+    if fields and is_reviewer and not is_admin and writer is not None and r.reviewer_id != writer.id             and any(f in fields for f in ('manager_summary', 'strengths', 'growth_areas', 'goals', 'overall_rating',
+                                          'manager_submitted_at')):
+        r.reviewer = writer                 # the manager who wrote it is the reviewer shown
+        fields.append('reviewer')
     if fields:
         fields.append('updated_at')
         r.save(update_fields=fields)
         _write_audit_log(request.user, company, 'review.update', 'review', r.id,
                          before=before_review, after=_serialize_perf_review(r))
-    return Response({'status': 'success', 'data': _serialize_perf_review(r)})
+    return Response({'status': 'success', 'data': _review_as_seen(r, is_reviewee and not (is_admin or is_reviewer))})
 
 
 # ============================================================================
@@ -6711,6 +6876,11 @@ def adjust_leave_balance(request, employee_id):
     return Response({'status': 'success', 'data': _serialize_leave_balance(row)})
 
 
+
+def _goal_value(value):
+    """A goal's target or current value as the text it is kept as (up to 80 characters): "100", "PKR 1.2M"."""
+    return '' if value is None else str(value).strip()[:80]
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -6779,8 +6949,9 @@ def create_employee_goal(request, employee_id):
         success_criteria=(d.get('success_criteria') or '')[:5000],
         status=d.get('status') or 'open',
         weight_pct=new_weight,
-        target_value=(d.get('target_value') or '')[:80],
-        current_value=(d.get('current_value') or '')[:80],
+        # A number ("target_value": 100) crashed with "'int' object is not subscriptable" (the test report's HR 3).
+        target_value=_goal_value(d.get('target_value')),
+        current_value=_goal_value(d.get('current_value')),
         progress_pct=max(0, min(100, int(d.get('progress_pct') or 0))),
         due_date=due_date,
         assigned_by=caller_emp,
@@ -6853,9 +7024,9 @@ def update_employee_goal(request, goal_id):
             except (TypeError, ValueError):
                 pass
         elif k == 'target_value':
-            g.target_value = (d[k] or '')[:80]; fields.append('target_value')
+            g.target_value = _goal_value(d[k]); fields.append('target_value')
         elif k == 'current_value':
-            g.current_value = (d[k] or '')[:80]; fields.append('current_value')
+            g.current_value = _goal_value(d[k]); fields.append('current_value')
         elif k == 'due_date':
             if d[k] in (None, ''):
                 g.due_date = None; fields.append('due_date')
@@ -6927,7 +7098,12 @@ def manager_team_summary(request):
         manager = (Employee.objects.filter(company=company, company_user=request.user).first()
                    or Employee.objects.filter(company=company, work_email__iexact=request.user.email).first())
     if not manager:
-        return Response({'status': 'error', 'message': 'No employee record found for the caller'},
+        # An owner or admin who runs the company usually has no HR record; the screen showed "Failed to load team"
+        # in red (the test report's Final 2). The same words as My HR.
+        return Response({'status': 'error', 'code': 'no_hr_record',
+                         'message': ("This login has no HR record of its own, so nobody reports to it here. People "
+                                     "get an HR record when they are added under Dashboard › Users (or link this "
+                                     "login to one from an employee's page, under Logins).")},
                         status=status.HTTP_404_NOT_FOUND)
 
     reports = Employee.objects.filter(company=company, manager=manager)

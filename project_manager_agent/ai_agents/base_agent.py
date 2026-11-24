@@ -15,6 +15,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _raise_busy(exc):
+    """A provider still busy after its retries comes out as ProviderBusy, whose words are fit to show: the views that
+    put str(e) in their answer showed "Error code: 429 - Rate limit reached for gpt-4o-mini in organization org_…"
+    (24 Nov 2026, Retest B). Still an ordinary exception, so whole_document falls back to the passages as before."""
+    from core.api_key_service import ProviderBusy, is_busy_error
+    if is_busy_error(exc) and not isinstance(exc, ProviderBusy):
+        raise ProviderBusy() from exc
+
+
 # Rough prices in USD per 1M tokens (input, output). Update as providers change pricing.
 # Used only for approximate cost tracking. Unknown models fall back to _DEFAULT_PRICE_PER_MTOK.
 _PRICE_PER_MTOK = {
@@ -343,10 +352,12 @@ class BaseAgent:
                         success=False,
                     )
                     raise_if_auth_error(fallback_err, key_ctx)
+                    _raise_busy(fallback_err)
                     raise
             logger.error(f"Error in {self.agent_name} LLM call: {str(e)}")
             from core.api_key_service import raise_if_auth_error
             raise_if_auth_error(e, key_ctx)
+            _raise_busy(e)
             raise
     
     def _call_llm_stream(self, prompt, system_prompt=None, temperature=0.3,
@@ -459,7 +470,12 @@ class BaseAgent:
             )
             logger.error(f"{self.agent_name} streaming LLM error: {exc}")
             raise_if_auth_error(exc, key_ctx)
-            yield {'type': 'error', 'message': str(exc)}
+            # The provider's own words stay in the log (Retest B, 24 Nov 2026); the chats show the event's message.
+            from core.api_key_service import BUSY_MESSAGE, is_busy_error
+            if is_busy_error(exc):
+                yield {'type': 'error', 'message': BUSY_MESSAGE, 'code': 'ai_busy'}
+            else:
+                yield {'type': 'error', 'message': "The AI couldn't write the answer. Please try again."}
         finally:
             close = getattr(stream, 'close', None)
             if close:

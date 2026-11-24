@@ -1347,7 +1347,17 @@ class Command(BaseCommand):
         `brackets_too`: for a header the parser gives up on, such as a display
         name with an @ in it and no quotes (billing@bank.com <someone@else.com>),
         take what stands between the angle brackets. Only ever used on the
-        header as it arrived, never on decoded text."""
+        header as it arrived, never on decoded text.
+
+        With brackets, the address in them is taken first (quoted names left out): on a Python older than the
+        CVE-2023-27043 fix (3.11.10 / 3.12.6) the parser returned the display name billing@bank.com as the sender
+        (the test report's Marketing 5, 24 Nov 2026)."""
+        if brackets_too:
+            outside_quotes = re.sub(r'"(?:[^"\\]|\\.)*"', '', header_text)
+            for address in re.findall(r'<([^<>]*)>', outside_quotes):
+                found = cls._well_formed(address)
+                if found:
+                    return found
         for _name, address in getaddresses([header_text]):
             found = cls._well_formed(address)
             if found:

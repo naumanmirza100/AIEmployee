@@ -75,7 +75,8 @@ class WithdrawingALeaveUnderWay(HRTestCase):
 
     def setUp(self):
         super().setUp()
-        today = date.today()
+        from meeting_agent.clock import today as company_today
+        self.today = today = company_today(self.company)        # the date the view goes by
         self.start, self.end = today - timedelta(days=6), today + timedelta(days=7)
         self.days = float(working_days_between(self.start, self.end, self.company))
         self.taken = float(working_days_between(self.start, today - timedelta(days=1), self.company))
@@ -92,7 +93,7 @@ class WithdrawingALeaveUnderWay(HRTestCase):
         self.assertEqual(code, 200, body)
         self.assertTrue(body['data']['ended_early'])
         self.lr.refresh_from_db()
-        self.assertEqual((self.lr.status, self.lr.end_date), ('approved', date.today() - timedelta(days=1)))
+        self.assertEqual((self.lr.status, self.lr.end_date), ('approved', self.today - timedelta(days=1)))
         self.assertEqual(float(self.lr.days_requested), self.taken)
         self.assertEqual(body['data']['days_restored'], self.days - self.taken)
         self.assertEqual(self.used(), self.taken)

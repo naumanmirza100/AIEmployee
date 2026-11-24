@@ -57,6 +57,25 @@ def resolve_public(host: str, port: int) -> str:
     return addresses[0]
 
 
+def private_address(host: str, port=None) -> str:
+    """Why `host` may not be added: it is itself an address that is not public (127.0.0.1, 10.0.0.5, this server's
+    own) or localhost; '' otherwise. No name is looked up here: a name that leads inside is refused when the
+    connection is tried (resolve_public), as before, and saved as failed.
+
+    A source at 127.0.0.1 or 10.0.0.5 was saved, with status "failed" (the test report's Data Analyst 4b): it is refused
+    with 400 now (decision D9). Nothing ever connected to it."""
+    text = str(host or '').strip().strip('[]').lower()
+    refused = (f'"{str(host).strip()}" is not a public address. The database must be reachable on the internet, '
+               'with access allowed for our server only.')
+    if text == 'localhost' or text.endswith('.localhost'):
+        return refused
+    try:
+        ip = ipaddress.ip_address(text.split('%')[0])
+    except ValueError:
+        return ''
+    return refused if (not ip.is_global or ip.is_multicast or text in _own_addresses()) else ''
+
+
 # ---- 2. SQL ---------------------------------------------------------------------------------------------------------
 
 DIALECTS = {'postgres': 'postgres', 'mysql': 'mysql', 'sqlite': 'sqlite', 'mssql': 'tsql'}

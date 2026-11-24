@@ -17,7 +17,10 @@ export const InboxItem = ({ reply, active, onClick }) => {
   // The AI's triage, once it has read the mail: its sentence replaces the raw preview, and "Not Analyzed" (which
   // only a draft used to change) gives way to the kind of email.
   const priority = !isOutgoing && reply.priority ? PRIORITY_STYLES[reply.priority] : null;
-  const showInterest = !isOutgoing && (reply.interest_level !== 'not_analyzed' || !reply.category);
+  // A lead's interest ("Not Interested") only on a sales or customer email: on an angry support complaint it read as
+  // a customer who could be ignored (the test report's Reply Draft 4, 24 Nov 2026).
+  const leadLike = !reply.category || ['sales', 'customer'].includes(reply.category);
+  const showInterest = !isOutgoing && leadLike && (reply.interest_level !== 'not_analyzed' || !reply.category);
   return (
     <button
       onClick={onClick}

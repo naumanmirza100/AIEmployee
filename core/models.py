@@ -14,8 +14,18 @@ from django.dispatch import receiver
 # forward reference to Agent is safe.
 # ---------------------------------------------------------------------------
 
-class _LazyAgentChoices:
+try:                                    # Django 5.0+: a choices value of this kind is left lazy, not turned into a list
+    from django.utils.choices import BaseChoiceIterator as _ChoicesBase
+except ImportError:                     # Django 4.2, the pinned version: a plain iterable is kept as it is
+    _ChoicesBase = object
+
+
+class _LazyAgentChoices(_ChoicesBase):
     """A lazily-resolved, list-like `choices` value backed by the Agent table.
+
+    Ready for Django 5 (24 Nov 2026, the test report): Django 5 turns a field's `choices` into a plain list when the
+    model loads, unless it is a BaseChoiceIterator, so this one was read once, while the Agent table was empty, and
+    stayed [].
 
     Django 5.0 accepts a callable for `choices`; this project is on 4.2, which
     requires an *iterable*. So instead of a plain list (frozen at import — the
@@ -400,6 +410,9 @@ class CalendarBlock(models.Model):
         ('leave', 'Approved leave'),
         ('sdr', 'Sales call'),
         ('exec', 'Executive meeting'),
+        # Busy time from the person's own Google or Outlook calendar (core/personal_calendars.py): its times only,
+        # private, titled "Busy". source_id is a hash of the event's id there.
+        ('personal', 'Own calendar'),
     ]
     ROLE_CHOICES = [
         ('organizer', 'Organizer'),
@@ -2941,3 +2954,44 @@ class AgentPlan(models.Model):
 # so a new agent brings its own provider with it instead of needing this map
 # edited in lockstep.
 AGENT_DEFAULT_PROVIDER = _AgentDefaultProvider()
+
+
+class PersonalCalendar(models.Model):
+    """A person's own Google or Outlook calendar, connected by them (24 Nov 2026, core/personal_calendars.py).
+
+    The agents checked only the meetings they booked, so a person's real diary (a dentist at 11, a client call made
+    outside the product) never counted, and nothing the agents booked reached that diary either. Connected, its busy
+    times (times only) count in every agent's clash check, and the meetings the agents book for the person are put
+    in it. One per employee login: the identity the shared calendar uses."""
+    PROVIDER_CHOICES = [('google', 'Google Calendar'), ('microsoft', 'Outlook / Microsoft 365')]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='personal_calendar')
+    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='personal_calendars')
+    provider = models.CharField(max_length=12, choices=PROVIDER_CHOICES)
+    account_email = models.CharField(max_length=254, blank=True, default='')
+    refresh_token = models.TextField(help_text='Encrypted (core.crypto_utils), as the CRM passwords are.')
+    read_busy = models.BooleanField(default=True, help_text='Its busy times count in clash checks.')
+    push_events = models.BooleanField(default=True, help_text="Meetings the agents book go into it.")
+    connected_at = models.DateTimeField(auto_now_add=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True, default='')
+    #: Set while a sync runs, so the 15-minute job and "Sync now" never write the same events twice.
+    sync_started_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = 'core'
+
+
+class PersonalCalendarEvent(models.Model):
+    """An event the platform put in a personal calendar, for a booking (a CalendarBlock's source and source_id): so
+    it is moved or removed with the booking, and not read back as busy time."""
+    calendar = models.ForeignKey(PersonalCalendar, on_delete=models.CASCADE, related_name='events')
+    block_source = models.CharField(max_length=20)
+    block_source_id = models.PositiveBigIntegerField()
+    external_id = models.CharField(max_length=255)
+    state = models.CharField(max_length=300, blank=True, default='', help_text='start|end|title as last written.')
+
+    class Meta:
+        app_label = 'core'
+        constraints = [models.UniqueConstraint(fields=['calendar', 'block_source', 'block_source_id'],
+                                               name='personal_event_unique')]

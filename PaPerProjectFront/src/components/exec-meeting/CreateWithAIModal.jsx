@@ -111,7 +111,9 @@ export const CreateWithAIModal = ({ open, onClose, mode = 'meeting', onParsed, i
   // hand-picked members + mention state each time it opens.
   useEffect(() => {
     if (open) {
-      setPrompt(initialPrompt || (isTask ? DEFAULT_TASK_PROMPT : DEFAULT_MEETING_PROMPT));
+      // Empty, with the example as the grey hint: typed after the pre-filled example, a request kept its
+      // "Q3 Strategy Review" and made that meeting (the test report's Executive 7, 24 Nov 2026).
+      setPrompt(initialPrompt || '');
       setMembers([]);
       setMention(null); setShowAllMembers(false);
     }
@@ -213,9 +215,7 @@ export const CreateWithAIModal = ({ open, onClose, mode = 'meeting', onParsed, i
                   value={prompt}
                   onChange={onPromptChange}
                   rows={5}
-                  placeholder={isTask
-                    ? 'e.g. High-priority task "Review Q3 report" due Friday, assign @noor'
-                    : 'e.g. 30-min "Launch sync" next Monday 11am with @noor and @ali'}
+                  placeholder={isTask ? `e.g. ${DEFAULT_TASK_PROMPT}` : `e.g. ${DEFAULT_MEETING_PROMPT}`}
                   className="bg-white/5 border-white/10 text-white text-sm leading-relaxed"
                   disabled={loading}
                 />

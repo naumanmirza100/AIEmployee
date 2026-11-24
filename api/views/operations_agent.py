@@ -25,7 +25,7 @@ from operations_agent.models import (
     OperationsNotification,
 )
 
-from core.api_key_service import KeyServiceError
+from core.api_key_service import BUSY_MESSAGE, KeyServiceError, is_busy_error, raise_if_busy
 from operations_agent.agents.document_processing_agent import _invalidate_operations_indexes
 
 logger = logging.getLogger(__name__)
@@ -471,6 +471,8 @@ def extract_document_figures(request, document_id):
     except KeyServiceError:
         raise
     except Exception as e:
+        # A busy AI is 503 "busy, try again", not a 500 that looks like a crash (the test report's Operations 3).
+        raise_if_busy(e)
         logger.error(f'Extract figures error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': 'Could not read the figures. Try again.'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1867,7 +1869,7 @@ def stream_generate_document(request):
                         doc.reference_documents.set(used_refs)
             except Exception as db_err:
                 logger.error(f'stream_generate_document DB save error: {db_err}', exc_info=True)
-                yield _emit('error', {'message': f'Could not save document: {db_err}'})
+                yield _emit('error', {'message': 'The document was written but could not be saved. Please try again.'})
                 return
 
             yield _emit('done', {'document': _serialize_generated(doc, include_content=True)})
@@ -1881,7 +1883,10 @@ def stream_generate_document(request):
             yield _emit('error', {'message': e.user_message, 'error_code': e.reason})
         except Exception as e:
             logger.error(f'stream_generate_document error: {e}', exc_info=True)
-            yield _emit('error', {'message': str(e)})
+            # Never the exception's own text: on a busy provider it named our provider, model and organisation.
+            busy = is_busy_error(e)
+            yield _emit('error', {'message': BUSY_MESSAGE if busy else "The document couldn't be written. Please try again.",
+                                  'error_code': 'ai_busy' if busy else 'failed'})
 
     response = StreamingHttpResponse(event_stream(), content_type='application/x-ndjson')
     response['Cache-Control'] = 'no-cache'

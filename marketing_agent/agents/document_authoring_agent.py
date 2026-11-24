@@ -198,6 +198,10 @@ rather than inventing one or leaving a [placeholder]. Answer in markdown with no
 
         # Generate document content
         content = self._generate_document_content(document_type, document_data, campaign, context)
+        # An empty reply was saved and reported "created successfully"; its PDF was a blank page (the test report's
+        # Marketing 2, 24 Nov 2026). Nothing is saved then.
+        if not (content or '').strip():
+            return {'success': False, 'error': 'The AI returned nothing for this document. Please try again in a moment.'}
         
         # If action is 'generate', just return preview
         if action == 'generate':

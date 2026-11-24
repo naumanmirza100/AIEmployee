@@ -980,7 +980,9 @@ class CRMSyncAgent:
             object_type=object_type,
             source_type=source_type,
             source_id=source_id,
-            status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED],
+            # One waiting for the key too: a customer who wrote in while HubSpot refused the key was queued twice
+            # (the test report's CRM 3b, 24 Nov 2026). It stays waiting, with the newer details.
+            status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED, CRMSyncQueue.STATUS_WAITING],
         ).first()
 
         if existing:

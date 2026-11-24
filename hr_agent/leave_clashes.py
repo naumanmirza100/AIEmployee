@@ -55,7 +55,7 @@ def booked_during(leave_request, *, reveal_private=False) -> list:
     starts, ends = SOURCES['leave'].window(leave_request)
     clashes = find_conflicts([leave_request.employee.user_id], starts, ends,
                              viewer_source='hr', reveal_private=reveal_private)
-    return [c for c in clashes if c.source != 'leave']
+    return [c for c in clashes if c.source not in ('leave', 'personal')]     # an own calendar's busy time isn't ours
 
 
 def rows(clashes, tz_name='UTC') -> list[dict]:
