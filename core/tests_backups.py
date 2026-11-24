@@ -123,3 +123,88 @@ class EndpointTests(BackupBase):
         self.assertFalse(path.exists() or SystemBackup.objects.filter(pk=backup.pk).exists())
         running = SystemBackup.objects.create(created_by=self.admin, file_name='backup-run.zip')
         self.assertEqual(self.call(views.backup_delete, 'delete', backup_id=running.id).status_code, 409)
+
+
+class RestoreTests(BackupBase):
+    """manage.py restore_backup. Plain loaddata of the live backup (24 Nov 2026) stopped on the first Reply: its save
+    hook moves the lead on before the leads were loaded."""
+
+    def backup_with_hooks_in_it(self):
+        from core.models import UserProfile
+        from marketing_agent.models import Campaign, CampaignContact, Lead, Reply
+        UserProfile.objects.filter(user=self.admin).update(phone_number='+92 300 0000000')
+        campaign = Campaign.objects.create(owner=self.admin, name='Spring', status='active')
+        lead = Lead.objects.create(owner=self.admin, email='sara@clinic.example')
+        contact = CampaignContact.objects.create(campaign=campaign, lead=lead)
+        Reply.objects.create(contact=contact, campaign=campaign, lead=lead, interest_level='positive')
+        Lead.objects.filter(pk=lead.pk).update(status='contacted')     # set by a person after the reply
+        self.write('cvs/ali.pdf', b'%PDF-ali')
+        backup = self.made_backup()
+        self.assertEqual(backup.status, 'done', backup.error)
+        return backups.backup_path(backup), lead.pk
+
+    def new_server(self):
+        """The database of a server just set up, and no uploads yet."""
+        from django.core.management import call_command
+        call_command('flush', interactive=False, verbosity=0)
+        shutil.rmtree(self.media, ignore_errors=True)
+
+    def test_a_backup_comes_back_as_it_was_and_the_save_hooks_do_not_run(self):
+        from core.models import UserProfile
+        from marketing_agent.models import Lead, Reply
+        zip_path, lead_id = self.backup_with_hooks_in_it()
+        self.new_server()
+
+        result = backups.restore(zip_path)
+
+        self.assertEqual(result['files'], 1)
+        self.assertEqual((self.media / 'cvs' / 'ali.pdf').read_bytes(), b'%PDF-ali')
+        boss = User.objects.get(username='boss')
+        self.assertTrue(boss.check_password('x'))
+        self.assertEqual(list(UserProfile.objects.filter(user=boss).values_list('phone_number', flat=True)),
+                         ['+92 300 0000000'])                            # one profile, the backup's, not a new one
+        self.assertEqual(Company.objects.get().name, 'Acme Dental')
+        self.assertEqual(Reply.objects.count(), 1)
+        self.assertEqual(Lead.objects.get(pk=lead_id).status, 'contacted')   # the reply's hook did not move it on
+        from django.db.models import signals
+        self.assertNotIn('send', vars(signals.post_save))                  # the hooks are on again afterwards
+
+    def test_plain_loaddata_is_what_fails(self):
+        """Why the command exists: the same backup through plain loaddata does not load."""
+        from django.core.management import call_command
+        zip_path, _ = self.backup_with_hooks_in_it()
+        self.new_server()
+        fixture = self.tmp / 'database.json'
+        with zipfile.ZipFile(zip_path) as zf:
+            fixture.write_bytes(zf.read('database.json'))
+        with self.assertRaises(Exception):
+            call_command('loaddata', str(fixture), verbosity=0)
+
+    def test_a_database_in_use_is_refused_and_left_alone(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        zip_path, _ = self.backup_with_hooks_in_it()
+        CompanyUser.objects.create(company=self.company, email='ann@acme.test', full_name='Ann', role='admin',
+                                   password_hash='x', is_active=True)
+        with self.assertRaisesMessage(CommandError, 'already has logins or companies'):
+            call_command('restore_backup', str(zip_path))
+        self.assertEqual((User.objects.count(), CompanyUser.objects.count()), (1, 1))
+
+    def test_a_zip_that_is_not_a_backup_or_no_file_is_refused(self):
+        self.new_server()
+        not_ours = self.tmp / 'photos.zip'
+        with zipfile.ZipFile(not_ours, 'w') as zf:
+            zf.writestr('photo.jpg', b'x')
+        with self.assertRaisesMessage(backups.RestoreError, 'not a backup'):
+            backups.restore(not_ours)
+        with self.assertRaisesMessage(backups.RestoreError, 'No file'):
+            backups.restore(self.tmp / 'missing.zip')
+
+    def test_an_upload_name_cannot_write_outside_the_media_folder(self):
+        zip_path, _ = self.backup_with_hooks_in_it()
+        self.new_server()
+        with zipfile.ZipFile(zip_path, 'a') as zf:
+            zf.writestr('media/../escaped.txt', b'x')
+        result = backups.restore(zip_path)
+        self.assertEqual(result['files'], 1)
+        self.assertFalse((self.tmp / 'escaped.txt').exists())
