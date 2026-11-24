@@ -24,6 +24,7 @@ import Interviews from './Interviews';
 import RecruitmentWorkflows from './RecruitmentWorkflows';
 import CVRecords from './CVRecords';
 import RecruiterSettings from './RecruiterSettings';
+import { RecruitmentRoleBanner } from './RecruitmentRoles';
 import RecruitmentAnalytics from './RecruitmentAnalytics';
 import AiInterviewQuestions from './AiInterviewQuestions';
 // import AIGraphGenerator from './AIGraphGenerator';
@@ -255,6 +256,9 @@ const RecruitmentDashboard = () => {
           </div>
         ))}
       </div>
+
+      {/* A hiring manager or interviewer is told what they see and can do here (Recruitment roles). */}
+      <RecruitmentRoleBanner />
 
       {/* Main Tabs — the tab BAR now lives in the left sidebar; this keeps the
           URL-driven content switching. */}

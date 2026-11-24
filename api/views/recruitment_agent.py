@@ -610,6 +610,74 @@ def list_cv_batches(request):
                     created_at__gte=dj_timezone.now() - _td(days=1))[:10])
     return Response({'status': 'success', 'data': [cv_batches.serialize(cv_batches.settle_stale(b)) for b in rows]})
 
+
+# ---- Roles (24 Nov 2026, models.RecruitmentRole) ----------------------------------------------------------------
+
+def _may_set_roles(company_user):
+    return (company_user.role or '').lower() in ('owner', 'admin')
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def recruitment_roles(request):
+    """GET: every login of the company with its Recruitment role, and the caller's own. POST {"company_user_id",
+    "role"}: set one (owners and admins; an owner's or admin's is always recruiter)."""
+    from core.models import CompanyUser
+    from recruitment_agent.models import RecruitmentRole
+    me = request.user
+    if request.method == 'POST':
+        if not _may_set_roles(me):
+            return Response({'status': 'error', 'message': 'Only an owner or admin sets Recruitment roles.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        wanted = str((request.data or {}).get('role') or '')
+        if wanted not in dict(RecruitmentRole.ROLE_CHOICES):
+            return Response({'status': 'error', 'message': 'Role must be recruiter, hiring_manager or interviewer.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        who = CompanyUser.objects.filter(company=me.company, pk=(request.data or {}).get('company_user_id')).first()
+        if who is None:
+            return Response({'status': 'error', 'message': 'Login not found'}, status=status.HTTP_404_NOT_FOUND)
+        if (who.role or '').lower() in ('owner', 'admin') and wanted != 'recruiter':
+            return Response({'status': 'error', 'message': 'An owner or admin is always a recruiter in Recruitment.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        RecruitmentRole.objects.update_or_create(company_user=who, defaults={'role': wanted, 'set_by': me})
+    roles = dict(RecruitmentRole.objects.filter(company_user__company=me.company).values_list('company_user_id', 'role'))
+    logins = CompanyUser.objects.filter(company=me.company, is_active=True).order_by('full_name', 'email')
+    return Response({'status': 'success', 'data': {
+        'my_role': sharing.role(me),
+        'may_set': _may_set_roles(me),
+        'logins': [{'id': cu.id, 'name': cu.full_name or cu.email, 'email': cu.email, 'company_role': cu.role,
+                    'role': 'recruiter' if (cu.role or '').lower() in ('owner', 'admin')
+                    else roles.get(cu.id, 'recruiter'),
+                    'fixed': (cu.role or '').lower() in ('owner', 'admin')} for cu in logins],
+    }})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def job_hiring_managers(request, job_description_id):
+    """Name a job's hiring managers: {"company_user_ids": [...]}, logins of the company. A recruiter does this."""
+    from core.models import CompanyUser
+    if sharing.role(request.user) != sharing.RECRUITER:
+        return Response({'status': 'error', 'message': "A recruiter names a job's hiring managers."},
+                        status=status.HTTP_403_FORBIDDEN)
+    job = sharing.jobs(request.user).filter(pk=job_description_id).first()
+    if job is None:
+        return Response({'status': 'error', 'message': 'Job not found'}, status=status.HTTP_404_NOT_FOUND)
+    ids = (request.data or {}).get('company_user_ids') or []
+    if not isinstance(ids, list):
+        return Response({'status': 'error', 'message': 'company_user_ids must be a list'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    people = list(CompanyUser.objects.filter(company=request.user.company, is_active=True, pk__in=ids))
+    if len(people) != len({str(i) for i in ids}):
+        return Response({'status': 'error', 'message': 'One of them is not a login of this company.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    job.hiring_managers.set(people)
+    return Response({'status': 'success', 'data': {
+        'id': job.id, 'hiring_managers': [{'id': m.id, 'name': m.full_name or m.email} for m in people]}})
+
+
 # Shorter prompt = fewer input tokens. Output is plain text with section labels, not JSON.
 # Skills appear in both DESCRIPTION (full text) and REQUIREMENTS (bullet list).
 GENERATE_JOB_SYSTEM_PROMPT = """Generate a job posting from the user's prompt. Reply with ONLY the following sections. Use the exact labels.
@@ -782,7 +850,7 @@ def list_job_descriptions(request):
             page, page_size = 1, 9
 
         offset = (page - 1) * page_size
-        qs = qs.order_by('-created_at')[offset: offset + page_size]
+        qs = qs.order_by('-created_at').prefetch_related('hiring_managers')[offset: offset + page_size]
 
         job_list = []
         for jd in qs:
@@ -801,10 +869,12 @@ def list_job_descriptions(request):
                 'created_at': jd.created_at.isoformat() if jd.created_at else None,
                 'updated_at': jd.updated_at.isoformat() if jd.updated_at else None,
                 'owner': sharing.owner_payload(jd, company_user),
+                'hiring_managers': [{'id': m.id, 'name': m.full_name or m.email} for m in jd.hiring_managers.all()],
             })
 
         return Response({
             'status': 'success',
+            'my_role': sharing.role(company_user),
             'data': job_list,
             'total': total,
             'page': page,

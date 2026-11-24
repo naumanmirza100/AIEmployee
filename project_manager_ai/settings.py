@@ -381,6 +381,8 @@ MIDDLEWARE = [
     # before the agent middlewares below, so an unsubscribed company's request is
     # rejected instead of triggering their background work.
     'api.middleware.module_access.ModuleAccessMiddleware',
+    # What a Recruitment role may change (recruiter / hiring manager / interviewer, 24 Nov 2026).
+    'api.middleware.recruitment_roles.RecruitmentRoleMiddleware',
     # Reports a logged-in screen calling an API address that doesn't exist here
     # (a frontend newer than this backend). Only looks at 404 responses.
     'api.middleware.unknown_endpoint.UnknownEndpointMiddleware',

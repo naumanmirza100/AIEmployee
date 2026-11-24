@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle, Wand2, Settings, X, ArrowRight, ArrowDown, Copy, Check, Eye, MapPin, Building2, Clock, ExternalLink, Users, FileText, BrainCircuit, Download, ChevronDown, ChevronUp, Search, ChevronLeft, ChevronRight, Maximize2, Minimize2 } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
+import { getRecruitmentRoles, setJobHiringManagers } from '@/services/recruitmentAgentService';
 import {
   getJobDescriptions,
   createJobDescription,
@@ -34,10 +35,61 @@ const toLocaleDateStr = (date) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+/** A job's hiring managers: names, and for a recruiter a small picker (Recruitment roles, 24 Nov 2026). */
+const HiringManagers = ({ job, logins, canEdit, onSaved }) => {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState(() => new Set((job.hiring_managers || []).map((m) => m.id)));
+  const [saving, setSaving] = useState(false);
+  const names = (job.hiring_managers || []).map((m) => m.name);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const data = await setJobHiringManagers(job.id, [...picked]);
+      onSaved?.(data.hiring_managers || []);
+      setOpen(false);
+      toast({ title: 'Hiring managers saved' });
+    } catch (e) {
+      toast({ title: 'Not saved', description: e.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+  if (!names.length && !canEdit) return null;
+  return (
+    <div className="mt-0.5 text-xs text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+      Hiring managers: {names.length ? names.join(', ') : 'none'}
+      {canEdit && (
+        <button type="button" className="ml-2 text-violet-300 hover:text-violet-200" onClick={() => setOpen((o) => !o)}>
+          {open ? 'Close' : 'Change'}
+        </button>
+      )}
+      {open && (
+        <div className="mt-1 max-h-40 space-y-1 overflow-y-auto rounded-md border border-white/10 p-2">
+          {logins.filter((l) => !l.fixed).map((l) => (
+            <label key={l.id} className="flex items-center gap-2">
+              <input type="checkbox" checked={picked.has(l.id)}
+                onChange={() => setPicked((s) => { const n = new Set(s); if (n.has(l.id)) n.delete(l.id); else n.add(l.id); return n; })} />
+              {l.name}{l.role !== 'hiring_manager' ? ` (${l.role.replace('_', ' ')})` : ''}
+            </label>
+          ))}
+          <Button size="sm" className="mt-1 h-7 text-xs" disabled={saving} onClick={save}>Save</Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [jobs, setJobs] = useState([]);
+  // Recruitment roles: the logins a recruiter can name as a job's hiring managers, and the viewer's own role.
+  const [logins, setLogins] = useState([]);
+  const [myRole, setMyRole] = useState('recruiter');
+  useEffect(() => {
+    getRecruitmentRoles().then((d) => { setLogins(d.logins || []); setMyRole(d.my_role || 'recruiter'); }).catch(() => {});
+  }, []);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   // Full-screen toggle for the manual create modal.
@@ -690,6 +742,9 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                           {!job.owner.active && ' (no longer here)'}
                         </p>
                       )}
+                      {/* Hiring managers see this job and decide on its candidates (Recruitment roles). */}
+                      <HiringManagers job={job} logins={logins} canEdit={myRole === 'recruiter'}
+                        onSaved={(managers) => setJobs((all) => all.map((j) => (j.id === job.id ? { ...j, hiring_managers: managers } : j)))} />
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap justify-end">

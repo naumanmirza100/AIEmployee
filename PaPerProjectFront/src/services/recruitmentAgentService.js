@@ -87,6 +87,25 @@ export const processCVs = async (files, jobDescriptionId = null, jobDescriptionT
   }
 };
 
+/** Every login's Recruitment role, and the caller's own (`my_role`, `may_set`). */
+export const getRecruitmentRoles = async () => {
+  const response = await companyApi.get('/recruitment/roles');
+  return response?.data || {};
+};
+
+/** Set a login's Recruitment role (owners and admins). Returns the list again. */
+export const setRecruitmentRole = async (companyUserId, role) => {
+  const response = await companyApi.post('/recruitment/roles', { company_user_id: companyUserId, role });
+  return response?.data || {};
+};
+
+/** Name a job's hiring managers (a recruiter). */
+export const setJobHiringManagers = async (jobId, companyUserIds) => {
+  const response = await companyApi.post(`/recruitment/job-descriptions/${jobId}/hiring-managers`,
+    { company_user_ids: companyUserIds });
+  return response?.data || {};
+};
+
 /** One Process CVs upload as it is read and scored in the background: each file's step, then `result`. */
 export const getCVBatch = async (batchId) => {
   const token = getCompanyToken();
@@ -829,6 +848,9 @@ export default {
   processCVs,
   getCVBatch,
   listCVBatches,
+  getRecruitmentRoles,
+  setRecruitmentRole,
+  setJobHiringManagers,
   getJobDescriptions,
   generateJobDescription,
   createJobDescription,

@@ -230,6 +230,9 @@ class JobDescription(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_job_descriptions')
     company = models.ForeignKey('core.Company', on_delete=models.SET_NULL, null=True, blank=True, related_name='job_positions')
     company_user = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_jobs', help_text='Company user who created this job')
+    # Hiring managers (24 Nov 2026, Recruitment roles): logins with the hiring-manager role see this job, its candidates
+    # and interviews, and decide on them, besides the login that posted it (recruitment_agent/sharing.py).
+    hiring_managers = models.ManyToManyField('core.CompanyUser', blank=True, related_name='recruitment_jobs_managed')
     is_active = models.BooleanField(default=True, help_text="Whether this job description is currently active/being used")
     application_open_date = models.DateField(null=True, blank=True, help_text="Date from which applications are accepted")
     application_close_date = models.DateField(null=True, blank=True, help_text="Deadline date after which applications are no longer accepted")
@@ -832,3 +835,24 @@ class CVBatch(models.Model):
     class Meta:
         db_table = 'ppp_recruitment_cv_batches'
         ordering = ['-created_at']
+
+
+class RecruitmentRole(models.Model):
+    """What a dashboard login may do in Recruitment (24 Nov 2026; the coordination plan's CO-13 suggestion).
+
+    Recruitment is the company's since CO-13, and everyone saw and changed everything in it. Now:
+      * recruiter: everything, as before. The role of every login without a row here, and always of owners and admins.
+      * hiring_manager: the jobs they posted or are named on (JobDescription.hiring_managers), with those jobs'
+        candidates and interviews; they decide on them. Company-wide automation (workflows) is not theirs.
+      * interviewer: the interviews they sit in or run, and those candidates; they give feedback, nothing else.
+    """
+    ROLE_CHOICES = [('recruiter', 'Recruiter'), ('hiring_manager', 'Hiring manager'), ('interviewer', 'Interviewer')]
+
+    company_user = models.OneToOneField('core.CompanyUser', on_delete=models.CASCADE, related_name='recruitment_role')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='recruiter')
+    set_by = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='recruitment_roles_set')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ppp_recruitment_roles'
