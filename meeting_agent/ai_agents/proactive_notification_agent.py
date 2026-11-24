@@ -188,10 +188,16 @@ Be direct and actionable. No fluff."""
                 'meeting': a.meeting.title if a.meeting else '',
                 'due_date': str(a.due_date) if a.due_date else None,
                 'priority': a.priority,
+                'overdue': bool(a.due_date and a.due_date < today),
             }
             for a in pending_action_qs
         ]
         pending_actions_count = len(pending_action_qs)
+        # Overdue action items are counted too: the digest listed one "overdue since Nov 18" while its figures said
+        # nothing was overdue (the test report's Executive 6, 24 Nov 2026).
+        overdue_actions = MeetingActionItem.objects.filter(
+            meeting__organizer_id=company_user_id, status__in=['open', 'in_progress'], due_date__lt=today,
+        ).count()
 
         # Also get executive tasks due today or overdue
         due_tasks_list = list(ExecutiveTask.objects.filter(
@@ -209,6 +215,7 @@ Today's meetings: {len(todays_meetings)} scheduled (times are the company's own 
 {json.dumps(todays_meetings, indent=2, default=str)}
 
 Overdue tasks: {overdue_tasks}
+Overdue action items: {overdue_actions}
 Tasks due today: {due_today_count}
 Pending action items ({pending_actions_count}):
 {json.dumps(pending_actions_list, indent=2, default=str)}
@@ -231,6 +238,7 @@ Return ONLY the JSON."""
         result['stats'] = {
             'meetings_today': len(todays_meetings),
             'overdue_tasks': overdue_tasks,
+            'overdue_action_items': overdue_actions,
             'due_today': due_today_count,
             'pending_actions': pending_actions_count,
         }

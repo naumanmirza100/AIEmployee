@@ -287,7 +287,7 @@ export const MeetingsPanel = ({
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {statusBadge(m.status)}
-                      {m.meeting_link && (
+                      {m.meeting_link && m.status !== 'cancelled' && (
                         <a href={m.meeting_link} target="_blank" rel="noopener noreferrer" className="text-xs text-violet-400 hover:text-violet-300">Join</a>
                       )}
                       {m.my_response && m.my_response !== 'pending' && (
@@ -391,7 +391,7 @@ export const MeetingsPanel = ({
                     <p className="text-white/40 text-xs mt-0.5">
                       {fmtUtc(m.scheduled_at)}{m.duration_minutes ? ` · ${m.duration_minutes}min` : ''}
                     </p>
-                    {m.meeting_link && (
+                    {m.meeting_link && m.status !== 'cancelled' && (
                       <a href={m.meeting_link} target="_blank" rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 mt-1">
                         <span>🔗</span> Join Meeting
