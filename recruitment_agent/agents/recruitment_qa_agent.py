@@ -624,9 +624,9 @@ FORMATTING:
             return finish(self.groq_client.send_prompt_text(system_prompt=system, text=text))
         except KeyServiceError:
             raise                             # the view answers a key or quota problem itself
-        except GroqClientError:
+        except GroqClientError as e:
             logger.exception("Recruitment QA Groq error")
-            return self._api_error_response()
+            return self._api_error_response(e)
         except Exception:
             logger.exception("Recruitment QA failed")
             return self._failure_response()
@@ -654,9 +654,9 @@ FORMATTING:
                 return
         except KeyServiceError:
             raise
-        except GroqClientError:
+        except GroqClientError as e:
             logger.exception("Recruitment QA Groq error (stream)")
-            result = self._api_error_response()
+            result = self._api_error_response(e)
         except Exception:
             logger.exception("Recruitment QA failed (stream)")
             result = self._failure_response()
@@ -664,9 +664,18 @@ FORMATTING:
             yield {'type': 'token', 'value': result['answer']}
         yield {'type': 'done', 'result': result}
 
-    def _api_error_response(self) -> Dict[str, Any]:
+    def _api_error_response(self, error=None) -> Dict[str, Any]:
+        # It told everyone to check the API key, a busy AI included (24 Nov 2026, the test report's Retest B).
+        from core.api_key_service import is_busy_error
+        if error is not None and is_busy_error(error):
+            answer = "The AI is busy right now, so I couldn't answer. Please try again in a moment."
+        elif getattr(error, 'is_auth_error', False):
+            answer = ("I couldn't complete the analysis because the AI key was refused. Please check your API key "
+                      "configuration and try again.")
+        else:
+            answer = "I couldn't complete the analysis because the AI call failed. Please try again."
         return {
-            "answer": "I couldn't complete the analysis due to an API error. Please check your API key configuration and try again.",
+            "answer": answer,
             "insights": [],
             "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
         }

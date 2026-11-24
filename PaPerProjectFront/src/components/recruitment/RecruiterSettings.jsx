@@ -20,8 +20,9 @@ import {
   getJobDescriptions
 } from '@/services/recruitmentAgentService';
 import { companyAuthService } from '@/services';
+import RecruitmentRoles from './RecruitmentRoles';
 
-const SETTINGS_SUB_PATHS = ['email', 'interview', 'qualification'];
+const SETTINGS_SUB_PATHS = ['email', 'interview', 'qualification', 'roles'];
 
 const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
   const { toast } = useToast();
@@ -1474,6 +1475,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
               </Button>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent id="REC-settings-roles-panel" data-testid="REC-settings-roles-panel" value="roles">
+          <RecruitmentRoles />
         </TabsContent>
       </Tabs>
     </div>

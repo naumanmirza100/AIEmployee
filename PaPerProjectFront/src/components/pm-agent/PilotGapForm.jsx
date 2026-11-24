@@ -76,6 +76,13 @@ function legacyRows(data) {
   }));
 }
 
+const ExtraTag = () => (
+  <span className="ml-1.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
+    title="Not one of the tasks you listed: the Pilot suggests it. Tick it to make it too.">
+    not in your list
+  </span>
+);
+
 const SuggestedTag = () => (
   <span className="ml-1.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
     suggested
@@ -91,8 +98,12 @@ const PilotGapForm = ({
   const [reason, setReason] = useState('');
   const rows = data?.rows?.length ? data.rows : legacyRows(data);
   const changes = data?.changes || [];
-  // Unticked tasks and changes; a change that can't be made starts unticked.
-  const [skipped, setSkipped] = useState(() => new Set(changes.filter((c) => c.problem).map((c) => c.index)));
+  // Unticked tasks and changes; a change that can't be made starts unticked, and so does a task the Pilot added
+  // to the ones you listed (decision D10).
+  const [skipped, setSkipped] = useState(() => new Set([
+    ...changes.filter((c) => c.problem).map((c) => c.index),
+    ...rows.filter((r) => r.extra).map((r) => r.index),
+  ]));
   const toggleSkip = (index) => setSkipped((prev) => {
     const next = new Set(prev);
     if (next.has(index)) next.delete(index); else next.add(index);
@@ -287,6 +298,7 @@ const PilotGapForm = ({
                   aria-label={`Include ${row.title}`}
                 />
                 {row.title}
+                {row.extra && <ExtraTag />}
               </label>
               <div className={`grid gap-2 ${compact ? '' : 'sm:grid-cols-2'}`}>
                 <label className="space-y-1">

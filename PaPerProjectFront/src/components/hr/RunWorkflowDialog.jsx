@@ -88,6 +88,14 @@ export default function RunWorkflowDialog({ workflow, onOpenChange, onDone }) {
           <DialogDescription>Nothing is sent or changed until you press Run it.</DialogDescription>
         </DialogHeader>
 
+        {workflow?.requires_approval && (
+          // HR 12 (24 Nov 2026): it ran at once with no word of it, so HR thought it had skipped its sign-off.
+          <p className="rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            This workflow needs approval. Running it yourself counts as your approval, and the run records it.
+            When an event starts it, it waits for an HR admin to approve.
+          </p>
+        )}
+
         <div className="space-y-1.5">
           <Label htmlFor="HR-run-workflow-employee">Who is it for?</Label>
           <select id="HR-run-workflow-employee" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}
@@ -126,7 +134,7 @@ export default function RunWorkflowDialog({ workflow, onOpenChange, onDone }) {
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={running}>Cancel</Button>
           <Button onClick={run} disabled={running || previewing}>
             {running ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Play className="mr-1 h-4 w-4" />}
-            Run it
+            {workflow?.requires_approval ? 'Approve and run' : 'Run it'}
           </Button>
         </DialogFooter>
       </DialogContent>

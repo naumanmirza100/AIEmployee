@@ -100,8 +100,17 @@ def workflow_from_template(request):
     if template is None:
         return Response({'status': 'error', 'message': 'Choose one of the templates.'},
                         status=status.HTTP_400_BAD_REQUEST)
+    name = (request.data.get('name') or template['name'])[:200]
+    # The same copy twice (a double click, a second tab) ran twice: every "new applicant" alert came two times (the test
+    # report's Recruitment 2). Only an identical copy is refused; a renamed one may be added (decision D25).
+    for same in RecruitmentWorkflow.objects.filter(company=company_user.company, name__iexact=name,
+                                                   trigger_event=template['trigger_event']):
+        if same.steps == template['steps']:
+            return Response({'status': 'error', 'code': 'already_added',
+                             'message': f'"{same.name}" is already one of your workflows. Give the copy another name '
+                                        'to add it again.'}, status=status.HTTP_409_CONFLICT)
     wf = RecruitmentWorkflow.objects.create(
-        company=company_user.company, created_by=company_user, name=(request.data.get('name') or template['name'])[:200],
+        company=company_user.company, created_by=company_user, name=name,
         description=template['description'], trigger_event=template['trigger_event'], steps=template['steps'])
     return Response({'status': 'success', 'data': _payload(wf)}, status=status.HTTP_201_CREATED)
 

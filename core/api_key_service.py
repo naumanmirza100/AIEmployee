@@ -250,6 +250,10 @@ class AIServiceUnavailable(KeyServiceError):
                     "The AI service is unavailable right now: the platform's AI account has run out of credit. "
                     "The site's team has been told. Please try again a little later."
                 )
+        elif kind == 'busy':
+            # Still rate-limited after the call's own retries, or too slow to answer (raise_if_busy).
+            self.reason = 'ai_busy'
+            self.user_message = BUSY_MESSAGE
         else:
             self.user_message = "The AI service can't be reached right now. Please try again in a few minutes."
         super().__init__(self.user_message)
@@ -303,6 +307,63 @@ def raise_if_auth_error(exc: Exception, ctx=None) -> None:
         from core.error_alerts import ai_out_of_credit
         ai_out_of_credit(provider, exc)
     raise AIServiceUnavailable(kind, mode=mode, provider=provider) from exc
+
+
+# ---- A busy provider (24 Nov 2026, the test report's Retest B) ----------------------------------------------------
+#
+# On an ordinary rate limit the person was shown the provider's own words ("Error code: 429 - Rate limit reached for
+# gpt-4o-mini in organization org_… on tokens per min …"), in Operations' memo, Frontline's and HR's Summarize and HR's
+# meeting scheduler; Operations' figures answered 500; and two answers gave a wrong reason: HR's Q&A said the policy
+# wasn't in the documents, Recruitment's to check the API key.
+#
+# A rate limit stays an ordinary exception inside the AI call on purpose: core/whole_document.py catches it and answers
+# from the passages instead (a whole document can be too big for the minute's tokens). The shared calls raise it as
+# ProviderBusy, whose text is fit to show; where nothing else can be done, raise_if_busy makes it the 503 below.
+
+BUSY_MESSAGE = "The AI is busy right now. Please try again in a moment."
+
+
+class ProviderBusy(RuntimeError):
+    """The provider was still busy (rate-limited) after the call's own retries, or too slow to answer. The text is
+    the person's; the provider's words are in the log and in __cause__. status_code 429 keeps the callers that
+    look at it (recruitment_agent/core.py) working."""
+    status_code = 429
+
+    def __init__(self, message: str = BUSY_MESSAGE):
+        super().__init__(message)
+
+
+_BUSY_WORDS = ('rate limit', 'rate_limit', 'ratelimit', 'error code: 429', 'too many requests', 'overloaded',
+               'service is busy', 'took too long to respond', 'timed out', 'timeout')
+_NOT_BUSY_WORDS = ('request too large', 'context_length', 'maximum context length', 'too many tokens')
+
+
+def is_busy_error(exc: Exception) -> bool:
+    """True for a provider that is busy or too slow: a 429 that isn't out of credit, a 529 "overloaded", a timeout.
+    Not for a request that is too big (asking again won't help), a key or credit problem, or anything else."""
+    if isinstance(exc, ProviderBusy):
+        return True
+    if isinstance(exc, KeyServiceError) or _is_provider_auth_error(exc) or _provider_failure(exc) is not None:
+        return False
+    said = f"{type(exc).__name__} {getattr(exc, 'code', '') or ''} {exc}".lower()
+    if any(word in said for word in _NOT_BUSY_WORDS) or getattr(exc, 'is_request_too_large', False):
+        return False
+    status = getattr(exc, 'status_code', None) or getattr(getattr(exc, 'response', None), 'status_code', None)
+    return (status in (429, 529) or bool(getattr(exc, 'is_rate_limit', False))
+            or any(word in said for word in _BUSY_WORDS))
+
+
+def raise_if_busy(exc: Exception, ctx=None) -> None:
+    """raise_if_auth_error, and then a busy or slow provider → AIServiceUnavailable('busy'): a 503 with BUSY_MESSAGE,
+    the provider's words in the log only. For the place where the failure would otherwise reach the person as raw
+    text, a 500 or a wrong reason, after any fallback has had its turn. Does nothing for any other error."""
+    raise_if_auth_error(exc, ctx)
+    if is_busy_error(exc):
+        import logging
+        cause = exc.__cause__ if isinstance(exc, ProviderBusy) and exc.__cause__ else exc
+        logging.getLogger(__name__).warning("AI busy: %s: %s", type(cause).__name__, str(cause)[:500])
+        raise AIServiceUnavailable('busy', mode=getattr(ctx, 'mode', None),
+                                   provider=getattr(ctx, 'provider', None)) from exc
 
 
 @dataclass

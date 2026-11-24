@@ -14,8 +14,18 @@ from django.dispatch import receiver
 # forward reference to Agent is safe.
 # ---------------------------------------------------------------------------
 
-class _LazyAgentChoices:
+try:                                    # Django 5.0+: a choices value of this kind is left lazy, not turned into a list
+    from django.utils.choices import BaseChoiceIterator as _ChoicesBase
+except ImportError:                     # Django 4.2, the pinned version: a plain iterable is kept as it is
+    _ChoicesBase = object
+
+
+class _LazyAgentChoices(_ChoicesBase):
     """A lazily-resolved, list-like `choices` value backed by the Agent table.
+
+    Ready for Django 5 (24 Nov 2026, the test report): Django 5 turns a field's `choices` into a plain list when the
+    model loads, unless it is a BaseChoiceIterator, so this one was read once, while the Agent table was empty, and
+    stayed [].
 
     Django 5.0 accepts a callable for `choices`; this project is on 4.2, which
     requires an *iterable*. So instead of a plain list (frozen at import — the
@@ -400,6 +410,9 @@ class CalendarBlock(models.Model):
         ('leave', 'Approved leave'),
         ('sdr', 'Sales call'),
         ('exec', 'Executive meeting'),
+        # Busy time from the person's own Google or Outlook calendar (core/personal_calendars.py): its times only,
+        # private, titled "Busy". source_id is a hash of the event's id there.
+        ('personal', 'Own calendar'),
     ]
     ROLE_CHOICES = [
         ('organizer', 'Organizer'),

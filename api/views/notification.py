@@ -1,4 +1,5 @@
 from rest_framework import status
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -747,6 +748,43 @@ def _render_email_action_page(title: str, message: str, color: str = '#10b981'):
     return HttpResponse(html, content_type='text/html')
 
 
+def _render_email_confirm_page(title: str, message: str, button: str, color: str = '#10b981'):
+    """The page an invitation's Accept or Decline link opens: one button that answers (a POST to the same link).
+    A plain GET answered, so a mail scanner opening links to check them answered for the person (24 Nov 2026).
+    `title` and `message` go into the page as given: escape what came from people."""
+    from django.http import HttpResponse
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <style>
+    body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%);
+            color: #fff; padding: 24px; }}
+    .card {{ max-width: 460px; width:100%; background: rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.08);
+             border-radius: 16px; padding: 32px; text-align:center; }}
+    h1 {{ font-size: 20px; margin: 0 0 12px; }}
+    p {{ color: rgba(255,255,255,0.7); line-height: 1.5; margin: 0 0 24px; }}
+    button {{ background: {color}; color: #fff; border: 0; border-radius: 8px; padding: 12px 32px;
+              font-size: 15px; font-weight: 600; cursor: pointer; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{title}</h1>
+    <p>{message}</p>
+    <form method="post"><button type="submit">{button}</button></form>
+  </div>
+</body>
+</html>"""
+    return HttpResponse(html, content_type='text/html')
+
+
+@csrf_exempt
 def meeting_email_action(request, action, token):
     """Public endpoint hit from the accept/reject buttons in the invitation
     email. No auth required — the signed token IS the auth.
@@ -804,6 +842,14 @@ def meeting_email_action(request, action, token):
             f'You have already {verb} the meeting "{meeting.title}". No further action is needed.',
             color='#10b981' if action == 'accepted' else '#9ca3af',
         )
+
+    # Opening the link shows a button; only pressing it answers (a mail scanner opens links to check them).
+    if request.method != 'POST':
+        from html import escape
+        verb = 'Accept' if action == 'accepted' else 'Reject'
+        return _render_email_confirm_page(escape(f'{verb} "{meeting.title}"?'),
+                                          escape('The organizer will be told.'), verb,
+                                          color='#10b981' if action == 'accepted' else '#6b7280')
 
     people, when = _pm_people_made_busy(meeting, participant, action)
     try:

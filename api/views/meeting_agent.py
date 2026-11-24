@@ -12,6 +12,7 @@ from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
 from rest_framework.decorators import (
     api_view, authentication_classes, permission_classes, throttle_classes,
@@ -147,6 +148,21 @@ def _email_agenda_block(agenda) -> str:
     )
 
 
+def _plain_from_html(html_body):
+    """The email's text, for its plain-text part: it said only "Please view this email in an HTML-capable client",
+    so a text-only reader saw nothing of the invitation (the test report's Executive 7, 24 Nov 2026). A link is
+    written "label: address"."""
+    import html as _html
+    import re as _re
+    text = _re.sub(r'(?is)<(style|script|head)\b.*?</\1>', '', html_body or '')
+    text = _re.sub(r'(?is)<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+                   lambda m: f"{_re.sub(r'<[^>]+>', '', m.group(2)).strip()}: {m.group(1)}", text)
+    text = _re.sub(r'(?i)<br\s*/?>|</(p|div|tr|li|h[1-6]|table)>', '\n', text)
+    text = _html.unescape(_re.sub(r'<[^>]+>', '', text))
+    lines = [' '.join(line.split()) for line in text.splitlines()]
+    return _re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+
+
 def _send_email_safe(subject, html_body, recipient_email, plain_body=''):
     if not recipient_email or '@' not in recipient_email:
         logger.warning("Email skipped — invalid recipient: %r", recipient_email)
@@ -157,7 +173,7 @@ def _send_email_safe(subject, html_body, recipient_email, plain_body=''):
         logger.info("Sending email to %s | subject: %s", recipient_email, subject)
         msg = EmailMultiAlternatives(
             subject=subject,
-            body=plain_body or 'Please view this email in an HTML-capable client.',
+            body=plain_body or _plain_from_html(html_body) or 'Please view this email in an HTML-capable client.',
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[recipient_email],
         )
@@ -676,10 +692,12 @@ def _web_link(link) -> bool:
     return str(link).lower().startswith(('http://', 'https://'))
 
 
-def _meeting_context(meeting, writer):
-    """What a document written for a meeting knows of it: when, who, the agenda, and its notes."""
-    lines = [f'Meeting: {meeting.title}, {clock_when_text(meeting)}, {meeting.duration_minutes} minutes.',
-             f'Prepared by: {writer.full_name or writer.email}. Today: {_today(writer):%d %b %Y}.']
+def _meeting_context(meeting, writer, header=True):
+    """What a document written for a meeting knows of it: when, who, the agenda, and its notes. `header=False`
+    leaves out who writes it and today's date, which the briefing puts in its own header."""
+    lines = [f'Meeting: {meeting.title}, {clock_when_text(meeting)}, {meeting.duration_minutes} minutes.']
+    if header:
+        lines.append(f'Prepared by: {writer.full_name or writer.email}. Today: {_today(writer):%d %b %Y}.')
     people = [p.company_user.full_name for p in meeting.participants.select_related('company_user')]
     if people:
         lines.append('Attendees: ' + ', '.join(n for n in people if n) + '.')
@@ -700,6 +718,22 @@ def _meeting_context(meeting, writer):
     return '\n'.join(lines)
 
 
+def _topics_from_notes(meeting, most=6):
+    """A held meeting's topics from its notes: the decisions taken, then the action items, at most `most`."""
+    try:
+        note = meeting.note
+    except Exception:
+        note = None
+    topics, seen = [], set()
+    for text in [*(note.key_decisions if note and note.key_decisions else []),
+                 *meeting.action_items.values_list('title', flat=True)[:20]]:
+        text = ' '.join(str(text).split())[:100]
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            topics.append(text)
+    return topics[:most]
+
+
 def _bad_choice(model, data, *fields):
     """Why one of these fields in the request is not a value the model allows, or None."""
     for field in fields:
@@ -708,6 +742,64 @@ def _bad_choice(model, data, *fields):
             if allowed and data[field] not in allowed:
                 return f'{field.title()} must be one of: {", ".join(allowed)}.'
     return None
+
+
+# ---- Typed values (24 Nov 2026, the test report's Executive 1) -------------------------------------------------
+# "abc" or -30 minutes, a due date of "next week" or 30 February, "lots" of hours: server errors (500). A status
+# "banana" was saved, and took the meeting off the calendar: it no longer blocked anyone's time. Now each is 400.
+
+DURATION_RULE = 'The length must be a whole number of minutes, from 5 to 1440.'
+
+
+def _whole_minutes(value, least=5, most=24 * 60):
+    """A meeting's length as a whole number of minutes from `least` to `most`, or None when it isn't one."""
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if number != number or number != int(number) or not least <= number <= most:      # NaN, 30.5, 0, -30
+        return None
+    return int(number)
+
+
+def _day(value, label='The date'):
+    """(date or None, problem or None) for a YYYY-MM-DD value; blank is no date."""
+    if value in (None, ''):
+        return None, None
+    text = str(value).strip()
+    try:
+        if len(text) > 10 and text[10] not in 'T ':
+            raise ValueError
+        return datetime.strptime(text[:10], '%Y-%m-%d').date(), None
+    except ValueError:
+        return None, f'{label} must be a real date, written YYYY-MM-DD.'
+
+
+def _hours(value):
+    """(hours or None, problem or None) for a task's estimate: a number from 0 to 999."""
+    from decimal import Decimal, InvalidOperation
+    if value in (None, ''):
+        return None, None
+    try:
+        hours = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return None, 'The estimate must be a number of hours.'
+    if not hours.is_finite() or hours < 0 or hours > 999:
+        return None, 'The estimate must be a number of hours, from 0 to 999.'
+    return hours.quantize(Decimal('0.1')), None
+
+
+def _same_person_key(cu, company):
+    """Who a participant row is, so one person isn't invited twice through two rows (Executive 2): the employee
+    login behind a dashboard login (HR's link or the same address) or behind an employee's seat, else the row."""
+    from core.models import UserProfile
+    from core.scheduling.identity import login_user_id_for_company_user
+    if cu.is_active:
+        user_id = login_user_id_for_company_user(cu)
+    else:                                   # the seat an employee login takes part through (_seat_for_employee)
+        user_id = (UserProfile.objects.filter(company=company, user__email__iexact=cu.email or '')
+                   .values_list('user_id', flat=True).first()) if cu.email else None
+    return ('person', user_id) if user_id else ('row', cu.id)
 
 
 def _today(company_user):
@@ -1119,40 +1211,18 @@ def schedule_meeting_ai(request):
             if not scheduled_at:
                 return Response({'status': 'error', 'message': 'Could not determine meeting time.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            duration = int(parsed.get('duration_minutes') or 60)
+            duration = _whole_minutes(parsed.get('duration_minutes') or 60) or 60
             conflicts = agent.check_conflicts(company_user.id, scheduled_at, duration)
             # And anything the organiser has in another agent, their leave, or a company holiday.
             conflicts = _all_clashes(conflicts, _shared_clashes(_calendar_people([company_user]), scheduled_at,
                                                                 duration, company_user,
                                                                 fallback=_browser_zone(request)))
 
-            if conflicts:
-                result['conflicts'] = conflicts
-                result['message'] = 'Meeting has conflicts. Review before creating.'
-            else:
-                # AI may hand back "null"/"none"/non-ISO for the recurrence end
-                # date — coerce anything unparseable to None so the DB doesn't reject it.
-                rec_end_raw = parsed.get('recurrence_end_date')
-                rec_end = None
-                if rec_end_raw and str(rec_end_raw).strip().lower() not in ('null', 'none', 'n/a', 'tbd', ''):
-                    try:
-                        rec_end = datetime.strptime(str(rec_end_raw)[:10], '%Y-%m-%d').date()
-                    except (ValueError, TypeError):
-                        rec_end = None
-                meeting = ExecutiveMeeting.objects.create(
-                    organizer=company_user,
-                    title=parsed.get('title', 'Executive Meeting'),
-                    description=parsed.get('description', ''),
-                    agenda=parsed.get('agenda', []),
-                    meeting_link=parsed.get('meeting_link', ''),
-                    scheduled_at=scheduled_at,
-                    duration_minutes=duration,
-                    timezone_name=_browser_zone(request) or 'UTC',
-                    recurrence=parsed.get('recurrence', 'none'),
-                    recurrence_end_date=rec_end,
-                )
-                result['meeting'] = _serialize_meeting(meeting)
-                result['message'] = 'Meeting created successfully.'
+            # It books nothing (decision D18): made here, a meeting had nobody invited and no link, while the
+            # Schedule form (meeting_list) invites the people and makes the link. No screen used `create`.
+            result['conflicts'] = conflicts
+            result['message'] = ('Meeting has conflicts. Review before creating.' if conflicts else
+                                 'Nothing was booked: check the details, then book it with the Schedule form.')
 
         return Response(result, status=status.HTTP_200_OK)
     except KeyServiceError:
@@ -1246,7 +1316,12 @@ def meeting_list(request):
         slug = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(10))
         meeting_link = f'https://meet.jit.si/exec-{slug}'
 
-    duration = int(request.data.get('duration_minutes', 60))
+    duration = _whole_minutes(request.data.get('duration_minutes', 60))
+    if duration is None:
+        return Response({'status': 'error', 'message': DURATION_RULE}, status=status.HTTP_400_BAD_REQUEST)
+    problem = _bad_choice(ExecutiveMeeting, request.data, 'recurrence')
+    if problem:
+        return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
     # The people invited come with the meeting, so it is booked for all of them or for nobody. They
     # used to be added one request each afterwards: one busy person left a meeting made without them.
     picks = request.data.get('participants') or []
@@ -1258,6 +1333,16 @@ def meeting_list(request):
             return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         if target.id != company_user.id and target not in targets:
             targets.append(target)
+    # One place per person: someone picked as their login and as their employee record was invited twice, and
+    # answering through one left the other "pending" (Executive 2). The login is kept.
+    seen = {_same_person_key(company_user, company_user.company)}
+    kept = []
+    for target in sorted(targets, key=lambda t: not t.is_active):
+        key = _same_person_key(target, company_user.company)
+        if key not in seen:
+            seen.add(key)
+            kept.append(target)
+    targets = [t for t in targets if t in kept]
     people = _calendar_people([company_user, *targets])
     try:
         # Refused if the organiser or anyone invited is busy anywhere: another agent's meeting, an
@@ -1281,6 +1366,14 @@ def meeting_list(request):
                 ExecutiveMeetingParticipant.objects.create(meeting=meeting, company_user=target)
     except ScheduleConflict as clash:
         return clash.response()
+    # A meeting dated in the past is kept, but nobody is invited to it (decision D19): "You're invited" went out
+    # for a meeting held three days before (Executive 5).
+    from meeting_agent.clock import real_end
+    ended = real_end(meeting)
+    if ended is not None and ended < timezone.now():
+        return Response({'status': 'success', 'meeting': _serialize_meeting(meeting, include_participants=bool(targets)),
+                         'note': "That time has already passed, so the meeting was saved without inviting anyone."},
+                        status=status.HTTP_201_CREATED)
     _invite_all(targets, meeting, company_user.full_name)
     return Response({'status': 'success', 'meeting': _serialize_meeting(meeting, include_participants=bool(targets))},
                     status=status.HTTP_201_CREATED)
@@ -1339,16 +1432,25 @@ def meeting_detail(request, meeting_id):
                      'duration_minutes', 'status', 'recurrence']
         if request.data.get('meeting_link') and not _web_link(str(request.data['meeting_link']).strip()):
             return Response({'status': 'error', 'message': LINK_RULE}, status=status.HTTP_400_BAD_REQUEST)
+        problem = _bad_choice(ExecutiveMeeting, request.data, 'status', 'recurrence')
+        typed = {field: request.data[field] for field in updatable if field in request.data}
+        if 'duration_minutes' in typed:
+            typed['duration_minutes'] = _whole_minutes(typed['duration_minutes'])
+            if typed['duration_minutes'] is None:
+                problem = problem or DURATION_RULE
+        if 'scheduled_at' in request.data and not _parse_datetime(request.data['scheduled_at']):
+            problem = problem or 'Invalid scheduled_at format. Use ISO 8601.'
+        if problem:
+            return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
         # The browser's zone comes with every save (CO-210); it is not a change to tell anyone about.
         if _browser_zone(request):
             meeting.timezone_name = _browser_zone(request)
         changed_fields = []
         was = (_occupies_people(meeting), meeting.scheduled_at, meeting.duration_minutes)
-        for field in updatable:
-            if field in request.data:
-                if getattr(meeting, field) != request.data[field]:
-                    changed_fields.append(field.replace('_', ' '))
-                setattr(meeting, field, request.data[field])
+        for field, value in typed.items():
+            if getattr(meeting, field) != value:
+                changed_fields.append(field.replace('_', ' '))
+            setattr(meeting, field, value)
         if 'scheduled_at' in request.data:
             dt = _parse_datetime(request.data['scheduled_at'])
             if dt and dt != meeting.scheduled_at:
@@ -1502,11 +1604,21 @@ def _all_company_members(company_user):
             'role': cu['role'],
             'user_type': 'company_user',
         })
-    seen_emails = {m['email'] for m in out}
+    seen_emails = {(m['email'] or '').lower() for m in out}
+    # An employee login whose person has a dashboard login (HR's link) is listed once, as the login: "Create with AI"
+    # filled in two "Sana Iqbal"s, and the meeting invited her twice (the test report's Executive 2).
+    try:
+        from hr_agent.models import Employee
+        by_login = set(Employee.objects.filter(company=company_user.company, company_user__is_active=True,
+                                               user__isnull=False).values_list('user_id', flat=True))
+    except ImportError:                     # pragma: no cover
+        by_login = set()
     up_qs = UserProfile.objects.filter(
         company=company_user.company, user__is_active=True,
-    ).select_related('user').exclude(user__email__in=seen_emails)[:500]
+    ).select_related('user')[:500]
     for up in up_qs:
+        if up.user_id in by_login or (up.user.email or '').lower() in seen_emails:
+            continue
         u = up.user
         full_name = f"{u.first_name} {u.last_name}".strip() or u.username
         out.append({
@@ -1579,6 +1691,15 @@ def _match_members_by_hints(members, hints):
                 or h in name_words          # whole-word match within the name
             )
             if hit:
+                # The same name as a login already matched is that person's employee record: one chip, the login.
+                same = next((x for x in matched if (x.get('full_name') or '').strip().lower() == name.strip()
+                             and name.strip() and {x.get('user_type'), m.get('user_type')} == {'company_user', 'profile'}),
+                            None)
+                if same is not None:
+                    if m.get('user_type') == 'company_user':
+                        matched[matched.index(same)] = m
+                    matched_keys.add(key)
+                    continue
                 matched.append(m)
                 matched_keys.add(key)
     return matched
@@ -1798,6 +1919,10 @@ def meeting_respond(request, meeting_id):
     if participant is None:
         return Response({'status': 'error', 'message': 'You are not invited to this meeting.'},
                         status=status.HTTP_403_FORBIDDEN)
+    # A cancelled or finished meeting can't be accepted here either, as on the email link (Executive 5).
+    problem = _not_answerable(meeting)
+    if problem:
+        return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
     counter = _parse_datetime(counter_time_str) if response_val == 'counter_proposed' and counter_time_str else None
     _record_answer(meeting, participant, response_val, reason, counter)
     return Response({'status': 'success', 'participant': {
@@ -1906,12 +2031,17 @@ def meeting_respond_as_employee(request, meeting_id):
     return Response({'status': 'success', 'response': seat.response})
 
 
+@csrf_exempt
 def meeting_email_answer(request, action, token):
     """The Accept and Decline buttons of an invitation email. No login: the signed link is the proof, as for
-    Project Manager's invitations (api/views/notification.meeting_email_action)."""
+    Project Manager's invitations (api/views/notification.meeting_email_action).
+
+    Opening the link shows a page with the button; only pressing it answers. A plain GET answered, so a mail
+    scanner that opens links to check them (Outlook Safe Links and the like) accepted or declined for the person
+    (the test report's Executive 5). The signed link is the proof, so there is no session to guard (csrf_exempt)."""
     from html import escape
     from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
-    from api.views.notification import _render_email_action_page
+    from api.views.notification import _render_email_action_page, _render_email_confirm_page
 
     def page(heading, text, color='#10b981'):
         # The page puts its text into HTML as given; a meeting's title is the organiser's text.
@@ -1932,6 +2062,11 @@ def meeting_email_answer(request, action, token):
     title = seat.meeting.title
     if seat.response == action:
         return page(f'Already {_SAID[action]}', f'You have already {_SAID[action]} "{title}". Nothing more to do.')
+    if request.method != 'POST':
+        verb = 'Accept' if action == 'accepted' else 'Decline'
+        return _render_email_confirm_page(escape(f'{verb} "{title}"?'),
+                                          escape(f'{seat.meeting.organizer.full_name or "The organiser"} will be told.'),
+                                          verb, color='#059669' if action == 'accepted' else '#6b7280')
     _record_answer(seat.meeting, seat, action)
     if action == 'accepted':
         return page('Accepted', f'You accepted "{title}". {seat.meeting.organizer.full_name or "The organiser"} '
@@ -2017,9 +2152,16 @@ def meeting_check_conflicts(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([ExecLLMWhenWritingThrottle, ExecCRUDWhenReadingThrottle])
 def meeting_notes(request, meeting_id):
-    """Get or submit notes/transcript for a meeting."""
+    """Get or submit notes/transcript for a meeting. The people invited may read them (decision D20): they got
+    404, action items given to them included; only the organiser writes them."""
     company_user = request.user
-    meeting = get_object_or_404(ExecutiveMeeting, id=meeting_id, organizer=company_user)
+    meeting = get_object_or_404(
+        ExecutiveMeeting.objects.filter(
+            models.Q(organizer=company_user) | models.Q(participants__company_user=company_user)).distinct(),
+        id=meeting_id)
+    if request.method != 'GET' and meeting.organizer_id != company_user.id:
+        return Response({'status': 'error', 'message': 'Only the organiser can write the notes.'},
+                        status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
         try:
@@ -2225,7 +2367,9 @@ def action_item_detail(request, item_id):
         if field in request.data:
             setattr(item, field, request.data[field])
     if 'due_date' in request.data:
-        item.due_date = request.data['due_date'] or None
+        item.due_date, problem = _day(request.data['due_date'], 'The due date')
+        if problem:
+            return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
     if 'assignee_id' in request.data:
         from core.models import CompanyUser
         wanted = request.data['assignee_id'] or None
@@ -2447,7 +2591,9 @@ def task_list(request):
         )
 
     # Weekend deadlines are allowed — any date may be picked for a task.
-    due_date = request.data.get('due_date') or None
+    due_date, problem = _day(request.data.get('due_date'), 'The due date')
+    if problem:
+        return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
     parent_task_id = request.data.get('parent_task_id') or None
     parent = None
     if parent_task_id:
@@ -2459,16 +2605,11 @@ def task_list(request):
         # A subtask normally must finish on or before its parent. The client can
         # opt out (checkbox) by sending allow_after_parent=true.
         allow_after_parent = bool(request.data.get('allow_after_parent', False))
-        if not allow_after_parent and due_date and parent.due_date:
-            try:
-                sub_dt = datetime.strptime(str(due_date), '%Y-%m-%d').date()
-                if sub_dt > parent.due_date:
-                    return Response({
-                        'status': 'error',
-                        'message': f"Subtask due date can't be after the parent task's due date ({parent.due_date}).",
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            except (ValueError, TypeError):
-                pass
+        if not allow_after_parent and due_date and parent.due_date and due_date > parent.due_date:
+            return Response({
+                'status': 'error',
+                'message': f"Subtask due date can't be after the parent task's due date ({parent.due_date}).",
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     # A linked meeting of this company only, and states the task has (CO-255).
     problem = _bad_choice(ExecutiveTask, request.data, 'status', 'priority')
@@ -2554,14 +2695,25 @@ def task_detail(request, task_id):
         problem = _bad_choice(ExecutiveTask, request.data, 'status', 'priority')
         if problem:
             return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
+        due_date, problem = _day(request.data.get('due_date'), 'The due date')
+        hours, too = _hours(request.data.get('estimated_hours'))
+        problem = problem or too
+        # A subtask moved past its parent's date: refused when made, saved when edited (Executive 5).
+        if not problem and due_date and task.parent_task_id and task.parent_task.due_date \
+                and due_date > task.parent_task.due_date and not request.data.get('allow_after_parent'):
+            problem = f"Subtask due date can't be after the parent task's due date ({task.parent_task.due_date})."
+        if problem:
+            return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
         before = {f: str(getattr(task, f) or '') for f in TASK_TOLD_FIELDS}
         already_on = [cu for cu in task.assignees.all() if cu.id != company_user.id]
         # Weekend deadlines are allowed — any date may be set for a task.
-        for field in ['title', 'description', 'status', 'priority', 'due_date', 'ai_reasoning']:
+        for field in ['title', 'description', 'status', 'priority', 'ai_reasoning']:
             if field in request.data:
-                setattr(task, field, request.data[field] or None if field == 'due_date' else request.data[field])
+                setattr(task, field, request.data[field])
+        if 'due_date' in request.data:
+            task.due_date = due_date
         if 'estimated_hours' in request.data:
-            task.estimated_hours = request.data['estimated_hours'] or None
+            task.estimated_hours = hours
         task.save()
         if 'assignees' in request.data:
             resolved = _resolve_assignees(request.data['assignees'], company_user.company)
@@ -2800,22 +2952,23 @@ def _busy_elsewhere(company_user, week_start, listed_ids):
 def calendar_plan_week(request):
     """Generate an AI weekly calendar plan."""
     company_user = request.user
-    week_start = request.data.get('week_start', _today(company_user).isoformat())
     include_past_tasks = bool(request.data.get('include_past_tasks', False))
-    # Work-hours window the user wants tasks scheduled within (defaults 9–17).
+    # The week and the working hours as typed: "soon" planned from today and came back as "soon", and an hour of
+    # 25 was quietly moved (Executive 1).
+    _week_start_date, problem = _day(request.data.get('week_start') or _today(company_user).isoformat(),
+                                     'week_start')
     try:
-        work_start_hour = int(request.data.get('work_start_hour', 9))
-        work_end_hour = int(request.data.get('work_end_hour', 17))
+        work_start_hour = int(str(request.data.get('work_start_hour', 9)).strip())
+        work_end_hour = int(str(request.data.get('work_end_hour', 17)).strip())
+        if not 0 <= work_start_hour < work_end_hour <= 24:
+            raise ValueError
     except (ValueError, TypeError):
-        work_start_hour, work_end_hour = 9, 17
-    work_start_hour = max(0, min(23, work_start_hour))
-    work_end_hour = max(work_start_hour + 1, min(24, work_end_hour))
+        problem = problem or 'Working hours must be whole hours from 0 to 24, the start before the end.'
+    if problem:
+        return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
+    week_start = _week_start_date.isoformat()
 
     from datetime import date as _date, timedelta as _td
-    try:
-        _week_start_date = datetime.strptime(week_start, '%Y-%m-%d').date()
-    except ValueError:
-        _week_start_date = _today(company_user)
     _week_end_date = _week_start_date + _td(days=6)
 
     meetings = []
@@ -2987,14 +3140,19 @@ def document_draft(request):
         if meeting_id:
             try:
                 meeting = ExecutiveMeeting.objects.get(id=meeting_id, organizer=company_user)
-            except ExecutiveMeeting.DoesNotExist:
-                pass
+            except (ExecutiveMeeting.DoesNotExist, ValueError, TypeError):
+                # It answered 200 with an empty template ("Attendees: No attendees") for another company's meeting
+                # (Executive 5).
+                return Response({'status': 'error', 'message': 'Meeting not found.'},
+                                status=status.HTTP_404_NOT_FOUND)
 
         if doc_type == 'agenda':
             topics = request.data.get('topics', [])
             attendees = request.data.get('attendees', [])
             if meeting and not topics:
-                topics = meeting.agenda or []
+                # A meeting already held, with no agenda of its own: what its notes say was discussed. It listed
+                # invented topics ("Risk Mitigation Planning") instead (the test report's Executive 6).
+                topics = meeting.agenda or _topics_from_notes(meeting)
             if meeting and not attendees:
                 attendees = list(meeting.participants.values_list('company_user__full_name', flat=True))
             scheduled_at_str = request.data.get('scheduled_at', '')
@@ -3059,12 +3217,14 @@ def document_draft(request):
             # template ("[DD MMM YYYY]", "[Name / Department]") whatever meeting was chosen (live run, 28 Oct).
             context = str(request.data.get('context', '') or '')
             if meeting and not context.strip():
-                context = _meeting_context(meeting, company_user)
+                context = _meeting_context(meeting, company_user, header=False)
             content = agent.create_briefing(
                 briefing_topic,
                 context,
                 request.data.get('key_points'),
                 request.data.get('audience', 'Executive Team') or 'Executive Team',
+                prepared_by=company_user.full_name or company_user.email,
+                date=f"{_today(company_user):%d %b %Y}",
             )
 
         result = {'status': 'success', 'doc_type': doc_type, 'content': content}

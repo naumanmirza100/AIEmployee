@@ -41,7 +41,7 @@ _RESPONSE_LABELS = {
 
 # Busy time that isn't a meeting reads differently: "Ali is on leave 6–8 Oct",
 # "Mon Oct 06 is a company holiday (Eid)".
-_OFF_LABELS = {'leave': 'Leave', 'holiday': 'Company holiday'}
+_OFF_LABELS = {'leave': 'Leave', 'holiday': 'Company holiday', 'personal': 'own calendar'}
 
 
 def zone_info(tz_name):

@@ -132,8 +132,18 @@ def _settings_redirect(connected=None, error=None, return_to=''):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def google_calendar_callback(request):
-    """Google redirects here with ?code&state. Exchange for a refresh token and save it."""
+    """Google redirects here with ?code&state. Exchange for a refresh token and save it.
+
+    A person connecting their own calendar comes back here too (one redirect URI for the platform's Google app):
+    its state is signed for that flow, and core/personal_calendars.py takes it."""
     import requests
+    from core import personal_calendars
+    try:
+        if personal_calendars.read_state(request.GET.get('state')) is not None:
+            from api.views.personal_calendar import finish
+            return finish(request, 'google')
+    except personal_calendars.CalendarError as exc:
+        return personal_calendars.redirect_after('', error=str(exc))
 
     error = request.GET.get('error')
     if error:

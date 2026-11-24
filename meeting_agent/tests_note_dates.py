@@ -45,7 +45,10 @@ class NoteDatesTests(TestCase):
                                        held_on=datetime(2026, 10, 15).date())
         prompt = llm.call_args[0][0]
         self.assertIn('Thursday, 2026-10-15', prompt)
-        self.assertIn("'Friday' is the first Friday after it", prompt)
+        self.assertIn("('by Friday') is the first such day after the meeting", prompt)
+        # Worked out here, not by the AI (the test report's Executive 3, 24 Nov 2026).
+        self.assertIn('end of next week = Friday 2026-10-23', prompt)
+        self.assertIn('next week = Monday 2026-10-19 to Friday 2026-10-23', prompt)
 
     def test_a_due_date_before_the_meeting_is_not_kept(self):
         typed = (timezone.now() - timedelta(days=2)).replace(hour=11, minute=0, second=0, microsecond=0, tzinfo=None)

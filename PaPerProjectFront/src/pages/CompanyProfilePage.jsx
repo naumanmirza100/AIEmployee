@@ -14,6 +14,7 @@ import {
   User as UserIcon, Plug, CalendarCheck, CheckCircle2, ExternalLink, Clock, Zap,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import PersonalCalendarCard from '@/components/shared/PersonalCalendarCard';
 
 const ACCENT = 'hsl(var(--brand-accent))';
 
@@ -460,12 +461,8 @@ const IntegrationsTab = () => {
         )}
       </div>
 
-      {/* Placeholder for future integrations — keeps the grid balanced and hints at more */}
-      <div className="rounded-2xl border border-dashed border-white/[0.08] p-5 flex flex-col items-center justify-center text-center min-h-[150px]"
-           style={{ background: 'hsl(var(--surface-invert) / 0.015)' }}>
-        <Plug className="h-6 w-6 text-white/25 mb-2" />
-        <p className="text-sm text-white/40">More integrations coming soon</p>
-      </div>
+      {/* The signed-in person's own calendar (24 Nov 2026): theirs, not the company's, so anyone may connect it */}
+      <PersonalCalendarCard side="company" returnTo="/company/profile/integrations" />
     </div>
   );
 };

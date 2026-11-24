@@ -60,9 +60,24 @@ Return a clean bullet-point summary. Focus on what was discussed, decided, and a
         Told nothing, the AI turned "by Friday" into a Friday in 2023."""
         if not held_on:
             return ''
-        return (f"The meeting was held on {held_on:%A}, {held_on.isoformat()}. Work out every due date from that "
-                "day: 'Friday' is the first Friday after it, 'next week' is the week after it, 'end of the month' is "
-                "the last day of its month. No due date is before that day. If no date was said, use null.")
+        # The dates themselves, worked out here: told only the day, the AI put "by end of next week" said on Tuesday
+        # 17 November on Tuesday 24 November, not Friday 27 (the test report's Executive 3, 24 Nov 2026).
+        import calendar
+        from datetime import timedelta
+        monday = held_on - timedelta(days=held_on.weekday())
+        this_friday, next_monday = monday + timedelta(days=4), monday + timedelta(days=7)
+        next_friday = next_monday + timedelta(days=4)
+        month_end = held_on.replace(day=calendar.monthrange(held_on.year, held_on.month)[1])
+
+        def day(d):
+            return f"{d:%A} {d.isoformat()}"
+        return (f"The meeting was held on {held_on:%A}, {held_on.isoformat()}. These dates are worked out from that "
+                f"day; use them for what was said: tomorrow = {day(held_on + timedelta(days=1))}; end of this week = "
+                f"{day(this_friday if this_friday >= held_on else next_friday)}; next week = {day(next_monday)} to "
+                f"{day(next_friday)}; end of next week = {day(next_friday)}; in two weeks = "
+                f"{day(held_on + timedelta(days=14))}; end of the month = {day(month_end)}. A weekday on its own "
+                "('by Friday') is the first such day after the meeting. No due date is before the meeting. If no date "
+                "was said, use null.")
 
     def extract_action_items(self, transcript: str, participant_names: list = None, held_on=None) -> list:
         """Extract action items from transcript as structured JSON list."""

@@ -190,6 +190,8 @@ def invalidate_answer_cache_for_company(company_id) -> None:
         _ANSWER_CACHE.clear()
 
 
+from operations_agent.arithmetic import RULE as SUM_RULE, check_sums  # noqa: E402
+
 SYSTEM_PROMPT = (
     "You are the Operations Knowledge Assistant for a company's internal document library. "
     "You answer questions strictly based on the provided document excerpts (contracts, invoices, "
@@ -221,6 +223,7 @@ SYSTEM_PROMPT = (
     "- Do NOT block-quote chunk text verbatim; synthesise the answer in your own words.\n"
     "- Be concise but complete — aim for clarity over length.\n"
     "- If the user asks for a list of documents or a count, answer from the document metadata provided.\n"
+    "- " + SUM_RULE + "\n"
 )
 
 
@@ -496,6 +499,12 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
                 answer_text = (llm_response.get('content') or llm_response.get('text') or '').strip()
             elif isinstance(llm_response, str):
                 answer_text = llm_response.strip()
+
+            # Its adding is checked here: a quarter's three months, listed right, came to a total PKR 350,000 too
+            # high (the test report's Operations 1, operations_agent/arithmetic.py).
+            answer_text, fixed_sums = check_sums(answer_text)
+            if fixed_sums:
+                logger.info("Operations Q&A: corrected the AI's arithmetic %s", fixed_sums)
 
             if not answer_text:
                 return {

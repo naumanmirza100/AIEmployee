@@ -256,6 +256,7 @@ import { useTranslation } from 'react-i18next';
               <Route path="/recruitment/settings/email" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/settings/interview" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/settings/qualification" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/settings/roles" element={<RecruitmentDashboard />} />
 
               {/* Frontline */}
               <Route path="/frontline/dashboard" element={<FrontlineDashboard />} />

@@ -25,6 +25,7 @@ import { Spinner, EmptyState } from './HRUiKit';
 import { HR_HINTS } from './hrTutorialSteps';
 import { WORKFLOW_EVENTS, FILTER_LABELS, eventLabel, humanize } from './hrEventLabels';
 import RunWorkflowDialog from './RunWorkflowDialog';
+import StepList from './HRStepBuilder';
 
 /**
  * HR workflows (SOPs): the list, the editor, Run, templates and run history
@@ -57,15 +58,21 @@ export default function HRWorkflowsTab() {
 
   useEffect(() => { loadWorkflows(); }, []);
 
+  // Templates, projects and employees for the step builder, once a workflow is opened.
+  const [builderOptions, setBuilderOptions] = useState({});
+  useEffect(() => {
+    if (!wfDialog.open) return;
+    hrAgentService.getHRWorkflowBuilderOptions().then(setBuilderOptions).catch(() => setBuilderOptions({}));
+  }, [wfDialog.open]);
+
   const openCreateWorkflow = () => setWfDialog({
     open: true, mode: 'create',
     wf: {
       name: '', description: '',
       trigger_event: 'employee_hired', trigger_filters: {},
-      steps_text: JSON.stringify([
-        { type: 'send_email', template_name: 'welcome_email', recipient: '{{employee_email}}' },
-        { type: 'wait', seconds: 0 },
-      ], null, 2),
+      // Steps are built in forms (HRStepBuilder); "Edit as JSON" keeps the text for anything the forms don't show.
+      steps: [{ type: 'send_email', recipient_email: '{{employee_email}}', subject: 'Welcome, {{employee_name}}', body: '' }],
+      json_mode: false, steps_text: '',
       is_active: true, requires_approval: false, timeout_seconds: 0,
     },
   });
@@ -76,7 +83,8 @@ export default function HRWorkflowsTab() {
       id: w.id, name: w.name, description: w.description || '',
       trigger_event: w.trigger_conditions?.on || '',
       trigger_filters: { ...w.trigger_conditions, on: undefined },
-      steps_text: JSON.stringify(w.steps || [], null, 2),
+      steps: Array.isArray(w.steps) ? w.steps : [],
+      json_mode: false, steps_text: '',
       is_active: !!w.is_active, requires_approval: !!w.requires_approval,
       timeout_seconds: w.timeout_seconds || 0,
     },
@@ -88,13 +96,15 @@ export default function HRWorkflowsTab() {
       toast({ title: 'Name required', variant: 'destructive' });
       return;
     }
-    let steps;
-    try {
-      steps = JSON.parse(wf.steps_text || '[]');
-      if (!Array.isArray(steps)) throw new Error('steps must be a JSON array');
-    } catch (e) {
-      toast({ title: 'Steps JSON invalid', description: e.message, variant: 'destructive' });
-      return;
+    let steps = wf.steps || [];
+    if (wf.json_mode) {
+      try {
+        steps = JSON.parse(wf.steps_text || '[]');
+        if (!Array.isArray(steps)) throw new Error('steps must be a JSON array');
+      } catch (e) {
+        toast({ title: 'Steps JSON invalid', description: e.message, variant: 'destructive' });
+        return;
+      }
     }
     const trigger_conditions = {};
     if (wf.trigger_event) trigger_conditions.on = wf.trigger_event;
@@ -422,10 +432,33 @@ export default function HRWorkflowsTab() {
                 </div>
               </div>
               <div>
-                <Label>Steps (JSON array)</Label>
-                <Textarea rows={10} className="font-mono text-xs"
-                  value={wfDialog.wf.steps_text}
-                  onChange={(e) => setWfDialog((s) => ({ ...s, wf: { ...s.wf, steps_text: e.target.value } }))} />
+                <div className="mb-1 flex items-center justify-between">
+                  <Label>Steps</Label>
+                  <button type="button" className="text-xs text-violet-300 hover:text-violet-200"
+                    onClick={() => setWfDialog((s) => {
+                      if (!s.wf.json_mode) {
+                        return { ...s, wf: { ...s.wf, json_mode: true, steps_text: JSON.stringify(s.wf.steps || [], null, 2) } };
+                      }
+                      try {
+                        const parsed = JSON.parse(s.wf.steps_text || '[]');
+                        if (!Array.isArray(parsed)) throw new Error('steps must be a JSON array');
+                        return { ...s, wf: { ...s.wf, json_mode: false, steps: parsed } };
+                      } catch (e) {
+                        toast({ title: 'Steps JSON invalid', description: e.message, variant: 'destructive' });
+                        return s;
+                      }
+                    })}>
+                    {wfDialog.wf.json_mode ? 'Back to the forms' : 'Edit as JSON'}
+                  </button>
+                </div>
+                {wfDialog.wf.json_mode ? (
+                  <Textarea rows={10} className="font-mono text-xs"
+                    value={wfDialog.wf.steps_text}
+                    onChange={(e) => setWfDialog((s) => ({ ...s, wf: { ...s.wf, steps_text: e.target.value } }))} />
+                ) : (
+                  <StepList steps={wfDialog.wf.steps} options={builderOptions}
+                    onChange={(steps) => setWfDialog((s) => ({ ...s, wf: { ...s.wf, steps } }))} />
+                )}
               </div>
               <div className="flex items-center gap-4 flex-wrap">
                 <label className="flex items-center gap-2 text-sm select-none">
@@ -438,7 +471,7 @@ export default function HRWorkflowsTab() {
                   <input type="checkbox" checked={!!wfDialog.wf.requires_approval}
                     onChange={(e) => setWfDialog((s) => ({ ...s, wf: { ...s.wf, requires_approval: e.target.checked } }))}
                     className="h-4 w-4" />
-                  <span>Requires approval before running</span>
+                  <span>Requires approval before running (when an event starts it; running it yourself approves it)</span>
                 </label>
                 <div>
                   <Label className="mr-2">Give up after (seconds, 0 = never)</Label>

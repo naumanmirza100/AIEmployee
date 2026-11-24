@@ -903,11 +903,13 @@ class FrontlineAgent(BaseAgent):
             )
             return {'success': True, 'summary': (summary or "").strip(), 'note': note}
         except Exception as e:
-            from core.api_key_service import KeyServiceError
+            from core.api_key_service import KeyServiceError, raise_if_busy
             if isinstance(e, KeyServiceError):
                 raise
+            raise_if_busy(e)            # 503 "busy, try again", not the provider's words (24 Nov 2026, Retest B)
             logger.error(f"Summarize document failed: {e}", exc_info=True)
-            return {'success': False, 'error': str(e), 'summary': None}
+            return {'success': False, 'error': "The document couldn't be summarized. Please try again.",
+                    'summary': None}
 
     def extract_from_document(self, text: str, schema: Optional[list] = None) -> Dict:
         """
@@ -953,11 +955,13 @@ class FrontlineAgent(BaseAgent):
             data = json.loads(raw)
             return {'success': True, 'data': data, 'note': note}
         except Exception as e:
-            from core.api_key_service import KeyServiceError
+            from core.api_key_service import KeyServiceError, raise_if_busy
             if isinstance(e, KeyServiceError):
                 raise
+            raise_if_busy(e)
             logger.error(f"Extract from document failed: {e}", exc_info=True)
-            return {'success': False, 'error': str(e), 'data': None}
+            return {'success': False, 'error': "The document's details couldn't be read. Please try again.",
+                    'data': None}
 
     def generate_analytics_narrative(self, analytics_data: Dict) -> Dict:
         """

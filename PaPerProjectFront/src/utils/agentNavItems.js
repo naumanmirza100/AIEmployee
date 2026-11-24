@@ -133,6 +133,7 @@ const ALL_AGENTS = [
           { label: 'Email',         icon: Mail,     path: '/recruitment/settings/email' },
           { label: 'Interview',     icon: Calendar, path: '/recruitment/settings/interview' },
           { label: 'Qualification', icon: Target,   path: '/recruitment/settings/qualification' },
+          { label: 'Roles',         icon: Users,    path: '/recruitment/settings/roles' },
         ],
       },
     ],

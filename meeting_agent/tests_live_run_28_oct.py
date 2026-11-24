@@ -58,9 +58,13 @@ class DraftTests(base.ExecCase):
         with mock.patch.object(views, '_get_agent') as agent:
             agent.return_value.create_briefing.return_value = '# Briefing'
             self.call(views.document_draft, self.nadia, data={'doc_type': 'briefing', 'meeting_id': board.id})
-        context = agent.return_value.create_briefing.call_args[0][1]
-        for said in ('Board review', 'Renew for a year', 'Send the acceptance (Usman Tariq)', 'Prepared by: Nadia Rehman'):
+        call = agent.return_value.create_briefing.call_args
+        context = call[0][1]
+        for said in ('Board review', 'Renew for a year', 'Send the acceptance (Usman Tariq)'):
             self.assertIn(said, context)
+        # Who wrote it goes in the header, not into the facts, which were pasted as its Background (24 Nov 2026).
+        self.assertEqual(call.kwargs['prepared_by'], 'Nadia Rehman')
+        self.assertNotIn('Prepared by', context)
 
     def test_an_answer_in_a_list_is_read_and_an_unreadable_one_drafts_nothing(self):
         # The film's board review failed with a server error: the AI had put its one answer in a list (29 Oct 2026).

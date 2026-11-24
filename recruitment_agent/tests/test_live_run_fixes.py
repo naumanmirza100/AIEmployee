@@ -8,7 +8,7 @@
 - A workflow template already in use could be added again.
 """
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from unittest import mock
 
 from django.test import SimpleTestCase, TestCase
@@ -68,7 +68,7 @@ class AssistantTests(TestCase):
                                  job_role='Senior Frontend Engineer', cv_record=self.cv, available_slots_json='[]',
                                  company_user=self.owner, status='SCHEDULED', timezone_name='Asia/Karachi',
                                  scheduled_datetime=timezone.make_aware(datetime(2026, 10, 29, 5, 0),
-                                                                        timezone.utc))
+                                                                        dt_timezone.utc))
         self.agent = RecruitmentQAAgent(groq_client=mock.Mock())
 
     def test_the_dossier_holds_the_research_and_the_time_on_the_companys_clock(self):

@@ -17,7 +17,7 @@ from django.conf import settings
 from core import answer_language, whole_document
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 from .services import HRKnowledgeService, build_employee_context
-from .intent import NOT_IN_THE_DOCUMENTS
+from .intent import AI_BUSY_ANSWER, NOT_IN_THE_DOCUMENTS
 from .prompts import HR_SYSTEM_PROMPT, employee_context_block, get_knowledge_prompt
 
 logger = logging.getLogger(__name__)
@@ -167,7 +167,9 @@ class HRAgent(BaseAgent):
             return {
                 'success': True,
                 # It used to promise "I'll route this to the HR team to follow up"; nothing routed anything.
-                'answer': NOT_IN_THE_DOCUMENTS,
+                # Nothing found because the search's AI was busy is said so, not "not in the documents".
+                'answer': AI_BUSY_ANSWER if knowledge_result.get('ai_busy') else NOT_IN_THE_DOCUMENTS,
+                'ai_busy': bool(knowledge_result.get('ai_busy')),
                 'has_verified_info': False,
                 'confidence': knowledge_result.get('confidence', 'none'),
                 'best_score': knowledge_result.get('best_score'),
@@ -241,12 +243,14 @@ class HRAgent(BaseAgent):
             if isinstance(exc, KeyServiceError):
                 raise
             logger.exception("HRAgent.answer_question LLM formatting failed: %s", exc)
+            # The passages were sent raw ("--- Source: Handbook --- …") as a verified answer (Retest B, 24 Nov 2026).
             return {
                 'success': True,
-                'answer': knowledge_result.get('answer'),
-                'has_verified_info': True,
+                'answer': AI_BUSY_ANSWER,
+                'ai_busy': True,
+                'has_verified_info': False,
                 'confidence': knowledge_result.get('confidence'),
-                'citations': knowledge_result.get('citations', []),
+                'citations': [],
             }
 
     # ---- Streaming Q&A ---------------------------------------------------
@@ -321,7 +325,7 @@ class HRAgent(BaseAgent):
 
         # No-verified-info path — emit fixed message and stop.
         if not knowledge_result.get('has_verified_info'):
-            fallback = NOT_IN_THE_DOCUMENTS
+            fallback = AI_BUSY_ANSWER if knowledge_result.get('ai_busy') else NOT_IN_THE_DOCUMENTS
             yield {
                 'type': 'meta',
                 'has_verified_info': False,
@@ -446,11 +450,12 @@ class HRAgent(BaseAgent):
             )
             return {'success': True, 'summary': (summary or '').strip(), 'note': note}
         except Exception as exc:
-            from core.api_key_service import KeyServiceError
+            from core.api_key_service import KeyServiceError, raise_if_busy
             if isinstance(exc, KeyServiceError):
                 raise
+            raise_if_busy(exc)          # 503 "busy, try again", not the provider's words (24 Nov 2026, Retest B)
             logger.exception("HRAgent.summarize_document failed")
-            return {'success': False, 'error': str(exc)}
+            return {'success': False, 'error': "The document couldn't be summarized. Please try again."}
 
     def personalize_message(self, body: str, *, name: str = '') -> Optional[str]:
         """A template's message, rewritten for the one person it goes to, for templates with "Personalise each
@@ -510,9 +515,10 @@ class HRAgent(BaseAgent):
                 return {'success': False, 'error': 'LLM did not return valid JSON', 'raw': s[:500]}
             return {'success': True, 'data': data, 'note': note}
         except Exception as exc:
-            from core.api_key_service import KeyServiceError
+            from core.api_key_service import KeyServiceError, raise_if_busy
             if isinstance(exc, KeyServiceError):
                 raise
+            raise_if_busy(exc)          # 503 "busy, try again", not the provider's words (24 Nov 2026, Retest B)
             logger.exception("HRAgent.extract_from_document failed")
-            return {'success': False, 'error': str(exc)}
+            return {'success': False, 'error': "The document's details couldn't be read. Please try again."}
 

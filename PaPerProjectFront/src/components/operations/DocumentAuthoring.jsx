@@ -133,6 +133,9 @@ function markdownToHtml(md) {
 // ──────────────────────────────────────────────
 // Main component
 // ──────────────────────────────────────────────
+// Words that ask for figures a document would have to come from.
+const FIGURE_WORDS = /\b(numbers?|figures?|metrics?|kpis?|revenue|sales|costs?|budget|totals?|profit|margin|percent|results?|performance|growth|q[1-4]|quarter(ly)?|monthly|annual)\b|%/i;
+
 const DocumentAuthoring = () => {
   const { toast } = useToast();
 
@@ -238,10 +241,23 @@ const DocumentAuthoring = () => {
   // ──────────────────────────────────────────────
   // Actions
   // ──────────────────────────────────────────────
-  const handleGenerate = async () => {
+  const handleGenerate = async (options) => {
     const cleanPrompt = prompt.trim();
     if (!cleanPrompt) {
       toast({ title: 'Prompt required', description: 'Describe what you want the AI to write.', variant: 'destructive' });
+      return;
+    }
+    // A request for figures with no reference documents picked came back "Document ready" with "[placeholder]" for
+    // every number (the test report's Operations 4, decision D15): ask first.
+    if (!options?.withoutReferences && !selectedRefIds.length && availableDocs.length
+        && FIGURE_WORDS.test(cleanPrompt)) {
+      setConfirmState({
+        title: 'Pick the documents to write it from?',
+        description: 'This asks for figures, and no reference documents are picked, so every figure would be left '
+          + 'as a [placeholder]. Pick the documents under References, or write it anyway.',
+        confirmLabel: 'Write it anyway',
+        onConfirm: () => { closeConfirm(); handleGenerate({ withoutReferences: true }); },
+      });
       return;
     }
 
@@ -1561,24 +1577,28 @@ const SelectorCard = ({ label, primaryText, secondaryText, icon, onClick, traili
     <Label className="text-[11px] uppercase tracking-wider text-white/55 mb-2 block">
       {label}
     </Label>
-    <button
-      type="button"
-      onClick={onClick}
-      className="group w-full text-left rounded-xl border border-white/10 bg-black/30 hover:bg-white/[0.04] hover:border-amber-500/30 transition-colors px-3 py-2.5 flex items-center gap-3"
-    >
-      <div
-        className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0"
-        style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}
+    {/* The trailing action (a button) sits beside the card's button, not inside it: a button in a button is not
+        valid HTML, and a click could reach the wrong one (the test report's Operations 5). */}
+    <div className="group w-full rounded-xl border border-white/10 bg-black/30 hover:bg-white/[0.04] hover:border-amber-500/30 transition-colors flex items-center gap-1 pr-3">
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex-1 min-w-0 text-left px-3 py-2.5 flex items-center gap-3 rounded-xl"
       >
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold text-white/95 truncate">{primaryText}</div>
-        <div className="text-[11px] text-white/50 truncate">{secondaryText}</div>
-      </div>
+        <div
+          className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0"
+          style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}
+        >
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-white/95 truncate">{primaryText}</div>
+          <div className="text-[11px] text-white/50 truncate">{secondaryText}</div>
+        </div>
+      </button>
       {trailingAction}
-      <ChevronDown className="h-3.5 w-3.5 text-white/40 group-hover:text-amber-300 shrink-0" />
-    </button>
+      <ChevronDown className="h-3.5 w-3.5 text-white/40 group-hover:text-amber-300 shrink-0 cursor-pointer" onClick={onClick} />
+    </div>
   </div>
 );
 

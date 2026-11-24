@@ -170,9 +170,9 @@ class InterviewSchedulingAgent:
         max_followups = 3
         min_between = 24
         
-        print("\n⚙️  APPLYING RECRUITER EMAIL SETTINGS TO INTERVIEW")
-        print(f"   Recruiter ID: {recruiter_id}")
-        print(f"   Company User ID: {company_user_id}")
+        logger.info("\n⚙️  APPLYING RECRUITER EMAIL SETTINGS TO INTERVIEW")
+        logger.info(f"   Recruiter ID: {recruiter_id}")
+        logger.info(f"   Company User ID: {company_user_id}")
         
         # Use provided email_settings if available
         if email_settings:
@@ -180,11 +180,11 @@ class InterviewSchedulingAgent:
             reminder_hours = email_settings.get('reminder_hours_before', reminder_hours)
             max_followups = email_settings.get('max_followup_emails', max_followups)
             min_between = email_settings.get('min_hours_between_followups', min_between)
-            print(f"   ✅ Using provided email settings:")
-            print(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
-            print(f"      • Reminder hours before: {reminder_hours} hours")
-            print(f"      • Max follow-ups: {max_followups}")
-            print(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
+            logger.info(f"   ✅ Using provided email settings:")
+            logger.info(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
+            logger.info(f"      • Reminder hours before: {reminder_hours} hours")
+            logger.info(f"      • Max follow-ups: {max_followups}")
+            logger.info(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
         elif company_user_id:
             # Try to get company user email settings
             try:
@@ -195,46 +195,46 @@ class InterviewSchedulingAgent:
                 reminder_hours = settings.reminder_hours_before
                 max_followups = settings.max_followup_emails
                 min_between = settings.min_hours_between_followups
-                print(f"   ✅ Using company user custom settings:")
-                print(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
-                print(f"      • Reminder hours before: {reminder_hours} hours")
-                print(f"      • Max follow-ups: {max_followups}")
-                print(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
+                logger.info(f"   ✅ Using company user custom settings:")
+                logger.info(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
+                logger.info(f"      • Reminder hours before: {reminder_hours} hours")
+                logger.info(f"      • Max follow-ups: {max_followups}")
+                logger.info(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
             except CompanyUser.DoesNotExist:
-                print(f"   ⚠️  Company user not found (ID: {company_user_id}), using defaults")
+                logger.warning(f"   ⚠️  Company user not found (ID: {company_user_id}), using defaults")
             except RecruiterEmailSettings.DoesNotExist:
-                print(f"   ⚠️  No email settings found for company user, using defaults")
+                logger.warning(f"   ⚠️  No email settings found for company user, using defaults")
             except Exception as e:
-                print(f"   ⚠️  Error getting company user settings: {str(e)}, using defaults")
+                logger.warning(f"   ⚠️  Error getting company user settings: {str(e)}, using defaults")
         elif recruiter_id:
             try:
                 from django.contrib.auth.models import User
                 recruiter = User.objects.get(id=recruiter_id)
-                print(f"   Recruiter: {recruiter.username}")
+                logger.info(f"   Recruiter: {recruiter.username}")
                 settings = recruiter.recruiter_email_settings
                 followup_delay = settings.followup_delay_hours
                 reminder_hours = settings.reminder_hours_before
                 max_followups = settings.max_followup_emails
                 min_between = settings.min_hours_between_followups
-                print(f"   ✅ Using recruiter custom settings:")
-                print(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
-                print(f"      • Reminder hours before: {reminder_hours} hours")
-                print(f"      • Max follow-ups: {max_followups}")
-                print(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
+                logger.info(f"   ✅ Using recruiter custom settings:")
+                logger.info(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
+                logger.info(f"      • Reminder hours before: {reminder_hours} hours")
+                logger.info(f"      • Max follow-ups: {max_followups}")
+                logger.info(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
             except User.DoesNotExist:
-                print(f"   ⚠️  Recruiter not found (ID: {recruiter_id}), using defaults")
+                logger.warning(f"   ⚠️  Recruiter not found (ID: {recruiter_id}), using defaults")
             except RecruiterEmailSettings.DoesNotExist:
-                print(f"   ⚠️  No email settings found for recruiter, using defaults")
+                logger.warning(f"   ⚠️  No email settings found for recruiter, using defaults")
             except Exception as e:
-                print(f"   ⚠️  Error getting recruiter settings: {str(e)}, using defaults")
+                logger.warning(f"   ⚠️  Error getting recruiter settings: {str(e)}, using defaults")
         else:
-            print(f"   ⚠️  No recruiter ID or company user ID provided, using defaults")
+            logger.warning(f"   ⚠️  No recruiter ID or company user ID provided, using defaults")
         
-        print(f"   📝 Final settings to apply:")
-        print(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
-        print(f"      • Reminder hours before: {reminder_hours} hours")
-        print(f"      • Max follow-ups: {max_followups}")
-        print(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
+        logger.info(f"   📝 Final settings to apply:")
+        logger.info(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
+        logger.info(f"      • Reminder hours before: {reminder_hours} hours")
+        logger.info(f"      • Max follow-ups: {max_followups}")
+        logger.info(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
         
         # Create interview record with recruiter/company_user preferences
         interview_data = {
@@ -267,9 +267,9 @@ class InterviewSchedulingAgent:
         
         interview = Interview.objects.create(**interview_data)
         
-        print(f"   ✅ Interview created with ID: {interview.id}")
-        print(f"   ✅ Email settings saved to interview record")
-        print(f"   📋 Interview will be checked for follow-ups after {followup_delay} hours ({followup_delay * 60} minutes)")
+        logger.info(f"   ✅ Interview created with ID: {interview.id}")
+        logger.info(f"   ✅ Email settings saved to interview record")
+        logger.info(f"   📋 Interview will be checked for follow-ups after {followup_delay} hours ({followup_delay * 60} minutes)")
 
         # Send invitation email
         email_sent = self.send_invitation_email(interview, available_slots)
@@ -342,13 +342,13 @@ class InterviewSchedulingAgent:
                     if end_time_obj:
                         end_hour = end_time_obj.hour
                     
-                    print(f"\n📅 Using recruiter interview settings:")
-                    print(f"   • Schedule from: {schedule_from_date or 'Today'}")
-                    print(f"   • Schedule to: {schedule_to_date or 'No limit'}")
-                    print(f"   • Time range: {start_time_obj} - {end_time_obj}")
-                    print(f"   • Interview time gap: {interview_time_gap} minutes")
+                    logger.info(f"\n📅 Using recruiter interview settings:")
+                    logger.info(f"   • Schedule from: {schedule_from_date or 'Today'}")
+                    logger.info(f"   • Schedule to: {schedule_to_date or 'No limit'}")
+                    logger.info(f"   • Time range: {start_time_obj} - {end_time_obj}")
+                    logger.info(f"   • Interview time gap: {interview_time_gap} minutes")
                 except RecruiterInterviewSettings.DoesNotExist:
-                    print(f"   ⚠️  No interview settings found for recruiter, using defaults")
+                    logger.warning(f"   ⚠️  No interview settings found for recruiter, using defaults")
             except User.DoesNotExist:
                 pass
         
@@ -372,7 +372,7 @@ class InterviewSchedulingAgent:
         if schedule_to_date:
             max_days = (schedule_to_date - current_date).days
             if max_days < 0:
-                print(f"⚠️  schedule_to_date is in the past, no slots generated")
+                logger.warning(f"⚠️  schedule_to_date is in the past, no slots generated")
                 return []
             days_ahead = min(days_ahead, max_days)
         
@@ -439,9 +439,9 @@ class InterviewSchedulingAgent:
         Returns:
             True if email sent successfully, False otherwise
         """
-        print("\n" + "="*60)
-        print("[EMAIL] SENDING INTERVIEW INVITATION EMAIL")
-        print("="*60)
+        logger.info("\n" + "="*60)
+        logger.info("[EMAIL] SENDING INTERVIEW INVITATION EMAIL")
+        logger.info("="*60)
         try:
             # Use job title for subject and body (from job description or truncated job_role)
             job_title = self._get_job_title_for_email(interview)
@@ -458,9 +458,9 @@ class InterviewSchedulingAgent:
                 backend_base = f'https://{backend_base}'
             slot_selection_url = f"{backend_base}/recruitment/interview/select/{interview.confirmation_token}/" if backend_base else ''
             if slot_selection_url:
-                print(f"✓ Slot selection URL: {slot_selection_url}")
+                logger.info(f"✓ Slot selection URL: {slot_selection_url}")
             else:
-                print("⚠ BACKEND_URL not set in .env – slot selection link will be empty in email")
+                logger.warning("⚠ BACKEND_URL not set in .env – slot selection link will be empty in email")
             
             # Prepare email context (job_title for display in templates)
             context = {
@@ -473,11 +473,11 @@ class InterviewSchedulingAgent:
                 'slot_selection_url': slot_selection_url,
             }
             
-            print(f"✓ Interview ID: {interview.id}")
-            print(f"✓ Candidate: {interview.candidate_name}")
-            print(f"✓ Email: {interview.candidate_email}")
-            print(f"✓ Job Role: {interview.job_role}")
-            print(f"✓ Interview Type: {interview.interview_type}")
+            logger.info(f"✓ Interview ID: {interview.id}")
+            logger.info(f"✓ Candidate: {interview.candidate_name}")
+            logger.info(f"✓ Email: {interview.candidate_email}")
+            logger.info(f"✓ Job Role: {interview.job_role}")
+            logger.info(f"✓ Interview Type: {interview.interview_type}")
             
             # Validate candidate email format before attempting to send
             from django.core.validators import validate_email as _validate_email
@@ -489,14 +489,14 @@ class InterviewSchedulingAgent:
                 return False
 
             # Render email template with plain-text fallback if template is missing/broken
-            print("\n📝 Rendering email templates...")
+            logger.info("\n📝 Rendering email templates...")
             try:
                 context.update(candidate_mail.who_hires(interview))
                 message = render_to_string('recruitment_agent/emails/interview_invitation.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_invitation.html', context)
-                print("✓ Templates rendered successfully")
+                logger.info("✓ Templates rendered successfully")
             except Exception as template_error:
-                print(f"⚠ Template rendering failed ({template_error}), using plain-text fallback")
+                logger.warning(f"⚠ Template rendering failed ({template_error}), using plain-text fallback")
                 logger.warning(f"Invitation template error for interview {interview.id}: {template_error}")
                 message = (
                     f"Dear {interview.candidate_name},\n\n"
@@ -512,11 +512,11 @@ class InterviewSchedulingAgent:
             to_email = self._clean_email_header(interview.candidate_email)
             email_backend = getattr(settings, 'EMAIL_BACKEND', 'Not configured')
             
-            print(f"\n📤 Email Configuration:")
-            print(f"  Backend: {email_backend}")
-            print(f"  From: {from_email}")
-            print(f"  To: {to_email}")
-            print(f"  Subject: {subject}")
+            logger.info(f"\n📤 Email Configuration:")
+            logger.info(f"  Backend: {email_backend}")
+            logger.info(f"  From: {from_email}")
+            logger.info(f"  To: {to_email}")
+            logger.info(f"  Subject: {subject}")
             
             self._log_step("sending_invitation_email", {
                 "interview_id": interview.id,
@@ -527,21 +527,21 @@ class InterviewSchedulingAgent:
             })
             
             # Send email
-            print("\n🚀 Attempting to send email...")
+            logger.info("\n🚀 Attempting to send email...")
             try:
                 candidate_mail.send(subject, message, html_message, to_email, interview=interview)
-                print("✅ Email sent successfully!")
+                logger.info("✅ Email sent successfully!")
             except Exception as send_error:
-                print(f"❌ ERROR: Email sending failed: {send_error}")
-                print(f"   Error Type: {type(send_error).__name__}")
+                logger.warning(f"❌ ERROR: Email sending failed: {send_error}")
+                logger.warning(f"   Error Type: {type(send_error).__name__}")
                 raise
             
             # Update interview record
             interview.invitation_sent_at = timezone.now()
             interview.save(update_fields=['invitation_sent_at'])
             
-            print(f"✓ Timestamp updated: {interview.invitation_sent_at}")
-            print("="*60 + "\n")
+            logger.info(f"✓ Timestamp updated: {interview.invitation_sent_at}")
+            logger.info("="*60 + "\n")
             
             self._log_step("invitation_email_sent", {
                 "interview_id": interview.id,
@@ -553,12 +553,12 @@ class InterviewSchedulingAgent:
             
         except Exception as exc:
             import traceback
-            print(f"\n❌ EXCEPTION OCCURRED:")
-            print(f"   Error: {str(exc)}")
-            print(f"   Type: {type(exc).__name__}")
-            print(f"\n📋 Full Traceback:")
-            print(traceback.format_exc())
-            print("="*60 + "\n")
+            logger.warning(f"\n❌ EXCEPTION OCCURRED:")
+            logger.warning(f"   Error: {str(exc)}")
+            logger.info(f"   Type: {type(exc).__name__}")
+            logger.warning(f"\n📋 Full Traceback:")
+            logger.warning(traceback.format_exc())
+            logger.info("="*60 + "\n")
             
             error_details = {
                 "interview_id": interview.id,
@@ -1038,9 +1038,9 @@ class InterviewSchedulingAgent:
         Returns:
             True if emails sent successfully, False otherwise
         """
-        print("\n" + "="*60)
-        print("📧 SENDING INTERVIEW CONFIRMATION EMAILS")
-        print("="*60)
+        logger.info("\n" + "="*60)
+        logger.info("📧 SENDING INTERVIEW CONFIRMATION EMAILS")
+        logger.info("="*60)
         try:
             from_email_raw = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
             from_email = self._clean_email_header(from_email_raw)
@@ -1054,13 +1054,13 @@ class InterviewSchedulingAgent:
             
             subject = f"Interview Confirmed - {clean_job_title}"
             
-            print(f"✓ Interview ID: {interview.id}")
-            print(f"✓ Candidate: {interview.candidate_name} ({interview.candidate_email})")
-            print(f"✓ Scheduled: {interview.scheduled_datetime}")
-            print(f"✓ Email Backend: {email_backend}")
+            logger.info(f"✓ Interview ID: {interview.id}")
+            logger.info(f"✓ Candidate: {interview.candidate_name} ({interview.candidate_email})")
+            logger.info(f"✓ Scheduled: {interview.scheduled_datetime}")
+            logger.info(f"✓ Email Backend: {email_backend}")
             
             # Candidate confirmation
-            print("\n📝 Preparing candidate confirmation email...")
+            logger.info("\n📝 Preparing candidate confirmation email...")
             candidate_context = {
                 'candidate_name': interview.candidate_name,
                 'job_role': interview.job_role,
@@ -1084,9 +1084,9 @@ class InterviewSchedulingAgent:
                 candidate_context.update(candidate_mail.who_hires(interview))
                 candidate_message = render_to_string('recruitment_agent/emails/interview_confirmation.txt', candidate_context)
                 candidate_html = render_to_string('recruitment_agent/emails/interview_confirmation.html', candidate_context)
-                print("✓ Candidate email templates rendered")
+                logger.info("✓ Candidate email templates rendered")
             except Exception as template_error:
-                print(f"⚠ Confirmation template failed ({template_error}), using plain-text fallback")
+                logger.warning(f"⚠ Confirmation template failed ({template_error}), using plain-text fallback")
                 logger.warning(f"Confirmation template error for interview {interview.id}: {template_error}")
                 slot_str = interview.selected_slot or interview_time.when(interview)
                 candidate_message = (
@@ -1105,12 +1105,12 @@ class InterviewSchedulingAgent:
                 "to": to_email,
             })
             
-            print(f"\n🚀 Sending to candidate: {to_email}")
+            logger.info(f"\n🚀 Sending to candidate: {to_email}")
             try:
                 candidate_mail.send(subject, candidate_message, candidate_html, to_email, interview=interview)
-                print("✅ Candidate email sent successfully!")
+                logger.info("✅ Candidate email sent successfully!")
             except Exception as send_error:
-                print(f"❌ ERROR: Candidate email failed: {send_error}")
+                logger.warning(f"❌ ERROR: Candidate email failed: {send_error}")
                 raise
             
             # Recruiter notification (if recruiter email available)
@@ -1133,7 +1133,7 @@ class InterviewSchedulingAgent:
                     recruiter_email = None
 
             if recruiter_email:
-                print(f"\n📝 Preparing recruiter notification email...")
+                logger.info(f"\n📝 Preparing recruiter notification email...")
                 recruiter_context = {
                     'recruiter_name': recruiter_name,
                     'candidate_name': interview.candidate_name,
@@ -1160,9 +1160,9 @@ class InterviewSchedulingAgent:
                     with timezone.override(zone_info(interview_time.stored_zone(interview))):
                         recruiter_message = render_to_string('recruitment_agent/emails/interview_confirmation_recruiter.txt', recruiter_context)
                         recruiter_html = render_to_string('recruitment_agent/emails/interview_confirmation_recruiter.html', recruiter_context)
-                    print("✓ Recruiter email templates rendered")
+                    logger.info("✓ Recruiter email templates rendered")
                 except Exception as template_error:
-                    print(f"❌ ERROR: Recruiter template rendering failed: {template_error}")
+                    logger.warning(f"❌ ERROR: Recruiter template rendering failed: {template_error}")
                     raise
                 
                 recruiter_email_clean = self._clean_email_header(recruiter_email)
@@ -1172,7 +1172,7 @@ class InterviewSchedulingAgent:
                     "to": recruiter_email_clean,
                 })
                 
-                print(f"\n🚀 Sending to recruiter: {recruiter_email_clean}")
+                logger.info(f"\n🚀 Sending to recruiter: {recruiter_email_clean}")
                 try:
                     send_mail(
                         subject=recruiter_subject,
@@ -1182,19 +1182,19 @@ class InterviewSchedulingAgent:
                         html_message=recruiter_html,
                         fail_silently=False,
                     )
-                    print("✅ Recruiter email sent successfully!")
+                    logger.info("✅ Recruiter email sent successfully!")
                     recruiter_email_sent = True
                 except Exception as send_error:
-                    print(f"❌ ERROR: Recruiter email failed: {send_error}")
+                    logger.warning(f"❌ ERROR: Recruiter email failed: {send_error}")
                     raise
             else:
-                print(f"\n⚠️  No recruiter to email, or they turned this email off (skipping recruiter notification)")
+                logger.warning(f"\n⚠️  No recruiter to email, or they turned this email off (skipping recruiter notification)")
 
             interview.confirmation_sent_at = timezone.now()
             interview.save(update_fields=['confirmation_sent_at'])
             
-            print(f"\n✓ Confirmation timestamp updated: {interview.confirmation_sent_at}")
-            print("="*60 + "\n")
+            logger.info(f"\n✓ Confirmation timestamp updated: {interview.confirmation_sent_at}")
+            logger.info("="*60 + "\n")
             
             self._log_step("confirmation_emails_sent", {
                 "interview_id": interview.id,
@@ -1206,12 +1206,12 @@ class InterviewSchedulingAgent:
             
         except Exception as exc:
             import traceback
-            print(f"\n❌ EXCEPTION OCCURRED:")
-            print(f"   Error: {str(exc)}")
-            print(f"   Type: {type(exc).__name__}")
-            print(f"\n📋 Full Traceback:")
-            print(traceback.format_exc())
-            print("="*60 + "\n")
+            logger.warning(f"\n❌ EXCEPTION OCCURRED:")
+            logger.warning(f"   Error: {str(exc)}")
+            logger.info(f"   Type: {type(exc).__name__}")
+            logger.warning(f"\n📋 Full Traceback:")
+            logger.warning(traceback.format_exc())
+            logger.info("="*60 + "\n")
             
             error_details = {
                 "interview_id": interview.id,
@@ -1251,13 +1251,13 @@ class InterviewSchedulingAgent:
             from_email = self._clean_email_header(from_email)
             to_email = self._clean_email_header(interview.candidate_email)
             if not to_email:
-                print("⚠ Reschedule email skipped: no candidate email for interview", interview.id)
+                logger.warning("⚠ Reschedule email skipped: no candidate email for interview %s", interview.id)
                 return False
             candidate_mail.send(subject, message, html_message, to_email, interview=interview)
-            print(f"✓ Reschedule email sent to candidate: {to_email} (interview {interview.id})")
+            logger.info(f"✓ Reschedule email sent to candidate: {to_email} (interview {interview.id})")
             return True
         except Exception as e:
-            print(f"✗ Reschedule email failed for interview {interview.id}: {e}")
+            logger.warning(f"✗ Reschedule email failed for interview {interview.id}: {e}")
             self._log_error("reschedule_email_error", {"interview_id": interview.id, "error": str(e)})
             return False
 
@@ -1284,13 +1284,13 @@ class InterviewSchedulingAgent:
             from_email = self._clean_email_header((getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com') or '').strip())
             to_email = self._clean_email_header(interview.candidate_email)
             if not to_email:
-                print("⚠ Cancellation email skipped: no candidate email for interview", interview.id)
+                logger.warning("⚠ Cancellation email skipped: no candidate email for interview %s", interview.id)
                 return False
             candidate_mail.send(subject, message, html_message, to_email, interview=interview)
-            print(f"✓ Cancellation email sent to candidate: {to_email} (interview {interview.id})")
+            logger.info(f"✓ Cancellation email sent to candidate: {to_email} (interview {interview.id})")
             return True
         except Exception as e:
-            print(f"✗ Cancellation email failed for interview {interview.id}: {e}")
+            logger.warning(f"✗ Cancellation email failed for interview {interview.id}: {e}")
             self._log_error("cancellation_email_error", {"interview_id": interview.id, "error": str(e)})
             return False
 
@@ -1301,7 +1301,7 @@ class InterviewSchedulingAgent:
         try:
             to_email = self._clean_email_header((candidate_email or '').strip())
             if not to_email:
-                print("⚠ Rejection email skipped: no candidate email")
+                logger.warning("⚠ Rejection email skipped: no candidate email")
                 return False
             clean_job_title = self._clean_email_header(job_title or 'the position')
             if len(clean_job_title) > 50:
@@ -1316,10 +1316,10 @@ class InterviewSchedulingAgent:
             html_message = render_to_string('recruitment_agent/emails/application_rejected.html', context)
             from_email = self._clean_email_header((getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com') or '').strip())
             candidate_mail.send(subject, message, html_message, to_email, job=job)
-            print(f"✓ Rejection email sent to candidate: {to_email}")
+            logger.info(f"✓ Rejection email sent to candidate: {to_email}")
             return True
         except Exception as e:
-            print(f"✗ Rejection email failed for {candidate_email}: {e}")
+            logger.warning(f"✗ Rejection email failed for {candidate_email}: {e}")
             self._log_error("rejection_email_error", {"email": candidate_email, "error": str(e)})
             return False
 
@@ -1337,9 +1337,9 @@ class InterviewSchedulingAgent:
         Returns:
             Dict with reminder status
         """
-        print("\n" + "="*60)
-        print("📧 SENDING FOLLOW-UP REMINDER EMAIL")
-        print("="*60)
+        logger.info("\n" + "="*60)
+        logger.info("📧 SENDING FOLLOW-UP REMINDER EMAIL")
+        logger.info("="*60)
         try:
             interview = Interview.objects.get(id=interview_id)
             
@@ -1386,26 +1386,26 @@ class InterviewSchedulingAgent:
             to_email = self._clean_email_header(interview.candidate_email)
             email_backend = getattr(settings, 'EMAIL_BACKEND', 'Not configured')
             
-            print(f"✓ Interview ID: {interview.id}")
-            print(f"✓ Candidate: {interview.candidate_name}")
-            print(f"✓ Email: {to_email}")
-            print(f"✓ Follow-up #: {interview.followup_count + 1}")
-            print(f"✓ Email Backend: {email_backend}")
+            logger.info(f"✓ Interview ID: {interview.id}")
+            logger.info(f"✓ Candidate: {interview.candidate_name}")
+            logger.info(f"✓ Email: {to_email}")
+            logger.info(f"✓ Follow-up #: {interview.followup_count + 1}")
+            logger.info(f"✓ Email Backend: {email_backend}")
             
-            print("\n📝 Rendering email templates...")
+            logger.info("\n📝 Rendering email templates...")
             try:
                 context.update(candidate_mail.who_hires(interview))
                 message = render_to_string('recruitment_agent/emails/interview_followup.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_followup.html', context)
-                print("✓ Templates rendered successfully")
+                logger.info("✓ Templates rendered successfully")
             except Exception as template_error:
-                print(f"❌ ERROR: Template rendering failed: {template_error}")
+                logger.warning(f"❌ ERROR: Template rendering failed: {template_error}")
                 # Fallback to reminder template if followup template doesn't exist
                 try:
                     context.update(candidate_mail.who_hires(interview))
                     message = render_to_string('recruitment_agent/emails/interview_reminder.txt', context)
                     html_message = render_to_string('recruitment_agent/emails/interview_reminder.html', context)
-                    print("✓ Using fallback reminder templates")
+                    logger.info("✓ Using fallback reminder templates")
                 except:
                     raise template_error
             
@@ -1415,26 +1415,26 @@ class InterviewSchedulingAgent:
                 "followup_number": interview.followup_count + 1,
             })
             
-            print(f"\n🚀 Sending follow-up reminder email...")
-            print(f"   From: {from_email}")
-            print(f"   To: {to_email}")
-            print(f"   Subject: {subject[:60]}...")
+            logger.info(f"\n🚀 Sending follow-up reminder email...")
+            logger.info(f"   From: {from_email}")
+            logger.info(f"   To: {to_email}")
+            logger.info(f"   Subject: {subject[:60]}...")
             try:
                 result = candidate_mail.send(subject, message, html_message, to_email, interview=interview)
-                print(f"✅ Follow-up reminder email sent successfully!")
-                print(f"   Django send_mail returned: {result} (1 = success)")
-                print(f"   📧 Email should be delivered to: {to_email}")
-                print(f"   ⚠️  If email not received, check spam folder or email provider settings")
+                logger.info(f"✅ Follow-up reminder email sent successfully!")
+                logger.info(f"   Django send_mail returned: {result} (1 = success)")
+                logger.info(f"   📧 Email should be delivered to: {to_email}")
+                logger.warning(f"   ⚠️  If email not received, check spam folder or email provider settings")
             except Exception as send_error:
-                print(f"❌ ERROR: Follow-up reminder email failed: {send_error}")
-                print(f"   Error Type: {type(send_error).__name__}")
+                logger.warning(f"❌ ERROR: Follow-up reminder email failed: {send_error}")
+                logger.warning(f"   Error Type: {type(send_error).__name__}")
                 import traceback
-                print(f"\n📋 Full Traceback:")
-                print(traceback.format_exc())
+                logger.warning(f"\n📋 Full Traceback:")
+                logger.warning(traceback.format_exc())
                 raise
             
-            print(f"✓ Timestamp will be updated by caller")
-            print("="*60 + "\n")
+            logger.info(f"✓ Timestamp will be updated by caller")
+            logger.info("="*60 + "\n")
             
             self._log_step("followup_reminder_sent", {
                 "interview_id": interview.id,
@@ -1448,20 +1448,20 @@ class InterviewSchedulingAgent:
             }
             
         except Interview.DoesNotExist:
-            print(f"\n❌ ERROR: Interview not found (ID: {interview_id})")
-            print("="*60 + "\n")
+            logger.warning(f"\n❌ ERROR: Interview not found (ID: {interview_id})")
+            logger.info("="*60 + "\n")
             return {
                 "success": False,
                 "error": "Interview not found",
             }
         except Exception as exc:
             import traceback
-            print(f"\n❌ EXCEPTION OCCURRED:")
-            print(f"   Error: {str(exc)}")
-            print(f"   Type: {type(exc).__name__}")
-            print(f"\n📋 Full Traceback:")
-            print(traceback.format_exc())
-            print("="*60 + "\n")
+            logger.warning(f"\n❌ EXCEPTION OCCURRED:")
+            logger.warning(f"   Error: {str(exc)}")
+            logger.info(f"   Type: {type(exc).__name__}")
+            logger.warning(f"\n📋 Full Traceback:")
+            logger.warning(traceback.format_exc())
+            logger.info("="*60 + "\n")
             
             self._log_error("followup_reminder_error", {
                 "interview_id": interview_id,
@@ -1527,27 +1527,27 @@ class InterviewSchedulingAgent:
                 'meeting_link': interview.meeting_link or '',
             }
             
-            print("\n" + "="*60)
-            print(f"📧 SENDING PRE-INTERVIEW REMINDER ({hours_before}h before)")
-            print("="*60)
-            print(f"✓ Interview ID: {interview.id}")
-            print(f"✓ Candidate: {interview.candidate_name} ({interview.candidate_email})")
-            print(f"✓ Scheduled: {interview.scheduled_datetime}")
+            logger.info("\n" + "="*60)
+            logger.info(f"📧 SENDING PRE-INTERVIEW REMINDER ({hours_before}h before)")
+            logger.info("="*60)
+            logger.info(f"✓ Interview ID: {interview.id}")
+            logger.info(f"✓ Candidate: {interview.candidate_name} ({interview.candidate_email})")
+            logger.info(f"✓ Scheduled: {interview.scheduled_datetime}")
             
             from_email_raw = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
             from_email = self._clean_email_header(from_email_raw)
             to_email = self._clean_email_header(interview.candidate_email)
             email_backend = getattr(settings, 'EMAIL_BACKEND', 'Not configured')
-            print(f"✓ Email Backend: {email_backend}")
+            logger.info(f"✓ Email Backend: {email_backend}")
             
-            print("\n📝 Rendering email templates...")
+            logger.info("\n📝 Rendering email templates...")
             try:
                 context.update(candidate_mail.who_hires(interview))
                 message = render_to_string('recruitment_agent/emails/interview_pre_reminder.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_pre_reminder.html', context)
-                print("✓ Templates rendered successfully")
+                logger.info("✓ Templates rendered successfully")
             except Exception as template_error:
-                print(f"❌ ERROR: Template rendering failed: {template_error}")
+                logger.warning(f"❌ ERROR: Template rendering failed: {template_error}")
                 raise
             
             self._log_step("sending_pre_interview_reminder", {
@@ -1556,18 +1556,18 @@ class InterviewSchedulingAgent:
                 "hours_before": hours_before,
             })
             
-            print(f"\n🚀 Sending pre-interview reminder...")
+            logger.info(f"\n🚀 Sending pre-interview reminder...")
             try:
                 candidate_mail.send(subject, message, html_message, to_email, interview=interview)
-                print("✅ Pre-interview reminder sent successfully!")
-                print("="*60 + "\n")
+                logger.info("✅ Pre-interview reminder sent successfully!")
+                logger.info("="*60 + "\n")
             except Exception as send_error:
-                print(f"❌ ERROR: Pre-interview reminder failed: {send_error}")
-                print(f"   Error Type: {type(send_error).__name__}")
+                logger.warning(f"❌ ERROR: Pre-interview reminder failed: {send_error}")
+                logger.warning(f"   Error Type: {type(send_error).__name__}")
                 import traceback
-                print(f"\n📋 Full Traceback:")
-                print(traceback.format_exc())
-                print("="*60 + "\n")
+                logger.warning(f"\n📋 Full Traceback:")
+                logger.warning(traceback.format_exc())
+                logger.info("="*60 + "\n")
                 raise
             
             # The stamp that stops a second reminder is set by the periodic check, before sending (CO-185).

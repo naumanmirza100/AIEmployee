@@ -55,6 +55,9 @@ FRONTLINE_AI_INTENT = False    # the same
 RECRUITMENT_AI_INTENT = False  # the same
 OPERATIONS_AI_INTENT = False   # the same
 CELERY_TASK_EAGER_PROPAGATES = True
+# Never OpenAI's real bill: with the admin key in a developer's .env, the spend tests read the account's own month
+# (24 Nov 2026) and the budget warnings came out wrong. The tests that read the bill give their own key and a stub.
+OPENAI_ADMIN_KEY = ''
 WHITENOISE_AUTOREFRESH = True
 
 # Rate limits are a production concern; in tests they would just make a long

@@ -162,6 +162,56 @@ def _allowed_confidentialities(role: str) -> list[str]:
     return ['public']
 
 
+# ---- Keyword search on the question's words (24 Nov 2026, the test report's HR 2) --------------------------------
+#
+# "What is the meal limit when travelling for work?" was answered "not in the HR documents" while the handbook says
+# "Meals while travelling for work are paid up to PKR 15,000 a day". The keyword search looked for the whole question
+# as one string, which no passage contains, and only the top hit's similarity was checked against the 0.3 line, which a
+# two-sentence section can miss. Now a passage holding at least half of the question's words (two at least) is a match.
+
+_KEYWORD_STOPWORDS = frozenset({
+    'the', 'and', 'for', 'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had', 'does', 'did', 'doing',
+    'will', 'would', 'should', 'could', 'may', 'might', 'must', 'can', 'shall', 'what', 'when', 'where', 'which',
+    'who', 'whom', 'whose', 'why', 'how', 'this', 'that', 'these', 'those', 'you', 'your', 'yours', 'our', 'ours',
+    'their', 'them', 'they', 'she', 'her', 'his', 'him', 'its', 'mine', 'myself', 'with', 'about', 'from', 'into',
+    'onto', 'over', 'under', 'than', 'then', 'there', 'here', 'any', 'all', 'some', 'each', 'every', 'not', 'yes',
+    'please', 'tell', 'know', 'want', 'need', 'say', 'says', 'said', 'many', 'much', 'long', 'get', 'got', 'give',
+    'also', 'just', 'like', 'very', 'more', 'most', 'other', 'such', 'only', 'own', 'same', 'too', 'out', 'off',
+    'company', 'companies', 'employee', 'employees', 'staff', 'policy', 'policies', 'handbook', 'document',
+    'documents', 'rule', 'rules',
+})
+
+
+def _stem(word: str) -> str:
+    """A crude stem that still finds the word's other forms as a substring: travelling → travel, meals → meal,
+    claims → claim, expenses → expens, policies → polic."""
+    for suffix in ('ings', 'ing', 'ies', 'es', 'ed', 's'):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            word = word[:-len(suffix)]
+            if suffix in ('ings', 'ing', 'ed') and len(word) > 4 and word[-1] == word[-2] and word[-1] not in 'aeiou':
+                word = word[:-1]            # travell → travel, submitt → submit
+            break
+    return word
+
+
+def question_words(text: str, most: int = 8) -> List[str]:
+    """The question's telling words, stemmed, in order, without repeats."""
+    import re
+    out: List[str] = []
+    for word in re.findall(r"[^\W_]{3,}", (text or '').lower()):
+        if word in _KEYWORD_STOPWORDS:
+            continue
+        stem = _stem(word)
+        if stem not in out:
+            out.append(stem)
+    return out[:most]
+
+
+def keyword_needed(words: List[str]) -> int:
+    """How many of the question's words a passage must hold to match: half of them, and two when there are two."""
+    return max(min(2, len(words)), math.ceil(len(words) / 2))
+
+
 class HRKnowledgeService:
     """RAG over HR documents, gated by confidentiality + per-employee scope."""
 
@@ -193,21 +243,24 @@ class HRKnowledgeService:
             question, asker_role=asker_role,
             asker_employee_id=asker_employee_id, max_results=max_results,
         )
+        busy = bool(getattr(self, 'last_search_busy', False))
         if not results:
             return {
                 'success': True, 'answer': None, 'has_verified_info': False,
-                'confidence': 'none', 'citations': [],
+                'confidence': 'none', 'citations': [], 'ai_busy': busy,
                 'message': 'No verified HR knowledge found for this question.',
             }
         threshold = float(getattr(settings, 'HR_RAG_MIN_CONFIDENCE',
                                   getattr(settings, 'FRONTLINE_RAG_MIN_CONFIDENCE', 0.3)))
-        best = results[0]
-        sem = best.get('semantic_score')
-        if sem is not None and float(sem) < threshold:
+        scores = [float(r['semantic_score']) for r in results if r.get('semantic_score') is not None]
+        sem = max(scores) if scores else None
+        # A match: a passage at or over the line, or one holding the question's words. Only the top hit was looked
+        # at, so a passage with the answer, a little under the line, was "not found" (HR 2).
+        if not any(r.get('keyword_match') for r in results) and sem is not None and sem < threshold:
             return {
                 'success': True, 'answer': None, 'has_verified_info': False,
-                'confidence': 'low', 'best_score': float(sem),
-                'threshold': threshold, 'citations': [],
+                'confidence': 'low', 'best_score': sem,
+                'threshold': threshold, 'citations': [], 'ai_busy': busy,
                 'message': 'No sufficiently confident HR match found.',
             }
         # Aggregate top chunks into a single context block
@@ -257,6 +310,7 @@ class HRKnowledgeService:
         _t0 = _time.time()
         self.last_retrieval_timing = {}
         self.last_retrieval_path = ''
+        self.last_search_busy = False    # the question's embedding failed because the AI was busy
 
         _t = _time.time()
         docs = HRDocument.objects.filter(
@@ -297,6 +351,10 @@ class HRKnowledgeService:
             _t = _time.time()
             qvec = _cache_get_query_vec(query, self.embedding_service)
             self.last_retrieval_timing['query_embed'] = int((_time.time() - _t) * 1000)
+            if qvec is None:
+                from core.api_key_service import is_busy_error
+                failed = getattr(self.embedding_service, 'last_error', None)
+                self.last_search_busy = failed is not None and is_busy_error(failed)
             if qvec is not None:
                 # -------- FAISS path (O(log N)) --------
                 # Try FAISS first — for a company with 1000+ chunks this is
@@ -376,6 +434,29 @@ class HRKnowledgeService:
                 | _Q(section_heading__icontains=literal)
             ).values_list('id', flat=True)[:50]
         )
+        # The question's words, each looked for on its own (HR 2): the passages holding the most of them first.
+        keyword_match: set[int] = set(keyword_hits)
+        words = question_words(_current_question(query))
+        if words:
+            needed = keyword_needed(words)
+            anyword = _Q()
+            for word in words:
+                anyword |= _Q(chunk_text__icontains=word) | _Q(section_heading__icontains=word)
+            scored = []
+            for cid, text, heading in chunks_qs.filter(anyword).values_list(
+                    'id', 'chunk_text', 'section_heading')[:400]:
+                if _is_junk_chunk(cid, text):
+                    continue
+                body = f"{heading or ''} {text or ''}".lower()
+                held = sum(1 for word in words if word in body)
+                if held >= needed:
+                    scored.append((held, cid))
+            scored.sort(key=lambda hit: (-hit[0], hit[1]))
+            for _, cid in scored[:50]:
+                if cid not in keyword_match:
+                    keyword_hits.append(cid)
+                    keyword_match.add(cid)
+            self.last_retrieval_path += f'words={len(words)},word_hits={len(scored)}|'
         self.last_retrieval_timing['keyword'] = int((_time.time() - _t) * 1000)
 
         # Cheap RRF merge (k=60)
@@ -431,6 +512,8 @@ class HRKnowledgeService:
                 'page_number': page,
                 'content': c.chunk_text,
                 'semantic_score': sem_score.get(cid),
+                # Holds the question's words (or the question itself): a match whatever its similarity.
+                'keyword_match': cid in keyword_match,
             })
         self.last_retrieval_timing['output_build'] = int((_time.time() - _t) * 1000)
         self.last_retrieval_timing['search_total'] = int((_time.time() - _t0) * 1000)

@@ -22,7 +22,7 @@ from django.contrib.auth.models import User
 from django.http import Http404, HttpResponse
 from django.conf import settings
 from django.core import signing
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone as dt_timezone
 import json
 import logging
 import csv
@@ -595,7 +595,7 @@ def _add_business_hours(now, hours_to_add, oh_cfg):
     try:
         tz = ZoneInfo((oh_cfg.get('timezone_name') or 'UTC'))
     except (ZoneInfoNotFoundError, Exception):
-        tz = timezone.utc
+        tz = dt_timezone.utc
     schedule = oh_cfg.get('schedule') or {}
     day_keys = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
     # Quick "no open time at all" guard
@@ -633,7 +633,7 @@ def _add_business_hours(now, hours_to_add, oh_cfg):
             # Jump to the next minute. The next-open-window seek is also valid
             # but the minute increments keep the code simple.
             cursor += timedelta(minutes=1)
-    return cursor.astimezone(timezone.utc)
+    return cursor.astimezone(dt_timezone.utc)
 
 
 def _should_send_notification_to_recipient(company_id, recipient_email, channel, event_type=None):
@@ -1367,7 +1367,7 @@ def summarize_document(request, document_id):
     except Exception as e:
         logger.exception("summarize_document failed")
         return Response(
-            {'status': 'error', 'message': 'Failed to summarize document', 'error': str(e)},
+            {'status': 'error', 'message': 'Failed to summarize document'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -1416,7 +1416,7 @@ def extract_document(request, document_id):
     except Exception as e:
         logger.exception("extract_document failed")
         return Response(
-            {'status': 'error', 'message': 'Failed to extract from document', 'error': str(e)},
+            {'status': 'error', 'message': 'Failed to extract from document'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -3043,7 +3043,7 @@ def snooze_ticket(request, ticket_id):
                 raw = data['snoozed_until'].replace('Z', '+00:00')
                 until = datetime.fromisoformat(raw)
                 if until.tzinfo is None:
-                    until = timezone.make_aware(until, timezone.utc)
+                    until = timezone.make_aware(until, dt_timezone.utc)
             except Exception:
                 return Response({'status': 'error', 'message': 'Invalid snoozed_until (ISO-8601 expected)'},
                                 status=status.HTTP_400_BAD_REQUEST)
@@ -4261,7 +4261,7 @@ def _parse_iso_aware(raw):
         s = raw.replace('Z', '+00:00') if isinstance(raw, str) else raw
         dt = datetime.fromisoformat(s) if isinstance(s, str) else s
         if dt.tzinfo is None:
-            dt = timezone.make_aware(dt, timezone.utc)
+            dt = timezone.make_aware(dt, dt_timezone.utc)
         return dt
     except Exception:
         return None
@@ -7843,6 +7843,9 @@ def delete_dead_letter(request, dlq_id):
 # The thin wrapper near the top of this module keeps the old name working.
 
 
+SURVEY_OPEN_DAYS = 14      # how long a satisfaction survey's link takes an answer (decision D22)
+
+
 @api_view(['POST'])
 @permission_classes([])
 @authentication_classes([])
@@ -7863,6 +7866,13 @@ def submit_satisfaction(request):
     if not survey:
         return Response({'status': 'error', 'message': 'Survey not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    # The link never expired, so anyone holding it could change the rating at any time (the test report's N9). It
+    # closes 14 days after it was sent (decision D22, 24 Nov 2026).
+    opened = survey.sent_at or survey.created_at
+    if opened and timezone.now() > opened + timedelta(days=SURVEY_OPEN_DAYS):
+        return Response({'status': 'error', 'code': 'survey_closed',
+                         'message': f'This survey closed {SURVEY_OPEN_DAYS} days after it was sent. Thank you all the same.'},
+                        status=status.HTTP_410_GONE)
     try:
         rating = int(d.get('rating'))
     except (TypeError, ValueError):

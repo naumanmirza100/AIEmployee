@@ -135,7 +135,11 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "6. Sign with the signature given in the prompt, as written. Never write placeholders in brackets such as "
         "[Your Name] or [Company]: leave out what you do not know.\n"
         "7. Write in the language and script the sender wrote in, unless the user's instructions ask for another. "
-        "In Urdu or Roman Urdu write as the company ('hum'), so the verbs do not guess the writer's gender.\n\n"
+        "In Urdu or Roman Urdu write as the company ('hum'), so the verbs do not guess the writer's gender.\n"
+        "8. Promise nothing nobody said: no action under way (\"our team is already investigating\"), no "
+        "availability or meeting time (\"I am free on Tuesday\"), no step done (\"we have processed your refund\") unless "
+        "the user's instructions say so. Say what will be checked or confirmed instead, without a date.\n"
+        "\n"
         "Output strict JSON only, with exactly these keys: "
         '{"subject": "...", "body": "...", "reasoning": "..."}'
     )
@@ -166,7 +170,13 @@ class ReplyDraftAgent(MarketingBaseAgent):
         "7. Write in the language and script the sender wrote in (Roman Urdu stays Roman Urdu, Urdu script stays "
         "Urdu script), unless the user's instructions ask for another. In Urdu or Roman Urdu write as the company "
         "('hum'), so the verbs do not guess the writer's gender.\n"
-        "8. Greet the person by the name they sign the email with; only when there is none, by the sender name.\n\n"
+        "8. Greet the person by the name they sign the email with; only when there is none, by the sender name.\n"
+        "9. Promise nothing nobody said: no action under way (\"our team is already investigating\"), no "
+        "availability or meeting time (\"I am free on Tuesday\"), no step done (\"we have processed your refund\") unless "
+        "the user's instructions say so. Say what will be checked or confirmed instead, without a date.\n"
+        "10. Rule 3 is for sales and enquiry emails. When the triage says the email is a complaint, a support problem, "
+        "an invoice or a meeting, answer it as that: acknowledge the problem, apologise where it is fair, say what "
+        "will be checked. Never an opt-out, and never treat it as a lead who is not interested.\n\n"
         "Output strict JSON only, with exactly these keys: "
         '{"interest_level": "...", "analysis": "...", "subject": "...", "body": "...", "reasoning": "..."}'
     )
@@ -740,10 +750,19 @@ class ReplyDraftAgent(MarketingBaseAgent):
         if caution:
             caution += '\n'
 
+        # What triage read the email as: an angry support customer got a sales-style "not interested" reply, the
+        # draft never told it was a complaint (the test report's Reply Draft 4 and N8, 24 Nov 2026).
+        triage = ''
+        if getattr(msg, 'category', ''):
+            from reply_draft_agent.models import CATEGORY_CHOICES
+            priority = getattr(msg, 'priority', '')
+            triage = (f"Triage: {dict(CATEGORY_CHOICES).get(msg.category, msg.category)}"
+                      + (f", {priority} priority" if priority else '') + '\n')
         return (
             f"{caution}"
             f"Desired tone: {tone}\n"
             f"Length guidance: {length_guide}\n"
+            f"{triage}"
             f"Sender: {sender_name} <{msg.from_email}>\n"
             f"Received: {msg.received_at.isoformat() if msg.received_at else 'unknown'}\n\n"
             f"{thread_block}"
