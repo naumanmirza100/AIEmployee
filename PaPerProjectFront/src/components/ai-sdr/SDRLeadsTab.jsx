@@ -23,7 +23,7 @@ import {
   createIcpProfile, updateIcpProfile, setDefaultIcpProfile, deleteIcpProfile,
   enrichLead, getLeadEnrichment, enrichLeadsBatch,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads, updateLead,
-  listLeadIndustries, renameLeadIndustry, bulkSetLeadIndustry,
+  listLeadIndustries, renameLeadIndustry, bulkSetLeadIndustry, bulkSetLeadIcp,
 } from '@/services/aiSdrService';
 
 // --------------------------------------------------------------------------
@@ -931,6 +931,11 @@ const SDRLeadsTab = () => {
   const [bulkIndustry, setBulkIndustry] = useState('');
   const [bulkIndustrySaving, setBulkIndustrySaving] = useState(false);
   const [allMatching, setAllMatching] = useState(false);   // the bulk action covers every lead the filters match
+  // Moving leads to an ICP (e.g. leads uploaded before leads had one); rescore = score the scored ones again with it.
+  const [bulkIcpId, setBulkIcpId] = useState('');
+  const [icpRescore, setIcpRescore] = useState(false);
+  const [icpMoving, setIcpMoving] = useState(false);
+  const [detailIcpId, setDetailIcpId] = useState('');
   const [detailIndustry, setDetailIndustry] = useState('');
   const [showIndustryManager, setShowIndustryManager] = useState(false);
   const [page, setPage] = useState(1);
@@ -1102,6 +1107,45 @@ const SDRLeadsTab = () => {
       toast({ title: 'Could not change the industry', description: e?.message, variant: 'destructive' });
     }
   };
+
+  useEffect(() => { setDetailIcpId(selectedLead?.icp_id ? String(selectedLead.icp_id) : ''); }, [selectedLead?.id, selectedLead?.icp_id]);
+
+  // Move leads to an ICP: the ticked ones, every matching one, or (from the detail panel) one lead.
+  const moveLeadsToIcp = async (icpId, target) => {
+    if (!icpId) return;
+    setIcpMoving(true);
+    try {
+      const resp = await bulkSetLeadIcp({ icpId, rescore: icpRescore, ...target });
+      toast({ title: resp?.message || 'ICP updated' });
+      return resp;
+    } catch (e) {
+      toast({ title: 'Could not change the ICP', description: e?.message, variant: 'destructive' });
+    } finally {
+      setIcpMoving(false);
+      loadLeads();
+      loadIcps();
+    }
+  };
+  const handleBulkSetIcp = async () => {
+    const resp = await moveLeadsToIcp(bulkIcpId, allMatching ? { filters: currentFilters } : { ids: [...selectedIds] });
+    // Moved leads may leave the filtered list (e.g. "No ICP"), so the old selection would point at nothing.
+    if (resp) { setSelectedIds(new Set()); setAllMatching(false); setBulkIcpId(''); }
+  };
+  const handleSaveDetailIcp = async () => {
+    if (!selectedLead) return;
+    const resp = await moveLeadsToIcp(detailIcpId, { ids: [selectedLead.id] });
+    if (resp?.updated) {
+      const icp = icpProfiles.find(i => String(i.id) === detailIcpId);
+      setSelectedLead(prev => ({ ...prev, icp_id: icp?.id ?? prev.icp_id, icp_name: icp?.name ?? prev.icp_name }));
+    }
+  };
+  const icpOptions = icpProfiles.map(i => ({ value: String(i.id), label: i.is_active ? `${i.name} (default)` : i.name }));
+  const rescoreBox = (
+    <label title="Leads already scored are scored again with the new ICP, in the background. Their old score shows until then."
+      style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'hsl(var(--pt-9ca3af))', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+      <input type="checkbox" checked={icpRescore} onChange={e => setIcpRescore(e.target.checked)} /> Rescore
+    </label>
+  );
   const allPageIds = leads.map(l => l.id);
   const allSelected = allPageIds.length > 0 && allPageIds.every(id => selectedIds.has(id));
   const someSelected = allPageIds.some(id => selectedIds.has(id)) && !allSelected;
@@ -1701,6 +1745,19 @@ const SDRLeadsTab = () => {
               {bulkIndustrySaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Set industry
             </button>
           </div>
+          {/* Move the selection to an ICP, e.g. leads uploaded before leads had one (they list under "No ICP"). */}
+          {icpProfiles.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Target size={13} style={{ color: '#a78bfa', flexShrink: 0 }} />
+              <div style={{ width: 180 }}>
+                <SdrSelect value={bulkIcpId} onChange={setBulkIcpId} style={inputStyle} placeholder="Move to ICP…" options={icpOptions} />
+              </div>
+              {rescoreBox}
+              <button onClick={handleBulkSetIcp} disabled={icpMoving || !bulkIcpId} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: bulkIcpId ? 'pointer' : 'not-allowed', opacity: bulkIcpId ? 1 : 0.5, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.35)', color: 'hsl(var(--pt-a78bfa))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                {icpMoving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Move
+              </button>
+            </div>
+          )}
           <button onClick={handleBulkQualify} disabled={bulkQualifying} title="Score the selected unscored leads with AI in the background. Scored leads are skipped." style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
             {bulkQualifying ? <Loader2 size={13} className="animate-spin" /> : <Brain size={13} />} Qualify selected
           </button>
@@ -2122,6 +2179,19 @@ const SDRLeadsTab = () => {
               <span style={{ fontSize: 13, color: selectedLead.icp_name ? 'var(--text-soft)' : '#6b7280' }}>
                 {selectedLead.icp_name || 'None of its own: scored with your default ICP'}
               </span>
+              {icpProfiles.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <SdrSelect value={detailIcpId} onChange={setDetailIcpId} style={inputStyle} placeholder="Move to ICP…" options={icpOptions} />
+                  </div>
+                  {selectedLead.score != null && rescoreBox}
+                  {detailIcpId && detailIcpId !== String(selectedLead.icp_id || '') && (
+                    <Button onClick={handleSaveDetailIcp} disabled={icpMoving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, height: 38 }}>
+                      {icpMoving ? <Loader2 size={13} className="animate-spin" /> : 'Save'}
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Score + category */}
