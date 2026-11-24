@@ -1,5 +1,7 @@
 """Whole-system backups (core.backups, api.views.admin_backups): what goes in the zip and what is left out, the
 admin-only endpoints, and the signed download link."""
+import csv
+import io
 import json
 import shutil
 import tempfile
@@ -70,6 +72,43 @@ class WhatGoesInTests(BackupBase):
         self.assertEqual(manifest['files'], 2)
         self.assertEqual((backup.summary['files'], backup.size_bytes > 0), (2, True))
         self.assertEqual(backup.summary['models']['core.company'], 1)
+
+    def test_each_companys_leads_are_exported_as_csvs(self):
+        from ai_sdr_agent.models import SDRLead
+        from marketing_agent.models import Campaign, CampaignLead, Lead
+        login = User.objects.create_user('acme-login', 'owner@acme.test', 'x')
+        owner = CompanyUser.objects.create(company=self.company, email='owner@acme.test', full_name='Owner',
+                                           role='owner', password_hash='x', is_active=True, login_user=login)
+        other = Company.objects.create(name='Beta Co', email='beta@test.local')
+        beta = CompanyUser.objects.create(company=other, email='b@beta.test', full_name='B', role='owner',
+                                          password_hash='x', is_active=True)
+        SDRLead.objects.create(company_user=owner, full_name='Ali Khan', email='ali@x.test',
+                               buying_signals=['Raised a Series A', 'Hiring'])
+        SDRLead.objects.create(company_user=owner, full_name='=HYPERLINK("http://evil")', is_deleted=True)
+        SDRLead.objects.create(company_user=beta, full_name='Sara')
+        lead = Lead.objects.create(email='lead@x.test', first_name='Lina', owner=login)
+        CampaignLead.objects.create(campaign=Campaign.objects.create(name='Spring', owner=login), lead=lead)
+        Lead.objects.create(email='orphan@x.test', owner=self.admin)
+
+        backup = self.made_backup()
+        self.assertEqual(backup.status, 'done', backup.error)
+        acme, beta_dir = f'exports/{self.company.pk}-acme-dental', f'exports/{other.pk}-beta-co'
+        with zipfile.ZipFile(backups.backup_path(backup)) as zf:
+            names = set(zf.namelist())
+            sdr = list(csv.DictReader(io.StringIO(zf.read(f'{acme}/sdr_leads.csv').decode('utf-8-sig'))))
+            mkt = list(csv.DictReader(io.StringIO(zf.read(f'{acme}/marketing_leads.csv').decode('utf-8-sig'))))
+            manifest = json.loads(zf.read('manifest.json'))
+
+        self.assertIn(f'{beta_dir}/sdr_leads.csv', names)
+        self.assertIn('exports/0-no-company/marketing_leads.csv', names)   # its owner is no company's login
+        self.assertEqual([r['full_name'] for r in sdr], ['Ali Khan', '\'=HYPERLINK("http://evil")'])
+        self.assertEqual((sdr[0]['buying_signals'], sdr[0]['added_by'], sdr[1]['is_deleted']),
+                         ('Raised a Series A; Hiring', 'owner@acme.test', 'True'))
+        self.assertEqual((mkt[0]['email'], mkt[0]['campaigns'], mkt[0]['owner']),
+                         ('lead@x.test', 'Spring', 'owner@acme.test'))
+        self.assertEqual(manifest['exports'][f'{self.company.pk}-acme-dental'],
+                         {'sdr_leads.csv': 2, 'marketing_leads.csv': 1})
+        self.assertEqual(backup.summary['exported_leads'], 5)
 
     def test_a_failure_is_recorded_and_leaves_no_half_file(self):
         backup = SystemBackup.objects.create(created_by=self.admin, file_name='backup-bad.zip')
