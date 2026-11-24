@@ -11,7 +11,7 @@ already agreed, the model is never consulted, and the invitees are still held
 to the organiser's company.
 """
 
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 from unittest import mock
 
 from django.utils import timezone
@@ -54,7 +54,7 @@ class ScheduleFromPendingTests(PMTestCase):
 
     def test_the_time_is_taken_exactly_as_picked(self):
         # The picker sends UTC with a Z; it must survive as the same instant.
-        picked = self.when.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        picked = self.when.astimezone(dt_timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
         result = self.agent.schedule_from_pending(self.pending, picked)
         from datetime import datetime
         got = datetime.fromisoformat(result['data']['proposed_time'])

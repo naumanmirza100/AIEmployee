@@ -198,10 +198,45 @@ class DocumentProcessor:
                 text = ' '.join(chunk for chunk in chunks if chunk)
             return True, text, None
         except ImportError:
-            # Fallback to basic extraction if BeautifulSoup not available
-            return DocumentProcessor._extract_txt(file_path)
+            # Without BeautifulSoup the page was kept as it was, its tags, <style> and <script> included, and that went
+            # into the knowledge base (the test report's Frontline 2, 24 Nov 2026). Python's own parser strips them.
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    return True, DocumentProcessor._html_text(f.read()), None
+            except Exception as e:
+                return False, '', f"Error extracting HTML: {str(e)}"
         except Exception as e:
             return False, '', f"Error extracting HTML: {str(e)}"
+
+    @staticmethod
+    def _html_text(markup: str) -> str:
+        """The words of an HTML page, without its tags, styles and scripts, by the standard library's parser."""
+        from html.parser import HTMLParser
+
+        class _Text(HTMLParser):
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.parts, self._skip = [], 0
+
+            def handle_starttag(self, tag, attrs):
+                if tag in ('script', 'style', 'noscript', 'template'):
+                    self._skip += 1
+                elif tag in ('br', 'p', 'div', 'li', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+                    self.parts.append('\n')
+
+            def handle_endtag(self, tag):
+                if tag in ('script', 'style', 'noscript', 'template') and self._skip:
+                    self._skip -= 1
+
+            def handle_data(self, data):
+                if not self._skip:
+                    self.parts.append(data)
+
+        parser = _Text()
+        parser.feed(markup or '')
+        parser.close()
+        lines = (' '.join(line.split()) for line in ''.join(parser.parts).splitlines())
+        return ' '.join(line for line in lines if line)
     
     @staticmethod
     def _extract_pdf(file_path: str) -> Tuple[bool, str, Optional[str]]:

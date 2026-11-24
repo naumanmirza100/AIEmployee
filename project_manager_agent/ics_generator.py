@@ -3,7 +3,7 @@ ICS (iCalendar) file generator for meeting scheduling.
 Generates .ics files that can be imported into Google Calendar, Outlook, Apple Calendar, etc.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from django.utils import timezone
 import uuid
 
@@ -149,7 +149,7 @@ def _sequence(meeting) -> int:
 
 def _format_dt(dt) -> str:
     """Format a datetime as iCal UTC string: 20260402T140000Z"""
-    utc_dt = dt.astimezone(timezone.utc) if timezone.is_aware(dt) else dt
+    utc_dt = dt.astimezone(dt_timezone.utc) if timezone.is_aware(dt) else dt
     return utc_dt.strftime('%Y%m%dT%H%M%SZ')
 
 

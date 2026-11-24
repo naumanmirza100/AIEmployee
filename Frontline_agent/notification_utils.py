@@ -2,7 +2,7 @@
 Helpers for notification delivery: quiet hours, recipient preference lookup,
 and unsubscribe-token signing / verification.
 """
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone as dt_timezone
 import logging
 
 from django.conf import settings
@@ -81,7 +81,7 @@ def _recipient_local_now(prefs, now=None):
         except ZoneInfoNotFoundError:
             tz = ZoneInfo('UTC')
     except Exception:
-        return now.astimezone(timezone.utc)
+        return now.astimezone(dt_timezone.utc)
     return now.astimezone(tz)
 
 
@@ -121,7 +121,7 @@ def template_quiet_hours_check(template, now=None):
     try:
         tz = ZoneInfo(tz_name)
     except (ZoneInfoNotFoundError, Exception):
-        tz = timezone.utc
+        tz = dt_timezone.utc
     now = now or timezone.now()
     local = now.astimezone(tz)
     start = _parse_hhmm(cfg.get('start') or '22:00', time(22, 0))
@@ -136,7 +136,7 @@ def template_quiet_hours_check(template, now=None):
     target_local = datetime.combine(local.date(), end, tzinfo=local.tzinfo)
     if target_local <= local:
         target_local = target_local + timedelta(days=1)
-    return True, target_local.astimezone(timezone.utc)
+    return True, target_local.astimezone(dt_timezone.utc)
 
 
 def next_allowed_send_time(prefs, now=None):
@@ -151,7 +151,7 @@ def next_allowed_send_time(prefs, now=None):
     target_local = datetime.combine(local.date(), end, tzinfo=local.tzinfo)
     if target_local <= local:
         target_local = target_local + timedelta(days=1)
-    return target_local.astimezone(timezone.utc)
+    return target_local.astimezone(dt_timezone.utc)
 
 
 # ---------- Unsubscribe token ----------

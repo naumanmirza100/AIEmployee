@@ -354,6 +354,12 @@ export default function HRLeaveTab() {
                       <TableCell><Badge variant="outline" className="text-[10px]">{labelOf(lr.leave_type)}</Badge></TableCell>
                       <TableCell className="text-xs text-white/70">
                         {lr.start_date} → {lr.end_date}
+                        {/* Others in the team off then, for whoever decides (decision D21). */}
+                        {lr.others_off?.length > 0 && (
+                          <div className="mt-1 text-[10px] text-amber-300" title="Others in the same team on leave at the same time">
+                            Also off: {lr.others_off.map((o) => `${o.employee_name} (${o.start_date}${o.end_date !== o.start_date ? ` to ${o.end_date}` : ''}${o.status === 'pending' ? ', waiting' : ''})`).join('; ')}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-white/85">{lr.days_requested}</TableCell>
                       <TableCell className="text-xs text-white/70">{lr.approver_name || '—'}</TableCell>

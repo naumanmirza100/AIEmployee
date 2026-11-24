@@ -143,10 +143,10 @@ class ReplyDraftInbox(TestCase):
 
 # ---- Recruitment ---------------------------------------------------------------------------------------------------
 
-from recruitment_agent.tests.test_workflows import WorkflowTests as _WorkflowCase  # noqa: E402
+from recruitment_agent.tests import test_workflows as _workflows  # noqa: E402  (the module: its class would run here too)
 
 
-class RecruitmentTemplateTwice(_WorkflowCase):
+class RecruitmentTemplateTwice(_workflows.WorkflowTests):
 
     def test_the_same_copy_twice_is_refused_and_a_renamed_one_is_not(self):
         """Recruitment 2 (decision D25): a double click made two workflows, and every alert came twice."""
@@ -160,7 +160,7 @@ class RecruitmentTemplateTwice(_WorkflowCase):
 
 
 # The workflow tests themselves are not run a second time from here.
-for _name in [n for n in dir(_WorkflowCase) if n.startswith('test_')]:
+for _name in [n for n in dir(_workflows.WorkflowTests) if n.startswith('test_')]:
     setattr(RecruitmentTemplateTwice, _name, None)
 
 

@@ -2335,11 +2335,21 @@ _HR_PRIVATE_TYPES = ('exit_interview', 'grievance_hearing', 'performance_review'
 _HR_BUSY_ANSWERS = ('pending', 'accepted', 'counter_proposed')
 
 
-def _hr_aware(dt):
+def _hr_aware(dt, zone=None):
+    """`dt` with a zone. A time sent without an offset is read in `zone` (the meeting's, else the company's), as the
+    Executive agent reads it: "2026-11-25T15:15:00" with "Asia/Karachi" was booked at 15:15 UTC, 20:15 in Karachi
+    (the test report's Final 4, 24 Nov 2026). With no zone, UTC as before."""
     if dt is not None and timezone.is_naive(dt):
         from datetime import timezone as _dt_tz
-        return timezone.make_aware(dt, _dt_tz.utc)
+        from zoneinfo import ZoneInfo
+        return timezone.make_aware(dt, ZoneInfo(zone) if zone else _dt_tz.utc)
     return dt
+
+
+def _meeting_zone(d, company, meeting=None):
+    """The zone a meeting's typed time is in: the one sent, the meeting's own, then the company's; '' for none."""
+    return (zone_name(d.get('timezone_name'), default='') or zone_name(getattr(meeting, 'timezone_name', ''), default='')
+            or zone_name(getattr(company, 'timezone_name', ''), default=''))
 
 
 def _hr_duration(raw, default=30):
@@ -2510,7 +2520,7 @@ def create_hr_meeting(request):
     if not sched_raw or not d.get('title'):
         return Response({'status': 'error', 'message': 'title and scheduled_at are required'},
                         status=status.HTTP_400_BAD_REQUEST)
-    sched = _hr_aware(_parse_iso_dt(sched_raw))
+    sched = _hr_aware(_parse_iso_dt(sched_raw), _meeting_zone(d, company))
     if sched is None:
         return Response({'status': 'error', 'message': 'scheduled_at must be ISO-8601'},
                         status=status.HTTP_400_BAD_REQUEST)
@@ -4459,7 +4469,7 @@ def update_hr_meeting(request, meeting_id):
         m.description = str(d['description'] or '')[:5000]
         dirty.append('description')
     if 'scheduled_at' in d:
-        sched = _hr_aware(_parse_iso_dt(d['scheduled_at']))
+        sched = _hr_aware(_parse_iso_dt(d['scheduled_at']), _meeting_zone(d, m.company, m))
         if sched is None:
             return Response({'status': 'error', 'message': 'scheduled_at must be ISO-8601'},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -4972,6 +4982,25 @@ def extract_hr_meeting_action_items(request, meeting_id):
 # Leave requests — list with mine / pending filters
 # ============================================================================
 
+def _others_off(lr, most=5) -> list:
+    """Others in `lr`'s team (the same manager, else the same department) on approved or waiting leave that overlaps
+    it: names and dates, never the reasons."""
+    emp = lr.employee
+    if emp is None or not (lr.start_date and lr.end_date):
+        return []
+    team = Q(employee__manager_id=emp.manager_id) if emp.manager_id else (
+        Q(employee__department_obj_id=emp.department_obj_id) if emp.department_obj_id else
+        Q(employee__department=emp.department) if emp.department else None)
+    if team is None:
+        return []
+    overlapping = (LeaveRequest.objects.filter(team, employee__company_id=emp.company_id,
+                                               status__in=['approved', 'pending'],
+                                               start_date__lte=lr.end_date, end_date__gte=lr.start_date)
+                   .exclude(employee_id=emp.id).select_related('employee').order_by('start_date')[:most])
+    return [{'employee_name': o.employee.full_name, 'start_date': o.start_date.isoformat(),
+             'end_date': o.end_date.isoformat(), 'status': o.status} for o in overlapping]
+
+
 def _serialize_leave_request(lr) -> dict:
     return {
         'id': lr.id,
@@ -5051,6 +5080,12 @@ def list_leave_requests(request):
         from api.pagination import paginate
         page, pagination = paginate(request, qs, default_limit=200, max_limit=500)
         rows = [_serialize_leave_request(lr) for lr in page]
+        # Who else in the team is off then, for the one who decides (decision D21): "Clashes" were meetings only, so
+        # two people of one team off on the same days raised nothing (the test report's HR 6, 24 Nov 2026).
+        is_admin = _is_hr_admin(request.user)
+        for lr, row in zip(page, rows):
+            if lr.status == 'pending' and (is_admin or (asker_emp and lr.approver_id == asker_emp.id)):
+                row['others_off'] = _others_off(lr)
         return Response({'status': 'success', 'data': rows, 'count': len(rows),
                          'pagination': pagination})
     except Exception:
@@ -6420,13 +6455,25 @@ def list_employee_reviews(request, employee_id):
                          'message': "Only HR, the person and their managers can see someone's reviews."},
                         status=status.HTTP_403_FORBIDDEN)
     qs = PerformanceReview.objects.filter(employee=emp).select_related('cycle', 'reviewer')
-    if not _is_hr_admin(request.user):
-        # Self-view only sees released reviews.
-        caller_user_id = _caller_login_user_id(request.user)
-        if str(caller_user_id) != str(emp.user_id):
-            qs = qs.filter(visible_to_employee=True)
+    # It was back to front: the person saw the manager's unreleased rating and summary, and their manager saw only
+    # released reviews, not the one they were writing. Now HR and the managers see every review; the person sees
+    # every review too (they write their own part), with the manager's part once HR releases it.
+    is_self = not _is_hr_admin(request.user) and str(_caller_login_user_id(request.user)) == str(emp.user_id)
     return Response({'status': 'success',
-                     'data': [_serialize_perf_review(r) for r in qs.order_by('-cycle__period_start')]})
+                     'data': [_review_as_seen(r, is_self) for r in qs.order_by('-cycle__period_start')]})
+
+
+_MANAGER_PART = ('manager_summary', 'strengths', 'growth_areas', 'goals', 'overall_rating')
+
+
+def _review_as_seen(review, by_the_person):
+    """A review as shown: to the person it is about, the manager's part only once released."""
+    data = _serialize_perf_review(review)
+    if by_the_person and not review.visible_to_employee:
+        for key in _MANAGER_PART:
+            data[key] = [] if key == 'goals' else (None if key == 'overall_rating' else '')
+        data['manager_part_hidden'] = True
+    return data
 
 
 @api_view(['PATCH', 'POST'])
@@ -6555,7 +6602,7 @@ def update_perf_review(request, review_id):
         r.save(update_fields=fields)
         _write_audit_log(request.user, company, 'review.update', 'review', r.id,
                          before=before_review, after=_serialize_perf_review(r))
-    return Response({'status': 'success', 'data': _serialize_perf_review(r)})
+    return Response({'status': 'success', 'data': _review_as_seen(r, is_reviewee and not (is_admin or is_reviewer))})
 
 
 # ============================================================================
