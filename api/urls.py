@@ -15,6 +15,7 @@ from api.views import notification
 from api.views import company
 from api.views import company_auth
 from api.views import company_integrations
+from api.views import personal_calendar
 from api.views import company_users
 from api.views import user_tasks
 from api.views import company_user_tasks
@@ -199,6 +200,14 @@ urlpatterns = [
     re_path(r'^company/integrations/google-calendar/connect/?$', company_integrations.google_calendar_connect, name='company_gcal_connect'),  # POST
     re_path(r'^company/integrations/google-calendar/callback/?$', company_integrations.google_calendar_callback, name='company_gcal_callback'),  # GET (public)
     re_path(r'^company/integrations/google-calendar/disconnect/?$', company_integrations.google_calendar_disconnect, name='company_gcal_disconnect'),  # DELETE
+    # A person's own Google / Outlook calendar (core/personal_calendars.py, 24 Nov 2026)
+    re_path(r'^company/my-calendar/?$', personal_calendar.company_my_calendar, name='company_my_calendar'),  # GET / PATCH / DELETE
+    re_path(r'^company/my-calendar/connect/?$', personal_calendar.company_my_calendar_connect, name='company_my_calendar_connect'),  # POST
+    re_path(r'^company/my-calendar/sync/?$', personal_calendar.company_my_calendar_sync, name='company_my_calendar_sync'),  # POST
+    re_path(r'^me/calendar/?$', personal_calendar.my_calendar, name='my_calendar'),  # GET / PATCH / DELETE
+    re_path(r'^me/calendar/connect/?$', personal_calendar.my_calendar_connect, name='my_calendar_connect'),  # POST
+    re_path(r'^me/calendar/sync/?$', personal_calendar.my_calendar_sync, name='my_calendar_sync'),  # POST
+    re_path(r'^me/calendar/microsoft/callback/?$', personal_calendar.microsoft_callback, name='my_calendar_ms_callback'),  # GET (public)
     re_path(r'^company/forgot-password/?$', company_auth.forgot_password, name='company_forgot_password'),
     re_path(r'^company/verify-otp/?$', company_auth.verify_reset_otp, name='company_verify_reset_otp'),
     re_path(r'^company/reset-password/?$', company_auth.reset_password, name='company_reset_password'),

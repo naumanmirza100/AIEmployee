@@ -269,3 +269,11 @@ def check_ai_spend():
     spends far more than usual (core/ai_spend.py). Each alert goes once."""
     from core.ai_spend import check_and_alert
     return check_and_alert()
+
+
+@shared_task(name='core.tasks.sync_personal_calendars')
+def sync_personal_calendars():
+    """Every 15 minutes: each connected Google / Outlook calendar's busy times into the shared calendar, and the
+    meetings the agents booked for that person into it (core/personal_calendars.py)."""
+    from core.personal_calendars import sync_all
+    return sync_all()

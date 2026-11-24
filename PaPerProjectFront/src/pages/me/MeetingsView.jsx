@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { awaitsAnswer, canAnswer, isAnswered } from '@/utils/meetingAnswers';
+import PersonalCalendarCard from '@/components/shared/PersonalCalendarCard';
 
 /**
  * MeetingsView — /me/meetings
@@ -155,6 +156,8 @@ export default function MeetingsView() {
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
+
+      <PersonalCalendarCard side="employee" returnTo="/me/meetings" />
 
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-violet-300" /></div>

@@ -5154,12 +5154,12 @@ def _booked_on(company, day):
 
     A company holiday makes every agent refuse new bookings that day, but it
     cancels nothing: whoever adds one is shown what is already there, so they
-    can tell the people involved. Leave is not a booking and is left out.
+    can tell the people involved. Leave is not a booking and is left out, nor is a person's own calendar.
     """
     from core.models import CalendarBlock
     seen, found = set(), []
     blocks = (CalendarBlock.objects.filter(company=company, starts_at__date=day)
-              .exclude(source='leave').order_by('starts_at'))
+              .exclude(source__in=('leave', 'personal')).order_by('starts_at'))
     for block in blocks:
         key = (block.source, block.source_id)
         if key in seen:
