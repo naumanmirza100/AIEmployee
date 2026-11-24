@@ -801,3 +801,34 @@ class RecruitmentWorkflowRun(models.Model):
     class Meta:
         db_table = 'ppp_recruitment_workflow_runs'
         ordering = ['-started_at']
+
+
+class CVBatch(models.Model):
+    """CVs uploaded together on Process CVs, read and scored in the background (24 Nov 2026).
+
+    Each CV was read, scored and screened inside the request, about ten seconds a file with OpenAI: three CVs took
+    7½ minutes on screen in the test report (Recruitment 5), and the live server ends a request after 60 seconds. The
+    upload now answers at once; the work runs on its own thread, and the screen follows `files` until `result` is
+    there, the same answer the request used to give."""
+    STATUS_CHOICES = [('queued', 'Queued'), ('running', 'Running'), ('done', 'Done'), ('failed', 'Failed')]
+
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='cv_batches')
+    company_user = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
+                                     related_name='cv_batches')
+    job_description = models.ForeignKey(JobDescription, on_delete=models.SET_NULL, null=True, blank=True,
+                                        related_name='cv_batches')
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='queued', db_index=True)
+    #: One per file, in upload order: {"name", "state": waiting|reading|scoring|done|failed, "reason", "record_id"}.
+    files = models.JSONField(default=list, blank=True)
+    #: What the screen is given when it is done: results, total, failed_files, notice.
+    result = models.JSONField(default=dict, blank=True)
+    #: The settings the run was asked with: keywords worked out, top_n.
+    options = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'ppp_recruitment_cv_batches'
+        ordering = ['-created_at']

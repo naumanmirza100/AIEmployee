@@ -361,6 +361,8 @@ urlpatterns = [
 
     # Recruitment Agent endpoints (Company User)
     re_path(r'^recruitment/process-cvs/?$', recruitment_agent.process_cvs, name='recruitment_process_cvs'),  # POST (full pipeline)
+    re_path(r'^recruitment/cv-batches/?$', recruitment_agent.list_cv_batches, name='recruitment_cv_batches'),  # GET
+    re_path(r'^recruitment/cv-batches/(?P<batch_id>\d+)/?$', recruitment_agent.cv_batch_detail, name='recruitment_cv_batch'),  # GET
     re_path(r'^recruitment/agents/cv/parse/?$', recruitment_agent.api_cv_parse, name='recruitment_api_cv_parse'),  # POST
     re_path(r'^recruitment/agents/cv/summarize/?$', recruitment_agent.api_cv_summarize, name='recruitment_api_cv_summarize'),  # POST
     re_path(r'^recruitment/agents/cv/enrich/?$', recruitment_agent.api_cv_enrich, name='recruitment_api_cv_enrich'),  # POST

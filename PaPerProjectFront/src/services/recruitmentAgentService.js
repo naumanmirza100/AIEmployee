@@ -87,6 +87,28 @@ export const processCVs = async (files, jobDescriptionId = null, jobDescriptionT
   }
 };
 
+/** One Process CVs upload as it is read and scored in the background: each file's step, then `result`. */
+export const getCVBatch = async (batchId) => {
+  const token = getCompanyToken();
+  const response = await fetch(`${API_BASE_URL}/recruitment/cv-batches/${batchId}`, {
+    headers: { 'Authorization': `Token ${token}` },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || `HTTP error! status: ${response.status}`);
+  return data.data;
+};
+
+/** This login's uploads of the last day, newest first (to pick up one still running after a reload). */
+export const listCVBatches = async () => {
+  const token = getCompanyToken();
+  const response = await fetch(`${API_BASE_URL}/recruitment/cv-batches`, {
+    headers: { 'Authorization': `Token ${token}` },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || `HTTP error! status: ${response.status}`);
+  return data.data || [];
+};
+
 // ---------- Per-agent APIs (call each agent individually) ----------
 
 /**
@@ -805,6 +827,8 @@ export const getJobApplicationsByJob = async (jobDescriptionId) => {
 
 export default {
   processCVs,
+  getCVBatch,
+  listCVBatches,
   getJobDescriptions,
   generateJobDescription,
   createJobDescription,

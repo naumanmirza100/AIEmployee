@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent, ChevronsUpDown, Check, Search, Settings, ArrowRight, Info } from 'lucide-react';
-import { processCVs, getJobDescriptions, getInterviewSettings } from '@/services/recruitmentAgentService';
+import { processCVs, getJobDescriptions, getInterviewSettings, getCVBatch, listCVBatches } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
 // Module-level draft cache. Survives this component unmounting (e.g. the user
@@ -19,10 +19,42 @@ import QualificationReasoning from './QualificationReasoning';
 // clears on a full page reload, which is the expected "fresh start" behaviour.
 let cvProcessingDraft = null;
 
-// Files per upload request: about ten seconds of AI work each, inside the live server's 60-second limit.
-const FILES_PER_REQUEST = 3;
-// With Top N the best of the whole upload are chosen in one request, so it stays within the limit too.
-const FILES_WITH_TOP_N = 4;
+// The server now reads and scores the CVs in the background and answers at once (24 Nov 2026); this screen follows
+// the upload. They went three a request before, to stay inside the live server's 60-second limit.
+const FILES_PER_REQUEST = 20;
+// With Top N the best of the whole upload are chosen together, so they go in one upload.
+const FILES_WITH_TOP_N = 20;
+const POLL_MS = 3000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Follow a background upload until it is done; `onStep` hears its counts. Returns its result. */
+const followBatch = async (batch, onStep) => {
+  let current = batch;
+  while (current && !['done', 'failed'].includes(current.status)) {
+    onStep?.(current);
+    await sleep(POLL_MS);
+    current = await getCVBatch(current.id);
+  }
+  onStep?.(current);
+  if (current.status === 'failed' && !(current.result?.results?.length)) {
+    const failure = new Error(current.error || current.result?.message || 'Processing failed');
+    failure.failedFiles = current.result?.failed_files || [];
+    throw failure;
+  }
+  return current.result || {};
+};
+
+/** The step to show for a background upload. */
+const stepOf = (batch) => {
+  const c = batch?.counts || {};
+  const total = (batch?.files || []).length;
+  return {
+    done: (c.done || 0) + (c.failed || 0),
+    total,
+    step: c.scoring ? 'Scoring' : c.reading ? 'Reading' : batch?.status === 'queued' ? 'Starting' : 'Reading and scoring',
+  };
+};
 
 const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const { toast } = useToast();
@@ -34,7 +66,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const [jobKeywords, setJobKeywords] = useState(() => cvProcessingDraft?.jobKeywords || '');
   const [topN, setTopN] = useState(() => cvProcessingDraft?.topN || '');
   const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(null);   // { done, total } while files go in a few at a time
+  const [progress, setProgress] = useState(null);   // { done, total, step } while the upload is read and scored
   const [results, setResults] = useState(null);
   const [displayedKeywords, setDisplayedKeywords] = useState([]);
   const [jobSearchOpen, setJobSearchOpen] = useState(false);
@@ -51,6 +83,29 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
 
   React.useEffect(() => {
     fetchJobDescriptions();
+  }, []);
+
+  // An upload still being read and scored when the page was left or reloaded: follow it again here.
+  React.useEffect(() => {
+    let stopped = false;
+    listCVBatches().then(async (batches) => {
+      const running = batches.find((b) => ['queued', 'running'].includes(b.status));
+      if (!running || stopped) return;
+      setProcessing(true);
+      try {
+        const result = await followBatch(running, (b) => !stopped && setProgress(stepOf(b)));
+        if (!stopped && result.results) {
+          setResults({ ...result, total: result.results.length });
+          toast({ title: 'CVs processed', description: `${result.results.length} CV(s) scored for ${running.job_title || 'the job'}.` });
+          onProcessComplete?.();
+        }
+      } catch (error) {
+        if (!stopped) toast({ title: 'Processing failed', description: error.message, variant: 'destructive' });
+      } finally {
+        if (!stopped) { setProcessing(false); setProgress(null); }
+      }
+    }).catch(() => {});
+    return () => { stopped = true; };
   }, []);
 
   // When a draft is restored (e.g. after "Fix Settings"), selectedJobId comes
@@ -244,8 +299,12 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
       for (const batch of batches) {
         setProgress({ done: sent, total: all.length });
         try {
-          const part = await processCVs(batch, selectedJobId, jobDescriptionText, jobKeywords,
-                                        topN ? parseInt(topN) : null, false);
+          const answer = await processCVs(batch, selectedJobId, jobDescriptionText, jobKeywords,
+                                          topN ? parseInt(topN) : null, false);
+          // 202: read and scored in the background; follow it. An older server answers with the results.
+          const part = answer.batch
+            ? await followBatch(answer.batch, (b) => setProgress({ ...stepOf(b), done: sent + b.counts.done + b.counts.failed, total: all.length }))
+            : answer;
           response.results.push(...(part.results || []));
           response.failed_files.push(...(part.failed_files || []));
           response.notice = response.notice || part.notice || null;
@@ -550,8 +609,8 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   <span className="hidden sm:inline">
-                    {progress && progress.total > FILES_PER_REQUEST
-                      ? `Processing ${Math.min(progress.done + FILES_PER_REQUEST, progress.total)} of ${progress.total}...`
+                    {progress && progress.total
+                      ? `${progress.step || 'Reading and scoring'}: ${progress.done} of ${progress.total} done...`
                       : 'Processing CVs...'}
                   </span>
                   <span className="sm:hidden">Processing...</span>
