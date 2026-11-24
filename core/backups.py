@@ -24,16 +24,20 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import threading
 import zipfile
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
 from django.apps import apps
 from django.conf import settings
+from django.core.files import File
 from django.core.files.storage import FileSystemStorage, default_storage
 from django.core.management import call_command
 from django.db import close_old_connections, connection, models
+from django.db.models import signals as model_signals
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -257,9 +261,11 @@ def build_zip(path: Path, created_by: str = '') -> dict:
             'models': summary['models'],
             'exports': exports,
             'left_out': {'models': EXCLUDED_MODELS, 'apps': EXCLUDED_APPS, 'media_folders': sorted(SKIPPED_MEDIA_DIRS)},
-            'restore': ('Into a new, migrated database: manage.py loaddata database.json, then copy media/ into '
-                        'MEDIA_ROOT (exports/ is for reading only and is not loaded). Stored API keys and secrets only decrypt with the same FIELD_ENCRYPTION_KEY '
-                        '(or SECRET_KEY) as the server the backup came from.'),
+            'restore': ('On a new server, after migrate: manage.py restore_backup <this zip>. It loads the database '
+                        'and puts media/ back (exports/ is for reading only and is not loaded). Not plain loaddata: '
+                        'the app\'s save hooks would run during the load, fail on rows not loaded yet and change '
+                        'others. Stored API keys and secrets only decrypt with the same FIELD_ENCRYPTION_KEY (or '
+                        'SECRET_KEY) as the server the backup came from.'),
         }, indent=2))
     return summary
 
@@ -281,3 +287,92 @@ def run_backup(backup_id):
     backup.finished_at = timezone.now()
     backup.save(update_fields=['status', 'summary', 'size_bytes', 'error', 'finished_at'])
     close_old_connections()
+
+
+# ---- Restore (manage.py restore_backup) ------------------------------------------------------------------------
+# Tried on the live backup of 24 Nov 2026: plain `loaddata database.json` stopped on the first Reply, whose save hook
+# moves its lead on before the leads were loaded. The app has dozens of such hooks (a new login gets a profile, a
+# reply moves a lead, a document is queued for reading). A backup is the database as it already was, so they are off
+# while it loads: run again they fail on rows not loaded yet, or change the data being put back.
+MUTED_SIGNALS = (model_signals.pre_save, model_signals.post_save, model_signals.m2m_changed,
+                 model_signals.pre_delete, model_signals.post_delete)
+
+
+class RestoreError(Exception):
+    """A restore refused before anything was changed."""
+
+
+def _no_receivers(*args, **kwargs):
+    return []
+
+
+@contextmanager
+def model_hooks_off():
+    for signal in MUTED_SIGNALS:
+        signal.send = _no_receivers
+    try:
+        yield
+    finally:
+        for signal in MUTED_SIGNALS:
+            del signal.send          # back to Signal.send
+
+
+def database_is_new() -> bool:
+    """No logins and no companies: a server just set up, never one in use."""
+    from django.contrib.auth.models import User
+    from core.models import Company, CompanyUser
+    return not (User.objects.exists() or Company.objects.exists() or CompanyUser.objects.exists())
+
+
+def restore(zip_path, media=True) -> dict:
+    """Put a backup back into this server's database, which must be new (migrated, no logins, no companies), and its
+    uploaded files back where the database expects them. Returns {'records': n, 'files': n}.
+
+    The database is emptied first: migrations add starter rows (the agent plans, prices) that would clash with the
+    backup's own. Then everything loads in one transaction with the save hooks off, so a failure leaves it empty."""
+    zip_path = Path(zip_path)
+    if not zip_path.is_file():
+        raise RestoreError(f'No file at {zip_path}.')
+    if not database_is_new():
+        raise RestoreError('This database already has logins or companies. A backup goes into a new, migrated, empty '
+                           'database; it never merges into one in use. Nothing was changed.')
+    with zipfile.ZipFile(zip_path) as zf:
+        names = set(zf.namelist())
+        if not {'database.json', 'manifest.json'} <= names:
+            raise RestoreError('This is not a backup from Admin → Backups: it has no database.json and manifest.json.')
+        damaged = zf.testzip()
+        if damaged:
+            raise RestoreError(f'The zip is damaged: {damaged} does not match its checksum. Nothing was changed.')
+        manifest = json.loads(zf.read('manifest.json'))
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Path(tmp) / 'database.json'
+            with zf.open('database.json') as src, open(fixture, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
+            call_command('flush', interactive=False, verbosity=0)   # also puts back content types and permissions
+            with model_hooks_off():
+                call_command('loaddata', str(fixture), verbosity=0)
+        files = _restore_media(zf, names) if media else 0
+    return {'records': manifest.get('records'), 'files': files}
+
+
+def _restore_media(zf, names) -> int:
+    """Each media/ file back under MEDIA_ROOT, as build_zip found it. When uploads live in other storage (S3), the
+    ones the database points at go there too, where the app reads them."""
+    root = Path(settings.MEDIA_ROOT).resolve()
+    remote = not isinstance(default_storage, FileSystemStorage)
+    wanted = set(_stored_file_names()) if remote else set()
+    count = 0
+    for name in sorted(n for n in names if n.startswith('media/') and not n.endswith('/')):
+        rel = name[len('media/'):]
+        target = (root / rel).resolve()
+        if root not in target.parents:
+            logger.warning('Restore: left out %s, which points outside MEDIA_ROOT', name)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(name) as src, open(target, 'wb') as dst:
+            shutil.copyfileobj(src, dst)
+        if rel in wanted and not default_storage.exists(rel):
+            with open(target, 'rb') as fh:
+                default_storage.save(rel, File(fh, name=rel))
+        count += 1
+    return count
