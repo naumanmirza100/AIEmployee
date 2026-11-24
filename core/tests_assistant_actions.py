@@ -54,6 +54,31 @@ class Proposals(AssistantTestCase):
         self.assertEqual((code, body['message']), (400, 'This was done already.'))
         self.assertEqual(Task.objects.filter(title='Fix the login page').count(), 1)
 
+    def test_a_date_past_the_projects_end_is_said_before_confirm(self):
+        from core.models import Project
+        Project.objects.filter(pk=self.project.pk).update(deadline=date.today() + timedelta(days=3),
+                                                          end_date=date.today() + timedelta(days=3))
+        due = (date.today() + timedelta(days=7)).isoformat()
+        result = self.propose(self.admin, 'create_task', {'title': 'Late one', 'project': 'website', 'due_date': due})
+        self.assertTrue(result['asked_back'])
+        self.assertIn('ends on', result['answer'])
+        self.assertNotIn('proposal', result)
+
+    def test_a_refused_confirm_leaves_the_card_usable(self):
+        from core.models import Project
+        due = (date.today() + timedelta(days=7)).isoformat()
+        card = self.propose(self.admin, 'create_task', {'title': 'Plan Q2', 'project': 'website', 'due_date': due})['proposal']
+        Project.objects.filter(pk=self.project.pk).update(deadline=date.today() + timedelta(days=3),
+                                                          end_date=date.today() + timedelta(days=3))
+        for _ in range(2):                                   # PM refuses it, and says so each time
+            code, body = self.act(self.admin, card['token'])
+            self.assertEqual(code, 400)
+            self.assertIn('project deadline', body['message'])
+        Project.objects.filter(pk=self.project.pk).update(deadline=date.today() + timedelta(days=30),
+                                                          end_date=date.today() + timedelta(days=30))
+        self.assertEqual(self.act(self.admin, card['token'])[0], 200)
+        self.assertEqual(self.act(self.admin, card['token'])[1]['message'], 'This was done already.')
+
     def test_a_name_that_fits_nobody_or_two_is_asked_back(self):
         result = self.propose(self.admin, 'create_task', {'title': 'X', 'project': 'website', 'assignee': 'Zed'})
         self.assertTrue(result['asked_back'])
