@@ -145,10 +145,11 @@ name the agent in "needs".
 Lookups you may use (name — what it returns — arguments):
 {lookups}
 
-{history}Question: {question}
+{actions}{history}Question: {question}
 
 Return ONLY a JSON object:
 {{"calls": [{{"lookup": "<name>", "args": {{...}}}}],
+  "action": null,
   "ask_back": null,
   "needs": [],
   "english": "<the question restated in English, standalone>",
@@ -173,6 +174,9 @@ Rules:
 - A follow-up ("and the week after?", "what about Ali?") repeats the conversation's lookups with the new arguments.
 - "ask_back": one short question back, only when the question can't be looked up at all without it.
 - "needs": the agent names (e.g. "Recruitment", "Marketing") a question needs that are NOT among the lookups.
+- "action": {{"kind": "<an action above>", "args": {{...}}}} only when the asker asks for that to be done ("give Ali
+  the login page task by Friday", "approve Sana's leave", "close ticket 12"); then "calls" may be []. A question
+  about whether or to whom ("can I give someone a task?") is not a request: no action. Names exactly as typed.
 """
 
 
@@ -203,7 +207,9 @@ def plan(ai, ctx: Context, question, history) -> dict:
     me = ctx.directory.me(ctx.company_user)
     asker = f'{ctx.company_user.full_name} ({ctx.company_user.get_role_display()}' + \
         (f', {me.title}' if me and me.title else '') + ')'
+    from core.assistant import actions as A
     prompt = _PLAN.format(today=f'{ctx.today:%A} {ctx.today.isoformat()}', tz=ctx.tz, asker=asker,
+                          actions=A.plan_text(ctx) + ('\n' if A.plan_text(ctx) else ''),
                           agents=', '.join(AGENT_NAMES[m] for m in AGENT_NAMES if m in ctx.modules) or 'none',
                           unread=', '.join(unread(ctx)) or 'none', lookups=lookups, history=_history_lines(history), question=str(question)[:2000],
                           max_calls=MAX_CALLS)
@@ -219,8 +225,9 @@ def plan(ai, ctx: Context, question, history) -> dict:
     calls = [c for c in (out.get('calls') or []) if isinstance(c, dict) and c.get('lookup')][:MAX_CALLS]
     english = str(out.get('english') or '').strip()
     calls = _sure_calls(calls, f'{question} {english}', {lk.name for lk in usable})
+    action = out.get('action') if isinstance(out.get('action'), dict) and out['action'].get('kind') else None
     return {'calls': calls, 'ask_back': (out.get('ask_back') or None), 'needs': out.get('needs') or [],
-            'english': english, 'language': out.get('language')}
+            'english': english, 'language': out.get('language'), 'action': action}
 
 
 _GIVE_WORK = re.compile(r'\b(give|assign|hand)\b.*\b(task|work)\b|\b(take|get)\b.*\b(new|more)\s+(task|work)\b'
@@ -305,10 +312,11 @@ Write the answer as a helpful colleague would, plainly:
   own screens have it. Never say the agent is inactive, empty or unused.
 - With no facts at all, say what you can answer instead: people, who is free or away, tasks and projects, leave,
   support tickets.
-- You read only: you cannot assign, book, email, approve or change anything. A question about whether or to whom
-  ("can I give someone a task?", "who should get it?") is not a request: answer it, without saying you can't act.
-  When the asker wants something done,
-  say so in one sentence ("I can't assign tasks: I only read.") and where it is done, by name: tasks in Project
+- Creating or changing a task, deciding a leave request and changing a support ticket are proposed for the asker
+  to confirm, before this answer is written; here you answer. A question about whether or to whom ("can I give
+  someone a task?", "who should get it?") is not a request: answer it, without saying you can't act. When the
+  asker wants something else done (booking, emailing, anything not just named), say in one sentence that you
+  can't do that one here, and where it is done, by name: tasks in Project
   Manager, Tasks; leave in HR, Leave; HR, Project Manager or Executive meetings under that agent's Meetings; customer
   mail in Reply Draft, Emails; tickets in Frontline, Tickets; candidates and interviews in Recruitment; campaigns in
   Marketing; leads and sales calls in AI SDR; a CRM in CRM Sync. Never say "no information" or "no facts" for it.
@@ -390,11 +398,22 @@ def _sources(answer, facts) -> list[dict]:
 
 # ---- the whole question --------------------------------------------------------------------------------------------
 
+PROPOSED = "Here is what I'll do. Check it, then press Confirm; nothing changes until you do."
+
+
 def _prepare(company_user, question, history, ai):
-    """Plan and fetch. (ctx, ai, readout, facts, lookup names, the question back or None)."""
+    """Plan and fetch. (ctx, ai, readout, facts, lookup names, the question back or None, the proposal or None).
+    Asked to do something, the proposal (a card to confirm, core/assistant/actions.py) is the answer."""
     ctx = context_for(company_user)
     ai = ai or AssistantAI(company_user.company_id)
     readout = plan(ai, ctx, question, history)
+    if readout.get('action'):
+        from core.assistant import actions as A
+        try:
+            card = A.prepare(ctx, str(readout['action'].get('kind')), readout['action'].get('args'))
+        except A.NotPossible as exc:
+            return ctx, ai, readout, [], [], str(exc)[:600], None
+        return ctx, ai, readout, [], ['action:' + card['kind']], None, card
     facts, unsure = fetch(ctx, readout['calls'])
     names = [str(c.get('lookup')) for c in readout['calls']]
     # Ask "which one?" only about a name the asker typed. "Who should I give a task?" was answered with
@@ -413,10 +432,10 @@ def _prepare(company_user, question, history, ai):
                    for p in people]
         text = (f'Which "{first.name}" do you mean: ' + ', '.join(options[:-1]) + f' or {options[-1]}?'
                 if len(options) > 1 else f'Which "{first.name}" do you mean?')
-        return ctx, ai, readout, facts, names, text
+        return ctx, ai, readout, facts, names, text, None
     if readout['ask_back'] and not readout['calls']:
-        return ctx, ai, readout, facts, [], str(readout['ask_back'])[:400]
-    return ctx, ai, readout, facts, names, None
+        return ctx, ai, readout, facts, [], str(readout['ask_back'])[:400], None
+    return ctx, ai, readout, facts, names, None, None
 
 
 def _finish(answer, facts, question, ctx, names) -> dict:
@@ -432,7 +451,10 @@ def _finish(answer, facts, question, ctx, names) -> dict:
 
 def ask(company_user, question, history=None, *, ai=None) -> dict:
     """{'answer', 'sources', 'asked_back', 'lookups', 'flagged'}. Key and quota errors (KeyServiceError) propagate."""
-    ctx, ai, readout, facts, names, asked_back = _prepare(company_user, question, history, ai)
+    ctx, ai, readout, facts, names, asked_back, proposal = _prepare(company_user, question, history, ai)
+    if proposal:
+        return {'answer': PROPOSED, 'sources': [], 'asked_back': False, 'lookups': names, 'flagged': [],
+                'proposal': proposal}
     if asked_back:
         return {'answer': asked_back, 'sources': [], 'asked_back': True, 'lookups': names, 'flagged': []}
     return _finish(write(ai, ctx, question, history, facts, readout), facts, question, ctx, names)
@@ -443,8 +465,13 @@ def ask_stream(company_user, question, history=None, *, ai=None):
     {'type': 'meta', 'lookups'} once the facts are read, {'type': 'token', 'value'} for each piece, then
     {'type': 'done', **the answer as `ask` gives it}; {'type': 'error', 'message'} if it cannot be written.
     Key and quota errors raised before the answer starts propagate, as with `ask`."""
-    ctx, ai, readout, facts, names, asked_back = _prepare(company_user, question, history, ai)
+    ctx, ai, readout, facts, names, asked_back, proposal = _prepare(company_user, question, history, ai)
     yield {'type': 'meta', 'lookups': names}
+    if proposal:
+        yield {'type': 'token', 'value': PROPOSED}
+        yield {'type': 'done', 'answer': PROPOSED, 'sources': [], 'asked_back': False, 'lookups': names,
+               'flagged': [], 'proposal': proposal}
+        return
     if asked_back:
         yield {'type': 'token', 'value': asked_back}
         yield {'type': 'done', 'answer': asked_back, 'sources': [], 'asked_back': True, 'lookups': names,

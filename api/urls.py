@@ -299,6 +299,7 @@ urlpatterns = [
     # The Company Assistant: one chat that asks across the agents (core/assistant, CO-18).
     re_path(r'^company/assistant/?$', company_assistant.assistant_status, name='company_assistant'),  # GET
     re_path(r'^company/assistant/ask/?$', company_assistant.assistant_ask, name='company_assistant_ask'),  # POST
+    re_path(r'^company/assistant/act/?$', company_assistant.assistant_act, name='company_assistant_act'),  # POST: do a confirmed proposal
     re_path(r'^company/assistant/ask-stream/?$', company_assistant.assistant_ask_stream,
             name='company_assistant_ask_stream'),  # POST, ndjson
     re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET

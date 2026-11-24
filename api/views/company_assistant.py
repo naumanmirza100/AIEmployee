@@ -124,3 +124,28 @@ def assistant_ask_stream(request):
             logger.exception('assistant_ask_stream failed while writing')
             yield error_event(exc)
     return ndjson_response(stream())
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([AssistantThrottle])
+def assistant_act(request):
+    """Do what the assistant proposed, once the asker confirms it: {"token": the proposal's}. Through the agent's own
+    code with the asker's rights (core/assistant/actions.py); its refusals come back as the message."""
+    refused = _not_included(request)
+    if refused:
+        return refused
+    from core.assistant import actions
+    token = str((request.data or {}).get('token') or '') if isinstance(request.data, dict) else ''
+    if not token:
+        return Response({'status': 'error', 'message': 'Nothing to confirm.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        result = actions.apply(request.user, token)
+    except actions.NotPossible as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception:
+        logger.exception('assistant_act failed')
+        return Response({'status': 'error', 'message': 'That could not be done just now. Please try again.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response({'status': 'success', 'data': result})

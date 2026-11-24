@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Loader2, Send, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, Check, Loader2, Send, Sparkles, X } from 'lucide-react';
 
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import ChatMarkdown from '@/components/shared/ChatMarkdown';
@@ -70,7 +70,9 @@ export default function CompanyAssistantPage() {
             show(reply);
           } else if (event.type === 'done') {
             reply = { role: 'assistant', content: event.answer || reply.content || '(no answer)',
-              sources: event.sources || [], askedBack: !!event.asked_back };
+              sources: event.sources || [], askedBack: !!event.asked_back,
+              // Asked to do something: a card to confirm (core/assistant/actions.py). Nothing changes until then.
+              ...(event.proposal ? { proposal: { ...event.proposal, state: 'waiting' } } : {}) };
           } else if (event.type === 'error') {
             reply = { role: 'assistant', content: event.message || 'The assistant could not answer just now.', error: true };
           }
@@ -87,6 +89,23 @@ export default function CompanyAssistantPage() {
   };
 
   const writing = busy && chat.messages[chat.messages.length - 1]?.streaming;
+
+  // Confirm or cancel a proposal; its outcome is kept on the message, so the chat's history shows it.
+  const settle = (index, patch) => setChat((c) => {
+    const next = { ...c, messages: c.messages.map((m, i) => (i === index ? { ...m, proposal: { ...m.proposal, ...patch } } : m)) };
+    save(next);
+    return next;
+  });
+  const confirm = async (index) => {
+    const { token } = chat.messages[index].proposal;
+    settle(index, { state: 'working' });
+    try {
+      const res = await companyApi.post('/company/assistant/act', { token });
+      settle(index, { state: 'done', result: res?.data?.message || 'Done.', link: res?.data?.link, token: undefined });
+    } catch (e) {
+      settle(index, { state: 'failed', result: e?.data?.message || e?.message || 'That could not be done.' });
+    }
+  };
 
   const open = (c) => setChat({ id: c.id, title: c.title, messages: c.messages || [] });
   const startNew = () => setChat({ id: newId(), title: '', messages: [] });
@@ -128,8 +147,8 @@ export default function CompanyAssistantPage() {
             </div>
           ) : (
             <ChatShell
-              icon={Sparkles} title="Company Assistant" badge="Reads only" testId="assistant"
-              description={`Reads ${status.reads?.join(', ') || 'your agents'}.${status.not_yet?.length ? ` Not yet: ${status.not_yet.join(', ')}.` : ''} It never assigns, books or emails.`}
+              icon={Sparkles} title="Company Assistant" badge="Asks before acting" testId="assistant"
+              description={`Reads ${status.reads?.join(', ') || 'your agents'}.${status.not_yet?.length ? ` Not yet: ${status.not_yet.join(', ')}.` : ''} It can create and change tasks, decide leave and change tickets, always after you confirm.`}
               chats={history.map((c) => ({ id: c.id, title: c.title, updatedAt: c.updated_at,
                 detail: `${Math.ceil((c.messages?.length || 0) / 2)} question${(c.messages?.length || 0) > 2 ? 's' : ''}` }))}
               selectedId={chat.messages.length ? chat.id : null}
@@ -179,6 +198,44 @@ export default function CompanyAssistantPage() {
                   ) : (
                     <div data-testid="assistant-answer" className={`max-w-[90%] rounded-2xl border px-4 py-2 text-sm ${m.error ? 'border-red-500/40 text-red-300' : 'border-border bg-[var(--panel-2)] text-foreground'}`}>
                       <ChatMarkdown>{clean(m.content)}</ChatMarkdown>
+                      {m.proposal && (
+                        <div className="mt-2 rounded-lg border border-violet-400/30 bg-violet-500/5 p-3" data-testid="assistant-proposal">
+                          <p className="mb-1.5 text-sm font-semibold text-foreground">{m.proposal.title}</p>
+                          <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-0.5 text-xs">
+                            {(m.proposal.rows || []).map(([label, value]) => (
+                              <React.Fragment key={label}>
+                                <dt className="text-muted-foreground">{label}</dt>
+                                <dd className="text-foreground">{value}</dd>
+                              </React.Fragment>
+                            ))}
+                          </dl>
+                          {(m.proposal.warnings || []).map((w) => (
+                            <p key={w} className="mt-1.5 flex items-start gap-1 text-xs text-amber-300"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{w}</p>
+                          ))}
+                          {m.proposal.state === 'waiting' || m.proposal.state === 'working' ? (
+                            <div className="mt-2 flex gap-2">
+                              <Button size="sm" className="h-7 text-xs" disabled={m.proposal.state === 'working'}
+                                onClick={() => confirm(i)} data-testid="assistant-confirm">
+                                {m.proposal.state === 'working' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+                                Confirm
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 text-xs" disabled={m.proposal.state === 'working'}
+                                onClick={() => settle(i, { state: 'cancelled', token: undefined })}>
+                                <X className="mr-1 h-3 w-3" /> Cancel
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className={`mt-2 text-xs ${m.proposal.state === 'failed' ? 'text-red-300' : m.proposal.state === 'cancelled' ? 'text-muted-foreground' : 'text-emerald-300'}`}>
+                              {m.proposal.state === 'cancelled' ? 'Cancelled: nothing was changed.' : m.proposal.result}
+                              {m.proposal.link && (
+                                <button type="button" className="ml-2 inline-flex items-center gap-0.5 text-violet-300 hover:text-violet-200" onClick={() => navigate(m.proposal.link)}>
+                                  Open <ArrowUpRight className="h-3 w-3" />
+                                </button>
+                              )}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       {m.sources?.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2" data-testid="assistant-sources">
                           <span className="text-[11px] text-muted-foreground">Sources:</span>
