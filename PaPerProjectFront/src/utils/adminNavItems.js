@@ -12,6 +12,7 @@ import {
   History,
   Inbox,
   Bell,
+  DatabaseBackup,
 } from 'lucide-react';
 
 /**
@@ -64,6 +65,14 @@ export const getAdminNavItems = (navigate, { pendingRequests = 0 } = {}) => [
       // lives on the group above rather than here.
       { label: 'Requests', icon: Inbox, path: '/admin/api-keys', tab: 'requests' },
     ],
+  },
+  {
+    // Whole-system backup: every company's data, the users and the uploaded files in one zip.
+    label: 'Backups',
+    icon: DatabaseBackup,
+    section: 'admin-backups',
+    basePath: '/admin/backups',
+    onClick: () => navigate('/admin/backups'),
   },
   {
     label: 'Notifications',

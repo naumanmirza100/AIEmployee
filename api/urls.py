@@ -43,6 +43,7 @@ from api.views import hr_self_service
 from api.views import module_purchase
 from api.views import company_api_keys
 from api.views import admin_api_keys
+from api.views import admin_backups
 from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
@@ -782,6 +783,12 @@ urlpatterns = [
     re_path(r'^company/key-requests/(?P<request_id>\d+)/checkout/?$', company_api_keys.create_key_checkout_session, name='create_key_checkout_session'),  # POST
     re_path(r'^company/key-requests/verify-session/(?P<session_id>[^/]+)/?$', company_api_keys.verify_key_session, name='verify_key_session'),  # GET
 
+    # Super Admin — whole-system backups
+    re_path(r'^admin/backups/?$', admin_backups.backups_list, name='admin_backups'),  # GET, POST
+    re_path(r'^admin/backups/(?P<backup_id>\d+)/?$', admin_backups.backup_delete, name='admin_backup_delete'),  # DELETE
+    re_path(r'^admin/backups/(?P<backup_id>\d+)/link/?$', admin_backups.backup_download_link, name='admin_backup_link'),  # POST
+    re_path(r'^admin/backups/(?P<backup_id>\d+)/download/?$', admin_backups.backup_download, name='admin_backup_download'),  # GET (signed ticket)
+
     # Super Admin — API keys, pricing, quotas, requests
     re_path(r'^admin/api-keys/overview/?$', admin_api_keys.admin_overview, name='admin_overview'),  # GET
     re_path(r'^admin/api-keys/spend/?$', admin_api_keys.admin_ai_spend, name='admin_ai_spend'),  # GET
@@ -815,6 +822,7 @@ urlpatterns = [
     re_path(r'^sdr/leads/bulk-delete/?$', sdr_api.sdr_bulk_delete_leads, name='sdr_bulk_delete_leads'),  # POST
     re_path(r'^sdr/leads/bulk-restore/?$', sdr_api.sdr_bulk_restore_leads, name='sdr_bulk_restore_leads'),  # POST
     re_path(r'^sdr/leads/bulk-industry/?$', sdr_api.sdr_bulk_set_industry, name='sdr_bulk_set_industry'),  # POST
+    re_path(r'^sdr/leads/bulk-icp/?$', sdr_api.sdr_bulk_set_icp, name='sdr_bulk_set_icp'),  # POST
     re_path(r'^sdr/lead-industries/?$', sdr_api.sdr_lead_industries, name='sdr_lead_industries'),  # GET
     re_path(r'^sdr/lead-industries/rename/?$', sdr_api.sdr_rename_lead_industry, name='sdr_rename_lead_industry'),  # POST
     re_path(r'^sdr/dashboard/?$', sdr_api.sdr_dashboard, name='sdr_dashboard'),  # GET

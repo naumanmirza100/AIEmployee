@@ -89,7 +89,13 @@ class MarketingTestCase(TestCase):
                 sent_at=timezone.now() if outcome else None)
             return {'success': True} if outcome else {'success': False, 'error': 'mailbox said no'}
 
-        with mock.patch.object(sender.email_service, 'send_email', side_effect=send_email):
+        # A lock file of its own: the real one is shared by everything on the machine (TEMP), so another test
+        # process, a local server's sender, or a run that was killed left it there, and every run here skipped
+        # without a word for up to 30 minutes. That was the "16 sender tests fail" since 19 Nov 2026.
+        import tempfile
+        with tempfile.TemporaryDirectory() as lock_dir, \
+                mock.patch.object(sender, '_LOCK_PATH', f'{lock_dir}/sender.lock'), \
+                mock.patch.object(sender.email_service, 'send_email', side_effect=send_email):
             call_command('send_sequence_emails', stdout=StringIO())
         return sent
 

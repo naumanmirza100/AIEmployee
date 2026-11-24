@@ -127,6 +127,8 @@ db.sqlite3.*
 /staticfiles/
 /media/
 /mediafiles/
+# The super admin's whole-system backups (BACKUP_ROOT): every company's data
+/backups/
 /static/
 
     # Django settings (project-specific configurations)

@@ -2995,3 +2995,29 @@ class PersonalCalendarEvent(models.Model):
         app_label = 'core'
         constraints = [models.UniqueConstraint(fields=['calendar', 'block_source', 'block_source_id'],
                                                name='personal_event_unique')]
+
+
+class SystemBackup(models.Model):
+    """One whole-system backup the super admin made: the database and the uploaded files in one zip (core.backups).
+    The zip is in BACKUP_ROOT; this row says how far it got, so the admin page can show it and hand it out."""
+    STATUS_CHOICES = [
+        ('running', 'Running'),
+        ('done', 'Done'),
+        ('failed', 'Failed'),
+    ]
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='running')
+    file_name = models.CharField(max_length=255, blank=True)
+    size_bytes = models.BigIntegerField(default=0)
+    # What went in: {"records": n, "files": n, "models": {"ai_sdr_agent.sdrlead": n, ...}}
+    summary = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='system_backups')
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Backup {self.pk} ({self.status})"

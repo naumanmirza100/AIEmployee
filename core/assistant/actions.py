@@ -129,6 +129,26 @@ def prepare(ctx, kind, args) -> dict:
     return card
 
 
+def _outside_project(project_id, due):
+    """PM refuses a due date outside the project's dates. Said here, before Confirm, not after it (24 Nov 2026: the
+    live check's card was refused only on Confirm)."""
+    if not due:
+        return
+    from core.models import Project
+    from project_manager_agent.services.tasks import _as_moment, due_date_problem
+    project = Project.objects.filter(pk=project_id).first()
+    problem = due_date_problem(project, _as_moment(due)) if project is not None else None
+    if not problem:
+        return
+    if problem[0] == 'task_before_project_start':
+        starts = _as_moment(project.start_date).date()
+        raise NotPossible(f'The project "{project.name}" starts on {starts:%a %d %b %Y}, so a task can\'t be due on '
+                          f'{due:%a %d %b %Y}. Give a later date, or move the project\'s start first.')
+    ends = _as_moment(project.effective_deadline, end_of_day=True).date()
+    raise NotPossible(f'The project "{project.name}" ends on {ends:%a %d %b %Y}, so a task can\'t be due on '
+                      f'{due:%a %d %b %Y}. Give an earlier date, or extend the project first.')
+
+
 def _prepare_create_task(ctx, args):
     from core.tenancy import projects_for_company_user
     title = ' '.join(str(args.get('title') or '').split())[:200]
@@ -140,6 +160,7 @@ def _prepare_create_task(ctx, args):
     pid, pname = _by_name(projects, args.get('project') or (projects[0][1] if len(projects) == 1 else ''), 'project')
     data, rows, warnings = {'project_id': pid, 'title': title}, [['Task', title], ['Project', pname]], []
     due = _day(args.get('due_date'))
+    _outside_project(pid, due)
     if args.get('assignee'):
         person = _one_person(ctx, args['assignee'])
         if not _user_id(person):
@@ -164,6 +185,8 @@ def _prepare_update_task(ctx, args):
         tasks_for_company_user(ctx.company_user).values_list('id', 'title')[:500])
     tid, ttitle = _by_name(rows_found, args.get('task'), 'task')
     data, rows, warnings = {}, [['Task', ttitle]], []
+    from core.models import Task
+    _outside_project(Task.objects.filter(pk=tid).values_list('project_id', flat=True).first(), _day(args.get('due_date')))
     status = str(args.get('status') or '').lower().replace(' ', '_')
     if status:
         if status not in ('todo', 'in_progress', 'review', 'done', 'blocked'):
@@ -264,9 +287,13 @@ def apply(company_user, token) -> dict:
     from core.modules import active_modules
     if ACTIONS.get(kind, (None,))[0] not in active_modules(company_user.company):
         raise NotPossible('The company no longer has the agent this needs.')
-    _once(token)
-    return {'create_task': _apply_create_task, 'update_task': _apply_update_task,
-            'decide_leave': _apply_decide_leave, 'update_ticket': _apply_update_ticket}[kind](company_user, data)
+    from django.db import transaction
+    # Marked done and done together: a refusal by the agent undoes the mark, so the same card says the refusal
+    # again rather than "This was done already" (24 Nov 2026).
+    with transaction.atomic():
+        _once(token)
+        return {'create_task': _apply_create_task, 'update_task': _apply_update_task,
+                'decide_leave': _apply_decide_leave, 'update_ticket': _apply_update_ticket}[kind](company_user, data)
 
 
 def _once(token):

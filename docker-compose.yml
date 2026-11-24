@@ -80,6 +80,9 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - media:/app/media
+      # The super admin's whole-system backups (BACKUP_ROOT = /app/backups): made and handed out by this
+      # container only, and on a volume so that a deploy doesn't throw them away.
+      - backups:/app/backups
     depends_on:
       redis:
         condition: service_healthy
@@ -133,3 +136,5 @@ volumes:
   # Each container has a disk of its own, so without this the worker never saw
   # an upload, and every deploy threw them all away.
   media:
+  # The super admin's backup zips (core/backups.py): every company's data, so not under media/.
+  backups:

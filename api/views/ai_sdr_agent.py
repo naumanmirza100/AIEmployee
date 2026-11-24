@@ -2022,6 +2022,64 @@ def sdr_bulk_set_industry(request):
     })
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_bulk_set_icp(request):
+    """Move many leads to one ICP, e.g. leads uploaded before leads had an ICP of their own, which list as "No ICP".
+
+    Body: {"icp_id": 3, "ids": [1, 2, ...]} for the ticked leads, or {"icp_id": 3, "all_matching": true} for every
+    lead the list's filters match (in the query string, as for the list). "rescore": true also queues the moved
+    leads that were already scored, so they are scored again with that ICP; their old score shows until then.
+    Leads being scored right now are skipped: the scoring would save its own ICP back over the move.
+    """
+    company_user = request.user
+    icp_id = request.data.get('icp_id')
+    if icp_id is None or str(icp_id).strip() == '':
+        return Response({'status': 'error', 'message': 'Pick the ICP to move the leads to.'}, status=400)
+    try:
+        icp = _picked_icp(company_user, icp_id)
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=400)
+    rescore = request.data.get('rescore') is True
+
+    qs = SDRLead.objects.filter(company_user=company_user)
+    if request.data.get('all_matching') is True:
+        qs = _apply_lead_filters(qs, request).order_by()
+    else:
+        try:
+            ids = _id_list(request.data.get('ids'))
+        except ValueError as exc:
+            return Response({'status': 'error', 'message': f'{exc} Or send "all_matching".'}, status=400)
+        qs = qs.filter(id__in=ids)
+
+    skipped = qs.filter(qualification_status='processing').count()
+    movable = SDRLead.objects.filter(pk__in=qs.exclude(qualification_status='processing').values('pk'))
+    now = timezone.now()
+    queued = 0
+    if rescore:
+        queued = movable.filter(score__isnull=False).exclude(qualification_status='pending').update(
+            qualification_status='pending', qualification_queued_at=now,
+            qualification_attempts=0, qualification_error='',
+        )
+    updated = movable.update(icp_profile=icp, updated_at=now)
+
+    message = f'Moved {updated} lead(s) to "{icp.name}".'
+    if queued:
+        message += f' {queued} will be scored again with it in the background.'
+    if skipped:
+        message += f' {skipped} being scored right now were left as they are; try them again in a minute.'
+    return Response({
+        'status': 'success',
+        'updated': updated,
+        'queued': queued,
+        'skipped': skipped,
+        'icp_id': icp.id,
+        'message': message,
+        'stats': _lead_stats(company_user),
+    })
+
+
 # ==========================================================================
 # Lead industries (the filter's list, and renaming one across every lead)
 # ==========================================================================
