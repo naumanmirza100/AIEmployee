@@ -775,6 +775,12 @@ export const rejectHRWorkflowExecution = async (executionId, reason = '') => {
 };
 
 // ---------- Notifications ----------
+/** What the workflow step builder offers to pick from: templates, Project Manager projects, employees. */
+export const getHRWorkflowBuilderOptions = async () => {
+  const response = await companyApi.get('/hr/workflows/builder-options');
+  return response?.data || {};
+};
+
 export const listHRNotificationTemplates = async () => {
   try {
     const response = await companyApi.get('/hr/notifications/templates');
@@ -1394,6 +1400,7 @@ export default {
   listHREmployeeReviews,
   updateHRPerfReview,
   listHRNotificationTemplates,
+  getHRWorkflowBuilderOptions,
   createHRNotificationTemplate,
   updateHRNotificationTemplate,
   deleteHRNotificationTemplate,

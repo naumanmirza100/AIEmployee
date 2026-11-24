@@ -905,6 +905,7 @@ urlpatterns = [
 
     # Workflows / SOPs
     re_path(r'^hr/workflows/?$', hr_agent.list_hr_workflows, name='hr_list_workflows'),  # GET
+    re_path(r'^hr/workflows/builder-options/?$', hr_agent.hr_workflow_builder_options, name='hr_workflow_builder_options'),  # GET
     re_path(r'^hr/workflows/create/?$', hr_agent.create_hr_workflow, name='hr_create_workflow'),  # POST
     re_path(r'^hr/workflows/(?P<workflow_id>\d+)/?$', hr_agent.get_hr_workflow, name='hr_get_workflow'),  # GET
     re_path(r'^hr/workflows/(?P<workflow_id>\d+)/update/?$', hr_agent.update_hr_workflow, name='hr_update_workflow'),  # PATCH

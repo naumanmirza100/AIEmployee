@@ -1682,6 +1682,30 @@ def list_hr_workflow_executions(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
+def hr_workflow_builder_options(request):
+    """What the workflow step builder offers to pick from (24 Nov 2026): the company's message templates, its Project
+    Manager projects (when it has the agent) and the employees. The steps were typed as JSON."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _HR_ADMIN_ONLY}, status=status.HTTP_403_FORBIDDEN)
+    from core.models import Project
+    from core.modules import has_module
+    company = request.user.company
+    has_pm = has_module(company.id, 'project_manager_agent')
+    return Response({'status': 'success', 'data': {
+        'templates': list(HRNotificationTemplate.objects.filter(company=company).order_by('name')
+                          .values('id', 'name', 'channel')),
+        'has_project_manager': has_pm,
+        'projects': list(Project.objects.filter(company=company).order_by('name').values('id', 'name')[:200])
+        if has_pm else [],
+        'employees': list(Employee.objects.filter(company=company).exclude(employment_status='offboarded')
+                          .order_by('full_name').values('id', 'full_name', 'job_title')[:500]),
+    }})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
 def list_hr_workflows(request):
     company = request.user.company
     qs = HRWorkflow.objects.filter(company=company).order_by('-updated_at')[:200]
