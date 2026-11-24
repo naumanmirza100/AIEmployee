@@ -292,6 +292,9 @@ Write the answer as a helpful colleague would, plainly:
   "facts", and never refer to a fact by its number in a sentence.
 - Use only names, numbers, dates and times that are in the facts. When they don't tell, say so plainly; never
   guess or fill in.
+- Asked about a period ("in December", "next week"), name every fact that falls in it or overlaps it, also one that
+  starts before it or ends after it (a leave from 30 Nov to 4 Dec is leave in December). Leave none out. (The test
+  report's Final 3, 24 Nov 2026: Sana's 30 Nov to 4 Dec leave was left out of "who is on leave in December".)
 - The records never say a person's gender, so never guess it from a name: call a person by their name again, or
   "they" / "their"; never "he", "she", "his" or "her" (nor a gendered word in another language), unless the
   asker used that word for that person.

@@ -569,7 +569,7 @@ const AiInterviewQuestions = () => {
         <div className="w-64">
           <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2" style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)', borderTopLeftRadius: 16 }}>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
+              <span className="text-base font-semibold text-white/90 tracking-wide">Conversations</span>
               <button
                 id="REC-aiquestions-close-sidebar-btn"
                 data-testid="REC-aiquestions-close-sidebar-btn"

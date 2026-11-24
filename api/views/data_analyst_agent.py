@@ -43,6 +43,7 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.api_key_service import KeyServiceError
 from core.drf_exceptions import key_error_status
+from data_analyst_agent import guards
 from data_analyst_agent import connectors, dumps, engine, mongo, mssql, sources as source_work
 from data_analyst_agent.guards import Refused, check_query
 from data_analyst_agent.models import DataQuestion, DataSource, SavedQuestion
@@ -371,6 +372,9 @@ def sources(request):
         else:
             source.kind = str(data.get('kind') or '').strip()
             _apply_connection_fields(source, data)
+            refused_host = guards.private_address(source.host, source.port) if source.host else ''
+            if refused_host:
+                raise Refused(refused_host)
         if not source.name:
             source.name = (source.file_name or source.database or (source.host or '').split('.')[0] or 'Database')[:120]
     except Refused as exc:

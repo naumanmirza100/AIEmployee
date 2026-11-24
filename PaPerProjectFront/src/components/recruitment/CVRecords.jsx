@@ -367,7 +367,7 @@ const CVRecords = () => {
                             <div className="flex items-center gap-2 flex-wrap">
                               {record.rank != null && <Badge variant="outline" className="text-xs shrink-0">#{record.rank}</Badge>}
                               <h3 className="font-semibold text-sm truncate">{displayName}</h3>
-                              {record.scored_without_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The AI could not score this CV, so built-in rules did. Process it again to score it with AI.">scored without AI</Badge>}
+                              {record.scored_without_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The AI could not score this CV, so built-in rules did. Process it again to score it with AI.">scored without AI</Badge>}{record.scored_with_limited_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The full AI scoring failed, so a shorter AI check scored this CV from its skills and job titles only, not its years of experience or education. Process it again for a full score.">limited AI score</Badge>}
                             </div>
                           </div>
                           <div className="shrink-0">{getDecisionBadge(record.qualification_decision)}</div>
@@ -425,7 +425,7 @@ const CVRecords = () => {
                           <Checkbox id={`REC-cvrecords-select-${record.id}`} data-testid={`REC-cvrecords-select-${record.id}`} checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} className="translate-y-0.5" />
                         </TableCell>
                         <TableCell className="font-medium">{record.rank != null ? record.rank : '—'}</TableCell>
-                        <TableCell>{displayName}{record.scored_without_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The AI could not score this CV, so built-in rules did. Process it again to score it with AI.">scored without AI</Badge>}</TableCell>
+                        <TableCell>{displayName}{record.scored_without_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The AI could not score this CV, so built-in rules did. Process it again to score it with AI.">scored without AI</Badge>}{record.scored_with_limited_ai && <Badge variant="outline" className="ml-1 text-[10px] text-amber-300 border-amber-400/40" title="The full AI scoring failed, so a shorter AI check scored this CV from its skills and job titles only, not its years of experience or education. Process it again for a full score.">limited AI score</Badge>}</TableCell>
                         <TableCell className="text-muted-foreground">{displayEmail}</TableCell>
                         <TableCell className="max-w-[180px] truncate" title={record.job_description_title}>{record.job_description_title || '—'}</TableCell>
                         <TableCell>{getDecisionBadge(record.qualification_decision)}</TableCell>
@@ -588,10 +588,13 @@ export function CandidateProfile({ detail, getDecisionBadge }) {
         </div>
         <div className="flex items-center gap-5 sm:flex-col sm:items-end sm:gap-0.5 shrink-0">
           {detail.role_fit_score != null && (
-            <div className="text-3xl font-bold text-violet-400">{detail.role_fit_score}<span className="text-base text-violet-300/70">%</span></div>
+            <div className="text-3xl font-bold text-violet-400" title="How well the CV fits the role, as the AI read it">{detail.role_fit_score}<span className="text-base text-violet-300/70">%</span></div>
           )}
+          {detail.role_fit_score != null && <div className="text-xs text-white/40">Fit score</div>}
+          {/* The decision follows the confidence, not the fit score: a fit of 35 beside INTERVIEW looked wrong (the
+              test report's Recruitment 3a, 24 Nov 2026). */}
           {detail.qualification_confidence != null && (
-            <div className="text-xs text-white/40">Confidence: {detail.qualification_confidence}%</div>
+            <div className="text-xs text-white/40" title="The thresholds in Settings compare this number">Confidence: {detail.qualification_confidence}% (decides {detail.qualification_decision || 'the decision'})</div>
           )}
           {detail.created_at && (
             <div className="text-xs text-white/30 flex items-center gap-1 mt-1">
@@ -909,7 +912,7 @@ function LegacyCandidateDetail({ record, getDecisionBadge }) {
         <div className="flex sm:flex-col items-center sm:items-end gap-2 sm:gap-0 sm:text-right shrink-0">
           {record.role_fit_score != null && <div className="text-xl sm:text-2xl font-bold text-primary">{record.role_fit_score}%</div>}
           <div className="text-xs text-muted-foreground">Fit Score</div>
-          {record.qualification_confidence != null && <div className="text-xs sm:text-sm mt-1">Confidence: {record.qualification_confidence}%</div>}
+          {record.qualification_confidence != null && <div className="text-xs sm:text-sm mt-1" title="The thresholds in Settings compare this number">Confidence: {record.qualification_confidence}% (decides {record.qualification_decision || 'the decision'})</div>}
         </div>
       </div>
       {summary && <div><h4 className="font-semibold text-xs sm:text-sm mb-1">Summary</h4><p className="text-xs sm:text-sm text-muted-foreground">{summary}</p></div>}

@@ -1949,15 +1949,28 @@ Assess:
             kind = row['interest_level'] or 'not_analyzed'
             reply_kinds[kind] = reply_kinds.get(kind, 0) + row['n']
 
+        # Where each email stands in the campaign's sequence, and the wait before it, from the sequence's own steps:
+        # the template's defaults said every email was "step 0" after "3 days", where the sequence waited 5 minutes
+        # and 2 days (the test report's Marketing 3, 24 Nov 2026).
+        from marketing_agent.models import EmailSequenceStep
+        placed = {}
+        for row in (EmailSequenceStep.objects.filter(sequence__campaign=campaign, sequence__is_sub_sequence=False)
+                    .order_by('sequence_id', 'step_order')
+                    .values('template_id', 'step_order', 'delay_days', 'delay_hours', 'delay_minutes')):
+            placed.setdefault(row['template_id'], row)
         emails = []
         for template in campaign.email_templates.filter(is_active=True).only(
                 'id', 'campaign_id', 'subject', 'text_content', 'html_content', 'followup_sequence_number',
                 'followup_delay_days'):
             stats = by_email.get(template.id, {})
             words = (template.text_content or strip_tags(template.html_content or '')).split()
+            step = placed.get(template.id)
             emails.append({
-                'subject': template.subject, 'step': template.followup_sequence_number,
-                'wait_days': template.followup_delay_days, 'body_start': ' '.join(words[:90]),
+                'subject': template.subject,
+                'step': (step['step_order'] - 1) if step else template.followup_sequence_number,
+                'wait_days': template.followup_delay_days,
+                'wait': self._wait_text(step) if step else f'{template.followup_delay_days} days',
+                'body_start': ' '.join(words[:90]),
                 'sent': stats.get('sent', 0), 'opened': stats.get('opened', 0), 'clicked': stats.get('clicked', 0),
                 'replies': replies_by_email.get(template.id, 0),
             })
@@ -1981,9 +1994,17 @@ Assess:
         }
 
     @staticmethod
+    def _wait_text(step) -> str:
+        parts = [(step.get('delay_days') or 0, 'day'), (step.get('delay_hours') or 0, 'hour'),
+                 (step.get('delay_minutes') or 0, 'minute')]
+        words = [f"{n} {unit}{'s' if n != 1 else ''}" for n, unit in parts if n]
+        return ' '.join(words) or 'no wait'
+
+    @staticmethod
     def _describe_email(number: int, email: Dict) -> str:
         if email['step']:
-            when = 'follow-up %d, sent %d days after the previous one' % (email['step'], email['wait_days'])
+            when = 'follow-up %d, sent %s after the previous one' % (
+                email['step'], email.get('wait') or '%d days' % email['wait_days'])
         else:
             when = 'first email'
         return ('%d. "%s" (%s): sent %d, opened %d, clicked %d, replies %d\n   Starts: %s' % (
@@ -2015,6 +2036,9 @@ Results so far:
 The emails in the sequence:
 {emails or 'No emails written yet.'}
 
+Quote the figures above as they are: never call a rate zero, or say there was a single reply, unless the figures say so.
+Invent nothing: no figures, results, clients or social proof ("we've helped 30+ brands…") that are not given above. A
+rewritten email may only claim what the campaign's goal and emails already say.
 Only suggest changes the owner can make in this tool: rewrite an email's subject or text, change how long to wait before a follow-up, add or remove a follow-up, change the targeting, add leads, or pause the campaign. It is email only: do not suggest ads, social media, landing pages or A/B tests.
 If fewer than 20 emails have been sent, say the numbers are too few to judge and advise on the emails themselves instead.
 

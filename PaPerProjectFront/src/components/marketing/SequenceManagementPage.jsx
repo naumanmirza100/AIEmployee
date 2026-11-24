@@ -385,7 +385,9 @@ const SequenceManagementPage = ({ embedded = false }) => {
         if (reasons.other) reasonParts.push(`${reasons.other} error(s)`);
         toast({
           title: d.rejected_count ? 'Leads uploaded with some rejected' : 'Leads uploaded',
+          // A lead already in the campaign is "updated", not "added" (the test report's Marketing 4).
           description: `${d.total_rows} row(s) found — ${d.created_count} added as lead(s)${
+            d.updated_count ? `, ${d.updated_count} already in the campaign (updated)` : ''}${
             d.rejected_count ? `, ${d.rejected_count} rejected (${reasonParts.join(', ')}).` : '.'
           }`,
         });

@@ -116,6 +116,8 @@ TONE_GUIDES = {
 }
 
 
+from operations_agent.arithmetic import RULE as SUM_RULE, check_sums  # noqa: E402
+
 BASE_SYSTEM = (
     "You are a senior operations analyst and professional writer. "
     "You produce publication-ready business documents in GitHub-flavored Markdown. "
@@ -133,6 +135,7 @@ BASE_SYSTEM = (
     "- Be specific: cite numbers, percentages, dates, and named entities from the reference material.\n"
     "- Be factual: every claim should be defensible from the references or the user's prompt.\n"
     "- Be coherent: sections should flow logically and reinforce one another.\n"
+    "- " + SUM_RULE + "\n"
 )
 
 
@@ -188,6 +191,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
 
             if not content.lstrip().startswith('#'):
                 content = f"# {prepared['resolved_title']}\n\n{content}"
+            content, _ = check_sums(content)          # its adding, checked (operations_agent/arithmetic.py)
 
             return {
                 'success': True,
@@ -322,6 +326,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
 
             if not content.lstrip().startswith('#'):
                 content = f"# {prepared['resolved_title']}\n\n{content}"
+            # Its adding, checked: the saved document, which replaces the streamed text, has the right totals.
+            content, _ = check_sums(content)
 
             tokens_used = {}
             if usage:

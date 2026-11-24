@@ -1997,6 +1997,10 @@ def list_cv_records(request):
                 # Scored by the built-in rules because the AI failed; the screen marks it (CO-221).
                 'scored_without_ai': (insights_data.get('summarization_source') == 'rule_based_fallback'
                                       if isinstance(insights_data, dict) else False),
+                # Scored by the short fallback prompt, which sees only skills, titles and keywords (not years,
+                # education or achievements): it was shown as a full AI score (the test report's Recruitment 1).
+                'scored_with_limited_ai': (str(insights_data.get('summarization_source') or '').startswith('llm_minimal')
+                                           if isinstance(insights_data, dict) else False),
                 'qualification_decision': cv.qualification_decision,
                 'qualification_confidence': cv.qualification_confidence,
                 'qualification_priority': cv.qualification_priority,
