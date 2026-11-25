@@ -920,7 +920,7 @@ class ResearchOneLeadTests(LeadApiBase):
     def post(self, lead_id, result=None, data=None):
         result = result or {'status': 'success', 'profile': {'research_status': 'completed'}}
         with mock.patch('ai_sdr_agent.tasks.research_lead_impl', return_value=result) as impl:
-            r = self.call(views.research_lead_endpoint, 'post', data=data or {}, lead_id=lead_id)
+            r = self.call(views.research_lead_endpoint, 'post', data={'async': False, **(data or {})}, lead_id=lead_id)
         return r, impl
 
     def test_researching_my_lead_returns_the_profile(self):
@@ -934,10 +934,13 @@ class ResearchOneLeadTests(LeadApiBase):
 
     def test_async_queues_a_background_job(self):
         lead = self.make_lead()
-        with mock.patch('ai_sdr_agent.tasks.research_lead_task.delay', return_value=mock.Mock(id='t')) as d:
-            r = self.call(views.research_lead_endpoint, 'post', data={'async': True}, lead_id=lead.id)
-        self.assertEqual(r.data['status'], 'queued')
-        d.assert_called_once_with(lead.id, campaign_id=None, force=False)
+        for data in ({'async': True}, {}):          # the default since 25 Nov 2026: no request waits ~47 s
+            with self.subTest(data=data), mock.patch('ai_sdr_agent.tasks.research_lead_task.delay',
+                                                     return_value=mock.Mock(id='t')) as d,                     mock.patch('ai_sdr_agent.tasks.research_lead_impl') as impl:
+                r = self.call(views.research_lead_endpoint, 'post', data=data, lead_id=lead.id)
+                self.assertEqual(r.data['status'], 'queued')
+                d.assert_called_once_with(lead.id, campaign_id=None, force=False)
+                impl.assert_not_called()
 
     def test_an_unknown_or_another_companys_lead_is_not_found(self):
         for lead_id in (999999, self.their_lead().id):
@@ -950,16 +953,18 @@ class ResearchOneLeadTests(LeadApiBase):
 
 class ResearchLeadsBatchTests(LeadApiBase):
     def post(self, data):
-        with mock.patch('ai_sdr_agent.tasks.research_leads_batch_impl',
-                        return_value={'total': 1, 'completed': 1, 'failed': 0, 'results': []}) as impl:
+        with mock.patch('ai_sdr_agent.tasks.research_leads_batch_task.delay',
+                        return_value=mock.Mock(id='t')) as queued:
             r = self.call(views.research_leads_batch_endpoint, 'post', data=data)
-        return r, impl
+        return r, queued
 
-    def test_only_my_listed_leads_are_researched(self):
+    def test_only_my_listed_leads_are_researched_in_the_background(self):
         mine = self.make_lead()
-        r, impl = self.post({'lead_ids': [mine.id, self.their_lead().id]})
-        self.assertEqual(r.status_code, 200)
-        impl.assert_called_once_with([mine.id], campaign_id=None, force=False)
+        for data in ({}, {'async': False}):        # always in the background: up to 50 leads at ~47 s each
+            with self.subTest(data=data):
+                r, queued = self.post({'lead_ids': [mine.id, self.their_lead().id], **data})
+                self.assertEqual((r.status_code, r.data['status'], r.data['lead_count']), (200, 'queued', 1))
+                queued.assert_called_once_with([mine.id], campaign_id=None, force=False)
 
     def test_an_empty_list_or_only_other_peoples_leads_is_refused(self):
         self.assertRefused(self.post({'lead_ids': []})[0])

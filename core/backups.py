@@ -16,6 +16,10 @@ admin's log), the Celery schedule, the search indexes (rebuilt from the document
 backups themselves.
 
 A backup runs in a thread of the web process, so it neither waits on a Celery worker nor holds up the request.
+
+Every night one is also made by `manage.py make_backup`, which scripts/ppp-full-backup.sh runs from cron (21:00 UTC),
+then encrypts and sends to Backblaze B2 (25 Nov 2026). Those are named backup-...-nightly.zip; the server keeps the
+last seven of them. Backups made with the button stay until the admin deletes them.
 """
 import csv
 import io
@@ -48,12 +52,14 @@ EXCLUDED_MODELS = [
     'authtoken.token', 'core.usertoken', 'core.usersession', 'core.systembackup',
 ]
 EXCLUDED_APPS = ['django_celery_beat']
-# Folders under MEDIA_ROOT that are rebuilt from the documents, and files that are logs or crash dumps.
-SKIPPED_MEDIA_DIRS = {'hr_vector_indexes', 'operations_vector_indexes', 'backups'}
+# Folders under MEDIA_ROOT that are rebuilt from the documents, files that are logs or crash dumps, and CVs waiting to
+# be read (recruitment_agent/cv_batches.py: each is kept in cvs/ once it is read).
+SKIPPED_MEDIA_DIRS = {'hr_vector_indexes', 'operations_vector_indexes', 'backups', 'cv_batches'}
 SKIPPED_SUFFIXES = ('.log', '.dmp', '.mdmp', '.tmp', '.pyc', '.part')
 
 # A backup still "running" after this long died with the process that ran it (a restart or a deploy).
 STALE_AFTER = timedelta(hours=6)
+NIGHTLY_SUFFIX = '-nightly.zip'
 
 
 def backup_root() -> Path:
@@ -83,6 +89,44 @@ def start_backup(user):
         created_by=user, file_name=f"backup-{timezone.now():%Y%m%d-%H%M%S}.zip")
     threading.Thread(target=run_backup, args=(backup.pk,), name=f'system-backup-{backup.pk}', daemon=True).start()
     return backup
+
+
+def is_nightly(backup) -> bool:
+    return (backup.file_name or '').endswith(NIGHTLY_SUFFIX)
+
+
+def make_nightly_backup(keep: int = 7):
+    """The nightly backup (manage.py make_backup): made here and now, not on a thread, so the script that runs it can
+    send the zip on once this returns. When it is done, nightly backups past the newest `keep` are deleted. Returns the
+    backup, done or failed; ValueError when another one is being made."""
+    from core.models import SystemBackup
+    fail_stale_backups()
+    if SystemBackup.objects.filter(status='running').exists():
+        raise ValueError('A backup is already being made. Wait for it to finish.')
+    backup = SystemBackup.objects.create(
+        created_by=None, file_name=f"backup-{timezone.now():%Y%m%d-%H%M%S}{NIGHTLY_SUFFIX}")
+    run_backup(backup.pk)
+    backup.refresh_from_db()
+    if backup.status == 'done':
+        prune_nightly(keep)
+    return backup
+
+
+def prune_nightly(keep: int):
+    """Keep the newest `keep` finished nightly backups and delete the older ones, with any nightly failure older than
+    the oldest one kept. Backups made with the button are never touched."""
+    from core.models import SystemBackup
+    nightly = list(SystemBackup.objects.filter(file_name__endswith=NIGHTLY_SUFFIX).exclude(status='running')
+                   .order_by('-created_at', '-pk'))
+    kept = [b for b in nightly if b.status == 'done'][:max(keep, 1)]
+    if not kept:
+        return 0
+    oldest_kept = kept[-1].created_at
+    gone = [b for b in nightly if b not in kept and (b.status == 'done' or b.created_at < oldest_kept)]
+    for backup in gone:
+        backup_path(backup).unlink(missing_ok=True)
+        backup.delete()
+    return len(gone)
 
 
 def _included_models():

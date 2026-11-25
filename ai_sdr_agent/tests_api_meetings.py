@@ -244,6 +244,38 @@ class MeetingDetailTests(MeetingBase):
         outreach.send_email.assert_called_once()
         self.assertEqual(outreach.send_email.call_args[0][1], 'kiran@clinic.example')
 
+    def test_a_call_that_took_place_converts_its_lead_and_reopening_takes_it_back(self):
+        m = self.meeting(status='scheduled', scheduled_at=work_time(3))
+        SDRLead.objects.filter(pk=self.lead.pk).update(status='meeting_scheduled')
+        with mock.patch.object(msa.MeetingSchedulingAgent, 'send_completion_email'):
+            self.assertEqual(self.call(views.sdr_meeting_detail, 'put', data={'status': 'completed'},
+                                       meeting_id=m.id).status_code, 200)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.status, 'converted')
+        self.call(views.sdr_meeting_detail, 'put', data={'status': 'pending'}, meeting_id=m.id)    # Reopen
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.status, 'replied')
+
+    def test_reopening_one_call_keeps_the_lead_converted_by_another(self):
+        self.meeting(status='completed', scheduled_at=work_time(1))
+        m = self.meeting(status='completed', scheduled_at=work_time(3))
+        SDRLead.objects.filter(pk=self.lead.pk).update(status='converted')
+        self.call(views.sdr_meeting_detail, 'put', data={'status': 'pending'}, meeting_id=m.id)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.status, 'converted')
+
+    def test_a_disqualified_lead_stays_disqualified_and_other_edits_leave_the_lead_alone(self):
+        m = self.meeting(status='scheduled', scheduled_at=work_time(3))
+        SDRLead.objects.filter(pk=self.lead.pk).update(status='disqualified')
+        with mock.patch.object(msa.MeetingSchedulingAgent, 'send_completion_email'):
+            self.call(views.sdr_meeting_detail, 'put', data={'status': 'completed'}, meeting_id=m.id)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.status, 'disqualified')
+        SDRLead.objects.filter(pk=self.lead.pk).update(status='meeting_scheduled')
+        self.call(views.sdr_meeting_detail, 'put', data={'title': 'Demo'}, meeting_id=m.id)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.status, 'meeting_scheduled')
+
     def test_an_edit_saves_the_fields_sent(self):
         m = self.meeting()
         resp = self.call(views.sdr_meeting_detail, 'put', meeting_id=m.id,

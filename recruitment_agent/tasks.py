@@ -232,6 +232,13 @@ if shared_task is not None:
     @shared_task(name='recruitment_agent.tasks.send_pipeline_digests')
     def send_pipeline_digests():
         return _pipeline_digests_impl()
+
+    @shared_task(name='recruitment_agent.tasks.process_cv_batch')
+    def process_cv_batch(batch_id):
+        """CVs uploaded on Process CVs, read and scored here rather than on the web server (cv_batches.py)."""
+        from . import cv_batches
+        outcome = cv_batches.process(batch_id)
+        return {'batch_id': batch_id, 'status_code': outcome[0] if outcome else None}
 else:  # pragma: no cover
     def send_pipeline_digests():
         return _pipeline_digests_impl()
