@@ -2,13 +2,21 @@
 
 Each CV is read, scored and screened by the AI, about ten seconds a file; three CVs took 7½ minutes on screen, while the
 live server ends a request after 60 seconds. The screen sent three files a request to stay under that. Now the upload is
-answered at once with a `CVBatch`, the work runs on its own thread (as screening a public application does), and the
-screen follows the batch: each file's step, then the same results the request used to give. The uploader is told in
-the bell when it is done, so they need not wait on the page.
+answered at once with a `CVBatch`, the work runs in the background, and the screen follows the batch: each file's step,
+then the same results the request used to give. The uploader is told in the bell when it is done, so they need not
+wait on the page.
+
+Since 25 Nov 2026 the Celery worker runs it (recruitment_agent.tasks.process_cv_batch), not a thread of the web server:
+a deploy restarted the web server under a running batch and stopped it. The worker finishes the task it is on before a
+deploy stops it (docker-compose.yml, stop_grace_period). The files wait in MEDIA_ROOT/cv_batches/<id>/, the volume the
+web server and the worker share; the web server's own temporary files are not seen by the worker. When the worker
+cannot be reached, the batch runs on a thread here, as before.
 """
 import logging
+import shutil
 import threading
 from datetime import timedelta
+from pathlib import Path
 
 from django.conf import settings
 from django.db import connection, transaction
@@ -49,7 +57,13 @@ def settle_stale(batch):
                        'scored are with the candidates; upload the others again.')
         batch.finished_at = timezone.now()
         batch.save(update_fields=['status', 'error', 'finished_at'])
+        shutil.rmtree(batch_folder(batch.id), ignore_errors=True)
     return batch
+
+
+def batch_folder(batch_id) -> Path:
+    """Where a batch's files wait to be read: on the media volume, which the worker sees too."""
+    return Path(settings.MEDIA_ROOT) / 'cv_batches' / str(int(batch_id))
 
 
 def start(company_user, job_desc, job_kw_list, temp_files, top_n):
@@ -64,19 +78,54 @@ def start(company_user, job_desc, job_kw_list, temp_files, top_n):
         code, payload = run(batch.id, temp_files, reraise=True)
         return Response({**payload, 'batch_id': batch.id}, status=code)
 
-    def on_its_own_thread():
-        try:
-            run(batch.id, temp_files)
-        except Exception:
-            logger.exception('CV batch %s failed', batch.id)
-        finally:
-            connection.close()          # the thread's own database connection
+    folder = batch_folder(batch.id)
+    folder.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for index, (_name, temp_path) in enumerate(temp_files):
+        kept = folder / f'{index}{Path(temp_path).suffix[:10]}'
+        shutil.move(temp_path, kept)
+        paths.append(str(kept))
+    batch.options = {**batch.options, 'paths': paths}
+    batch.save(update_fields=['options'])
 
-    # After the batch row is committed, so the thread can read it.
-    transaction.on_commit(lambda: threading.Thread(target=on_its_own_thread, name=f'cv-batch-{batch.id}',
-                                                   daemon=True).start())
+    # After the batch row is committed, so the worker can read it.
+    transaction.on_commit(lambda: queue(batch.id))
     return Response({'status': 'accepted', 'message': f'{len(temp_files)} CV(s) are being read and scored.',
                      'batch': serialize(batch)}, status=status.HTTP_202_ACCEPTED)
+
+
+def queue(batch_id):
+    """Hand the batch to the worker; when the worker's queue cannot be reached, run it on a thread here."""
+    try:
+        from recruitment_agent.tasks import process_cv_batch
+        process_cv_batch.delay(batch_id)
+    except Exception:
+        logger.exception('CV batch %s: the worker could not be reached; reading it on the web server', batch_id)
+
+        def on_its_own_thread():
+            try:
+                process(batch_id)
+            except Exception:
+                logger.exception('CV batch %s failed', batch_id)
+            finally:
+                connection.close()          # the thread's own database connection
+
+        threading.Thread(target=on_its_own_thread, name=f'cv-batch-{batch_id}', daemon=True).start()
+
+
+def process(batch_id):
+    """Read and score a queued batch's files (the worker's task). A batch already taken, by the same task delivered
+    twice, is left alone. Returns (HTTP status, payload), or None when there was nothing to do."""
+    from recruitment_agent.models import CVBatch
+    if not CVBatch.objects.filter(pk=batch_id, status='queued').update(status='running', started_at=timezone.now()):
+        return None
+    batch = CVBatch.objects.get(pk=batch_id)
+    names = [entry.get('name') or '' for entry in batch.files or []]
+    paths = (batch.options or {}).get('paths') or []
+    try:
+        return run(batch_id, list(zip(names, paths)))
+    finally:
+        shutil.rmtree(batch_folder(batch_id), ignore_errors=True)
 
 
 def run(batch_id, temp_files, reraise=False):
