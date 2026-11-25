@@ -127,6 +127,7 @@ const AdminBackupsPage = () => {
                   One zip with the whole database (all companies, users, and every agent's data) and the uploaded
                   files (CVs, HR and Frontline documents, attachments). Login sessions, logs and search indexes are
                   left out. It is made in the background and kept on the server until you delete it.
+                  One is also made every night, encrypted and sent off-site; the server keeps the last seven of those.
                 </CardDescription>
               </div>
               <Button onClick={handleStart} disabled={starting || running}
@@ -159,7 +160,7 @@ const AdminBackupsPage = () => {
                             <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            {formatDate(b.created_at)}{b.created_by ? ` · by ${b.created_by}` : ''}
+                            {formatDate(b.created_at)}{b.nightly ? ' · nightly' : b.created_by ? ` · by ${b.created_by}` : ''}
                             {b.status === 'done' && (
                               <> · {formatSize(b.size_bytes)} · {(b.records ?? 0).toLocaleString()} records · {(b.files ?? 0).toLocaleString()} files</>
                             )}

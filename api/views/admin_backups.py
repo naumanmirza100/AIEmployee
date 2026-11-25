@@ -32,6 +32,7 @@ def _serialize(backup):
         'files': (backup.summary or {}).get('files'),
         'error': backup.error,
         'created_by': backup.created_by.username if backup.created_by else '',
+        'nightly': backups.is_nightly(backup),
         'created_at': backup.created_at.isoformat(),
         'finished_at': backup.finished_at.isoformat() if backup.finished_at else None,
     }
