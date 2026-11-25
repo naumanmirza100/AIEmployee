@@ -1472,8 +1472,9 @@ def research_lead_endpoint(request, lead_id):
 
     # R1: research can take ~47 s per lead — past nginx's 60 s, and it starves the
     # single API worker. Run it in the background (like enrichment) and let the
-    # screen poll the GET side of this endpoint for `research_status`.
-    if bool(request.data.get('async', False)):
+    # screen poll the GET side of this endpoint for `research_status`. The default
+    # since 25 Nov 2026; `async: false` waits for it, as before.
+    if str(request.data.get('async', True)).strip().lower() not in ('false', '0', 'no'):
         from ai_sdr_agent.tasks import research_lead_task
         task = research_lead_task.delay(lead.id, campaign_id=campaign_id, force=force)
         return Response({
@@ -1522,20 +1523,16 @@ def research_leads_batch_endpoint(request):
     campaign_id = request.data.get('campaign_id')
     force = bool(request.data.get('force', False))
 
-    # R1: a batch of up to 50 leads at ~47 s each cannot run in one request.
-    if bool(request.data.get('async', False)):
-        from ai_sdr_agent.tasks import research_leads_batch_task
-        task = research_leads_batch_task.delay(owned_ids, campaign_id=campaign_id, force=force)
-        return Response({
-            'status': 'queued',
-            'lead_count': len(owned_ids),
-            'task_id': task.id,
-            'message': f'{len(owned_ids)} leads queued for background research.',
-        })
-
-    from ai_sdr_agent.tasks import research_leads_batch_impl
-    batch = research_leads_batch_impl(owned_ids, campaign_id=campaign_id, force=force)
-    return Response({'status': 'success', **batch})
+    # R1: a batch of up to 50 leads at ~47 s each cannot run in one request, so it always runs in the background
+    # (since 25 Nov 2026; before, only when asked with async). Each lead's GET shows its research_status.
+    from ai_sdr_agent.tasks import research_leads_batch_task
+    task = research_leads_batch_task.delay(owned_ids, campaign_id=campaign_id, force=force)
+    return Response({
+        'status': 'queued',
+        'lead_count': len(owned_ids),
+        'task_id': task.id,
+        'message': f'{len(owned_ids)} leads queued for background research.',
+    })
 
 
 @api_view(['GET', 'POST'])
@@ -3592,6 +3589,24 @@ def sdr_meetings_list(request):
         return Response({'status': 'error', 'message': str(exc)}, status=500)
 
 
+def _lead_follows_call(meeting):
+    """A call marked completed took place: its lead is converted, the funnel's last stage (Analytics, the Leads
+    filter). Nothing set it, so that stage always read 0 (the AI SDR audit, 3 Nov 2026). A call reopened takes the lead
+    back, unless another of its calls took place. A disqualified lead stays so. Saved with save(), so CRM Sync hears."""
+    lead = meeting.lead
+    if lead is None or lead.status == 'disqualified':
+        return
+    held = meeting.status == 'completed' or SDRMeeting.objects.filter(
+        lead=lead, status='completed').exclude(pk=meeting.pk).exists()
+    if held and lead.status != 'converted':
+        lead.status = 'converted'
+    elif not held and lead.status == 'converted':
+        lead.status = 'meeting_scheduled' if meeting.status == 'scheduled' else 'replied'
+    else:
+        return
+    lead.save(update_fields=['status'])
+
+
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -3630,6 +3645,9 @@ def sdr_meeting_detail(request, meeting_id):
                 meeting.save()
 
             new_status = meeting.status
+            if old_status != new_status and 'completed' in (old_status, new_status):
+                _lead_follows_call(meeting)
+
             # Send completion thank-you email when status changes to completed
             if old_status != 'completed' and new_status == 'completed':
                 try:

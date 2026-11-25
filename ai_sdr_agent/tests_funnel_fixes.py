@@ -288,9 +288,9 @@ class ResearchAsyncTests(SDRBase):
         delay.assert_called_once()
         impl.assert_not_called()   # did NOT run inside the request
 
-    def test_single_research_sync_still_works(self):
+    def test_single_research_waits_when_asked_to(self):
         lead = self.make_lead('r2@acme.com')
-        req = APIRequestFactory().post('/x', {'force': True}, format='json')
+        req = APIRequestFactory().post('/x', {'force': True, 'async': False}, format='json')
         force_authenticate(req, user=self.cu)
         with mock.patch('ai_sdr_agent.tasks.research_lead_impl',
                         return_value={'status': 'success', 'profile': {'research_status': 'completed'}}) as impl:
