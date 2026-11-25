@@ -99,6 +99,11 @@ services:
     # (CELERY_WORKER_MAX_MEMORY_PER_CHILD, 600,000 KiB) come from settings on
     # Linux; override them in .env per container size if needed.
     command: celery -A project_manager_ai worker -l info
+    # A deploy stops the worker with SIGTERM: Celery then takes no new task and
+    # finishes the ones it is on. Docker's 10 s default killed a CV batch
+    # half-read (recruitment_agent/cv_batches.py); its tasks otherwise take
+    # seconds (3 s at most on 25 Nov 2026), so this does not slow a deploy.
+    stop_grace_period: 10m
     volumes:
       - media:/app/media
     depends_on:

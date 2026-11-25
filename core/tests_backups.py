@@ -6,6 +6,7 @@ import json
 import shutil
 import tempfile
 import zipfile
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -162,6 +163,61 @@ class EndpointTests(BackupBase):
         self.assertFalse(path.exists() or SystemBackup.objects.filter(pk=backup.pk).exists())
         running = SystemBackup.objects.create(created_by=self.admin, file_name='backup-run.zip')
         self.assertEqual(self.call(views.backup_delete, 'delete', backup_id=running.id).status_code, 409)
+
+
+class NightlyTests(BackupBase):
+    """manage.py make_backup, run each night by scripts/ppp-full-backup.sh (25 Nov 2026)."""
+
+    def old_backup(self, name, status='done', days_ago=1):
+        backup = SystemBackup.objects.create(file_name=name, status=status, created_by=self.admin)
+        SystemBackup.objects.filter(pk=backup.pk).update(
+            created_at=backup.created_at - timedelta(days=days_ago))
+        if status == 'done':
+            self.root.mkdir(parents=True, exist_ok=True)
+            (self.root / name).write_bytes(b'PK')
+        return backup
+
+    def test_the_command_makes_one_and_prints_its_name_last(self):
+        from io import StringIO
+        from django.core.management import call_command
+        out, err = StringIO(), StringIO()
+        call_command('make_backup', stdout=out, stderr=err)
+        backup = SystemBackup.objects.get()
+        self.assertEqual((backup.status, backup.created_by), ('done', None))
+        self.assertTrue(backup.file_name.endswith('-nightly.zip'))
+        self.assertEqual(out.getvalue().strip().splitlines()[-1], backup.file_name)
+        self.assertTrue(backups.backup_path(backup).is_file())
+        self.assertIn('records', err.getvalue())
+        row = self.call(views.backups_list).data['data'][0]
+        self.assertEqual((row['nightly'], row['created_by']), (True, ''))
+
+    def test_only_the_newest_nightly_ones_are_kept_and_hand_made_ones_never_go(self):
+        nightly = [self.old_backup(f'backup-2026110{d}-210000-nightly.zip', days_ago=10 - d) for d in range(1, 6)]
+        failed_old = self.old_backup('backup-20261020-210000-nightly.zip', status='failed', days_ago=30)
+        by_hand = self.old_backup('backup-20261001-101010.zip', days_ago=50)
+
+        new = backups.make_nightly_backup(keep=3)
+
+        left = set(SystemBackup.objects.values_list('file_name', flat=True))
+        self.assertEqual(left, {new.file_name, nightly[-1].file_name, nightly[-2].file_name, by_hand.file_name})
+        self.assertFalse((self.root / nightly[0].file_name).exists())
+        self.assertTrue((self.root / by_hand.file_name).exists())
+        self.assertNotIn(failed_old.file_name, left)
+
+    def test_a_failed_night_deletes_nothing(self):
+        nightly = [self.old_backup(f'backup-2026110{d}-210000-nightly.zip', days_ago=10 - d) for d in range(1, 4)]
+        with mock.patch.object(backups, 'call_command', side_effect=RuntimeError('disk full')):
+            new = backups.make_nightly_backup(keep=1)
+        self.assertEqual(new.status, 'failed')
+        self.assertEqual(SystemBackup.objects.filter(status='done').count(), len(nightly))
+
+    def test_it_waits_its_turn_when_one_is_being_made(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        SystemBackup.objects.create(created_by=self.admin, file_name='backup-run.zip')
+        with self.assertRaisesMessage(CommandError, 'already being made'):
+            call_command('make_backup')
+        self.assertEqual(SystemBackup.objects.count(), 1)
 
 
 class RestoreTests(BackupBase):
