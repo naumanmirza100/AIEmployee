@@ -53,8 +53,8 @@ const formatDate = (iso) => {
 const markdownComponents = {
   h2: ({ children }) => (
     <div className="flex items-center gap-2.5 mt-7 mb-3 pb-2 border-b border-white/[0.06]">
-      <div className="h-6 w-1 rounded-full bg-amber-500" />
-      <h2 className="text-lg font-bold text-amber-400 m-0">{children}</h2>
+      <div className="h-6 w-1 rounded-full bg-primary" />
+      <h2 className="text-lg font-bold text-[hsl(var(--primary-fill))] dark:text-violet-300 m-0">{children}</h2>
     </div>
   ),
   h3: ({ children }) => (
@@ -75,7 +75,7 @@ const markdownComponents = {
   li: ({ children }) => (
     <li className="flex items-start gap-2.5 text-sm text-white/55 leading-relaxed p-0 m-0">
       <span className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 mt-0.5 text-[10px] font-bold"
-        style={{ background: 'rgba(245,158,11,0.12)', color: 'hsl(var(--pt-f59e0b))' }}
+        style={{ background: 'hsl(var(--primary)/0.12)', color: 'var(--brand-ink)' }}
       >•</span>
       <span className="flex-1">{children}</span>
     </li>
@@ -84,7 +84,7 @@ const markdownComponents = {
     <strong className="font-semibold text-white/80">{children}</strong>
   ),
   a: ({ children, href }) => (
-    <a href={href} className="text-amber-400 underline underline-offset-2" target="_blank" rel="noopener noreferrer">{children}</a>
+    <a href={href} className="text-[hsl(var(--primary-fill))] dark:text-violet-300 underline underline-offset-2" target="_blank" rel="noopener noreferrer">{children}</a>
   ),
 };
 
@@ -148,7 +148,7 @@ const SummaryDetailPage = () => {
   if (loading) {
     return (
       <div id="OPS-summarydetail-loading-state" data-testid="OPS-summarydetail-loading-state" className="flex flex-col items-center justify-center py-32">
-        <Loader2 className="h-10 w-10 animate-spin text-amber-500/60" />
+        <Loader2 className="h-10 w-10 animate-spin text-[hsl(var(--primary-fill)/0.6)] dark:text-violet-300/60" />
         <p className="mt-4 text-sm text-white/40">Loading summary details...</p>
       </div>
     );
@@ -163,7 +163,7 @@ const SummaryDetailPage = () => {
           id="OPS-summarydetail-notfound-back-btn"
           data-testid="OPS-summarydetail-notfound-back-btn"
           variant="ghost"
-          className="mt-4 text-amber-400 hover:text-amber-300"
+          className="mt-4 text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300"
           onClick={() => navigate('/operations/summarization')}
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -203,7 +203,7 @@ const SummaryDetailPage = () => {
       </Button>
 
       {/* ── Header Card ── */}
-      <div id="OPS-summarydetail-header-card" data-testid="OPS-summarydetail-header-card" className="rounded-2xl border border-white/[0.06] p-6" style={{ background: 'rgba(0,0,0,0.25)' }}>
+      <div id="OPS-summarydetail-header-card" data-testid="OPS-summarydetail-header-card" className="rounded-2xl border border-white/[0.06] p-6" style={{ background: 'hsl(var(--card)/0.7)' }}>
         <div className="flex items-start gap-4">
           <div className="flex items-center justify-center w-16 h-16 rounded-2xl shrink-0" style={{ backgroundColor: fc.bg }}>
             <FI className="h-8 w-8" style={{ color: fc.color }} />
@@ -241,7 +241,7 @@ const SummaryDetailPage = () => {
             { label: 'Size', value: formatFileSize(summary.file_size), icon: Hash, color: '#8b5cf6' },
             { label: 'Pages', value: summary.page_count || 'N/A', icon: BookOpen, color: '#3b82f6' },
             { label: 'Words', value: summary.word_count?.toLocaleString() || 'N/A', icon: FileText, color: '#14b8a6' },
-            { label: 'Created', value: formatDate(summary.created_at), icon: Calendar, color: '#f59e0b' },
+            { label: 'Created', value: formatDate(summary.created_at), icon: Calendar, color: '#0ea5e9' },
             { label: 'By', value: summary.created_by || 'Unknown', icon: User, color: '#ec4899' },
           ].map((m, i) => (
             <div key={i} id={`OPS-summarydetail-stat-${m.label.toLowerCase()}`} data-testid={`OPS-summarydetail-stat-${m.label.toLowerCase()}`} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
@@ -258,8 +258,8 @@ const SummaryDetailPage = () => {
         {summary.processing_status && summary.processing_status !== 'ready' && (
           <div id="OPS-summarydetail-status-note" data-testid="OPS-summarydetail-status-note"
             className={`mt-4 flex items-start gap-2.5 rounded-xl border p-3 text-xs ${summary.processing_status === 'failed'
-              ? 'border-red-500/25 text-red-200/90' : 'border-amber-500/25 text-amber-200/90'}`}
-            style={{ background: summary.processing_status === 'failed' ? 'rgba(239,68,68,0.06)' : 'rgba(245,158,11,0.06)' }}>
+              ? 'border-red-500/25 text-red-200/90' : 'border-primary/25 text-[hsl(var(--primary-fill)/0.9)] dark:text-violet-200/90'}`}
+            style={{ background: summary.processing_status === 'failed' ? 'rgba(239,68,68,0.06)' : 'hsl(var(--primary)/0.06)' }}>
             {summary.processing_status === 'failed'
               ? <span><b>This file could not be summarised.</b> {summary.processing_error || ''} Delete it and upload it again to try once more.</span>
               : <span className="flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" /> This file is still being summarised. Come back in a minute.</span>}
@@ -297,9 +297,9 @@ const SummaryDetailPage = () => {
 
       {/* ── Rich Summary ── */}
       {summary.rich_summary && (
-        <div id="OPS-summarydetail-rich-summary-card" data-testid="OPS-summarydetail-rich-summary-card" className="rounded-xl border border-white/[0.06] p-6" style={{ background: 'rgba(0,0,0,0.15)' }}>
+        <div id="OPS-summarydetail-rich-summary-card" data-testid="OPS-summarydetail-rich-summary-card" className="rounded-xl border border-white/[0.06] p-6" style={{ background: 'hsl(var(--card)/0.7)' }}>
           <div className="flex items-center gap-2 mb-4">
-            <Sparkles className="h-5 w-5 text-amber-400" />
+            <Sparkles className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
             <h3 className="text-base font-bold text-white">Summary</h3>
           </div>
           <ReactMarkdown components={markdownComponents}>{unfence(summary.rich_summary)}</ReactMarkdown>
@@ -348,7 +348,7 @@ const SummaryDetailPage = () => {
 
           {/* Topics */}
           {summary.topics?.length > 0 && (
-            <div id="OPS-summarydetail-topics-card" data-testid="OPS-summarydetail-topics-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-summarydetail-topics-card" data-testid="OPS-summarydetail-topics-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'hsl(var(--card)/0.7)' }}>
               <div className="flex items-center gap-2 mb-3">
                 <Tag className="h-4 w-4 text-violet-400" />
                 <h4 className="text-sm font-semibold text-white">Topics</h4>
@@ -366,9 +366,9 @@ const SummaryDetailPage = () => {
 
           {/* Entities */}
           {hasEntities && (
-            <div id="OPS-summarydetail-entities-card" data-testid="OPS-summarydetail-entities-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-summarydetail-entities-card" data-testid="OPS-summarydetail-entities-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'hsl(var(--card)/0.7)' }}>
               <div className="flex items-center gap-2 mb-4">
-                <Zap className="h-4 w-4 text-amber-400" />
+                <Zap className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
                 <h4 className="text-sm font-semibold text-white">Entities Detected</h4>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -376,13 +376,13 @@ const SummaryDetailPage = () => {
                   { key: 'people', label: 'People', icon: Users, color: '#3b82f6' },
                   { key: 'organizations', label: 'Organizations', icon: Building2, color: '#10b981' },
                   { key: 'locations', label: 'Locations', icon: MapPin, color: '#f43f5e' },
-                  { key: 'dates', label: 'Dates', icon: Calendar, color: '#f97316' },
+                  { key: 'dates', label: 'Dates', icon: Calendar, color: '#0ea5e9' },
                   { key: 'amounts', label: 'Amounts', icon: DollarSign, color: '#eab308' },
                 ].map(({ key, label, icon: Icon, color }) => {
                   const items = summary.entities?.[key];
                   if (!items?.length) return null;
                   return (
-                    <div key={key} id={`OPS-summarydetail-entity-group-${key}`} data-testid={`OPS-summarydetail-entity-group-${key}`} className="rounded-lg border border-white/[0.05] p-3" style={{ background: 'rgba(0,0,0,0.1)' }}>
+                    <div key={key} id={`OPS-summarydetail-entity-group-${key}`} data-testid={`OPS-summarydetail-entity-group-${key}`} className="rounded-lg border border-white/[0.05] p-3" style={{ background: 'hsl(var(--card)/0.7)' }}>
                       <div className="flex items-center gap-1.5 mb-2">
                         <Icon className="h-3.5 w-3.5" style={{ color }} />
                         <span className="text-[11px] font-semibold" style={{ color }}>{label}</span>
@@ -443,20 +443,20 @@ const SummaryDetailPage = () => {
 
           {/* Deadlines */}
           {summary.deadlines?.length > 0 && (
-            <div id="OPS-summarydetail-deadlines-card" data-testid="OPS-summarydetail-deadlines-card" className="rounded-xl border border-orange-500/10 p-5" style={{ background: 'rgba(249,115,22,0.04)' }}>
+            <div id="OPS-summarydetail-deadlines-card" data-testid="OPS-summarydetail-deadlines-card" className="rounded-xl border border-primary/10 p-5" style={{ background: 'hsl(var(--primary)/0.04)' }}>
               <div className="flex items-center gap-2 mb-3">
-                <Calendar className="h-4 w-4 text-orange-400" />
-                <h4 className="text-sm font-semibold text-orange-400">Key Deadlines</h4>
+                <Calendar className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
+                <h4 className="text-sm font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-300">Key Deadlines</h4>
               </div>
               <div className="space-y-2">
                 {summary.deadlines.map((dl, i) => (
-                  <div key={i} id={`OPS-summarydetail-deadline-row-${i}`} data-testid={`OPS-summarydetail-deadline-row-${i}`} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-orange-500/10" style={{ background: 'rgba(249,115,22,0.05)' }}>
-                    <Clock className="h-3.5 w-3.5 text-orange-400 mt-0.5 shrink-0" />
+                  <div key={i} id={`OPS-summarydetail-deadline-row-${i}`} data-testid={`OPS-summarydetail-deadline-row-${i}`} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-primary/10" style={{ background: 'hsl(var(--primary)/0.05)' }}>
+                    <Clock className="h-3.5 w-3.5 text-[hsl(var(--primary-fill))] dark:text-violet-300 mt-0.5 shrink-0" />
                     {/* A deadline is { date, description } since CO-277; older summaries keep a sentence. */}
                     <span className="text-xs text-white/50 leading-relaxed">
                       {typeof dl === 'string' ? dl : (
                         <>
-                          {dl?.date && <span className="text-orange-300 font-medium mr-1.5">{formatDeadline(dl.date)}</span>}
+                          {dl?.date && <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-medium mr-1.5">{formatDeadline(dl.date)}</span>}
                           {dl?.description || 'Deadline'}
                         </>
                       )}
@@ -471,17 +471,17 @@ const SummaryDetailPage = () => {
 
       {/* ── Key Findings ── */}
       {summary.key_findings?.length > 0 && (
-        <div id="OPS-summarydetail-key-findings-card" data-testid="OPS-summarydetail-key-findings-card" className="rounded-xl border border-amber-500/10 p-5" style={{ background: 'rgba(245,158,11,0.04)' }}>
+        <div id="OPS-summarydetail-key-findings-card" data-testid="OPS-summarydetail-key-findings-card" className="rounded-xl border border-primary/10 p-5" style={{ background: 'hsl(var(--primary)/0.04)' }}>
           <div className="flex items-center gap-2 mb-4">
-            <Lightbulb className="h-5 w-5 text-amber-400" />
+            <Lightbulb className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
             <h3 className="text-base font-bold text-white">Key Findings</h3>
             <span className="text-[10px] text-white/30 ml-auto">{summary.key_findings.length} findings</span>
           </div>
           <div className="space-y-3">
             {summary.key_findings.map((finding, i) => (
               <div key={i} id={`OPS-summarydetail-finding-row-${i}`} data-testid={`OPS-summarydetail-finding-row-${i}`} className="flex items-start gap-3 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
-                <div className="h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.12)' }}>
-                  <span className="text-[11px] font-bold text-amber-400">{i + 1}</span>
+                <div className="h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'hsl(var(--primary)/0.12)' }}>
+                  <span className="text-[11px] font-bold text-[hsl(var(--primary-fill))] dark:text-violet-300">{i + 1}</span>
                 </div>
                 <p className="text-sm text-white/55 leading-relaxed">{plainText(finding)}</p>
               </div>

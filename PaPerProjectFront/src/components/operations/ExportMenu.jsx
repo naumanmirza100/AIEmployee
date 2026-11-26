@@ -72,7 +72,7 @@ const ExportMenu = ({
       type="button"
       title="Download"
       disabled={disabled || downloading}
-      className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 bg-black/30 text-white/75 hover:text-amber-200 hover:bg-amber-500/10 hover:border-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 bg-muted/50 dark:bg-black/30 text-white/75 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 hover:bg-primary/10 hover:border-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {downloading
         ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -99,9 +99,9 @@ const ExportMenu = ({
           id="OPS-exportmenu-md-item"
           data-testid="OPS-exportmenu-md-item"
           onClick={handleMd}
-          className="cursor-pointer text-sm focus:bg-amber-500/10 focus:text-amber-200"
+          className="cursor-pointer text-sm focus:bg-primary/10 focus:text-[hsl(var(--primary-fill))] dark:focus:text-violet-200"
         >
-          <FileCode className="h-4 w-4 mr-2 text-amber-300" />
+          <FileCode className="h-4 w-4 mr-2 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
           <div className="flex flex-col items-start">
             <span className="font-medium">Markdown (.md)</span>
             <span className="text-[10px] text-white/50">Raw source, editable</span>
@@ -112,11 +112,11 @@ const ExportMenu = ({
           data-testid="OPS-exportmenu-pdf-item"
           onClick={handlePdf}
           disabled={downloading}
-          className="cursor-pointer text-sm focus:bg-amber-500/10 focus:text-amber-200"
+          className="cursor-pointer text-sm focus:bg-primary/10 focus:text-[hsl(var(--primary-fill))] dark:focus:text-violet-200"
         >
           {downloading
-            ? <Loader2 className="h-4 w-4 mr-2 text-amber-300 animate-spin" />
-            : <FileText className="h-4 w-4 mr-2 text-amber-300" />}
+            ? <Loader2 className="h-4 w-4 mr-2 text-[hsl(var(--primary-fill))] dark:text-violet-300 animate-spin" />
+            : <FileText className="h-4 w-4 mr-2 text-[hsl(var(--primary-fill))] dark:text-violet-300" />}
           <div className="flex flex-col items-start">
             <span className="font-medium">PDF (.pdf)</span>
             <span className="text-[10px] text-white/50">

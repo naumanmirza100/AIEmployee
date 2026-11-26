@@ -30,9 +30,9 @@ const TEMP_CFG = {
 };
 
 const STATUS_CFG = {
-  new:               { label: 'New',              color: '#6b7280' },
+  new:               { label: 'New',              color: 'hsl(var(--muted-foreground))' },
   qualified:         { label: 'Qualified',         color: '#60a5fa' },
-  contacted:         { label: 'Contacted',         color: '#a78bfa' },
+  contacted:         { label: 'Contacted',         color: 'var(--brand-ink)' },
   replied:           { label: 'Replied',           color: '#4ade80' },
   meeting_scheduled: { label: 'Meeting Scheduled', color: '#34d399' },
   converted:         { label: 'Converted',         color: '#fbbf24' },
@@ -64,7 +64,7 @@ function SCORE_COLOR(s) { return s >= 70 ? '#f43f5e' : s >= 40 ? '#f59e0b' : '#6
 function trend(curr, prev) {
   if (curr > prev) return { Icon: TrendingUp,   color: '#4ade80', label: `+${curr - prev} vs last wk` };
   if (curr < prev) return { Icon: TrendingDown,  color: '#f87171', label: `−${prev - curr} vs last wk` };
-  return             { Icon: Minus,             color: '#6b7280', label: 'same as last wk' };
+  return             { Icon: Minus,             color: 'hsl(var(--muted-foreground))', label: 'same as last wk' };
 }
 
 // ---------------------------------------------------------------------------
@@ -89,8 +89,8 @@ function KPICard({ Icon, label, value, sub, color, trendData, onClick }) {
         {T && <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: T.color }}><T.Icon size={11} /><span>{T.label}</span></div>}
       </div>
       <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-soft)', lineHeight: 1.1 }}>{value}</div>
-      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: '#4b5563', marginTop: 2 }}>{sub}</div>}
+      <div style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))', marginTop: 4 }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: 'hsl(var(--muted-foreground) / 0.85)', marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -132,8 +132,8 @@ function SetupGuideContent({ which, copiedKey, setCopiedKey }) {
   ];
 
   const steps = which === 'apify' ? apifySteps : apolloSteps;
-  const accent = which === 'apify' ? '#a855f7' : '#3b82f6';
-  const accentBg = which === 'apify' ? 'rgba(168,85,247,0.2)' : 'rgba(59,130,246,0.2)';
+  const accent = which === 'apify' ? 'hsl(var(--primary-fill))' : '#3b82f6';
+  const accentBg = which === 'apify' ? 'hsl(var(--primary) / 0.2)' : 'rgba(59,130,246,0.2)';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '4px 0 8px' }}>
@@ -144,8 +144,8 @@ function SetupGuideContent({ which, copiedKey, setCopiedKey }) {
         </span>
       </div>
       {which === 'apollo' && (
-        <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', fontSize: 12 }}>
-          💡 <strong style={{ color: 'var(--text-soft)' }}>Recommendation:</strong> Use <strong style={{ color: '#a855f7' }}>Apify</strong> for lead generation if you don't have a paid Apollo plan.
+        <div style={{ padding: '8px 12px', borderRadius: 8, background: 'hsl(var(--primary) / 0.06)', border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', fontSize: 12 }}>
+          💡 <strong style={{ color: 'var(--text-soft)' }}>Recommendation:</strong> Use <strong style={{ color: 'hsl(var(--primary-fill))' }}>Apify</strong> for lead generation if you don't have a paid Apollo plan.
         </div>
       )}
       {steps.map(s => (
@@ -155,7 +155,7 @@ function SetupGuideContent({ which, copiedKey, setCopiedKey }) {
             <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{s.title}</div>
             <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>
             {s.link && <a href={s.link} target="_blank" rel="noreferrer" style={{ color: accent, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}><ExternalLink size={11} />{s.linkLabel}</a>}
-            {s.note && <div style={{ marginTop: 4, padding: '4px 8px', borderRadius: 6, background: 'hsl(var(--surface-invert) / 0.04)', color: '#6b7280', fontSize: 11, fontFamily: 'monospace' }}>{s.note}</div>}
+            {s.note && <div style={{ marginTop: 4, padding: '4px 8px', borderRadius: 6, background: 'hsl(var(--surface-invert) / 0.04)', color: 'hsl(var(--muted-foreground))', fontSize: 11, fontFamily: 'monospace' }}>{s.note}</div>}
             {s.code && (
               <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <code style={{ color: accent, fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
@@ -315,8 +315,8 @@ export default function SDROverviewTab() {
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 320, gap: 12 }}>
-        <Loader2 size={32} style={{ color: 'hsl(var(--pt-a78bfa))', animation: 'spin 1s linear infinite' }} />
-        <span style={{ color: '#6b7280', fontSize: 14 }}>Loading dashboard…</span>
+        <Loader2 size={32} style={{ color: 'var(--brand-ink)', animation: 'spin 1s linear infinite' }} />
+        <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 14 }}>Loading dashboard…</span>
         <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
       </div>
     );
@@ -366,10 +366,10 @@ export default function SDROverviewTab() {
               background: 'hsl(var(--surface-invert) / 0.04)', border: '1px solid hsl(var(--surface-invert) / 0.1)',
               borderRadius: 9, color: 'var(--text-soft)', fontSize: 13, cursor: 'pointer', transition: 'all 0.2s',
             }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#a78bfa'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--brand-ink)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'hsl(var(--surface-invert) / 0.1)'; }}
           >
-            <Brain size={14} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> Research Leads
+            <Brain size={14} style={{ color: 'var(--brand-ink)' }} /> Research Leads
           </button>
 
           {/* Other actions */}
@@ -392,7 +392,7 @@ export default function SDROverviewTab() {
                 opacity: actionBusy && actionBusy !== key ? 0.5 : 1,
               }}
               onMouseEnter={e => { if (!actionBusy) e.currentTarget.style.borderColor = color; }}
-              onMouseLeave={e => { if (!actionBusy) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
+              onMouseLeave={e => { if (!actionBusy) e.currentTarget.style.borderColor = 'hsl(var(--surface-invert) / 0.1)'; }}
             >
               {actionBusy === key
                 ? <Loader2 size={14} style={{ color, animation: 'spin 1s linear infinite' }} />
@@ -410,13 +410,13 @@ export default function SDROverviewTab() {
         <div style={{ ...card, padding: '14px 18px' }}>
           <SectionTitle>
             🔥 Top Hot Leads
-            <button onClick={() => navigate('/ai-sdr/leads')} style={{ display:'flex',alignItems:'center',gap:4,fontSize:12,color:'hsl(var(--pt-a78bfa))',background:'none',border:'none',cursor:'pointer' }}>
+            <button onClick={() => navigate('/ai-sdr/leads')} style={{ display:'flex',alignItems:'center',gap:4,fontSize:12,color:'var(--brand-ink)',background:'none',border:'none',cursor:'pointer' }}>
               View all <ChevronRight size={13} />
             </button>
           </SectionTitle>
           {hotLeads.length === 0 ? (
-            <div style={{ textAlign:'center',padding:'24px 0',color:'#4b5563',fontSize:13 }}>
-              No hot leads yet — import your leads on the <strong style={{ color:'hsl(var(--pt-a78bfa))' }}>Leads</strong> page
+            <div style={{ textAlign:'center',padding:'24px 0',color:'hsl(var(--muted-foreground) / 0.85)',fontSize:13 }}>
+              No hot leads yet — import your leads on the <strong style={{ color:'var(--brand-ink)' }}>Leads</strong> page
             </div>
           ) : (
             <div style={{ display:'flex',flexDirection:'column',gap:8 }}>
@@ -427,7 +427,7 @@ export default function SDROverviewTab() {
                   </div>
                   <div style={{ flex:1,minWidth:0 }}>
                     <div style={{ fontSize:13,fontWeight:600,color:'var(--text-soft)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{lead.full_name || '(No Name)'}</div>
-                    <div style={{ fontSize:11,color:'#6b7280',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{[lead.job_title,lead.company_name].filter(Boolean).join(' · ') || lead.email}</div>
+                    <div style={{ fontSize:11,color:'hsl(var(--muted-foreground))',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{[lead.job_title,lead.company_name].filter(Boolean).join(' · ') || lead.email}</div>
                   </div>
                   <div style={{ display:'flex',alignItems:'center',gap:6,flexShrink:0 }}>
                     {lead.temperature && TEMP_CFG[lead.temperature] && (() => {
@@ -439,7 +439,7 @@ export default function SDROverviewTab() {
                         {STATUS_CFG[lead.status].label}
                       </span>
                     )}
-                    <span style={{ fontSize:10,color:'#4b5563' }}>{SOURCE_LABELS[lead.source] || lead.source}</span>
+                    <span style={{ fontSize:10,color:'hsl(var(--muted-foreground) / 0.85)' }}>{SOURCE_LABELS[lead.source] || lead.source}</span>
                   </div>
                 </div>
               ))}
@@ -451,14 +451,14 @@ export default function SDROverviewTab() {
         <div style={{ ...card, padding:'14px 18px' }}>
           <SectionTitle>📊 Pipeline Funnel</SectionTitle>
           {funnel.length === 0
-            ? <div style={{ color:'#4b5563',fontSize:12,textAlign:'center',paddingTop:20 }}>No data yet</div>
+            ? <div style={{ color:'hsl(var(--muted-foreground) / 0.85)',fontSize:12,textAlign:'center',paddingTop:20 }}>No data yet</div>
             : <div style={{ display:'flex',flexDirection:'column',gap:12 }}>
                 {funnel.map((s,i) => (
                   <div key={i}>
                     <div style={{ display:'flex',justifyContent:'space-between',marginBottom:4 }}>
                       <span style={{ fontSize:12,color:'hsl(var(--pt-9ca3af))' }}>{s.stage}</span>
                       <span style={{ fontSize:12,color:'var(--text-soft)',fontWeight:600 }}>
-                        {s.count}<span style={{ fontSize:10,color:'#4b5563',fontWeight:400 }}> ({pct(s.count,funnel[0]?.count??1)}%)</span>
+                        {s.count}<span style={{ fontSize:10,color:'hsl(var(--muted-foreground) / 0.85)',fontWeight:400 }}> ({pct(s.count,funnel[0]?.count??1)}%)</span>
                       </span>
                     </div>
                     <div style={{ height:7,borderRadius:4,background:'hsl(var(--surface-invert) / 0.06)' }}>
@@ -477,11 +477,11 @@ export default function SDROverviewTab() {
         <div style={{ ...card,padding:'14px 18px' }}>
           <SectionTitle>📈 Last 7 Days</SectionTitle>
           {dailyTrend.length === 0
-            ? <div style={{ color:'#4b5563',fontSize:12,textAlign:'center',paddingTop:20 }}>No data yet</div>
+            ? <div style={{ color:'hsl(var(--muted-foreground) / 0.85)',fontSize:12,textAlign:'center',paddingTop:20 }}>No data yet</div>
             : <>
                 <div style={{ display:'flex',gap:14,marginBottom:12,fontSize:11 }}>
-                  {[['#60a5fa','Emails'],['#a78bfa','Leads'],['#34d399','Meetings']].map(([c,l]) => (
-                    <span key={l} style={{ display:'flex',alignItems:'center',gap:5,color:'#6b7280' }}>
+                  {[['#60a5fa','Emails'],['var(--brand-ink)','Leads'],['#34d399','Meetings']].map(([c,l]) => (
+                    <span key={l} style={{ display:'flex',alignItems:'center',gap:5,color:'hsl(var(--muted-foreground))' }}>
                       <span style={{ width:10,height:10,borderRadius:3,background:c,display:'inline-block' }} />{l}
                     </span>
                   ))}
@@ -492,11 +492,11 @@ export default function SDROverviewTab() {
                     return (
                       <div key={i} style={{ flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:3 }}>
                         <div style={{ display:'flex',alignItems:'flex-end',gap:2,height:70 }}>
-                          {[{val:d.emails,color:'#60a5fa'},{val:d.leads,color:'#a78bfa'},{val:d.meetings,color:'#34d399'}].map(({val,color},j) => (
+                          {[{val:d.emails,color:'#60a5fa'},{val:d.leads,color:'var(--brand-ink)'},{val:d.meetings,color:'#34d399'}].map(({val,color},j) => (
                             <div key={j} style={{ width:7,borderRadius:'2px 2px 0 0',height:`${maxAll?Math.max(2,(val/maxAll)*70):2}px`,background:color,transition:'height 0.5s ease',opacity:val===0?0.25:1 }} />
                           ))}
                         </div>
-                        <span style={{ fontSize:10,color:'#4b5563' }}>{d.day}</span>
+                        <span style={{ fontSize:10,color:'hsl(var(--muted-foreground) / 0.85)' }}>{d.day}</span>
                       </div>
                     );
                   })}
@@ -508,24 +508,24 @@ export default function SDROverviewTab() {
         <div style={{ ...card,padding:'14px 18px' }}>
           <SectionTitle>
             🚀 Active Campaigns
-            <button onClick={() => navigate('/ai-sdr/outreach')} style={{ display:'flex',alignItems:'center',gap:4,fontSize:12,color:'hsl(var(--pt-a78bfa))',background:'none',border:'none',cursor:'pointer' }}>Manage <ChevronRight size={13} /></button>
+            <button onClick={() => navigate('/ai-sdr/outreach')} style={{ display:'flex',alignItems:'center',gap:4,fontSize:12,color:'var(--brand-ink)',background:'none',border:'none',cursor:'pointer' }}>Manage <ChevronRight size={13} /></button>
           </SectionTitle>
           {campaignRows.length === 0
-            ? <div style={{ color:'#4b5563',fontSize:12,textAlign:'center',paddingTop:20 }}>No active campaigns</div>
+            ? <div style={{ color:'hsl(var(--muted-foreground) / 0.85)',fontSize:12,textAlign:'center',paddingTop:20 }}>No active campaigns</div>
             : <div style={{ display:'flex',flexDirection:'column',gap:10 }}>
                 {campaignRows.map(c => (
                   <div key={c.id} style={{ background:'hsl(var(--surface-invert) / 0.03)',borderRadius:9,padding:'10px 12px',border:'1px solid hsl(var(--surface-invert) / 0.06)' }}>
                     <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:7 }}>
                       <span style={{ fontSize:13,fontWeight:600,color:'var(--text-soft)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'55%' }}>{c.name}</span>
-                      <div style={{ display:'flex',gap:10,fontSize:11,color:'#6b7280' }}>
-                        <span>{c.emails_sent} <span style={{ color:'#4b5563' }}>sent</span></span>
-                        <span style={{ color:'hsl(var(--pt-4ade80))' }}>{c.replies} <span style={{ color:'#4b5563' }}>replies</span></span>
+                      <div style={{ display:'flex',gap:10,fontSize:11,color:'hsl(var(--muted-foreground))' }}>
+                        <span>{c.emails_sent} <span style={{ color:'hsl(var(--muted-foreground) / 0.85)' }}>sent</span></span>
+                        <span style={{ color:'hsl(var(--pt-4ade80))' }}>{c.replies} <span style={{ color:'hsl(var(--muted-foreground) / 0.85)' }}>replies</span></span>
                         <span style={{ color:'#34d399',fontWeight:600 }}>{c.meetings} mtg</span>
                       </div>
                     </div>
                     <div style={{ display:'flex',alignItems:'center',gap:8 }}>
                       <MiniBar value={c.emails_sent} max={maxCampEmails} color="#60a5fa" />
-                      <span style={{ fontSize:10,color:'hsl(var(--pt-a78bfa))',fontWeight:600,whiteSpace:'nowrap' }}>{c.reply_rate}% reply</span>
+                      <span style={{ fontSize:10,color:'var(--brand-ink)',fontWeight:600,whiteSpace:'nowrap' }}>{c.reply_rate}% reply</span>
                     </div>
                   </div>
                 ))}
@@ -540,7 +540,7 @@ export default function SDROverviewTab() {
         <div style={{ ...card,padding:'14px 18px' }}>
           <SectionTitle>👤 Lead Status</SectionTitle>
           {Object.keys(statusCounts).length === 0
-            ? <div style={{ color:'#4b5563',fontSize:12,textAlign:'center',paddingTop:12 }}>No leads yet</div>
+            ? <div style={{ color:'hsl(var(--muted-foreground) / 0.85)',fontSize:12,textAlign:'center',paddingTop:12 }}>No leads yet</div>
             : <div style={{ display:'flex',flexDirection:'column',gap:8 }}>
                 {Object.entries(STATUS_CFG).map(([key,cfg]) => {
                   const cnt = statusCounts[key] ?? 0;
@@ -548,7 +548,7 @@ export default function SDROverviewTab() {
                   const maxC = Math.max(...Object.values(statusCounts),1);
                   return (
                     <div key={key} style={{ display:'flex',alignItems:'center',gap:8 }}>
-                      <span style={{ fontSize:11,color:'#6b7280',width:100,flexShrink:0 }}>{cfg.label}</span>
+                      <span style={{ fontSize:11,color:'hsl(var(--muted-foreground))',width:100,flexShrink:0 }}>{cfg.label}</span>
                       <MiniBar value={cnt} max={maxC} color={cfg.color} />
                       <span style={{ fontSize:11,fontWeight:600,color:cfg.color,width:24,textAlign:'right' }}>{cnt}</span>
                     </div>
@@ -579,8 +579,8 @@ export default function SDROverviewTab() {
             })}
             {(stats.unscored??0)>0 && (
               <div style={{ display:'flex',justifyContent:'space-between',marginTop:4,paddingTop:8,borderTop:'1px solid hsl(var(--surface-invert) / 0.07)' }}>
-                <span style={{ fontSize:11,color:'#4b5563' }}>Unscored</span>
-                <span style={{ fontSize:11,color:'#4b5563',fontWeight:600 }}>{stats.unscored}</span>
+                <span style={{ fontSize:11,color:'hsl(var(--muted-foreground) / 0.85)' }}>Unscored</span>
+                <span style={{ fontSize:11,color:'hsl(var(--muted-foreground) / 0.85)',fontWeight:600 }}>{stats.unscored}</span>
               </div>
             )}
           </div>
@@ -590,13 +590,13 @@ export default function SDROverviewTab() {
         <div style={{ ...card,padding:'14px 18px' }}>
           <SectionTitle>💬 Reply Sentiment</SectionTitle>
           {Object.keys(sentCounts).length === 0
-            ? <div style={{ color:'#4b5563',fontSize:12,textAlign:'center',paddingTop:12 }}>No replies yet</div>
+            ? <div style={{ color:'hsl(var(--muted-foreground) / 0.85)',fontSize:12,textAlign:'center',paddingTop:12 }}>No replies yet</div>
             : <div style={{ display:'flex',flexDirection:'column',gap:8 }}>
                 {[
                   { key:'positive',       label:'🎉 Positive',       color:'#4ade80' },
                   { key:'wants_more_info',label:'ℹ️ Wants Info',     color:'#60a5fa' },
                   { key:'out_of_office',  label:'🏖️ Out of Office', color:'#f59e0b' },
-                  { key:'neutral',        label:'💬 Neutral',        color:'#9ca3af' },
+                  { key:'neutral',        label:'💬 Neutral',        color:'hsl(var(--muted-foreground))' },
                   { key:'not_interested', label:'❌ Not Interested', color:'#f87171' },
                 ].map(({ key,label,color }) => {
                   const cnt = sentCounts[key] ?? 0;
@@ -604,7 +604,7 @@ export default function SDROverviewTab() {
                   const maxS = Math.max(...Object.values(sentCounts),1);
                   return (
                     <div key={key} style={{ display:'flex',alignItems:'center',gap:8 }}>
-                      <span style={{ fontSize:11,color:'#6b7280',width:110,flexShrink:0 }}>{label}</span>
+                      <span style={{ fontSize:11,color:'hsl(var(--muted-foreground))',width:110,flexShrink:0 }}>{label}</span>
                       <MiniBar value={cnt} max={maxS} color={color} />
                       <span style={{ fontSize:11,fontWeight:600,color,width:20,textAlign:'right' }}>{cnt}</span>
                     </div>
@@ -616,7 +616,7 @@ export default function SDROverviewTab() {
 
       {/* Refresh footer */}
       <div style={{ display:'flex',justifyContent:'flex-end',paddingTop:4 }}>
-        <button onClick={load} disabled={loading} style={{ display:'flex',alignItems:'center',gap:6,fontSize:12,color:'#4b5563',background:'none',border:'none',cursor:'pointer',padding:'4px 8px' }}>
+        <button onClick={load} disabled={loading} style={{ display:'flex',alignItems:'center',gap:6,fontSize:12,color:'hsl(var(--muted-foreground) / 0.85)',background:'none',border:'none',cursor:'pointer',padding:'4px 8px' }}>
           <RefreshCw size={13} style={{ animation:loading?'spin 1s linear infinite':'none' }} /> Refresh dashboard
         </button>
       </div>
@@ -639,7 +639,7 @@ export default function SDROverviewTab() {
               <label style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12,display:'block',marginBottom:8 }}>Source</label>
               <div style={{ display:'flex',gap:8 }}>
                 {[
-                  { key:'apify',  label:'⚡ Apify',    desc:'Web scraping — LinkedIn & Google', color:'#a855f7' },
+                  { key:'apify',  label:'⚡ Apify',    desc:'Web scraping — LinkedIn & Google', color:'hsl(var(--primary-fill))' },
                   { key:'apollo', label:'🚀 Apollo.io', desc:'Verified B2B contact database',    color:'#3b82f6' },
                 ].map(s => (
                   <button key={s.key} onClick={() => setGenSource(s.key)} style={{
@@ -655,7 +655,7 @@ export default function SDROverviewTab() {
                         <span
                           title="How to Connect"
                           onClick={e => { e.stopPropagation(); setShowSetupGuide(s.key); }}
-                          style={{ color:'#4b5563',cursor:'pointer',display:'flex',alignItems:'center',transition:'color 0.2s' }}
+                          style={{ color:'hsl(var(--muted-foreground) / 0.85)',cursor:'pointer',display:'flex',alignItems:'center',transition:'color 0.2s' }}
                           onMouseEnter={e => e.currentTarget.style.color = s.color}
                           onMouseLeave={e => e.currentTarget.style.color = '#4b5563'}
                         >
@@ -663,7 +663,7 @@ export default function SDROverviewTab() {
                         </span>
                       </div>
                     </div>
-                    <div style={{ color:'#6b7280',fontSize:12,marginTop:2 }}>{s.desc}</div>
+                    <div style={{ color:'hsl(var(--muted-foreground))',fontSize:12,marginTop:2 }}>{s.desc}</div>
                   </button>
                 ))}
               </div>
@@ -678,7 +678,7 @@ export default function SDROverviewTab() {
               </div>
             )}
             {icpProfiles.length === 1 && (
-              <div style={{ padding:'8px 12px',borderRadius:8,background:'rgba(168,85,247,0.08)',border:'1px solid var(--line-1)' }}>
+              <div style={{ padding:'8px 12px',borderRadius:8,background:'hsl(var(--primary) / 0.08)',border:'1px solid var(--line-1)' }}>
                 <span style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12 }}>ICP: </span>
                 <span style={{ color:'var(--text-soft)',fontSize:13,fontWeight:600 }}>{icpProfiles[0].name}</span>
               </div>
@@ -692,10 +692,10 @@ export default function SDROverviewTab() {
             {/* Count slider */}
             <div>
               <label style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12,display:'block',marginBottom:6 }}>
-                Number of Leads: <span style={{ color:'#a855f7',fontWeight:700 }}>{genCount}</span>
+                Number of Leads: <span style={{ color:'hsl(var(--primary-fill))',fontWeight:700 }}>{genCount}</span>
               </label>
-              <input type="range" min={5} max={50} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width:'100%',accentColor:'#a855f7' }} />
-              <div style={{ display:'flex',justifyContent:'space-between',color:'#4b5563',fontSize:11,marginTop:2 }}>
+              <input type="range" min={5} max={50} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width:'100%',accentColor:'hsl(var(--primary-fill))' }} />
+              <div style={{ display:'flex',justifyContent:'space-between',color:'hsl(var(--muted-foreground) / 0.85)',fontSize:11,marginTop:2 }}>
                 <span>5</span><span>50</span>
               </div>
             </div>
@@ -704,7 +704,7 @@ export default function SDROverviewTab() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border:'1px solid var(--line-1)',color:'hsl(var(--pt-9ca3af))',borderRadius:8 }}>Cancel</Button>
-            <Button onClick={handleGenerate} disabled={generating || icpProfiles.length === 0} style={{ background:'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)',color:'#fff',border:'none',borderRadius:8,fontWeight:600,display:'flex',alignItems:'center',gap:6 }}>
+            <Button onClick={handleGenerate} disabled={generating || icpProfiles.length === 0} style={{ background:'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))',color:'#fff',border:'none',borderRadius:8,fontWeight:600,display:'flex',alignItems:'center',gap:6 }}>
               {generating ? <Loader2 size={13} style={{ animation:'spin 1s linear infinite' }} /> : <Zap size={13} />}
               {generating ? 'Generating...' : `Generate ${genCount} Leads`}
             </Button>
@@ -732,7 +732,7 @@ export default function SDROverviewTab() {
           <DialogFooter>
             <Button
               onClick={() => { setGenSource(showSetupGuide); setShowSetupGuide(null); }}
-              style={{ background: showSetupGuide === 'apify' ? 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)' : 'linear-gradient(90deg,#1d4ed8,#3b82f6)', color:'#fff',border:'none',borderRadius:8,fontWeight:600 }}
+              style={{ background: showSetupGuide === 'apify' ? 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))' : 'linear-gradient(90deg,#1d4ed8,#3b82f6)', color:'#fff',border:'none',borderRadius:8,fontWeight:600 }}
             >
               Got it — Use {showSetupGuide === 'apify' ? 'Apify' : 'Apollo.io'}
             </Button>

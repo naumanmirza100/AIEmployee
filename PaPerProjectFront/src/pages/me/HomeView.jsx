@@ -12,6 +12,7 @@ import {
   Loader2,
   Clock,
   GraduationCap,
+  ChevronRight,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
@@ -142,144 +143,190 @@ export default function HomeView() {
     setTutorialOpen(true);
   };
 
+  // The next seven days, open tasks due on each (UI refresh, 26 Nov 2026: the highlight card's strip). A date-only
+  // due_date is read as a local day, not as UTC midnight, which shows the day before west of Greenwich.
+  const localDay = (v) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''));
+    const d = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(v);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+  const today = localDay(new Date());
+  const week = Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(today);
+    day.setDate(day.getDate() + i);
+    const n = openTasks.filter((t) => t.due_date && localDay(t.due_date).getTime() === day.getTime()).length;
+    return { key: i, label: i === 0 ? 'Today' : day.toLocaleDateString(undefined, { weekday: 'short' }), n };
+  });
+  const weekMax = Math.max(1, ...week.map((d) => d.n));
+  const now = new Date();
+  const dateLine = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const timeLine = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const needs = [
+    overdueTasks.length ? plural(overdueTasks.length, 'overdue task', 'overdue tasks') : null,
+    pendingInvites.length ? plural(pendingInvites.length, 'meeting invite', 'meeting invites') : null,
+  ].filter(Boolean);
+  const dotFor = (key) => (key.startsWith('t') ? 'bg-red-500' : key.startsWith('m') ? 'bg-orange-400' : 'bg-primary');
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="text-white">
-          <h2 className="text-2xl font-bold">Hi {firstName} 👋</h2>
-          <p className="text-white/60 mt-1 text-sm">Here's what needs your attention today.</p>
-        </div>
-        <div className="relative">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={replayTour}
-            className={`border-violet-500/40 text-violet-200 hover:bg-violet-500/10 hover:text-violet-100 ${tourGlow ? 'me-tour-glow' : ''}`}
-          >
-            <GraduationCap className="h-3.5 w-3.5 mr-1.5" /> Take the Tour
-          </Button>
-          {tourTooltip && (
-            <div className="absolute -bottom-11 right-0 z-10 rounded-md border border-violet-400/40 bg-[var(--panel-4)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
-              👋 New here? Take a quick tour
-              <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--panel-4)] border-t border-l border-violet-400/40 rotate-45" />
-            </div>
-          )}
-        </div>
-      </div>
       <style>{`
         @keyframes meTourGlow {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4), 0 0 0 0 rgba(139, 92, 246, 0.2); }
-          50%      { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.15), 0 0 0 12px rgba(139, 92, 246, 0.08); }
+          0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4), 0 0 0 0 hsl(var(--primary) / 0.2); }
+          50%      { box-shadow: 0 0 0 6px hsl(var(--primary) / 0.15), 0 0 0 12px hsl(var(--primary) / 0.08); }
         }
         .me-tour-glow { animation: meTourGlow 1.6s ease-in-out infinite; }
       `}</style>
 
       {profileIncomplete && (
-        <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
-            <User className="h-4 w-4 text-amber-300 shrink-0" />
-            <p className="text-xs text-amber-100/90">
+            <User className="h-4 w-4 text-amber-600 dark:text-amber-300 shrink-0" />
+            <p className="text-sm text-foreground/80">
               Your profile is missing {profileGaps.join(', ')}. Filling it out helps teammates reach you.
             </p>
           </div>
           <Link to="/me/profile">
-            <Button size="sm" variant="outline"
-              className="border-amber-500/40 text-amber-200 hover:bg-amber-500/10 hover:text-amber-100 h-7 text-xs">
-              Complete profile
-            </Button>
+            <Button size="sm" variant="outline" className="h-8 text-xs">Complete profile</Button>
           </Link>
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-tour="me-summary">
-        {tiles.map((tile) => (
-          <Link key={tile.label} to={tile.to} className="group">
-            <div className={`rounded-lg border p-3 transition-colors ${
-              tile.danger
-                ? 'border-red-500/30 bg-red-500/[0.06] group-hover:bg-red-500/[0.1]'
-                : 'border-white/10 bg-white/[0.03] group-hover:bg-white/[0.06]'
-            }`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-2xl font-bold text-white">
-                    {loading ? <span className="inline-block h-6 w-6 rounded bg-white/[0.06] animate-pulse" /> : tile.value}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-stretch">
+        <Card className="lg:col-span-3" data-tour="me-action-items">
+          <CardContent className="p-6 sm:p-8">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]" />
+                {dateLine} · as of {timeLine}
+              </p>
+              <div className="relative">
+                <Button variant="outline" size="sm" onClick={replayTour} className={tourGlow ? 'me-tour-glow' : ''}>
+                  <GraduationCap className="h-3.5 w-3.5 mr-1.5" /> Take the Tour
+                </Button>
+                {tourTooltip && (
+                  <div className="hidden sm:block absolute -bottom-11 right-0 z-10 rounded-md border border-primary/40 bg-[var(--panel-4)] px-2.5 py-1.5 text-xs text-foreground shadow-lg pointer-events-none whitespace-nowrap">
+                    New here? Take a quick tour
+                    <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--panel-4)] border-t border-l border-primary/40 rotate-45" />
                   </div>
-                  <div className="text-[11px] text-white/50 mt-0.5">{tile.label}</div>
-                </div>
-                <tile.icon className={`h-5 w-5 ${tile.danger ? 'text-red-400' : 'text-white/40 group-hover:text-violet-300'}`} />
+                )}
               </div>
             </div>
-          </Link>
-        ))}
+            <h2 className="font-heading font-semibold tracking-tight text-5xl sm:text-6xl leading-none mt-5 text-foreground">Hi {firstName}.</h2>
+            <p className="mt-4 text-lg text-foreground/80 max-w-xl">
+              {loading
+                ? 'Looking at your day…'
+                : needs.length
+                  ? <>Here's what needs your attention today: <b className="text-foreground">{needs.join(' and ')}</b>.</>
+                  : dueThisWeek.length
+                    ? <>Nothing is late. <b className="text-foreground">{plural(dueThisWeek.length, 'task', 'tasks')}</b> due this week.</>
+                    : "You're all caught up. Nice."}
+            </p>
+
+            <div className="h-px bg-border my-6" />
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-heading font-semibold text-lg text-foreground">Action items</h3>
+                <p className="text-sm text-muted-foreground">Most urgent first.</p>
+              </div>
+              {actionItems.length > 0 && (
+                <Button variant="ghost" size="sm" onClick={() => navigate('/me/work')} className="text-muted-foreground">
+                  View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              )}
+            </div>
+            {loading ? (
+              <div className="space-y-3 mt-4">
+                {[0, 1, 2].map((i) => <div key={i} className="h-12 rounded-xl bg-muted/60 animate-pulse" />)}
+              </div>
+            ) : actionItems.length === 0 ? (
+              <div className="text-center py-8">
+                <CheckSquare className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
+                <p className="text-sm text-foreground/80">You're all caught up. Nice.</p>
+                <p className="text-xs text-muted-foreground mt-1">Nothing overdue, no pending meeting invites, nothing due this week.</p>
+              </div>
+            ) : (
+              <div className="mt-2 divide-y divide-border">
+                {actionItems.map((item) => (
+                  <div key={item.key} className="py-1">
+                  <button
+                    onClick={item.onClick}
+                    className="w-full text-left flex items-center gap-4 py-2.5 hover:bg-muted/40 px-2 -mx-2 rounded-md transition-colors"
+                  >
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${dotFor(item.key)}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[15px] font-semibold text-foreground truncate">{item.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 truncate">{item.subtitle}</div>
+                    </div>
+                    <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-medium capitalize shrink-0 ${item.badgeClass}`}>
+                      {item.badge}
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <section className="ui-ink lg:col-span-2 rounded-xl p-6 sm:p-8 flex flex-col" data-tour="me-summary">
+          <div className="flex items-center justify-between">
+            <span className="text-base font-medium text-pure-white">My work</span>
+            <Link to="/me/tasks" className="text-xs font-semibold text-pure-white/70 hover:text-pure-white">Open my tasks</Link>
+          </div>
+          <div className="text-sm text-pure-white/60 mt-7">Open tasks</div>
+          <div className="font-heading font-semibold text-pure-white text-[88px] leading-none mt-2 tabular-nums">
+            {loading ? <span className="inline-block h-16 w-14 rounded-xl bg-pure-white/10 animate-pulse" /> : openTasks.length}
+          </div>
+          <div className="mt-8 grid grid-cols-7 gap-2 items-end h-44" aria-label="Open tasks due in the next seven days">
+            {week.map((d) => (
+              <div key={d.key} className="flex flex-col items-center justify-end gap-1.5 h-full">
+                <span className="text-[11px] font-semibold text-pure-white/80">{d.n || ''}</span>
+                <div className={`w-full max-w-[34px] rounded-md ${d.n ? 'ui-ink-chart' : 'bg-pure-white/10'}`}
+                  style={{ height: `${Math.max(8, (d.n / weekMax) * 120)}px` }} />
+                <span className="text-[11px] text-pure-white/55">{d.label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex-1" />
+          <div className="grid grid-cols-3 border-t border-pure-white/10 mt-7 pt-5">
+            {tiles.slice(1).map((tile, i) => (
+              <Link key={tile.label} to={tile.to} className={`px-3 ${i ? 'border-l border-pure-white/10' : ''}`}>
+                <div className="text-xs text-pure-white/60">{tile.label}</div>
+                <div className={`font-heading font-semibold text-3xl mt-1.5 tabular-nums ${tile.danger ? 'text-red-300' : 'text-pure-white'}`}>
+                  {loading ? '–' : tile.value}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
       </div>
 
-      <Card className="bg-white/[0.04] border-white/[0.08]" data-tour="me-action-items">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-white text-base">Action items</CardTitle>
-            <CardDescription className="text-white/50">
-              The top few things worth handling right now
-            </CardDescription>
+      <Card data-tour="me-quick-jump">
+        <CardContent className="p-6 sm:p-8">
+          <h3 className="font-heading font-semibold text-lg text-foreground">Jump to</h3>
+          <p className="text-sm text-muted-foreground">Everything that's yours, one click away.</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+            {quickLinks.map((q) => (
+              <Link key={q.to} to={q.to} className="group rounded-lg border border-border/70 bg-card/70 p-4 flex flex-col gap-3 hover:border-primary/40 hover:shadow-md transition-all">
+                <span className="h-10 w-10 rounded-lg bg-primary/10 text-primary dark:text-violet-300 flex items-center justify-center">
+                  <q.icon className="h-[18px] w-[18px]" />
+                </span>
+                <span className="flex items-center justify-between text-sm font-semibold text-foreground">
+                  {q.label}
+                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                </span>
+              </Link>
+            ))}
           </div>
-          {actionItems.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => navigate('/me/work')} className="text-white/60 hover:text-white">
-              View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center gap-2 text-white/50 text-sm py-8 justify-center">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-            </div>
-          ) : actionItems.length === 0 ? (
-            <div className="text-center py-8">
-              <CheckSquare className="h-8 w-8 mx-auto text-white/25 mb-2" />
-              <p className="text-sm text-white/60">You're all caught up. Nice.</p>
-              <p className="text-[11px] text-white/40 mt-1">
-                Nothing overdue, no pending meeting invites, nothing due this week.
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-white/5">
-              {actionItems.map((item) => (
-                <button
-                  key={item.key}
-                  onClick={item.onClick}
-                  className="w-full text-left flex items-center justify-between py-3 hover:bg-white/[0.03] px-2 -mx-2 rounded-md transition-colors"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white truncate">{item.title}</div>
-                    <div className="text-[11px] text-white/50 mt-0.5 truncate">{item.subtitle}</div>
-                  </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium capitalize shrink-0 ml-3 ${item.badgeClass}`}>
-                    {item.badge}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
         </CardContent>
       </Card>
 
-      <div data-tour="me-quick-jump">
-        <h3 className="text-sm font-semibold text-white/70 mb-2 px-1">Jump to</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {quickLinks.map((q) => (
-            <Link key={q.to} to={q.to} className="group">
-              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 hover:bg-white/[0.06] hover:border-violet-500/30 transition-colors flex items-center gap-2">
-                <q.icon className="h-4 w-4 text-violet-300" />
-                <span className="text-sm text-white">{q.label}</span>
-                <ArrowRight className="h-3.5 w-3.5 text-white/30 group-hover:text-violet-300 group-hover:translate-x-0.5 transition-all ml-auto" />
-              </div>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      <div className="text-[11px] text-white/40 text-center">
+      <div className="text-xs text-muted-foreground text-center">
         Prefer the classic view? It still lives at{' '}
-        <Link to="/user/dashboard/classic" className="text-violet-300 hover:text-violet-200 underline">/user/dashboard/classic</Link>.
+        <Link to="/user/dashboard/classic" className="text-primary dark:text-violet-300 underline">/user/dashboard/classic</Link>.
       </div>
 
       <FrontlineTutorial

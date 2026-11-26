@@ -237,7 +237,7 @@ function KanbanCard({ interview, isDragOverlay, onStatusChange, onOutcomeChange,
         id={`REC-kanban-card-${interview.id}`}
         data-testid={`REC-kanban-card-${interview.id}`}
         className={`
-          rounded-xl border bg-pure-black/40 backdrop-blur-sm p-3 space-y-2 select-none
+          rounded-xl border bg-card/90 dark:bg-pure-black/40 backdrop-blur-sm p-3 space-y-2 select-none
           transition-shadow duration-150
           ${isDragging    ? 'opacity-30 shadow-none border-white/5' : 'border-white/10 hover:border-white/25 hover:shadow-lg hover:shadow-black/40'}
           ${isDragOverlay ? 'shadow-2xl shadow-black/60 rotate-1 border-white/30 scale-105' : ''}

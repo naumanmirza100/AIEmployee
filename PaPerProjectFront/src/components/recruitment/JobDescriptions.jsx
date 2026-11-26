@@ -677,7 +677,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
         </div>
       ) : jobs.length === 0 ? (
-        <Card id="REC-jobs-empty-state" data-testid="REC-jobs-empty-state" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+        <Card id="REC-jobs-empty-state" data-testid="REC-jobs-empty-state" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
           <CardContent className="py-12 text-center">
             <Briefcase className="h-12 w-12 mx-auto text-white/40 mb-4" />
             {search || statusFilter || typeFilter ? (
@@ -715,7 +715,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
               key={job.id}
               id={`REC-jobs-row-${job.id}`}
               data-testid={`REC-jobs-row-${job.id}`}
-              className={`border-white/10 bg-pure-black/20 backdrop-blur-sm ${selectedJobIds.has(job.id) ? 'ring-1 ring-primary/60' : ''}`}
+              className={`border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm ${selectedJobIds.has(job.id) ? 'ring-1 ring-primary/60' : ''}`}
             >
               <CardHeader>
                 <div className="flex justify-between items-start">

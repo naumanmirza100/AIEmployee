@@ -23,7 +23,7 @@ const STATUS_CONFIG = {
   pending:           { label: 'Pending',            color: '#f59e0b', bg: 'rgba(245,158,11,0.1)'   },
   awaiting_approval: { label: 'Awaiting Lead',      color: '#6366f1', bg: 'rgba(99,102,241,0.1)'   },
   scheduled:         { label: 'Scheduled',          color: '#10b981', bg: 'rgba(16,185,129,0.1)'   },
-  completed:         { label: 'Completed',          color: '#6b7280', bg: 'rgba(107,114,128,0.1)'  },
+  completed:         { label: 'Completed',          color: 'hsl(var(--muted-foreground))', bg: 'rgba(107,114,128,0.1)'  },
   cancelled:         { label: 'Cancelled',          color: '#ef4444', bg: 'rgba(239,68,68,0.1)'    },
   no_show:           { label: "Didn't Show Up",     color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)'   },
 };
@@ -33,8 +33,8 @@ const TEMP_COLOR = { hot: '#ef4444', warm: '#f59e0b', cold: '#6b7280' };
 const CAMPAIGN_STATUS_LABEL = {
   active:    { label: 'Active',    color: '#10b981' },
   paused:    { label: 'Paused',    color: '#f59e0b' },
-  completed: { label: 'Ended',     color: '#6b7280' },
-  draft:     { label: 'Draft',     color: '#4b5563' },
+  completed: { label: 'Ended',     color: 'hsl(var(--muted-foreground))' },
+  draft:     { label: 'Draft',     color: 'hsl(var(--muted-foreground) / 0.85)' },
   scheduled: { label: 'Scheduled', color: '#6366f1' },
 };
 
@@ -66,8 +66,8 @@ const pgBtn = (disabled, active = false) => ({
   minWidth: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
   borderRadius: 7, fontSize: 13, fontWeight: active ? 700 : 400,
   cursor: disabled ? 'not-allowed' : 'pointer',
-  border: `1px solid ${active ? '#a855f7' : 'rgba(255,255,255,0.08)'}`,
-  background: active ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)',
+  border: `1px solid ${active ? 'hsl(var(--primary-fill))' : 'hsl(var(--surface-invert) / 0.08)'}`,
+  background: active ? 'hsl(var(--primary) / 0.18)' : 'hsl(var(--surface-invert) / 0.03)',
   color: disabled ? 'var(--line-1)' : active ? '#c084fc' : '#9ca3af',
   opacity: disabled ? 0.5 : 1, transition: 'all 0.15s', padding: '0 8px',
 });
@@ -103,9 +103,9 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
           fontSize: 13, fontWeight: value ? 600 : 400, transition: 'all 0.15s',
         }}
       >
-        {LabelIcon && <LabelIcon size={13} style={{ color: value ? selected?.color : '#6b7280' }} />}
+        {LabelIcon && <LabelIcon size={13} style={{ color: value ? selected?.color : 'hsl(var(--muted-foreground))' }} />}
         <span style={{ flex: 1, textAlign: 'left', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }} title={value ? selected?.label : undefined}>{value ? selected?.label : label}</span>
-        <ChevronDown size={12} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
+        <ChevronDown size={12} style={{ color: 'hsl(var(--muted-foreground))', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
       </button>
 
       {open && (
@@ -130,7 +130,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
                   borderBottom: idx < options.length - 1 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none',
                   transition: 'background 0.1s',
                 }}
-                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'hsl(var(--surface-invert) / 0.05)'; }}
                 onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
               >
                 <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid var(--line-1)' }} />
@@ -168,9 +168,9 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
   if (!notes || Object.keys(notes).length === 0) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0' }}>
-        <span style={{ color: '#6b7280', fontSize: 13 }}>No prep notes yet</span>
+        <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>No prep notes yet</span>
         <button onClick={onRegenerate} disabled={loading}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'linear-gradient(90deg,#a855f7,#6366f1)', color: '#fff', border: 'none', borderRadius: 7, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 7, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
           {loading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
           Generate with AI
         </button>
@@ -183,7 +183,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Sparkles size={13} color="#a855f7" />
-          <span style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 700, fontSize: 13 }}>AI Prep Notes</span>
+          <span style={{ color: 'var(--brand-ink)', fontWeight: 700, fontSize: 13 }}>AI Prep Notes</span>
           {notes.opportunity_score && (
             <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', borderRadius: 6, padding: '1px 8px', fontSize: 11, fontWeight: 600 }}>
               {notes.opportunity_score}/10
@@ -191,7 +191,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
           )}
         </div>
         <button onClick={onRegenerate} disabled={loading}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: '1px solid var(--line-1)', color: '#6b7280', borderRadius: 6, padding: '3px 9px', fontSize: 11, cursor: 'pointer' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: '1px solid var(--line-1)', color: 'hsl(var(--muted-foreground))', borderRadius: 6, padding: '3px 9px', fontSize: 11, cursor: 'pointer' }}>
           {loading ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />} Refresh
         </button>
       </div>
@@ -206,10 +206,10 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {notes.talking_points?.length > 0 && (
           <div>
-            <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 700, marginBottom: 6 }}>TALKING POINTS</div>
+            <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, fontWeight: 700, marginBottom: 6 }}>TALKING POINTS</div>
             {notes.talking_points.map((p, i) => (
               <div key={i} style={{ display: 'flex', gap: 7, marginBottom: 5 }}>
-                <span style={{ color: '#a855f7', fontSize: 11 }}>▸</span>
+                <span style={{ color: 'hsl(var(--primary-fill))', fontSize: 11 }}>▸</span>
                 <span style={{ color: 'hsl(var(--pt-c4b5d4))', fontSize: 12, lineHeight: 1.5 }}>{p}</span>
               </div>
             ))}
@@ -217,7 +217,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
         )}
         {notes.questions_to_ask?.length > 0 && (
           <div>
-            <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 700, marginBottom: 6 }}>QUESTIONS TO ASK</div>
+            <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, fontWeight: 700, marginBottom: 6 }}>QUESTIONS TO ASK</div>
             {notes.questions_to_ask.map((q, i) => (
               <div key={i} style={{ display: 'flex', gap: 7, marginBottom: 5 }}>
                 <span style={{ color: '#6366f1', fontSize: 11 }}>?</span>
@@ -230,7 +230,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
 
       {notes.risks?.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <span style={{ color: '#6b7280', fontSize: 11, fontWeight: 700, alignSelf: 'center' }}>RISKS:</span>
+          <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, fontWeight: 700, alignSelf: 'center' }}>RISKS:</span>
           {notes.risks.map((r, i) => (
             <span key={i} style={{ background: 'rgba(239,68,68,0.09)', color: '#f87171', borderRadius: 5, padding: '2px 9px', fontSize: 11 }}>{r}</span>
           ))}
@@ -275,9 +275,9 @@ function PrepNotesModal({ meeting, onClose, onNotesUpdated }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div>
             <div style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 16 }}>AI Prep Notes</div>
-            <div style={{ color: '#4b5563', fontSize: 12, marginTop: 2 }}>{meeting.lead_name} · {meeting.lead_company || 'Unknown company'}</div>
+            <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 12, marginTop: 2 }}>{meeting.lead_name} · {meeting.lead_company || 'Unknown company'}</div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 4 }}>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'hsl(var(--muted-foreground))', cursor: 'pointer', padding: 4 }}>
             <X size={18} />
           </button>
         </div>
@@ -305,9 +305,9 @@ function SearchFieldDropdown({ value, onChange, fields }) {
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
       <button type="button" onClick={() => setOpen(v => !v)}
-        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 7px 12px', background: 'rgba(168,85,247,0.08)', border: 'none', borderRight: '1px solid var(--line-1)', borderRadius: '9px 0 0 9px', color: '#a855f7', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', height: '100%', outline: 'none' }}>
+        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 7px 12px', background: 'hsl(var(--primary) / 0.08)', border: 'none', borderRight: '1px solid var(--line-1)', borderRadius: '9px 0 0 9px', color: 'hsl(var(--primary-fill))', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', height: '100%', outline: 'none' }}>
         {selected.label}
-        <ChevronDown size={11} style={{ color: '#a855f7', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
+        <ChevronDown size={11} style={{ color: 'hsl(var(--primary-fill))', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
       </button>
       {open && (
         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 100, background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))', border: '1px solid var(--line-1)', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.6)', minWidth: 130, overflow: 'hidden', animation: 'fadeDown 0.12s ease' }}>
@@ -315,10 +315,10 @@ function SearchFieldDropdown({ value, onChange, fields }) {
             const isSel = f.key === value;
             return (
               <button key={f.key} type="button" onClick={() => { onChange(f.key); setOpen(false); }}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none', borderBottom: i < fields.length - 1 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', cursor: 'pointer', background: isSel ? 'rgba(168,85,247,0.12)' : 'transparent', color: isSel ? '#a855f7' : '#c4b5d4', fontSize: 13, fontWeight: isSel ? 600 : 400, transition: 'background 0.1s', textAlign: 'left' }}
-                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none', borderBottom: i < fields.length - 1 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', cursor: 'pointer', background: isSel ? 'hsl(var(--primary) / 0.12)' : 'transparent', color: isSel ? 'hsl(var(--primary-fill))' : '#c4b5d4', fontSize: 13, fontWeight: isSel ? 600 : 400, transition: 'background 0.1s', textAlign: 'left' }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'hsl(var(--surface-invert) / 0.05)'; }}
                 onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}>
-                {isSel && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#a855f7', flexShrink: 0 }} />}
+                {isSel && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'hsl(var(--primary-fill))', flexShrink: 0 }} />}
                 {!isSel && <span style={{ width: 6, height: 6, flexShrink: 0 }} />}
                 {f.label}
               </button>
@@ -384,14 +384,14 @@ function ClockTimePicker({ value, onChange, ampm, onAmpmChange, mode, onModeChan
           const selected = n === selNumSnapped;
           return (
             <g key={n} onClick={() => mode === 'hour' ? pickHour(n) : pickMinute(n)} style={{ cursor: 'pointer' }}>
-              <circle cx={pos.x} cy={pos.y} r={16} fill={selected ? '#a855f7' : 'transparent'} />
+              <circle cx={pos.x} cy={pos.y} r={16} fill={selected ? 'hsl(var(--primary-fill))' : 'transparent'} />
               <text x={pos.x} y={pos.y + 5} textAnchor="middle" fontSize={12} fontWeight={selected ? 700 : 400}
                 fill={selected ? '#fff' : '#c4b5d4'}>{mode === 'minute' ? String(n).padStart(2,'0') : n}</text>
             </g>
           );
         })}
       </svg>
-      <p style={{ color: '#6b7280', fontSize: 11, margin: 0 }}>
+      <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, margin: 0 }}>
         {mode === 'hour' ? 'Select hour' : 'Select minute'}
       </p>
     </div>
@@ -470,15 +470,15 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
   };
 
   const inp = { width: '100%', background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 8, color: 'var(--text-soft)', padding: '8px 12px', fontSize: 14, boxSizing: 'border-box', outline: 'none' };
-  const lbl = { color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 6, display: 'block' };
+  const lbl = { color: 'hsl(var(--muted-foreground))', fontSize: 12, fontWeight: 600, marginBottom: 6, display: 'block' };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
       <div style={{ background: 'linear-gradient(145deg,var(--sfc-1a1030),var(--sfc-120d24))', border: '1px solid var(--line-1)', borderRadius: 16, padding: 20, width: 520, maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', scrollbarWidth: 'none' }} onClick={e => e.stopPropagation()}>
         <h3 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 17, margin: '0 0 4px' }}>Confirm Meeting</h3>
-        <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 16px' }}>
-          Set time for <strong style={{ color: '#a855f7' }}>{meeting.lead_name}</strong>.{' '}
-          <span style={{ color: '#818cf8' }}>Ask Lead First</span> sends an approval email.{' '}
+        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, margin: '0 0 16px' }}>
+          Set time for <strong style={{ color: 'hsl(var(--primary-fill))' }}>{meeting.lead_name}</strong>.{' '}
+          <span style={{ color: 'var(--brand-ink)' }}>Ask Lead First</span> sends an approval email.{' '}
           <span style={{ color: '#10b981' }}>Confirm Directly</span> schedules immediately.
         </p>
 
@@ -489,13 +489,13 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
           <div style={{ background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 12, padding: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <button onClick={() => setCalMonth(new Date(y, mo - 1, 1))}
-                style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>‹</button>
+                style={{ background: 'none', border: 'none', color: 'hsl(var(--primary-fill))', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>‹</button>
               <span style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 12 }}>{monthNames[mo].slice(0,3)} {y}</span>
               <button onClick={() => setCalMonth(new Date(y, mo + 1, 1))}
-                style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>›</button>
+                style={{ background: 'none', border: 'none', color: 'hsl(var(--primary-fill))', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>›</button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 1, marginBottom: 3 }}>
-              {dayNames.map(d => <div key={d} style={{ textAlign: 'center', color: '#6b7280', fontSize: 9, fontWeight: 600 }}>{d.slice(0,1)}</div>)}
+              {dayNames.map(d => <div key={d} style={{ textAlign: 'center', color: 'hsl(var(--muted-foreground))', fontSize: 9, fontWeight: 600 }}>{d.slice(0,1)}</div>)}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 1 }}>
               {cells.map((d, i) => {
@@ -509,9 +509,9 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                     style={{
                       textAlign: 'center', padding: '5px 0', borderRadius: 4, fontSize: 11,
                       cursor: d && !past ? 'pointer' : 'default',
-                      background: selected ? '#a855f7' : todayD ? 'rgba(168,85,247,0.15)' : 'transparent',
-                      color: !d ? 'transparent' : past ? 'var(--line-1)' : selected ? '#fff' : todayD ? '#a855f7' : '#c4b5d4',
-                      border: todayD && !selected ? '1px solid rgba(168,85,247,0.3)' : '1px solid transparent',
+                      background: selected ? 'hsl(var(--primary-fill))' : todayD ? 'hsl(var(--primary) / 0.15)' : 'transparent',
+                      color: !d ? 'transparent' : past ? 'var(--line-1)' : selected ? '#fff' : todayD ? 'hsl(var(--primary-fill))' : '#c4b5d4',
+                      border: todayD && !selected ? '1px solid hsl(var(--primary) / 0.3)' : '1px solid transparent',
                     }}>
                     {d || ''}
                   </div>
@@ -546,7 +546,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                 const inputStyle = {
                   width: 28, background: 'transparent', border: 'none', outline: 'none',
                   fontSize: 16, fontWeight: 700, color: 'var(--text-soft)', textAlign: 'center',
-                  padding: 0, caretColor: '#a855f7',
+                  padding: 0, caretColor: 'hsl(var(--primary-fill))',
                   MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield',
                 };
                 const commitFromInputs = (hVal, mVal, ap) => {
@@ -574,9 +574,9 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                           if (v.length === 2) setClockMode('minute');
                         }
                       }}
-                      style={{ ...inputStyle, color: clockMode === 'hour' ? '#a855f7' : 'var(--text-soft)' }}
+                      style={{ ...inputStyle, color: clockMode === 'hour' ? 'hsl(var(--primary-fill))' : 'var(--text-soft)' }}
                     />
-                    <span style={{ color: '#6b7280', fontSize: 16, fontWeight: 700 }}>:</span>
+                    <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 16, fontWeight: 700 }}>:</span>
                     <input
                       type="number" min={0} max={59}
                       value={mStr}
@@ -589,7 +589,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                           commitFromInputs(hCur, v || '0', ampm);
                         }
                       }}
-                      style={{ ...inputStyle, color: clockMode === 'minute' ? '#a855f7' : 'var(--text-soft)' }}
+                      style={{ ...inputStyle, color: clockMode === 'minute' ? 'hsl(var(--primary-fill))' : 'var(--text-soft)' }}
                     />
                   </span>
                 );
@@ -610,8 +610,8 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                     style={{
                       padding: '2px 8px', borderRadius: 4, border: '1px solid',
                       fontWeight: 700, fontSize: 11, cursor: 'pointer', transition: 'all 0.12s',
-                      background: ampm === ap ? '#a855f7' : 'transparent',
-                      borderColor: ampm === ap ? '#a855f7' : 'var(--line-1)',
+                      background: ampm === ap ? 'hsl(var(--primary-fill))' : 'transparent',
+                      borderColor: ampm === ap ? 'hsl(var(--primary-fill))' : 'var(--line-1)',
                       color: ampm === ap ? '#fff' : '#6b7280',
                     }}>{ap}</button>
                 ))}
@@ -633,7 +633,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
 
           {/* Option 1: Ask lead first */}
           <Button onClick={() => handleConfirm(true)} disabled={saving || !selDate || !selTime}
-            style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#6d28d9)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13 }}>
+            style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13 }}>
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
             <span style={{ marginLeft: 5 }}>Ask Lead First</span>
           </Button>
@@ -706,7 +706,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
 
   return (
     <tr>
-      <td colSpan={colSpan} style={{ padding: '0 0 2px 0', background: 'rgba(168,85,247,0.04)' }}>
+      <td colSpan={colSpan} style={{ padding: '0 0 2px 0', background: 'hsl(var(--primary) / 0.04)' }}>
         {showConfirm && (
           <ConfirmModal
             meeting={local}
@@ -721,11 +721,11 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             <div style={{ background: 'linear-gradient(145deg,var(--sfc-1a1030),var(--sfc-120d24))', border: '1px solid var(--line-1)', borderRadius: 14, padding: 24, width: 380, maxWidth: '95vw' }}
               onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                <AlertCircle size={18} style={{ color: '#a855f7', flexShrink: 0 }} />
+                <AlertCircle size={18} style={{ color: 'hsl(var(--primary-fill))', flexShrink: 0 }} />
                 <h4 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 15, margin: 0 }}>Meeting hasn't started yet</h4>
               </div>
               <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, lineHeight: 1.6, margin: '0 0 6px' }}>
-                Starts in <strong style={{ color: 'hsl(var(--pt-c084fc))' }}>{earlyWarning.timeLeft}</strong>. Are you sure you want to "{earlyWarning.label}" now?
+                Starts in <strong style={{ color: 'var(--brand-ink)' }}>{earlyWarning.timeLeft}</strong>. Are you sure you want to "{earlyWarning.label}" now?
               </p>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
                 <button onClick={() => setEarlyWarning(null)}
@@ -733,7 +733,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
                   Cancel
                 </button>
                 <button onClick={() => { doStatus(earlyWarning.status); setEarlyWarning(null); }}
-                  style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(90deg,#a855f7,hsl(var(--brand-600)))', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(90deg,hsl(var(--primary-fill-deep)),hsl(var(--brand-600)))', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                   Yes, proceed
                 </button>
               </div>
@@ -752,14 +752,14 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             )}
             {local.status === 'pending' && (
               <button disabled={actionLoading === 'resend'}
-                style={{ ...btnBase, background: 'rgba(168,85,247,0.12)', color: 'hsl(var(--pt-c084fc))', border: '1px solid rgba(168,85,247,0.25)' }}
+                style={{ ...btnBase, background: 'hsl(var(--primary) / 0.12)', color: 'var(--brand-ink)', border: '1px solid hsl(var(--primary) / 0.25)' }}
                 onClick={() => act('resend', 'Scheduling email resent', () => resendSchedulingEmail(local.id))}>
                 {actionLoading === 'resend' ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Resend Scheduling Email
               </button>
             )}
             {local.status === 'scheduled' && (
               <button disabled={actionLoading === 'reminder'}
-                style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}
+                style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: 'var(--brand-ink)', border: '1px solid rgba(99,102,241,0.25)' }}
                 onClick={() => act('reminder', 'Reminder sent', () => sendMeetingReminder(local.id))}>
                 {actionLoading === 'reminder' ? <Loader2 size={12} className="animate-spin" /> : <Bell size={12} />} Send Reminder
               </button>
@@ -801,14 +801,14 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             )}
             {local.status === 'completed' && (
               <button disabled={!!actionLoading}
-                style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}
+                style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: 'var(--brand-ink)', border: '1px solid rgba(99,102,241,0.25)' }}
                 onClick={() => handleStatus('pending')}>
                 {actionLoading === 'status_pending' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Reopen
               </button>
             )}
             {local.calendar_link && (
               <a href={local.calendar_link} target="_blank" rel="noopener noreferrer"
-                style={{ ...btnBase, background: 'transparent', color: '#a855f7', border: '1px solid rgba(168,85,247,0.3)', textDecoration: 'none' }}>
+                style={{ ...btnBase, background: 'transparent', color: 'hsl(var(--primary-fill))', border: '1px solid hsl(var(--primary) / 0.3)', textDecoration: 'none' }}>
                 <ExternalLink size={12} /> Calendar Link
               </a>
             )}
@@ -829,7 +829,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
               <span style={{ color: '#10b981' }}>✓ Scheduling email sent {fmt(local.scheduling_email_sent_at)}</span>
             )}
             {(local.status === 'completed' || local.status === 'no_show') && local.confirmed_at && (
-              <span style={{ color: '#6b7280' }}>✓ Was scheduled {fmt(local.confirmed_at)}</span>
+              <span style={{ color: 'hsl(var(--muted-foreground))' }}>✓ Was scheduled {fmt(local.confirmed_at)}</span>
             )}
           </div>
 
@@ -838,7 +838,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: 18 }}>📨</span>
               <div>
-                <p style={{ margin: 0, color: '#818cf8', fontSize: 12, fontWeight: 700 }}>WAITING FOR LEAD RESPONSE</p>
+                <p style={{ margin: 0, color: 'var(--brand-ink)', fontSize: 12, fontWeight: 700 }}>WAITING FOR LEAD RESPONSE</p>
                 <p style={{ margin: '2px 0 0', color: 'hsl(var(--pt-9ca3af))', fontSize: 12 }}>
                   Approval email was sent. Lead will confirm or suggest another time.
                   {local.scheduled_at && <> Proposed time: <strong style={{ color: 'var(--text-soft)' }}>{fmt(local.scheduled_at)}</strong></>}
@@ -850,7 +850,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
           {/* Reply snippet */}
           {local.reply_snippet && (
             <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 8, padding: '8px 12px', marginBottom: 14 }}>
-              <span style={{ color: '#818cf8', fontSize: 11, fontWeight: 700 }}>LEAD'S REPLY  </span>
+              <span style={{ color: 'var(--brand-ink)', fontSize: 11, fontWeight: 700 }}>LEAD'S REPLY  </span>
               <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, fontStyle: 'italic' }}>"{local.reply_snippet}"</span>
             </div>
           )}
@@ -983,8 +983,8 @@ const SDRMeetingsTab = () => {
   const scheduled = meetings.filter(m => m.status === 'scheduled').length;
 
   // ── Styles ──
-  const th = { padding: '10px 14px', color: '#6b7280', fontSize: 11, fontWeight: 700, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--sfc-1e1535)', whiteSpace: 'nowrap' };
-  const td = { padding: '12px 14px', color: '#c4b5d4', fontSize: 13, borderBottom: '1px solid var(--sfc-1a1030)', verticalAlign: 'middle' };
+  const th = { padding: '10px 14px', color: 'hsl(var(--muted-foreground))', fontSize: 11, fontWeight: 700, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--sfc-1e1535)', whiteSpace: 'nowrap' };
+  const td = { padding: '12px 14px', color: 'hsl(var(--pt-c4b5d4))', fontSize: 13, borderBottom: '1px solid var(--sfc-1a1030)', verticalAlign: 'middle' };
   const inp = { background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 8, color: 'var(--text-soft)', padding: '7px 12px', fontSize: 13, outline: 'none' };
 
   return (
@@ -1009,7 +1009,7 @@ const SDRMeetingsTab = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
             <h2 style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 20, margin: 0 }}>Meeting Scheduler</h2>
-            <p style={{ color: '#4b5563', fontSize: 12, margin: '3px 0 0' }}>
+            <p style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 12, margin: '3px 0 0' }}>
               {total} meeting{total !== 1 ? 's' : ''} · {pending} pending · {scheduled} scheduled
               {!activeOnly && <span style={{ color: 'hsl(var(--pt-f59e0b))', marginLeft: 8 }}>· showing all campaigns</span>}
             </p>
@@ -1017,8 +1017,8 @@ const SDRMeetingsTab = () => {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {/* Live reply-check indicator */}
             {checkingReplies && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#6b7280', fontSize: 11, fontWeight: 500 }}>
-                <Loader2 size={11} className="animate-spin" style={{ color: '#a855f7' }} />
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'hsl(var(--muted-foreground))', fontSize: 11, fontWeight: 500 }}>
+                <Loader2 size={11} className="animate-spin" style={{ color: 'hsl(var(--primary-fill))' }} />
                 Checking for new replies…
               </span>
             )}
@@ -1088,7 +1088,7 @@ const SDRMeetingsTab = () => {
                   <SearchFieldDropdown value={searchField} onChange={setSearchField} fields={SEARCH_FIELDS} />
                   {/* Input */}
                   <div style={{ position: 'relative', flex: 1 }}>
-                    <Search size={12} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: '#4b5563', pointerEvents: 'none' }} />
+                    <Search size={12} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-foreground) / 0.85)', pointerEvents: 'none' }} />
                     <input
                       placeholder={placeholders[searchField]}
                       value={searchRaw}
@@ -1096,7 +1096,7 @@ const SDRMeetingsTab = () => {
                       style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-soft)', fontSize: 13, padding: '7px 28px 7px 28px', width: '100%', boxSizing: 'border-box' }}
                     />
                     {searchRaw && (
-                      <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
+                      <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--muted-foreground))', display: 'flex', padding: 0 }}>
                         <X size={12} />
                       </button>
                     )}
@@ -1116,20 +1116,20 @@ const SDRMeetingsTab = () => {
                     style={{
                       display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px',
                       borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
-                      background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'hsl(var(--surface-invert) / 0.04)',
-                      border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : 'var(--line-1)'}`,
-                      color: filtersOpen || mTotalActive > 0 ? 'hsl(var(--pt-c084fc))' : '#9ca3af',
+                      background: filtersOpen || mTotalActive > 0 ? 'hsl(var(--primary) / 0.12)' : 'hsl(var(--surface-invert) / 0.04)',
+                      border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'hsl(var(--primary) / 0.5)' : 'var(--line-1)'}`,
+                      color: filtersOpen || mTotalActive > 0 ? 'var(--brand-ink)' : '#9ca3af',
                       fontSize: 13, fontWeight: mTotalActive > 0 ? 600 : 400, transition: 'all 0.15s',
                     }}
                   >
                     <SlidersHorizontal size={13} />
                     Filters
                     {mTotalActive > 0 && (
-                      <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
+                      <span style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
                         {mTotalActive}
                       </span>
                     )}
-                    <ChevronDown size={11} style={{ color: '#6b7280', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
+                    <ChevronDown size={11} style={{ color: 'hsl(var(--muted-foreground))', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
                   </button>
                   {mTotalActive > 0 && (
                     <button
@@ -1152,7 +1152,7 @@ const SDRMeetingsTab = () => {
             />
 
             {/* Refresh */}
-            <button onClick={() => load()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
+            <button onClick={() => load()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: 'hsl(var(--muted-foreground))' }}>
               <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             </button>
           </div>
@@ -1163,15 +1163,15 @@ const SDRMeetingsTab = () => {
               marginTop: 10,
               padding: '16px 16px 14px',
               background: 'linear-gradient(135deg,hsl(var(--sfr-0a041c) / 0.92),hsl(var(--sfr-100626) / 0.95))',
-              border: '1px solid rgba(168,85,247,0.2)',
+              border: '1px solid hsl(var(--primary) / 0.2)',
               borderRadius: 11,
-              boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06), 0 4px 20px rgba(0,0,0,0.3)',
+              boxShadow: 'inset 0 1px 0 hsl(var(--primary) / 0.06), 0 4px 20px rgba(0,0,0,0.3)',
             }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
 
                 {/* Status */}
                 <div>
-                  <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} /> STATUS
                   </div>
                   <FilterDropdown fullWidth
@@ -1179,11 +1179,11 @@ const SDRMeetingsTab = () => {
                     value={statusFilter}
                     onChange={setStatusFilter}
                     options={[
-                      { key: '',                   label: 'All Statuses',    color: '#6b7280' },
+                      { key: '',                   label: 'All Statuses',    color: 'hsl(var(--muted-foreground))' },
                       { key: 'pending',            label: 'Pending',         color: '#f59e0b', dot: true },
                       { key: 'awaiting_approval',  label: 'Awaiting Lead',   color: '#6366f1', dot: true },
                       { key: 'scheduled',          label: 'Scheduled',       color: '#10b981', dot: true },
-                      { key: 'completed',          label: 'Completed',       color: '#6b7280', dot: true },
+                      { key: 'completed',          label: 'Completed',       color: 'hsl(var(--muted-foreground))', dot: true },
                       { key: 'cancelled',          label: 'Cancelled',       color: '#ef4444', dot: true },
                       { key: 'no_show',            label: "Didn't Show Up",  color: '#8b5cf6', dot: true },
                     ]}
@@ -1192,7 +1192,7 @@ const SDRMeetingsTab = () => {
 
                 {/* Temperature */}
                 <div>
-                  <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <Thermometer size={11} style={{ color: 'hsl(var(--pt-f59e0b))' }} /> LEAD TEMP
                   </div>
                   <FilterDropdown fullWidth
@@ -1201,7 +1201,7 @@ const SDRMeetingsTab = () => {
                     onChange={setTempFilter}
                     icon={Thermometer}
                     options={[
-                      { key: '',     label: 'All Temps', color: '#6b7280' },
+                      { key: '',     label: 'All Temps', color: 'hsl(var(--muted-foreground))' },
                       { key: 'hot',  label: 'Hot',       color: '#f43f5e', dot: true, Icon: Flame },
                       { key: 'warm', label: 'Warm',      color: '#f59e0b', dot: true, Icon: Thermometer },
                       { key: 'cold', label: 'Cold',      color: '#60a5fa', dot: true, Icon: Snowflake },
@@ -1211,7 +1211,7 @@ const SDRMeetingsTab = () => {
 
                 {/* Campaign */}
                 <div>
-                  <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6366f1', display: 'inline-block' }} /> CAMPAIGN
                   </div>
                   <FilterDropdown fullWidth
@@ -1219,27 +1219,27 @@ const SDRMeetingsTab = () => {
                     value={campaignFilter}
                     onChange={setCampaignFilter}
                     options={[
-                      { key: '',          label: 'All Campaigns', color: '#6b7280' },
+                      { key: '',          label: 'All Campaigns', color: 'hsl(var(--muted-foreground))' },
                       { key: 'active',    label: 'Active',        color: '#10b981', dot: true },
                       { key: 'paused',    label: 'Paused',        color: '#f59e0b', dot: true },
-                      { key: 'completed', label: 'Completed',     color: '#6b7280', dot: true },
+                      { key: 'completed', label: 'Completed',     color: 'hsl(var(--muted-foreground))', dot: true },
                       { key: 'scheduled', label: 'Scheduled',     color: '#6366f1', dot: true },
-                      { key: 'draft',     label: 'Draft',         color: '#4b5563', dot: true },
+                      { key: 'draft',     label: 'Draft',         color: 'hsl(var(--muted-foreground) / 0.85)', dot: true },
                     ]}
                   />
                 </div>
 
                 {/* Sort */}
                 <div>
-                  <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <ArrowUpDown size={11} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> SORT BY
+                  <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <ArrowUpDown size={11} style={{ color: 'var(--brand-ink)' }} /> SORT BY
                   </div>
                   <FilterDropdown fullWidth
                     label="Sort by"
                     value={sortBy}
                     onChange={setSortBy}
                     icon={ArrowUpDown}
-                    options={MEET_SORT_OPTIONS.map(o => ({ key: o.value, label: o.label, color: '#a78bfa' }))}
+                    options={MEET_SORT_OPTIONS.map(o => ({ key: o.value, label: o.label, color: 'var(--brand-ink)' }))}
                   />
                 </div>
               </div>
@@ -1255,7 +1255,7 @@ const SDRMeetingsTab = () => {
                     >
                       <X size={11} /> Clear all
                     </button>
-                    <span style={{ color: '#6b7280', fontSize: 12 }}>{mTotalActive} active</span>
+                    <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>{mTotalActive} active</span>
                   </div>
                 ) : null;
               })()} */}
@@ -1263,9 +1263,9 @@ const SDRMeetingsTab = () => {
           )}
 
           {/* Result summary */}
-          <div style={{ marginTop: 8, fontSize: 12, color: '#4b5563', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ marginTop: 8, fontSize: 12, color: 'hsl(var(--muted-foreground) / 0.85)', display: 'flex', alignItems: 'center', gap: 8 }}>
             {loading
-              ? <span style={{ color: 'hsl(var(--pt-a78bfa))' }}>Loading…</span>
+              ? <span style={{ color: 'var(--brand-ink)' }}>Loading…</span>
               : <>
                   <span>
                     Showing <strong style={{ color: 'var(--text-soft)' }}>
@@ -1273,7 +1273,7 @@ const SDRMeetingsTab = () => {
                     </strong> of <strong style={{ color: 'var(--text-soft)' }}>{data.total}</strong> meetings
                   </span>
                   {(searchRaw || statusFilter || tempFilter || campaignFilter) && (
-                    <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'hsl(var(--pt-a78bfa))', fontSize: 11 }}>
+                    <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'var(--brand-ink)', fontSize: 11 }}>
                       filtered
                     </span>
                   )}
@@ -1287,20 +1287,20 @@ const SDRMeetingsTab = () => {
       {/* ── Table ── */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#4b5563', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'hsl(var(--muted-foreground) / 0.85)', gap: 10 }}>
             <Loader2 size={20} className="animate-spin" /> Loading meetings…
           </div>
         ) : meetings.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 240, color: '#4b5563' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 240, color: 'hsl(var(--muted-foreground) / 0.85)' }}>
             <Calendar size={36} style={{ opacity: 0.25, marginBottom: 12 }} />
-            <p style={{ fontWeight: 600, color: '#4b5563', fontSize: 15, margin: 0 }}>No meetings found</p>
+            <p style={{ fontWeight: 600, color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 15, margin: 0 }}>No meetings found</p>
             <p style={{ fontSize: 12, marginTop: 6, color: '#374151' }}>
               {activeOnly
                 ? 'Meetings from active campaigns will appear here when leads reply with interest.'
                 : 'No meetings match the current filters.'}
             </p>
             {activeOnly && (
-              <button onClick={() => setActiveOnly(false)} style={{ marginTop: 12, fontSize: 12, color: '#a855f7', background: 'none', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 7, padding: '5px 14px', cursor: 'pointer' }}>
+              <button onClick={() => setActiveOnly(false)} style={{ marginTop: 12, fontSize: 12, color: 'hsl(var(--primary-fill))', background: 'none', border: '1px solid hsl(var(--primary) / 0.3)', borderRadius: 7, padding: '5px 14px', cursor: 'pointer' }}>
                 Show all campaigns
               </button>
             )}
@@ -1327,19 +1327,19 @@ const SDRMeetingsTab = () => {
                   <React.Fragment key={m.id}>
                     <tr
                       onClick={() => setExpandedId(id => id === m.id ? null : m.id)}
-                      style={{ cursor: 'pointer', background: isExpanded ? 'rgba(168,85,247,0.06)' : 'transparent', transition: 'background 0.15s' }}
-                      onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
+                      style={{ cursor: 'pointer', background: isExpanded ? 'hsl(var(--primary) / 0.06)' : 'transparent', transition: 'background 0.15s' }}
+                      onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = 'hsl(var(--surface-invert) / 0.02)'; }}
                       onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
                     >
                       {/* Lead */}
                       <td style={td}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                          <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#a855f7,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                          <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
                             {(m.lead_name || '?')[0].toUpperCase()}
                           </div>
                           <div>
                             <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13 }}>{m.lead_name}</div>
-                            <div style={{ color: '#4b5563', fontSize: 11 }}>{m.lead_email}</div>
+                            <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11 }}>{m.lead_email}</div>
                           </div>
                         </div>
                       </td>
@@ -1347,17 +1347,17 @@ const SDRMeetingsTab = () => {
                       {/* Company */}
                       <td style={td}>
                         <div style={{ color: 'hsl(var(--pt-c4b5d4))', fontSize: 13 }}>{m.lead_company || '—'}</div>
-                        {m.lead_job_title && <div style={{ color: '#4b5563', fontSize: 11 }}>{m.lead_job_title}</div>}
+                        {m.lead_job_title && <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11 }}>{m.lead_job_title}</div>}
                       </td>
 
                       {/* Campaign */}
                       <td style={td}>
                         {m.campaign_name ? (
-                          <span style={{ fontSize: 12, color: '#818cf8', background: 'rgba(99,102,241,0.1)', borderRadius: 6, padding: '2px 9px', fontWeight: 600 }}>
+                          <span style={{ fontSize: 12, color: 'var(--brand-ink)', background: 'rgba(99,102,241,0.1)', borderRadius: 6, padding: '2px 9px', fontWeight: 600 }}>
                             {m.campaign_name}
                           </span>
                         ) : m.campaign_removed ? (
-                          <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Campaign removed</span>
+                          <span style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))', fontStyle: 'italic' }}>Campaign removed</span>
                         ) : '—'}
                       </td>
 
@@ -1383,7 +1383,7 @@ const SDRMeetingsTab = () => {
                       <td style={td}>
                         {m.lead_score ? (
                           <div>
-                            <span style={{ color: '#a855f7', fontWeight: 700, fontSize: 13 }}>{m.lead_score}</span>
+                            <span style={{ color: 'hsl(var(--primary-fill))', fontWeight: 700, fontSize: 13 }}>{m.lead_score}</span>
                             <span style={{ color: '#374151', fontSize: 11 }}>/100</span>
                           </div>
                         ) : '—'}
@@ -1402,7 +1402,7 @@ const SDRMeetingsTab = () => {
                             title="Generate AI prep notes"
                             onClick={e => handleGeneratePrep(m, e)}
                             disabled={prepGenIds.has(m.id)}
-                            style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 6, padding: '4px 7px', cursor: prepGenIds.has(m.id) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', color: '#a855f7' }}
+                            style={{ background: 'hsl(var(--primary) / 0.1)', border: '1px solid hsl(var(--primary) / 0.25)', borderRadius: 6, padding: '4px 7px', cursor: prepGenIds.has(m.id) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', color: 'hsl(var(--primary-fill))' }}
                           >
                             {prepGenIds.has(m.id)
                               ? <Loader2 size={12} className="animate-spin" />
@@ -1414,14 +1414,14 @@ const SDRMeetingsTab = () => {
                             <button
                               title="View prep notes"
                               onClick={e => { e.stopPropagation(); setPrepModal(m); }}
-                              style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 6, padding: '4px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#818cf8' }}
+                              style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 6, padding: '4px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--brand-ink)' }}
                             >
                               <Eye size={12} />
                             </button>
                           )}
 
                           {/* Expand chevron */}
-                          <span style={{ color: '#4b5563' }}>
+                          <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)' }}>
                             {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                           </span>
                         </div>
@@ -1449,9 +1449,9 @@ const SDRMeetingsTab = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '12px 20px', borderTop: '1px solid var(--sfc-1e1535)', background: 'var(--sfc-0a0616)' }}>
 
           {/* Left: page info */}
-          <span style={{ fontSize: 13, color: '#6b7280' }}>
+          <span style={{ fontSize: 13, color: 'hsl(var(--muted-foreground))' }}>
             Page <strong style={{ color: 'var(--text-soft)' }}>{page}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{total_pages}</strong>
-            <span style={{ color: '#4b5563', marginLeft: 8 }}>({total.toLocaleString()} total)</span>
+            <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', marginLeft: 8 }}>({total.toLocaleString()} total)</span>
           </span>
 
           {/* Right: page controls */}
@@ -1475,7 +1475,7 @@ const SDRMeetingsTab = () => {
               }, [])
               .map((p, i) =>
                 p === '…'
-                  ? <span key={`ellipsis-${i}`} style={{ color: '#4b5563', padding: '0 4px', fontSize: 13 }}>…</span>
+                  ? <span key={`ellipsis-${i}`} style={{ color: 'hsl(var(--muted-foreground) / 0.85)', padding: '0 4px', fontSize: 13 }}>…</span>
                   : <button key={p} onClick={() => { setPage(p); load({ page: p }); }} style={pgBtn(false, p === page)}>
                       {p}
                     </button>

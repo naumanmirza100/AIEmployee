@@ -468,7 +468,7 @@ const Interviews = ({ onUpdate }) => {
       </div>
 
       {interviews.length === 0 ? (
-        <Card id="REC-interviews-empty-state" data-testid="REC-interviews-empty-state" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+        <Card id="REC-interviews-empty-state" data-testid="REC-interviews-empty-state" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
             <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
             <p className="text-base sm:text-lg font-medium mb-2 text-white">No interviews yet</p>
@@ -488,7 +488,7 @@ const Interviews = ({ onUpdate }) => {
       ) : (
         <div id="REC-interviews-list" data-testid="REC-interviews-list" className="space-y-3 sm:space-y-4">
           {interviews.map((interview) => (
-            <Card key={interview.id} id={`REC-interviews-row-${interview.id}`} data-testid={`REC-interviews-row-${interview.id}`} className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm">
+            <Card key={interview.id} id={`REC-interviews-row-${interview.id}`} data-testid={`REC-interviews-row-${interview.id}`} className="overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
               <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-4">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-4">
                   <div className="min-w-0 flex-1">

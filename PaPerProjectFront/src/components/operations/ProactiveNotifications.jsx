@@ -200,7 +200,7 @@ const ProactiveNotifications = () => {
     <div
       id="OPS-notifications-root"
       data-testid="OPS-notifications-root"
-      className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)] p-5 sm:p-6"
+      className="w-full rounded-2xl border border-primary/10 overflow-hidden shadow-[0_8px_40px_-12px_hsl(var(--primary)/0.15)] p-5 sm:p-6"
       style={{
         background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, hsl(var(--sfr-40280a) / 0.55) 100%)',
       }}
@@ -210,12 +210,12 @@ const ProactiveNotifications = () => {
         <div className="flex items-center gap-3">
           <div
             className="flex items-center justify-center w-11 h-11 rounded-xl relative"
-            style={{ backgroundColor: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.28)' }}
+            style={{ backgroundColor: 'hsl(var(--primary)/0.12)', border: '1px solid hsl(var(--primary)/0.28)' }}
           >
             {totalUnread > 0 ? (
-              <BellRing className="h-5 w-5" style={{ color: 'hsl(var(--pt-f59e0b))' }} />
+              <BellRing className="h-5 w-5" style={{ color: 'var(--brand-ink)' }} />
             ) : (
-              <Bell className="h-5 w-5" style={{ color: 'hsl(var(--pt-f59e0b))' }} />
+              <Bell className="h-5 w-5" style={{ color: 'var(--brand-ink)' }} />
             )}
             {totalUnread > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-pure-white text-[10px] font-bold flex items-center justify-center">
@@ -242,7 +242,7 @@ const ProactiveNotifications = () => {
             onClick={() => load(true)}
             disabled={refreshing}
             title="Refresh"
-            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 bg-black/30 hover:bg-white/5 transition-colors disabled:opacity-50"
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 bg-muted/50 dark:bg-black/30 hover:bg-white/5 transition-colors disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 text-white/70 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
@@ -253,7 +253,7 @@ const ProactiveNotifications = () => {
             disabled={totalUnread === 0}
             size="sm"
             variant="outline"
-            className="h-8 text-xs border-white/10 bg-transparent text-white/80 hover:bg-amber-500/10 hover:border-amber-500/30 hover:text-amber-200 disabled:opacity-40"
+            className="h-8 text-xs border-white/10 bg-transparent text-white/80 hover:bg-primary/10 hover:border-primary/30 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 disabled:opacity-40"
           >
             <CheckCheck className="h-3.5 w-3.5 mr-1" /> Mark all read
           </Button>
@@ -288,12 +288,12 @@ const ProactiveNotifications = () => {
               onClick={() => setFilter(f.value)}
               className={`px-3 py-1 rounded-full text-[11px] font-semibold transition-colors flex items-center gap-1.5 ${
                 active
-                  ? 'bg-amber-500/20 text-amber-200 border border-amber-500/30'
-                  : 'border border-white/10 bg-black/20 text-white/65 hover:text-white/90 hover:bg-white/5'
+                  ? 'bg-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200 border border-primary/30'
+                  : 'border border-white/10 bg-muted/50 dark:bg-black/20 text-white/65 hover:text-white/90 hover:bg-white/5'
               }`}
             >
               {f.label}
-              <span className={`${active ? 'text-amber-300' : 'text-white/40'} tabular-nums`}>
+              <span className={`${active ? 'text-[hsl(var(--primary-fill))] dark:text-violet-300' : 'text-white/40'} tabular-nums`}>
                 {count}
               </span>
             </button>
@@ -304,7 +304,7 @@ const ProactiveNotifications = () => {
       {/* Body */}
       {loading ? (
         <div id="OPS-notifications-loading" data-testid="OPS-notifications-loading" className="flex items-center justify-center py-16 text-white/50 text-sm">
-          <Loader2 className="h-5 w-5 animate-spin mr-2" style={{ color: 'hsl(var(--pt-f59e0b))' }} />
+          <Loader2 className="h-5 w-5 animate-spin mr-2" style={{ color: 'var(--brand-ink)' }} />
           Loading notifications...
         </div>
       ) : grouped.length === 0 ? (
@@ -367,12 +367,12 @@ const NotificationCard = ({ n, busy, onMarkRead, onDelete }) => {
       className={`group relative rounded-xl border px-4 py-3 transition-all ${
         n.is_read
           ? 'border-white/10 bg-white/[0.02]'
-          : 'border-amber-500/25 bg-amber-500/[0.06] shadow-[0_0_0_1px_rgba(245,158,11,0.08)]'
+          : 'border-primary/25 bg-primary/[0.06] shadow-[0_0_0_1px_hsl(var(--primary)/0.08)]'
       }`}
     >
       {!n.is_read && (
         <span
-          className="absolute top-3 left-1.5 h-2 w-2 rounded-full bg-amber-400"
+          className="absolute top-3 left-1.5 h-2 w-2 rounded-full bg-primary"
           title="Unread"
         />
       )}
@@ -416,7 +416,7 @@ const NotificationCard = ({ n, busy, onMarkRead, onDelete }) => {
               onClick={onMarkRead}
               disabled={busy}
               title="Mark as read"
-              className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 bg-black/30 hover:bg-amber-500/10 hover:border-amber-500/30 text-white/70 hover:text-amber-200 disabled:opacity-50"
+              className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 bg-muted/50 dark:bg-black/30 hover:bg-primary/10 hover:border-primary/30 text-white/70 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 disabled:opacity-50"
             >
               <Eye className="h-3 w-3" />
             </button>
@@ -426,7 +426,7 @@ const NotificationCard = ({ n, busy, onMarkRead, onDelete }) => {
             data-testid={`OPS-notifications-delete-btn-${n.id}`}
             onClick={onDelete}
             title="Delete"
-            className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 bg-black/30 hover:bg-red-500/10 hover:border-red-500/30 text-white/70 hover:text-red-300"
+            className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 bg-muted/50 dark:bg-black/30 hover:bg-red-500/10 hover:border-red-500/30 text-white/70 hover:text-red-300"
           >
             <X className="h-3 w-3" />
           </button>
@@ -448,9 +448,9 @@ const EmptyState = ({ filter }) => {
     <div id="OPS-notifications-empty" data-testid="OPS-notifications-empty" className="flex flex-col items-center justify-center py-16 text-center">
       <div
         className="w-14 h-14 rounded-2xl mb-3 flex items-center justify-center"
-        style={{ backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)' }}
+        style={{ backgroundColor: 'hsl(var(--primary)/0.08)', border: '1px solid hsl(var(--primary)/0.18)' }}
       >
-        <BellOff className="h-6 w-6 text-amber-300/70" />
+        <BellOff className="h-6 w-6 text-[hsl(var(--primary-fill)/0.7)] dark:text-violet-300/70" />
       </div>
       <div className="text-white/90 text-sm font-semibold">{copy.title}</div>
       {copy.sub && <div className="text-white/45 text-xs mt-1 max-w-md">{copy.sub}</div>}

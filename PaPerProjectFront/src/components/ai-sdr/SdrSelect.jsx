@@ -25,10 +25,10 @@ const SdrSelect = ({ value, onChange, options, style, placeholder, disabled, tit
           textAlign: 'left', ...style,
         }}>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-          <SelectPrimitive.Value placeholder={<span style={{ color: '#6b7280' }}>{placeholder || 'Choose…'}</span>} />
+          <SelectPrimitive.Value placeholder={<span style={{ color: 'hsl(var(--muted-foreground))' }}>{placeholder || 'Choose…'}</span>} />
         </span>
         <SelectPrimitive.Icon asChild>
-          <ChevronDown size={15} style={{ flexShrink: 0, color: '#9ca3af' }} />
+          <ChevronDown size={15} style={{ flexShrink: 0, color: 'hsl(var(--muted-foreground))' }} />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>

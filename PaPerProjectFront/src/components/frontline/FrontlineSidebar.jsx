@@ -120,7 +120,7 @@ function SidebarItem({ item, collapsed, activeTab, onTabChange }) {
                   onClick={() => onTabChange(sub.value)}
                   className={`w-full inline-flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-md text-xs transition ${
                     isSubActive
-                      ? 'bg-amber-500/15 text-amber-200 font-medium'
+                      ? 'bg-primary/15 text-[hsl(var(--primary-fill))] dark:text-violet-200 font-medium'
                       : 'text-white/55 hover:text-white hover:bg-white/[0.04]'
                   }`}
                 >
@@ -144,7 +144,7 @@ function NavButton({ onClick, active, collapsed, icon: Icon, label, trailing }) 
   }, [collapsed]);
 
   const baseCls = active
-    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-pure-white shadow-sm'
+    ? 'bg-gradient-to-r from-primary to-primary text-pure-white shadow-sm'
     : 'text-white/60 hover:text-white hover:bg-white/[0.05]';
 
   return (

@@ -8,10 +8,12 @@ import { MessageCircle, Trash2 } from 'lucide-react';
  */
 
 // Whole class names, so Tailwind keeps them.
+// Every agent's chat uses the brand (UI refresh, 26 Nov 2026); the old names still work.
+const BRAND = { selected: 'bg-primary/10 border border-primary/30', active: 'bg-primary/10', icon: 'text-[hsl(var(--primary-fill))] dark:text-violet-300' };
 const ACCENTS = {
-  cyan: { selected: 'bg-cyan-500/10 border border-cyan-400/30', active: 'bg-cyan-500/10', icon: 'text-cyan-300' },
-  violet: { selected: 'bg-violet-500/10 border border-violet-400/30', active: 'bg-violet-500/10', icon: 'text-violet-300' },
-  amber: { selected: 'bg-amber-400/10 border border-amber-400/30', active: 'bg-amber-400/10', icon: 'text-amber-300' },
+  cyan: BRAND,
+  violet: BRAND,
+  amber: BRAND,
 };
 
 /** '5m ago' for a timestamp in milliseconds. */

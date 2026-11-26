@@ -648,7 +648,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
             content switching. */}
 
         <TabsContent id="REC-settings-email-panel" data-testid="REC-settings-email-panel" value="email">
-          <Card id="REC-settings-email-card" data-testid="REC-settings-email-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-email-card" data-testid="REC-settings-email-card" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Email Settings</CardTitle>
               <CardDescription>
@@ -788,7 +788,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
         </TabsContent>
 
         <TabsContent id="REC-settings-interview-panel" data-testid="REC-settings-interview-panel" value="interview">
-          <Card id="REC-settings-interview-card" data-testid="REC-settings-interview-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-interview-card" data-testid="REC-settings-interview-card" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Interview Settings</CardTitle>
               <CardDescription>
@@ -1169,7 +1169,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       onClick={handleUpdateTimeSlotAvailability}
                       disabled={saving}
                       variant="outline"
-                      className="bg-indigo-600 hover:bg-indigo-700 text-pure-white border-indigo-600"
+                      className="bg-[hsl(var(--primary-fill))] hover:bg-[hsl(var(--primary-fill)/0.9)] text-pure-white border-transparent"
                     >
                       <Lock className="h-4 w-4 mr-2" />
                       {saving ? 'Updating...' : 'Update Availability'}
@@ -1221,7 +1221,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                 ? 'invisible' 
                                 : dateInfo.isInRange
                                   ? dateInfo.isStart
-                                    ? 'bg-indigo-600 text-pure-white font-bold'
+                                    ? 'bg-[hsl(var(--primary-fill))] text-pure-white font-bold'
                                     : dateInfo.isEnd
                                       ? 'bg-indigo-500 text-pure-white font-bold'
                                       : 'bg-indigo-500/70 text-white font-bold'
@@ -1355,7 +1355,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
         </TabsContent>
 
         <TabsContent id="REC-settings-qualification-panel" data-testid="REC-settings-qualification-panel" value="qualification">
-          <Card id="REC-settings-qualification-card" data-testid="REC-settings-qualification-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-qualification-card" data-testid="REC-settings-qualification-card" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Qualification Settings</CardTitle>
               <CardDescription>

@@ -31,21 +31,21 @@ const inputStyle = {
   borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
-const labelStyle = { color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 4 };
+const labelStyle = { color: 'hsl(var(--muted-foreground))', fontSize: 12, display: 'block', marginBottom: 4 };
 
 const STATUS_COLORS = {
-  draft:     { color: '#6b7280', bg: 'rgba(107,114,128,0.12)', border: 'rgba(107,114,128,0.3)', label: 'Draft' },
+  draft:     { color: 'hsl(var(--muted-foreground))', bg: 'rgba(107,114,128,0.12)', border: 'rgba(107,114,128,0.3)', label: 'Draft' },
   scheduled: { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)',  label: 'Scheduled' },
   active:    { color: '#10b981', bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.3)',  label: 'Active' },
   paused:    { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.3)',  label: 'Paused' },
-  completed: { color: '#a855f7', bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)',  label: 'Completed' },
+  completed: { color: 'hsl(var(--primary-fill))', bg: 'hsl(var(--primary) / 0.12)', border: 'hsl(var(--primary) / 0.3)',  label: 'Completed' },
 };
 const ENROLL_STATUS = {
   active:       { color: '#60a5fa', label: 'Active' },
   replied:      { color: '#10b981', label: 'Replied' },
-  completed:    { color: '#a855f7', label: 'Completed' },
+  completed:    { color: 'hsl(var(--primary-fill))', label: 'Completed' },
   paused:       { color: '#f59e0b', label: 'Paused' },
-  unsubscribed: { color: '#6b7280', label: 'Unsubscribed' },
+  unsubscribed: { color: 'hsl(var(--muted-foreground))', label: 'Unsubscribed' },
   bounced:      { color: '#f43f5e', label: 'Bounced' },
 };
 const TEMP_ICON = { hot: Flame, warm: Thermometer, cold: Snowflake };
@@ -112,7 +112,7 @@ const fmtCountdown = (iso, now) => {
   const m = Math.floor(diff / 60000);
   const h = Math.floor(m / 60);
   const d = Math.floor(h / 24);
-  if (d > 0) return { label: `in ${d}d ${h % 24}h`, color: '#6b7280' };
+  if (d > 0) return { label: `in ${d}d ${h % 24}h`, color: 'hsl(var(--muted-foreground))' };
   if (h > 0) return { label: `in ${h}h ${m % 60}m`, color: '#f59e0b' };
   return { label: `in ${m}m`, color: '#10b981' };
 };
@@ -122,7 +122,7 @@ const fmtCountdown = (iso, now) => {
 // --------------------------------------------------------------------------
 const StepIcon = ({ type, size = 16 }) =>
   type === 'email'
-    ? <Mail size={size} style={{ color: '#a855f7' }} />
+    ? <Mail size={size} style={{ color: 'hsl(var(--primary-fill))' }} />
     : <Linkedin size={size} style={{ color: '#60a5fa' }} />;
 
 // --------------------------------------------------------------------------
@@ -135,11 +135,11 @@ const StepCard = ({ step, onEdit, onDelete, isLast }) => (
       <div style={{
         width: 44, height: 44, borderRadius: '50%', display: 'flex', alignItems: 'center',
         justifyContent: 'center', flexDirection: 'column',
-        background: step.step_type === 'email' ? 'rgba(168,85,247,0.15)' : 'rgba(96,165,250,0.15)',
-        border: `2px solid ${step.step_type === 'email' ? 'rgba(168,85,247,0.4)' : 'rgba(96,165,250,0.4)'}`,
+        background: step.step_type === 'email' ? 'hsl(var(--primary) / 0.15)' : 'rgba(96,165,250,0.15)',
+        border: `2px solid ${step.step_type === 'email' ? 'hsl(var(--primary) / 0.4)' : 'rgba(96,165,250,0.4)'}`,
       }}>
         <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 9, lineHeight: 1 }}>Day</span>
-        <span style={{ fontWeight: 700, fontSize: 14, color: step.step_type === 'email' ? 'hsl(var(--pt-c084fc))' : '#93c5fd' }}>
+        <span style={{ fontWeight: 700, fontSize: 14, color: step.step_type === 'email' ? 'var(--brand-ink)' : '#93c5fd' }}>
           {step.delay_days}
         </span>
       </div>
@@ -155,7 +155,7 @@ const StepCard = ({ step, onEdit, onDelete, isLast }) => (
           <StepIcon type={step.step_type} />
           <div>
             <span style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13 }}>{step.name || `Step ${step.step_order}`}</span>
-            <span style={{ color: '#4b5563', fontSize: 11, marginLeft: 8 }}>
+            <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, marginLeft: 8 }}>
               {step.step_type === 'email' ? 'Email' : 'LinkedIn'}
             </span>
           </div>
@@ -164,7 +164,7 @@ const StepCard = ({ step, onEdit, onDelete, isLast }) => (
           {onEdit && (
             <button onClick={() => onEdit(step)} style={{
               background: 'none', border: '1px solid var(--line-1)', borderRadius: 6,
-              padding: '3px 7px', cursor: 'pointer', color: '#6b7280',
+              padding: '3px 7px', cursor: 'pointer', color: 'hsl(var(--muted-foreground))',
             }}>
               <Edit2 size={11} />
             </button>
@@ -180,12 +180,12 @@ const StepCard = ({ step, onEdit, onDelete, isLast }) => (
         </div>
       </div>
       {step.subject_template && (
-        <div style={{ marginTop: 6, color: '#6b7280', fontSize: 12 }}>
-          <span style={{ color: '#4b5563' }}>Subject: </span>{step.subject_template.slice(0, 70)}{step.subject_template.length > 70 ? '…' : ''}
+        <div style={{ marginTop: 6, color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>
+          <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)' }}>Subject: </span>{step.subject_template.slice(0, 70)}{step.subject_template.length > 70 ? '…' : ''}
         </div>
       )}
       {step.body_template && (
-        <div style={{ marginTop: 4, color: '#4b5563', fontSize: 11, lineHeight: 1.5 }}>
+        <div style={{ marginTop: 4, color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, lineHeight: 1.5 }}>
           {step.body_template.slice(0, 100)}{step.body_template.length > 100 ? '…' : ''}
         </div>
       )}
@@ -280,25 +280,25 @@ const EditStepModal = ({ step, onChange, onSave, onClose, saving }) => {
           {/* Variable picker */}
           <div style={{
             padding: '10px 12px', borderRadius: 8,
-            background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)',
+            background: 'hsl(var(--primary) / 0.06)', border: '1px solid hsl(var(--primary) / 0.2)',
           }}>
-            <p style={{ color: '#a855f7', fontSize: 11, fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <p style={{ color: 'hsl(var(--primary-fill))', fontSize: 11, fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Insert Lead Variable — click to insert at cursor
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {LEAD_VARS.map(({ label, token }) => (
                 <button key={token} onClick={() => insertToken(token)} style={{
-                  background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.35)',
-                  borderRadius: 6, padding: '3px 9px', cursor: 'pointer', color: 'hsl(var(--pt-c084fc))',
+                  background: 'hsl(var(--primary) / 0.12)', border: '1px solid hsl(var(--primary) / 0.35)',
+                  borderRadius: 6, padding: '3px 9px', cursor: 'pointer', color: 'var(--brand-ink)',
                   fontSize: 11, fontWeight: 500, fontFamily: 'monospace',
                   transition: 'background 0.15s',
                 }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(168,85,247,0.25)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'rgba(168,85,247,0.12)'}
+                  onMouseEnter={e => e.currentTarget.style.background = 'hsl(var(--primary) / 0.25)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'hsl(var(--primary) / 0.12)'}
                   title={`Inserts ${token}`}
                 >
                   {token}
-                  <span style={{ color: '#6b7280', fontFamily: 'sans-serif', fontWeight: 400, marginLeft: 4, fontSize: 10 }}>
+                  <span style={{ color: 'hsl(var(--muted-foreground))', fontFamily: 'sans-serif', fontWeight: 400, marginLeft: 4, fontSize: 10 }}>
                     {label}
                   </span>
                 </button>
@@ -335,11 +335,11 @@ const EditStepModal = ({ step, onChange, onSave, onClose, saving }) => {
           </div>
 
           {/* AI personalisation */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.15)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'hsl(var(--primary) / 0.04)', border: '1px solid hsl(var(--primary) / 0.15)' }}>
             <input type="checkbox" id="ai_p" checked={step.ai_personalize}
               onChange={e => onChange(p => ({ ...p, ai_personalize: e.target.checked }))} />
             <label htmlFor="ai_p" style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, cursor: 'pointer' }}>
-              <Zap size={11} style={{ display: 'inline', marginRight: 4, color: 'hsl(var(--pt-c084fc))' }} />
+              <Zap size={11} style={{ display: 'inline', marginRight: 4, color: 'var(--brand-ink)' }} />
               AI personalises this step using lead signals (buying signals, recent news, etc.)
             </label>
           </div>
@@ -348,7 +348,7 @@ const EditStepModal = ({ step, onChange, onSave, onClose, saving }) => {
         <DialogFooter>
           <Button variant="outline" onClick={onClose} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
           <Button onClick={onSave} disabled={saving} style={{
-            background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff',
+            background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff',
             border: 'none', borderRadius: 8, fontWeight: 600,
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
@@ -683,12 +683,12 @@ const SDROutreachTab = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 style={{ color: 'var(--text-soft)', fontSize: 20, fontWeight: 700, margin: 0 }}>Outreach Campaigns</h2>
-            <p style={{ color: '#4b5563', fontSize: 13, marginTop: 4 }}>
+            <p style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 13, marginTop: 4 }}>
               Multi-step sequences: Day 1 email → Day 3 LinkedIn → Day 5 follow-up → Day 10 last touch
             </p>
           </div>
           <Button onClick={() => setShowCreateModal(true)} style={{
-            background: 'linear-gradient(90deg,#f43f5e 0%,#a855f7 100%)',
+            background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))',
             color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600,
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
@@ -701,7 +701,7 @@ const SDROutreachTab = () => {
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Search */}
             <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
-              <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#4b5563', pointerEvents: 'none' }} />
+              <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-foreground) / 0.85)', pointerEvents: 'none' }} />
               <input
                 placeholder="Search campaigns…"
                 value={campaignSearch}
@@ -709,7 +709,7 @@ const SDROutreachTab = () => {
                 style={{ width: '100%', background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 9, color: 'var(--text-soft)', padding: '7px 28px 7px 30px', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
               />
               {campaignSearch && (
-                <button onClick={() => setCampaignSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
+                <button onClick={() => setCampaignSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--muted-foreground))', display: 'flex', padding: 0 }}>
                   <X size={13} />
                 </button>
               )}
@@ -719,9 +719,9 @@ const SDROutreachTab = () => {
               { key: '',          label: 'All'       },
               { key: 'active',    label: 'Active',    color: '#10b981' },
               { key: 'paused',    label: 'Paused',    color: '#f59e0b' },
-              { key: 'completed', label: 'Completed', color: '#6b7280' },
+              { key: 'completed', label: 'Completed', color: 'hsl(var(--muted-foreground))' },
               { key: 'scheduled', label: 'Scheduled', color: '#6366f1' },
-              { key: 'draft',     label: 'Draft',     color: '#4b5563' },
+              { key: 'draft',     label: 'Draft',     color: 'hsl(var(--muted-foreground) / 0.85)' },
             ].map(opt => {
               const isSel = campaignStatusFilter === opt.key;
               const col = opt.color || '#9ca3af';
@@ -737,19 +737,19 @@ const SDROutreachTab = () => {
 
         {/* Campaign grid */}
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>
-            <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 12px', color: '#a855f7' }} />
+          <div style={{ textAlign: 'center', padding: 60, color: 'hsl(var(--muted-foreground))' }}>
+            <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 12px', color: 'hsl(var(--primary-fill))' }} />
             <p>Loading campaigns…</p>
           </div>
         ) : campaigns.length === 0 ? (
           <div style={{ ...cardStyle, padding: 60, textAlign: 'center' }}>
             <Send size={40} style={{ color: '#1e0f38', margin: '0 auto 16px' }} />
-            <p style={{ color: '#6b7280', marginBottom: 6 }}>No campaigns yet.</p>
-            <p style={{ color: '#4b5563', fontSize: 13, marginBottom: 20 }}>
+            <p style={{ color: 'hsl(var(--muted-foreground))', marginBottom: 6 }}>No campaigns yet.</p>
+            <p style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 13, marginBottom: 20 }}>
               Create your first campaign and AI will generate the full outreach sequence automatically.
             </p>
             <Button onClick={() => setShowCreateModal(true)} style={{
-              background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff',
+              background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff',
               border: 'none', borderRadius: 8, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6,
             }}>
               <Plus size={14} /> Create Campaign
@@ -765,7 +765,7 @@ const SDROutreachTab = () => {
                 return matchSearch && matchStatus;
               });
               if (filtered.length === 0) return [(
-                <div key="empty" style={{ gridColumn: '1/-1', textAlign: 'center', padding: '40px 0', color: '#4b5563', fontSize: 14 }}>
+                <div key="empty" style={{ gridColumn: '1/-1', textAlign: 'center', padding: '40px 0', color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 14 }}>
                   No campaigns match your search.
                 </div>
               )];
@@ -774,20 +774,20 @@ const SDROutreachTab = () => {
               return (
                 <div key={c.id} style={{ ...cardStyle, padding: 20, cursor: 'pointer', transition: 'border-color 0.2s' }}
                   onClick={() => loadDetail(c)}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = '#a855f7'}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = 'hsl(var(--primary-fill))'}
                   onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--line-1)'}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                     <div style={{ flex: 1 }}>
                       <h3 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 15, margin: 0 }}>{c.name}</h3>
                       {c.description && (
-                        <p style={{ color: '#6b7280', fontSize: 12, marginTop: 4, lineHeight: 1.4 }}>
+                        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, marginTop: 4, lineHeight: 1.4 }}>
                           {c.description.slice(0, 80)}{c.description.length > 80 ? '…' : ''}
                         </p>
                       )}
                     </div>
                     <button onClick={e => { e.stopPropagation(); setDeleteConfirm(c); }} style={{
-                      background: 'none', border: 'none', cursor: 'pointer', color: '#4b5563', padding: 4,
+                      background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--muted-foreground) / 0.85)', padding: 4,
                     }}>
                       <Trash2 size={13} />
                     </button>
@@ -827,7 +827,7 @@ const SDROutreachTab = () => {
                         border: '1px solid hsl(var(--surface-invert) / 0.05)',
                       }}>
                         <div style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 18 }}>{value || 0}</div>
-                        <div style={{ color: '#4b5563', fontSize: 11, marginTop: 2 }}>{label}</div>
+                        <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, marginTop: 2 }}>{label}</div>
                       </div>
                     ))}
                   </div>
@@ -922,7 +922,7 @@ const SDROutreachTab = () => {
                   </div>
                   <div>
                     <label style={labelStyle}>Estimated End</label>
-                    <div style={{ ...inputStyle, color: '#6b7280', display: 'flex', alignItems: 'center', minHeight: 38 }}>
+                    <div style={{ ...inputStyle, color: 'hsl(var(--muted-foreground))', display: 'flex', alignItems: 'center', minHeight: 38 }}>
                       {newCampaign.start_date ? addDays(newCampaign.start_date, 10) : '— set start date'}
                     </div>
                   </div>
@@ -947,7 +947,7 @@ const SDROutreachTab = () => {
                     </label>
                   </div>
                 </div>
-                <p style={{ color: '#6b7280', fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+                <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
                   Sequence runs Day 1 (email) → Day 3 (LinkedIn) → Day 5 (follow-up) → Day 10 (last touch).
                   Background workers send each step automatically.
                 </p>
@@ -1013,7 +1013,7 @@ const SDROutreachTab = () => {
                     </div>
                     {/* IMAP — for reply detection */}
                     <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--sfc-1e0f38)', paddingTop: 10, marginTop: 4 }}>
-                      <p style={{ color: '#6b7280', fontSize: 11, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                      <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
                         IMAP Settings — reply detection
                       </p>
                     </div>
@@ -1032,10 +1032,10 @@ const SDROutreachTab = () => {
               </div>
 
               {/* AI steps checkbox */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8, background: 'hsl(var(--primary) / 0.06)', border: '1px solid hsl(var(--primary) / 0.2)' }}>
                 <input type="checkbox" id="gen_steps" checked={newCampaign.generate_steps}
                   onChange={e => setNewCampaign(p => ({ ...p, generate_steps: e.target.checked }))} />
-                <label htmlFor="gen_steps" style={{ color: 'hsl(var(--pt-c084fc))', fontSize: 13, cursor: 'pointer' }}>
+                <label htmlFor="gen_steps" style={{ color: 'var(--brand-ink)', fontSize: 13, cursor: 'pointer' }}>
                   <Zap size={12} style={{ display: 'inline', marginRight: 4 }} />
                   AI generates the 4-step sequence automatically on create
                 </label>
@@ -1045,7 +1045,7 @@ const SDROutreachTab = () => {
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowCreateModal(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
               <Button onClick={handleCreate} disabled={creating} style={{
-                background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff',
+                background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff',
                 border: 'none', borderRadius: 8, fontWeight: 600,
                 display: 'flex', alignItems: 'center', gap: 6,
               }}>
@@ -1090,7 +1090,7 @@ const SDROutreachTab = () => {
                 {sc.label}
               </span>
               {selectedCampaign.start_date && (
-                <span style={{ color: '#6b7280', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <Calendar size={11} />
                   {selectedCampaign.start_date} → {selectedCampaign.end_date || addDays(selectedCampaign.start_date, 10)}
                 </span>
@@ -1182,7 +1182,7 @@ const SDROutreachTab = () => {
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         {[
-          { label: 'Total Leads', value: selectedCampaign.total_leads, color: '#a855f7', icon: Users },
+          { label: 'Total Leads', value: selectedCampaign.total_leads, color: 'hsl(var(--primary-fill))', icon: Users },
           { label: 'Emails Sent', value: selectedCampaign.emails_sent, color: '#60a5fa', icon: Mail },
           { label: 'Replies', value: selectedCampaign.replies_received, color: '#10b981', icon: MessageSquare },
           { label: 'Meetings', value: selectedCampaign.meetings_booked || 0, color: '#f59e0b', icon: Calendar },
@@ -1193,7 +1193,7 @@ const SDROutreachTab = () => {
             </div>
             <div>
               <div style={{ color, fontSize: 24, fontWeight: 700 }}>{value || 0}</div>
-              <div style={{ color: '#6b7280', fontSize: 12 }}>{label}</div>
+              <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>{label}</div>
             </div>
           </div>
         ))}
@@ -1223,7 +1223,7 @@ const SDROutreachTab = () => {
         borderRadius: 8, background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.2)',
         color: 'hsl(var(--pt-93c5fd))', fontSize: 12,
       }}>
-        <Zap size={13} style={{ flexShrink: 0, color: '#a855f7' }} />
+        <Zap size={13} style={{ flexShrink: 0, color: 'hsl(var(--primary-fill))' }} />
         <span>
           {selectedCampaign.inbox_error ? (
             // The inbox could not be read: the line below said it was checked every five minutes (CO-197).
@@ -1253,8 +1253,8 @@ const SDROutreachTab = () => {
               })()
               : <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Paused</b> — campaign is paused. Resume to continue sending.</>)
             : selectedCampaign.status === 'completed'
-            ? <><b style={{ color: '#6b7280' }}>Campaign Completed</b> — all leads have been processed. Add new leads, then press Start campaign.</>
-            : <><b style={{ color: '#6b7280' }}>Draft</b> — nothing is sent yet. Add leads, then press Start campaign.</>}
+            ? <><b style={{ color: 'hsl(var(--muted-foreground))' }}>Campaign Completed</b> — all leads have been processed. Add new leads, then press Start campaign.</>
+            : <><b style={{ color: 'hsl(var(--muted-foreground))' }}>Draft</b> — nothing is sent yet. Add leads, then press Start campaign.</>}
           {selectedCampaign.smtp_host && <span style={{ color: '#60a5fa' }}> · Using {selectedCampaign.smtp_host}</span>}
         </span>
       </div>
@@ -1286,8 +1286,8 @@ const SDROutreachTab = () => {
             <h3 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 14, margin: 0 }}>Outreach Sequence</h3>
             {mine && (
               <button onClick={handleGenerateSteps} disabled={generatingSteps} style={{
-                background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)',
-                borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: 'hsl(var(--pt-c084fc))',
+                background: 'hsl(var(--primary) / 0.1)', border: '1px solid hsl(var(--primary) / 0.3)',
+                borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: 'var(--brand-ink)',
                 fontSize: 11, display: 'flex', alignItems: 'center', gap: 4,
               }}>
                 {generatingSteps ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
@@ -1297,15 +1297,15 @@ const SDROutreachTab = () => {
           </div>
 
           {loadingDetail ? (
-            <div style={{ textAlign: 'center', padding: 30, color: '#6b7280' }}>
-              <Loader2 size={20} className="animate-spin" style={{ margin: '0 auto 8px', color: '#a855f7' }} />
+            <div style={{ textAlign: 'center', padding: 30, color: 'hsl(var(--muted-foreground))' }}>
+              <Loader2 size={20} className="animate-spin" style={{ margin: '0 auto 8px', color: 'hsl(var(--primary-fill))' }} />
             </div>
           ) : steps.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 24 }}>
-              <p style={{ color: '#4b5563', fontSize: 13, marginBottom: 12 }}>No steps yet.</p>
+              <p style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 13, marginBottom: 12 }}>No steps yet.</p>
               {mine && (
                 <button onClick={handleGenerateSteps} disabled={generatingSteps} style={{
-                  background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff',
+                  background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff',
                   border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer',
                   fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, margin: '0 auto',
                 }}>
@@ -1329,15 +1329,15 @@ const SDROutreachTab = () => {
         <div style={{ ...cardStyle, overflow: 'hidden' }}>
           <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--sfc-1e0f38)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 14, margin: 0 }}>
-              Enrolled Leads <span style={{ color: '#4b5563', fontWeight: 400 }}>({enrollments.length})</span>
+              Enrolled Leads <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontWeight: 400 }}>({enrollments.length})</span>
             </h3>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ color: '#4b5563', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', display: 'inline-block', animation: 'pulse 2s infinite' }} />
                 Auto-checking replies every 5 min
               </span>
               <button onClick={() => loadDetail(selectedCampaign)} style={{
-                background: 'none', border: '1px solid var(--line-1)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: '#6b7280',
+                background: 'none', border: '1px solid var(--line-1)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: 'hsl(var(--muted-foreground))',
               }}>
                 <RefreshCw size={12} />
               </button>
@@ -1347,15 +1347,15 @@ const SDROutreachTab = () => {
           {enrollments.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 40 }}>
               <Users size={32} style={{ color: '#1e0f38', margin: '0 auto 10px' }} />
-              <p style={{ color: '#6b7280', fontSize: 13 }}>No leads enrolled yet.</p>
-              {mine && <p style={{ color: '#4b5563', fontSize: 12 }}>Click "Enroll Leads" to add leads to this campaign.</p>}
+              <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>No leads enrolled yet.</p>
+              {mine && <p style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 12 }}>Click "Enroll Leads" to add leads to this campaign.</p>}
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--sfc-1e0f38)' }}>
                   {['Lead', 'Score', 'Progress', 'Status', 'Next Action / Reply', 'Meeting'].map(h => (
-                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#4b5563', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1366,13 +1366,13 @@ const SDROutreachTab = () => {
                   return (
                     <tr key={enr.id}
                       style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.4)' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(168,85,247,0.04)'}
+                      onMouseEnter={e => e.currentTarget.style.background = 'hsl(var(--primary) / 0.04)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
                       <td style={{ padding: '11px 14px' }}>
                         <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 13 }}>{enr.lead_name}</div>
-                        <div style={{ color: '#6b7280', fontSize: 11, marginTop: 2 }}>{enr.lead_company}</div>
-                        {enr.lead_email && <div style={{ color: '#4b5563', fontSize: 11 }}>{enr.lead_email}</div>}
+                        <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, marginTop: 2 }}>{enr.lead_company}</div>
+                        {enr.lead_email && <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11 }}>{enr.lead_email}</div>}
                         {enr.send_error && (
                           // Why sending stopped for this lead: it was parked with no word (CO-198).
                           <div data-testid="sdr-send-error" style={{ color: '#f87171', fontSize: 11, marginTop: 3, maxWidth: 260 }}>
@@ -1396,10 +1396,10 @@ const SDROutreachTab = () => {
                             <div style={{
                               height: '100%', borderRadius: 3,
                               width: enr.total_steps > 0 ? `${(enr.current_step / enr.total_steps) * 100}%` : '0%',
-                              background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)',
+                              background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))',
                             }} />
                           </div>
-                          <span style={{ color: '#6b7280', fontSize: 11 }}>
+                          <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11 }}>
                             {enr.current_step}/{enr.total_steps}
                           </span>
                         </div>
@@ -1428,7 +1428,7 @@ const SDROutreachTab = () => {
                             </div>
                             {enr.reply_content && (
                               <div style={{
-                                color: '#6b7280', fontSize: 11, fontStyle: 'italic',
+                                color: 'hsl(var(--muted-foreground))', fontSize: 11, fontStyle: 'italic',
                                 maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                               }}>
                                 "{enr.reply_content.slice(0, 60)}{enr.reply_content.length > 60 ? '…' : ''}"
@@ -1477,7 +1477,7 @@ const SDROutreachTab = () => {
                           const cd = fmtCountdown(enr.next_action_at, now);
                           return (
                             <div style={{ fontSize: 11 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#6b7280' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'hsl(var(--muted-foreground))' }}>
                                 <Clock size={10} /> {fmtDate(enr.next_action_at)}
                               </div>
                               {cd && (
@@ -1496,7 +1496,7 @@ const SDROutreachTab = () => {
                           const ms = enr.meeting_status;
                           const cfg = ms === 'scheduled'         ? { label: 'Scheduled',      color: '#10b981', bg: 'rgba(16,185,129,0.12)',   border: 'rgba(16,185,129,0.3)'  }
                                     : ms === 'awaiting_approval' ? { label: 'Awaiting Lead',  color: '#6366f1', bg: 'rgba(99,102,241,0.12)',   border: 'rgba(99,102,241,0.3)'  }
-                                    : ms === 'completed'         ? { label: 'Completed',      color: '#6b7280', bg: 'rgba(107,114,128,0.12)',  border: 'rgba(107,114,128,0.3)' }
+                                    : ms === 'completed'         ? { label: 'Completed',      color: 'hsl(var(--muted-foreground))', bg: 'rgba(107,114,128,0.12)',  border: 'rgba(107,114,128,0.3)' }
                                     : ms === 'no_show'           ? { label: "Didn't Show",    color: '#8b5cf6', bg: 'rgba(139,92,246,0.12)',   border: 'rgba(139,92,246,0.3)'  }
                                     : ms === 'cancelled'         ? { label: 'Cancelled',      color: '#ef4444', bg: 'rgba(239,68,68,0.12)',    border: 'rgba(239,68,68,0.3)'   }
                                     :                              { label: 'Pending',         color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',   border: 'rgba(245,158,11,0.3)'  };
@@ -1531,7 +1531,7 @@ const SDROutreachTab = () => {
           </DialogHeader>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Search size={14} style={{ color: '#6b7280' }} />
+            <Search size={14} style={{ color: 'hsl(var(--muted-foreground))' }} />
             <input data-testid="sdr-enroll-search" value={enrollSearch} placeholder="Search by name, company or email"
               onChange={e => { setEnrollSearch(e.target.value); loadEnrollLeads(e.target.value, 1); }}
               style={{ flex: 1, background: 'transparent', border: '1px solid var(--line-1)', borderRadius: 8,
@@ -1539,7 +1539,7 @@ const SDROutreachTab = () => {
           </div>
           <div style={{ overflowY: 'auto', maxHeight: '50vh' }}>
             {leads.length === 0 ? (
-              <p style={{ color: '#6b7280', textAlign: 'center', padding: 30 }}>
+              <p style={{ color: 'hsl(var(--muted-foreground))', textAlign: 'center', padding: 30 }}>
                 {enrollSearch ? 'No lead matches that search.' : 'No leads to add: every lead is in this campaign already, or add leads first from the Leads tab.'}
               </p>
             ) : (
@@ -1555,7 +1555,7 @@ const SDROutreachTab = () => {
                       />
                     </th>
                     {['Name', 'Company', 'Score'].map(h => (
-                      <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: '#4b5563', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{h}</th>
+                      <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1568,7 +1568,7 @@ const SDROutreachTab = () => {
                         onClick={() => setSelectedLeadIds(prev =>
                           prev.includes(lead.id) ? prev.filter(id => id !== lead.id) : [...prev, lead.id]
                         )}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(168,85,247,0.05)'}
+                        onMouseEnter={e => e.currentTarget.style.background = 'hsl(var(--primary) / 0.05)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                       >
                         <td style={{ padding: '10px 12px' }}>
@@ -1586,7 +1586,7 @@ const SDROutreachTab = () => {
                         </td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13 }}>{lead.full_name}</div>
-                          <div style={{ color: '#6b7280', fontSize: 11 }}>{lead.job_title}</div>
+                          <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11 }}>{lead.job_title}</div>
                         </td>
                         <td style={{ padding: '10px 12px', color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>{lead.company_name}</td>
                         <td style={{ padding: '10px 12px' }}>
@@ -1606,7 +1606,7 @@ const SDROutreachTab = () => {
           </div>
 
           <div style={{ padding: '10px 0 0', borderTop: '1px solid var(--sfc-1e0f38)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, display: 'flex', alignItems: 'center', gap: 10 }}>
               {selectedLeadIds.length} lead{selectedLeadIds.length !== 1 ? 's' : ''} selected
               {enrollPage.total_pages > 1 && (
                 <span data-testid="sdr-enroll-pages" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1623,7 +1623,7 @@ const SDROutreachTab = () => {
             <div style={{ display: 'flex', gap: 8 }}>
               <Button variant="outline" onClick={() => setShowEnrollModal(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
               <Button onClick={handleEnroll} disabled={enrolling || !selectedLeadIds.length} style={{
-                background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff',
+                background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff',
                 border: 'none', borderRadius: 8, fontWeight: 600,
                 display: 'flex', alignItems: 'center', gap: 6,
               }}>
@@ -1766,7 +1766,7 @@ const SDROutreachTab = () => {
                   </div>
                   {/* IMAP — for reply detection */}
                   <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--sfc-1e0f38)', paddingTop: 10, marginTop: 4 }}>
-                    <p style={{ color: '#6b7280', fontSize: 11, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
                       IMAP Settings — reply detection
                     </p>
                   </div>
@@ -1785,7 +1785,7 @@ const SDROutreachTab = () => {
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowSettingsModal(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
               <Button onClick={handleSaveSettings} disabled={savingSettings} style={{
-                background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff',
+                background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff',
                 border: 'none', borderRadius: 8, fontWeight: 600,
                 display: 'flex', alignItems: 'center', gap: 6,
               }}>
@@ -1807,7 +1807,7 @@ const SDROutreachTab = () => {
           negative:       { color: '#f87171', bg: 'rgba(248,113,113,0.1)', icon: '❌', label: '✗ Not interested' },
           out_of_office:  { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  icon: '🏖️', label: '🏖️ Out of office — follow-up paused' },
           wants_more_info:{ color: '#60a5fa', bg: 'rgba(96,165,250,0.1)',  icon: 'ℹ️', label: 'ℹ️ Wants more info' },
-          neutral:        { color: '#9ca3af', bg: 'rgba(107,114,128,0.1)', icon: '💬', label: '~ Neutral reply' },
+          neutral:        { color: 'hsl(var(--muted-foreground))', bg: 'rgba(107,114,128,0.1)', icon: '💬', label: '~ Neutral reply' },
         };
         const ACTION_TAKEN = {
           unsubscribed: { color: '#f87171', bg: 'rgba(248,113,113,0.08)', border: 'rgba(248,113,113,0.25)', icon: '🚫', text: 'Outreach stopped — lead marked Disqualified' },
@@ -1840,7 +1840,7 @@ const SDROutreachTab = () => {
                   <span style={{ fontSize: 18 }}>{sc.icon}</span>
                   <div>
                     <div style={{ color: sc.color, fontWeight: 700, fontSize: 13 }}>{sc.label}</div>
-                    <div style={{ color: '#6b7280', fontSize: 11, marginTop: 2 }}>AI reply classification</div>
+                    <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, marginTop: 2 }}>AI reply classification</div>
                   </div>
                 </div>
 
@@ -1862,11 +1862,11 @@ const SDROutreachTab = () => {
                   borderRadius: 8, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 5,
                 }}>
                   <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-                    <span style={{ color: '#4b5563', minWidth: 40 }}>From</span>
+                    <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', minWidth: 40 }}>From</span>
                     <span style={{ color: 'var(--text-soft)', fontWeight: 600 }}>
                       {viewReplyModal.lead_name}
                       {viewReplyModal.lead_email && (
-                        <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 6 }}>
+                        <span style={{ color: 'hsl(var(--muted-foreground))', fontWeight: 400, marginLeft: 6 }}>
                           &lt;{viewReplyModal.lead_email}&gt;
                         </span>
                       )}
@@ -1874,13 +1874,13 @@ const SDROutreachTab = () => {
                   </div>
                   {viewReplyModal.lead_company && (
                     <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-                      <span style={{ color: '#4b5563', minWidth: 40 }}>Co.</span>
+                      <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', minWidth: 40 }}>Co.</span>
                       <span style={{ color: 'hsl(var(--pt-9ca3af))' }}>{viewReplyModal.lead_company}</span>
                     </div>
                   )}
                   {viewReplyModal.replied_at && (
                     <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-                      <span style={{ color: '#4b5563', minWidth: 40 }}>Date</span>
+                      <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', minWidth: 40 }}>Date</span>
                       <span style={{ color: 'hsl(var(--pt-9ca3af))' }}>{fmtDate(viewReplyModal.replied_at)}</span>
                     </div>
                   )}
@@ -1888,7 +1888,7 @@ const SDROutreachTab = () => {
 
                 {/* Reply body */}
                 <div>
-                  <div style={{ color: '#4b5563', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                  <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                     Reply Content
                   </div>
                   <div style={{
@@ -1899,7 +1899,7 @@ const SDROutreachTab = () => {
                   }}>
                     {viewReplyModal.reply_content
                       ? viewReplyModal.reply_content
-                      : <span style={{ color: '#4b5563', fontStyle: 'italic' }}>Reply content not available.</span>
+                      : <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontStyle: 'italic' }}>Reply content not available.</span>
                     }
                   </div>
                 </div>
@@ -1921,7 +1921,7 @@ const SDROutreachTab = () => {
 
               <DialogFooter>
                 <Button onClick={() => setViewReplyModal(null)} style={{
-                  background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff',
+                  background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff',
                   border: 'none', borderRadius: 8, fontWeight: 600,
                 }}>
                   Close
@@ -1943,11 +1943,11 @@ const SDROutreachTab = () => {
           </p>
 
           {/* Select All */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'rgba(168,85,247,0.06)', borderRadius: 8, marginBottom: 8, cursor: 'pointer' }}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'hsl(var(--primary) / 0.06)', borderRadius: 8, marginBottom: 8, cursor: 'pointer' }}
             onClick={() => setClearSelected(clearSelected.length === enrollments.length ? [] : enrollments.map(e => e.id))}>
             <input type="checkbox" readOnly
               checked={clearSelected.length === enrollments.length && enrollments.length > 0}
-              style={{ accentColor: '#a855f7', width: 15, height: 15 }} />
+              style={{ accentColor: 'hsl(var(--primary-fill))', width: 15, height: 15 }} />
             <span style={{ color: 'var(--text-soft)', fontSize: 13, fontWeight: 600 }}>
               Select All ({enrollments.length} leads)
             </span>
@@ -1965,7 +1965,7 @@ const SDROutreachTab = () => {
                   style={{ accentColor: '#ef4444', width: 14, height: 14, flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: 'var(--text-soft)', fontSize: 13, fontWeight: 500 }}>{enr.lead_name || enr.lead_email}</div>
-                  <div style={{ color: '#6b7280', fontSize: 11 }}>{enr.lead_email} · <span style={{ color: '#a855f7' }}>{enr.status}</span></div>
+                  <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11 }}>{enr.lead_email} · <span style={{ color: 'hsl(var(--primary-fill))' }}>{enr.status}</span></div>
                 </div>
               </div>
             ))}

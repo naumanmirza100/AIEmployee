@@ -25,10 +25,10 @@ import { sidePanelStartsOpen } from '@/utils/sidePanel';
 // ──────────────────────────────────────────────
 // Theming — matches the rest of the Operations module (amber/orange)
 // ──────────────────────────────────────────────
-const ACCENT = '#f59e0b';
-const ACCENT_SOFT = 'rgba(245,158,11,0.12)';
-const ACCENT_BORDER = 'rgba(245,158,11,0.28)';
-const ACCENT_STRONG = 'rgba(245,158,11,0.40)';
+const ACCENT = 'hsl(var(--primary-fill))';
+const ACCENT_SOFT = 'hsl(var(--primary)/0.12)';
+const ACCENT_BORDER = 'hsl(var(--primary)/0.28)';
+const ACCENT_STRONG = 'hsl(var(--primary)/0.40)';
 
 // ──────────────────────────────────────────────
 // Markdown renderer (amber accent)
@@ -38,8 +38,8 @@ function markdownToHtml(md) {
   const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const inline = (s) => {
     let out = escape(s);
-    out = out.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-white/10 text-amber-200 text-[0.85em] font-mono">$1</code>');
-    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-amber-200">$1</strong>');
+    out = out.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-white/10 text-[hsl(var(--primary-fill))] dark:text-violet-200 text-[0.85em] font-mono">$1</code>');
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-200">$1</strong>');
     out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em class="italic text-white/85">$2</em>');
     return out;
   };
@@ -73,8 +73,8 @@ function markdownToHtml(md) {
       i = j;
       if (rows.length) {
         out.push('<div class="my-4 overflow-x-auto rounded-lg border border-white/10">');
-        out.push('<table class="w-full text-sm"><thead><tr class="bg-amber-500/10">');
-        rows[0].forEach((c) => out.push(`<th class="px-3 py-2 text-left font-semibold text-amber-300">${inline(c)}</th>`));
+        out.push('<table class="w-full text-sm"><thead><tr class="bg-primary/10">');
+        rows[0].forEach((c) => out.push(`<th class="px-3 py-2 text-left font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-300">${inline(c)}</th>`));
         out.push('</tr></thead><tbody>');
         rows.slice(1).forEach((r, idx) => {
           out.push(`<tr class="${idx % 2 === 0 ? 'bg-white/[0.02]' : ''} hover:bg-white/[0.04]">`);
@@ -87,9 +87,9 @@ function markdownToHtml(md) {
     }
 
     if (/^---+$/.test(t)) { closeLists(-1); out.push('<hr class="my-5 border-white/10" />'); i++; continue; }
-    if (/^#### /.test(t)) { closeLists(-1); out.push(`<h4 class="text-sm font-semibold mt-3 mb-1.5 text-amber-100/90">${inline(t.slice(5))}</h4>`); i++; continue; }
-    if (/^### /.test(t))  { closeLists(-1); out.push(`<h3 class="text-base font-bold mt-5 mb-2 text-amber-200">${inline(t.slice(4))}</h3>`); i++; continue; }
-    if (/^## /.test(t))   { closeLists(-1); out.push(`<h2 class="text-lg font-bold mt-6 mb-2.5 text-amber-300 border-b border-amber-500/20 pb-1.5">${inline(t.slice(3))}</h2>`); i++; continue; }
+    if (/^#### /.test(t)) { closeLists(-1); out.push(`<h4 class="text-sm font-semibold mt-3 mb-1.5 text-[hsl(var(--primary-fill)/0.9)] dark:text-violet-200/90">${inline(t.slice(5))}</h4>`); i++; continue; }
+    if (/^### /.test(t))  { closeLists(-1); out.push(`<h3 class="text-base font-bold mt-5 mb-2 text-[hsl(var(--primary-fill))] dark:text-violet-200">${inline(t.slice(4))}</h3>`); i++; continue; }
+    if (/^## /.test(t))   { closeLists(-1); out.push(`<h2 class="text-lg font-bold mt-6 mb-2.5 text-[hsl(var(--primary-fill))] dark:text-violet-300 border-b border-primary/20 pb-1.5">${inline(t.slice(3))}</h2>`); i++; continue; }
     if (/^# /.test(t))    { closeLists(-1); out.push(`<h1 class="text-2xl font-bold mt-2 mb-4 text-white">${inline(t.slice(2))}</h1>`); i++; continue; }
 
     const indent = getIndent(line);
@@ -105,7 +105,7 @@ function markdownToHtml(md) {
         closeLists(indent);
       }
       const bullet = indent === 0 ? '•' : '›';
-      const color = indent === 0 ? 'text-amber-400' : 'text-white/30';
+      const color = indent === 0 ? 'text-[hsl(var(--primary-fill))] dark:text-violet-300' : 'text-white/30';
       const textColor = indent === 0 ? 'text-white/90' : 'text-white/70';
       out.push(
         `<li class="text-sm leading-relaxed ${textColor} flex gap-2 ${indent === 0 ? 'pt-1' : ''}">` +
@@ -499,7 +499,7 @@ const DocumentAuthoring = () => {
       description: (
         <>
           The current version will be archived in history, and version number will bump to{' '}
-          <strong className="text-amber-300">v{currentDoc.version + 1}</strong>.
+          <strong className="text-[hsl(var(--primary-fill))] dark:text-violet-300">v{currentDoc.version + 1}</strong>.
         </>
       ),
       confirmLabel: 'Regenerate',
@@ -605,7 +605,7 @@ const DocumentAuthoring = () => {
   // ──────────────────────────────────────────────
   return (
     <div
-      className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)]"
+      className="w-full rounded-2xl border border-primary/10 overflow-hidden shadow-[0_8px_40px_-12px_hsl(var(--primary)/0.15)]"
       style={{
         background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, hsl(var(--sfr-40280a) / 0.55) 100%)',
       }}
@@ -618,7 +618,7 @@ const DocumentAuthoring = () => {
           }`}
           style={{ minWidth: showSidebar ? '18rem' : 0, overflow: 'hidden' }}
         >
-          <div className="w-72 h-full flex flex-col bg-black/30">
+          <div className="w-72 h-full flex flex-col bg-muted/50 dark:bg-black/30">
             <div className="px-3 pt-3 pb-2 border-b border-white/10 flex flex-col gap-2 shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -659,7 +659,7 @@ const DocumentAuthoring = () => {
                     data-testid="OPS-authoring-hide-sidebar-btn"
                     onClick={() => setShowSidebar(false)}
                     title="Hide sidebar"
-                    className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/20 hover:bg-white/5 transition-colors"
+                    className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-muted/50 dark:bg-black/20 hover:bg-white/5 transition-colors"
                   >
                     <ChevronsLeft className="h-3.5 w-3.5 text-white/70" />
                   </button>
@@ -686,7 +686,7 @@ const DocumentAuthoring = () => {
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
                   placeholder="Search..."
-                  className="w-full bg-black/30 border border-white/10 rounded-md pl-8 pr-2.5 py-1.5 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-amber-500/40"
+                  className="w-full bg-muted/50 dark:bg-black/30 border border-white/10 rounded-md pl-8 pr-2.5 py-1.5 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-primary/40"
                 />
               </div>
             </div>
@@ -724,7 +724,7 @@ const DocumentAuthoring = () => {
                       data-testid={`OPS-authoring-doc-row-${d.id}`}
                       onClick={() => openDoc(d.id)}
                       className={`group relative rounded-lg px-2.5 py-2 cursor-pointer transition-colors ${
-                        isActive ? 'bg-amber-500/10 border border-amber-500/25' : 'hover:bg-white/[0.04] border border-transparent'
+                        isActive ? 'bg-primary/10 border border-primary/25' : 'hover:bg-white/[0.04] border border-transparent'
                       }`}
                     >
                       <div className="flex items-start gap-2">
@@ -970,11 +970,11 @@ const AuthoringOnboarding = ({ open, step, setStep, onClose }) => {
             </Button>
           )}
           {isLast ? (
-            <Button id="OPS-authoring-onboarding-getstarted-btn" data-testid="OPS-authoring-onboarding-getstarted-btn" size="sm" onClick={onClose} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff' }}>
+            <Button id="OPS-authoring-onboarding-getstarted-btn" data-testid="OPS-authoring-onboarding-getstarted-btn" size="sm" onClick={onClose} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,hsl(var(--primary-fill)),hsl(var(--primary-fill-deep)))', color: '#fff' }}>
               <Check className="h-4 w-4 mr-1" /> Get started
             </Button>
           ) : (
-            <Button id="OPS-authoring-onboarding-next-btn" data-testid="OPS-authoring-onboarding-next-btn" size="sm" onClick={() => setStep(step + 1)} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff' }}>
+            <Button id="OPS-authoring-onboarding-next-btn" data-testid="OPS-authoring-onboarding-next-btn" size="sm" onClick={() => setStep(step + 1)} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,hsl(var(--primary-fill)),hsl(var(--primary-fill-deep)))', color: '#fff' }}>
               Next <ArrowRight className="h-4 w-4 ml-1" />
             </Button>
           )}
@@ -1064,14 +1064,14 @@ const CreateView = ({
   return (
     <>
       {/* Header */}
-      <div className="px-6 py-4 border-b border-white/10 flex items-center gap-3 bg-black/25">
+      <div className="px-6 py-4 border-b border-white/10 flex items-center gap-3 bg-muted/50 dark:bg-black/25">
         {!showSidebar && (
           <button
             id="OPS-authoring-create-show-sidebar-btn"
             data-testid="OPS-authoring-create-show-sidebar-btn"
             onClick={() => setShowSidebar(true)}
             title="Show sidebar"
-            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors"
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-muted/50 dark:bg-black/30 hover:bg-white/5 transition-colors"
           >
             <ChevronsRight className="h-4 w-4 text-white/70" />
           </button>
@@ -1124,7 +1124,7 @@ const CreateView = ({
                   id="OPS-authoring-clear-refs-btn"
                   data-testid="OPS-authoring-clear-refs-btn"
                   onClick={(e) => { e.stopPropagation(); onClearRefs?.(); }}
-                  className="text-[11px] text-amber-300/80 hover:text-amber-200 px-2 py-1"
+                  className="text-[11px] text-[hsl(var(--primary-fill)/0.8)] dark:text-violet-300/80 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 px-2 py-1"
                   type="button"
                 >
                   Clear
@@ -1151,7 +1151,7 @@ const CreateView = ({
                     onClick={() => setTone(t.value)}
                     className={`rounded-lg border px-3 py-2 text-xs transition-colors flex flex-col items-start gap-0.5 ${
                       active
-                        ? 'border-amber-500/50 bg-amber-500/10 text-amber-200'
+                        ? 'border-primary/50 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-200'
                         : 'border-white/10 bg-white/[0.02] text-white/80 hover:bg-white/[0.06] hover:border-white/25'
                     }`}
                   >
@@ -1174,7 +1174,7 @@ const CreateView = ({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder={`e.g. ${tpl.label} – Q3 Operations`}
-              className="bg-black/30 border-white/10 text-white/95 placeholder-white/35 text-sm h-10 focus-visible:ring-1 focus-visible:ring-amber-500/40 focus-visible:border-amber-500/40"
+              className="bg-muted/50 dark:bg-black/30 border-white/10 text-white/95 placeholder-white/35 text-sm h-10 focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:border-primary/40"
             />
           </div>
 
@@ -1190,7 +1190,7 @@ const CreateView = ({
               onChange={(e) => setPrompt(e.target.value)}
               placeholder={`Describe the document you want. Example: "Draft a weekly operations report focusing on the risks from the latest Q3 financial document and recommended mitigation steps."`}
               rows={7}
-              className="resize-y bg-black/30 border-white/10 text-white/95 placeholder-white/35 text-sm leading-relaxed focus-visible:ring-1 focus-visible:ring-amber-500/40 focus-visible:border-amber-500/40 min-h-[180px]"
+              className="resize-y bg-muted/50 dark:bg-black/30 border-white/10 text-white/95 placeholder-white/35 text-sm leading-relaxed focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:border-primary/40 min-h-[180px]"
             />
             <p className="text-[11px] text-white/45 mt-1.5">
               Tip: be specific about the audience, key sections, and any data to emphasize.
@@ -1200,7 +1200,7 @@ const CreateView = ({
       </div>
 
       {/* Footer with CTA */}
-      <div className="border-t border-white/10 px-6 py-4 bg-black/25">
+      <div className="border-t border-white/10 px-6 py-4 bg-muted/50 dark:bg-black/25">
         <div className={`mx-auto flex items-center justify-between gap-4 transition-[max-width] duration-300 ${showSidebar ? 'max-w-4xl' : 'max-w-5xl'}`}>
           <div className="text-[11px] text-white/45">
             Powered by AI · Always review before sharing
@@ -1239,14 +1239,14 @@ const StreamingView = ({ scrollRef, title, content, onCancel, showSidebar, setSh
   return (
     <>
       {/* Header */}
-      <div className="px-6 py-3 border-b border-white/10 flex items-center gap-3 bg-black/25">
+      <div className="px-6 py-3 border-b border-white/10 flex items-center gap-3 bg-muted/50 dark:bg-black/25">
         {!showSidebar && (
           <button
             id="OPS-authoring-streaming-show-sidebar-btn"
             data-testid="OPS-authoring-streaming-show-sidebar-btn"
             onClick={() => setShowSidebar(true)}
             title="Show sidebar"
-            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors"
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-muted/50 dark:bg-black/30 hover:bg-white/5 transition-colors"
           >
             <ChevronsRight className="h-4 w-4 text-white/70" />
           </button>
@@ -1263,8 +1263,8 @@ const StreamingView = ({ scrollRef, title, content, onCancel, showSidebar, setSh
           </div>
           <div className="text-xs text-white/55 flex items-center gap-2 mt-0.5">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400/70" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/70" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
             </span>
             AI is writing...
           </div>
@@ -1287,7 +1287,7 @@ const StreamingView = ({ scrollRef, title, content, onCancel, showSidebar, setSh
           {content ? (
             <article
               className="prose prose-invert max-w-none"
-              dangerouslySetInnerHTML={{ __html: markdownToHtml(content) + '<span class="inline-block w-[2px] h-4 bg-amber-400 align-middle ml-0.5 animate-pulse" />' }}
+              dangerouslySetInnerHTML={{ __html: markdownToHtml(content) + '<span class="inline-block w-[2px] h-4 bg-primary align-middle ml-0.5 animate-pulse" />' }}
             />
           ) : (
             <div className="flex items-center gap-3 text-white/55 text-sm py-10">
@@ -1328,14 +1328,14 @@ const ViewView = ({
   return (
     <>
       {/* Header */}
-      <div className="px-6 py-3 border-b border-white/10 flex items-center gap-3 bg-black/25">
+      <div className="px-6 py-3 border-b border-white/10 flex items-center gap-3 bg-muted/50 dark:bg-black/25">
         {!showSidebar && (
           <button
             id="OPS-authoring-view-show-sidebar-btn"
             data-testid="OPS-authoring-view-show-sidebar-btn"
             onClick={() => setShowSidebar(true)}
             title="Show sidebar"
-            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors"
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-muted/50 dark:bg-black/30 hover:bg-white/5 transition-colors"
           >
             <ChevronsRight className="h-4 w-4 text-white/70" />
           </button>
@@ -1345,7 +1345,7 @@ const ViewView = ({
           data-testid="OPS-authoring-view-new-btn"
           onClick={onBack}
           title="New document"
-          className="h-8 px-2.5 flex items-center gap-1.5 rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors text-xs text-white/75"
+          className="h-8 px-2.5 flex items-center gap-1.5 rounded-md border border-white/10 hover:border-white/30 bg-muted/50 dark:bg-black/30 hover:bg-white/5 transition-colors text-xs text-white/75"
         >
           <Plus className="h-3.5 w-3.5" />
           New
@@ -1358,14 +1358,14 @@ const ViewView = ({
               data-testid="OPS-authoring-edit-title-input"
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
-              className="bg-black/30 border-white/10 text-white/95 font-semibold h-9 focus-visible:ring-1 focus-visible:ring-amber-500/40 focus-visible:border-amber-500/40"
+              className="bg-muted/50 dark:bg-black/30 border-white/10 text-white/95 font-semibold h-9 focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:border-primary/40"
               placeholder="Document title"
             />
           ) : (
             <div className="min-w-0">
               <div className="text-sm font-semibold text-white/95 truncate">{doc.title}</div>
               <div className="text-[11px] text-white/50 flex items-center gap-2 mt-0.5">
-                {tpl && <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-200 bg-amber-500/10">{tpl.label}</Badge>}
+                {tpl && <Badge variant="outline" className="text-[10px] border-primary/30 text-[hsl(var(--primary-fill))] dark:text-violet-200 bg-primary/10">{tpl.label}</Badge>}
                 <Badge variant="outline" className="text-[10px] border-white/10 text-white/70 bg-white/5">{toneLbl}</Badge>
                 <span>v{doc.version}</span>
                 <span>·</span>
@@ -1452,7 +1452,7 @@ const ViewView = ({
       </div>
 
       {/* Tab switcher */}
-      <div className="px-6 py-2 border-b border-white/10 bg-black/15 flex items-center gap-1">
+      <div className="px-6 py-2 border-b border-white/10 bg-muted/50 dark:bg-black/15 flex items-center gap-1">
         <span id="OPS-authoring-tab-preview" data-testid="OPS-authoring-tab-preview" className="contents">
           <TabButton active={tab === 'preview'} onClick={() => setTab('preview')} icon={Eye}>
             Preview
@@ -1497,7 +1497,7 @@ const ViewView = ({
                         type="button"
                         disabled={saving}
                         onClick={() => { setShowVersions(false); onRestore?.(h.version); }}
-                        className="text-[11px] px-2 py-0.5 rounded-md border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-40"
+                        className="text-[11px] px-2 py-0.5 rounded-md border border-primary/40 text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:bg-primary/10 disabled:opacity-40"
                         id={`OPS-authoring-version-restore-${h.version}-${i}`}
                         data-testid={`OPS-authoring-version-restore-${h.version}-${i}`}
                       >
@@ -1531,7 +1531,7 @@ const ViewView = ({
               value={editMode ? editContent : doc.content}
               onChange={(e) => setEditContent(e.target.value)}
               readOnly={!editMode}
-              className="w-full h-full resize-none bg-black/40 border-white/10 text-white/90 text-sm leading-relaxed font-mono focus-visible:ring-1 focus-visible:ring-amber-500/40 focus-visible:border-amber-500/40"
+              className="w-full h-full resize-none bg-black/40 border-white/10 text-white/90 text-sm leading-relaxed font-mono focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:border-primary/40"
               style={{ minHeight: 'calc(100vh - 360px)' }}
             />
           </div>
@@ -1564,7 +1564,7 @@ const TokenBadge = ({ tokens }) => {
   return (
     <span
       title={tip}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-200 text-[10px] font-medium"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/10 border border-primary/25 text-[hsl(var(--primary-fill))] dark:text-violet-200 text-[10px] font-medium"
     >
       <Zap className="h-2.5 w-2.5" />
       {fmt(total)} tokens{estimated ? '*' : ''}
@@ -1579,7 +1579,7 @@ const SelectorCard = ({ label, primaryText, secondaryText, icon, onClick, traili
     </Label>
     {/* The trailing action (a button) sits beside the card's button, not inside it: a button in a button is not
         valid HTML, and a click could reach the wrong one (the test report's Operations 5). */}
-    <div className="group w-full rounded-xl border border-white/10 bg-black/30 hover:bg-white/[0.04] hover:border-amber-500/30 transition-colors flex items-center gap-1 pr-3">
+    <div className="group w-full rounded-xl border border-white/10 bg-muted/50 dark:bg-black/30 hover:bg-white/[0.04] hover:border-primary/30 transition-colors flex items-center gap-1 pr-3">
       <button
         type="button"
         onClick={onClick}
@@ -1597,7 +1597,7 @@ const SelectorCard = ({ label, primaryText, secondaryText, icon, onClick, traili
         </div>
       </button>
       {trailingAction}
-      <ChevronDown className="h-3.5 w-3.5 text-white/40 group-hover:text-amber-300 shrink-0 cursor-pointer" onClick={onClick} />
+      <ChevronDown className="h-3.5 w-3.5 text-white/40 group-hover:text-[hsl(var(--primary-fill))] dark:group-hover:text-violet-300 shrink-0 cursor-pointer" onClick={onClick} />
     </div>
   </div>
 );
@@ -1609,8 +1609,8 @@ const IconButton = ({ children, onClick, title, danger = false, disabled = false
     disabled={disabled}
     className={`h-8 w-8 flex items-center justify-center rounded-md border transition-colors ${
       danger
-        ? 'border-white/10 bg-black/30 text-white/70 hover:text-red-300 hover:bg-red-500/10 hover:border-red-500/30'
-        : 'border-white/10 bg-black/30 text-white/75 hover:text-amber-200 hover:bg-amber-500/10 hover:border-amber-500/30'
+        ? 'border-white/10 bg-muted/50 dark:bg-black/30 text-white/70 hover:text-red-300 hover:bg-red-500/10 hover:border-red-500/30'
+        : 'border-white/10 bg-muted/50 dark:bg-black/30 text-white/75 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 hover:bg-primary/10 hover:border-primary/30'
     } disabled:opacity-50 disabled:cursor-not-allowed`}
   >
     {children}
@@ -1622,7 +1622,7 @@ const TabButton = ({ active, onClick, icon: Icon, children }) => (
     onClick={onClick}
     className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors ${
       active
-        ? 'bg-amber-500/15 text-amber-200 border border-amber-500/30'
+        ? 'bg-primary/15 text-[hsl(var(--primary-fill))] dark:text-violet-200 border border-primary/30'
         : 'text-white/65 hover:text-white/90 hover:bg-white/5 border border-transparent'
     }`}
   >

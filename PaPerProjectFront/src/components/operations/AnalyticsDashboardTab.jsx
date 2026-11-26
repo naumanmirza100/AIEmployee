@@ -17,10 +17,10 @@ import { formatDeadline } from './formatDeadline';
 // Theme (matches rest of Operations module — amber)
 // ──────────────────────────────────────────────
 const PALETTE = [
-  '#f59e0b', '#f97316', '#eab308', '#fb923c',
-  '#facc15', '#fdba74', '#fcd34d', '#fef3c7',
+  'hsl(var(--primary-fill))', 'hsl(var(--primary-fill-deep))', '#eab308', 'var(--brand-ink)',
+  '#facc15', 'var(--brand-ink)', 'var(--brand-ink)', '#fef3c7',
 ];
-const ACCENT = '#f59e0b';
+const ACCENT = 'hsl(var(--primary-fill))';
 const GRID_COLOR = 'rgba(255,255,255,0.06)';
 const AXIS_COLOR = 'rgba(255,255,255,0.45)';
 
@@ -77,7 +77,7 @@ const AnalyticsDashboardTab = () => {
 
   return (
     <div
-      className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)] p-5 sm:p-6"
+      className="w-full rounded-2xl border border-primary/10 overflow-hidden shadow-[0_8px_40px_-12px_hsl(var(--primary)/0.15)] p-5 sm:p-6"
       style={{
         background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, hsl(var(--sfr-40280a) / 0.55) 100%)',
       }}
@@ -89,7 +89,7 @@ const AnalyticsDashboardTab = () => {
         <div className="flex items-center gap-3">
           <div
             className="flex items-center justify-center w-11 h-11 rounded-xl"
-            style={{ backgroundColor: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.28)' }}
+            style={{ backgroundColor: 'hsl(var(--primary)/0.12)', border: '1px solid hsl(var(--primary)/0.28)' }}
           >
             <BarChart3 className="h-5 w-5" style={{ color: ACCENT }} />
           </div>
@@ -100,7 +100,7 @@ const AnalyticsDashboardTab = () => {
         </div>
         <div className="flex items-center gap-2">
           {/* Time range */}
-          <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5" id="OPS-analytics-range-select" data-testid="OPS-analytics-range-select">
+          <div className="flex rounded-lg border border-white/10 bg-muted/50 dark:bg-black/30 p-0.5" id="OPS-analytics-range-select" data-testid="OPS-analytics-range-select">
             {RANGES.map((r) => {
               const active = r.value === range;
               return (
@@ -109,7 +109,7 @@ const AnalyticsDashboardTab = () => {
                   onClick={() => setRange(r.value)}
                   className={`px-3 py-1 text-[11px] font-semibold rounded-md transition-colors ${
                     active
-                      ? 'bg-amber-500/20 text-amber-200 border border-amber-500/30'
+                      ? 'bg-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200 border border-primary/30'
                       : 'text-white/65 hover:text-white/90 border border-transparent'
                   }`}
                   id={`OPS-analytics-range-btn-${r.value}`}
@@ -124,7 +124,7 @@ const AnalyticsDashboardTab = () => {
             onClick={() => load(range, true)}
             disabled={refreshing}
             title="Refresh"
-            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 bg-black/30 hover:bg-white/5 transition-colors disabled:opacity-50"
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 bg-muted/50 dark:bg-black/30 hover:bg-white/5 transition-colors disabled:opacity-50"
             id="OPS-analytics-refresh-btn"
             data-testid="OPS-analytics-refresh-btn"
           >
@@ -182,16 +182,16 @@ const AnalyticsDashboardTab = () => {
                 <AreaChart data={mergeTimeseries(data.timeseries)} margin={{ top: 10, right: 12, left: -10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="gDocs" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.4} />
-                      <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
+                      <stop offset="0%" stopColor="hsl(var(--primary-fill))" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="hsl(var(--primary-fill))" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="gGen" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#fb923c" stopOpacity={0.4} />
-                      <stop offset="100%" stopColor="#fb923c" stopOpacity={0} />
+                      <stop offset="0%" stopColor="var(--brand-ink)" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="var(--brand-ink)" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="gQa" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#fcd34d" stopOpacity={0.4} />
-                      <stop offset="100%" stopColor="#fcd34d" stopOpacity={0} />
+                      <stop offset="0%" stopColor="var(--brand-ink)" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="var(--brand-ink)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" />
@@ -199,9 +199,9 @@ const AnalyticsDashboardTab = () => {
                   <YAxis stroke={AXIS_COLOR} fontSize={11} allowDecimals={false} />
                   <Tooltip content={<DarkTooltip />} />
                   <Legend wrapperStyle={{ fontSize: 11, color: 'rgba(255,255,255,0.65)' }} />
-                  <Area type="monotone" dataKey="documents" stroke="#f59e0b" strokeWidth={2} fill="url(#gDocs)" name="Uploads" />
-                  <Area type="monotone" dataKey="generated" stroke="#fb923c" strokeWidth={2} fill="url(#gGen)" name="Generated" />
-                  <Area type="monotone" dataKey="qa"        stroke="#fcd34d" strokeWidth={2} fill="url(#gQa)"  name="Q&A" />
+                  <Area type="monotone" dataKey="documents" stroke="hsl(var(--primary-fill))" strokeWidth={2} fill="url(#gDocs)" name="Uploads" />
+                  <Area type="monotone" dataKey="generated" stroke="var(--brand-ink)" strokeWidth={2} fill="url(#gGen)" name="Generated" />
+                  <Area type="monotone" dataKey="qa"        stroke="var(--brand-ink)" strokeWidth={2} fill="url(#gQa)"  name="Q&A" />
                 </AreaChart>
               </ResponsiveContainer>
             ) : <EmptyChart />}
@@ -243,7 +243,7 @@ const AnalyticsDashboardTab = () => {
                     <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" />
                     <XAxis type="number" stroke={AXIS_COLOR} fontSize={11} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" stroke={AXIS_COLOR} fontSize={11} width={60} />
-                    <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(245,158,11,0.06)' }} />
+                    <Tooltip content={<DarkTooltip />} cursor={{ fill: 'hsl(var(--primary)/0.06)' }} />
                     <Bar dataKey="value" fill={ACCENT} radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -286,7 +286,7 @@ const AnalyticsDashboardTab = () => {
                     <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" />
                     <XAxis dataKey="name" stroke={AXIS_COLOR} fontSize={11} />
                     <YAxis stroke={AXIS_COLOR} fontSize={11} allowDecimals={false} />
-                    <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(245,158,11,0.06)' }} />
+                    <Tooltip content={<DarkTooltip />} cursor={{ fill: 'hsl(var(--primary)/0.06)' }} />
                     <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                       {data.importance.map((entry, i) => (
                         <Cell key={i} fill={importanceColor(entry.name)} />
@@ -310,10 +310,10 @@ const AnalyticsDashboardTab = () => {
                   <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" />
                   <XAxis dataKey="name" stroke={AXIS_COLOR} fontSize={11} interval={0} angle={-18} textAnchor="end" height={60} />
                   <YAxis stroke={AXIS_COLOR} fontSize={11} allowDecimals={false} />
-                  <Tooltip content={<DarkTooltip suffixPerKey={{ Tokens: 'k' }} />} cursor={{ fill: 'rgba(245,158,11,0.06)' }} />
+                  <Tooltip content={<DarkTooltip suffixPerKey={{ Tokens: 'k' }} />} cursor={{ fill: 'hsl(var(--primary)/0.06)' }} />
                   <Legend wrapperStyle={{ fontSize: 11, color: 'rgba(255,255,255,0.65)' }} />
                   <Bar dataKey="Documents" fill={ACCENT} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Tokens" fill="#fcd34d" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Tokens" fill="var(--brand-ink)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <EmptyChart message="No AI-authored documents yet" />}
@@ -332,14 +332,14 @@ const AnalyticsDashboardTab = () => {
                   >
                     <div
                       className="flex items-center justify-center w-8 h-8 rounded-md shrink-0"
-                      style={{ backgroundColor: 'rgba(245,158,11,0.12)' }}
+                      style={{ backgroundColor: 'hsl(var(--primary)/0.12)' }}
                     >
                       <CalendarClock className="h-4 w-4" style={{ color: ACCENT }} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-white/90 truncate">{d.description || '—'}</div>
                       <div className="text-[11px] text-white/45 flex items-center gap-2 mt-0.5 truncate">
-                        {d.date && <span className="text-amber-300">{formatDeadline(d.date)}</span>}
+                        {d.date && <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300">{formatDeadline(d.date)}</span>}
                         {d.date && d.source && <span>·</span>}
                         {d.source && <span className="truncate">{d.source}</span>}
                       </div>
@@ -369,7 +369,7 @@ const AnalyticsDashboardTab = () => {
 // ──────────────────────────────────────────────
 
 const KpiCard = ({ icon: Icon, label, value, sub, tint = ACCENT, wide = false, testId }) => (
-  <div className={`rounded-xl border border-white/10 bg-black/30 px-4 py-3 ${wide ? 'lg:col-span-1' : ''}`} id={testId} data-testid={testId}>
+  <div className={`rounded-xl border border-white/10 bg-muted/50 dark:bg-black/30 px-4 py-3 ${wide ? 'lg:col-span-1' : ''}`} id={testId} data-testid={testId}>
     <div className="flex items-center gap-2 mb-2">
       <div
         className="w-7 h-7 rounded-md flex items-center justify-center"
@@ -385,9 +385,9 @@ const KpiCard = ({ icon: Icon, label, value, sub, tint = ACCENT, wide = false, t
 );
 
 const ChartCard = ({ title, icon: Icon, children, className = '', testId }) => (
-  <div className={`rounded-xl border border-white/10 bg-black/25 p-4 ${className}`} id={testId} data-testid={testId}>
+  <div className={`rounded-xl border border-white/10 bg-muted/50 dark:bg-black/25 p-4 ${className}`} id={testId} data-testid={testId}>
     <div className="flex items-center gap-2 mb-3">
-      {Icon && <Icon className="h-3.5 w-3.5 text-amber-300" />}
+      {Icon && <Icon className="h-3.5 w-3.5 text-[hsl(var(--primary-fill))] dark:text-violet-300" />}
       <h3 className="text-sm font-semibold text-white/90">{title}</h3>
     </div>
     {children}
@@ -413,7 +413,7 @@ const DarkTooltip = ({ active, payload, label, suffixPerKey = {} }) => {
             <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: p.color || p.payload?.fill }} />
             {p.name || p.dataKey}
           </span>
-          <span className="font-semibold text-amber-200">
+          <span className="font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-200">
             {p.value}{suffixPerKey[p.name] || suffixPerKey[p.dataKey] || ''}
           </span>
         </div>
@@ -454,7 +454,7 @@ function sentimentColor(name) {
     case 'positive': return '#10b981';
     case 'negative': return '#ef4444';
     case 'neutral':  return '#94a3b8';
-    case 'mixed':    return '#f59e0b';
+    case 'mixed':    return 'hsl(var(--primary-fill))';
     default:         return '#8b5cf6';
   }
 }
@@ -462,7 +462,7 @@ function sentimentColor(name) {
 function importanceColor(name) {
   switch ((name || '').toLowerCase()) {
     case 'critical': return '#ef4444';
-    case 'high':     return '#f97316';
+    case 'high':     return 'hsl(var(--primary-fill-deep))';
     case 'medium':   return '#f59e0b';
     case 'low':      return '#10b981';
     default:         return '#94a3b8';

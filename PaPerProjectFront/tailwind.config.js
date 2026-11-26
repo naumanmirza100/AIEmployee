@@ -62,7 +62,10 @@ module.exports = {
           100: "hsl(var(--c-amber-100) / <alpha-value>)",
           200: "hsl(var(--c-amber-200) / <alpha-value>)",
           300: "hsl(var(--c-amber-300) / <alpha-value>)",
-          400: "hsl(var(--c-amber-400) / <alpha-value>)"
+          400: "hsl(var(--c-amber-400) / <alpha-value>)",
+          // 500 and 600 too (26 Nov 2026): bright amber text was unreadable on a light page.
+          500: "hsl(var(--c-amber-500) / <alpha-value>)",
+          600: "hsl(var(--c-amber-600) / <alpha-value>)"
         },
         blue: {
           200: "hsl(var(--c-blue-200) / <alpha-value>)",
@@ -95,7 +98,10 @@ module.exports = {
           300: "hsl(var(--c-indigo-300) / <alpha-value>)"
         },
         orange: {
-          300: "hsl(var(--c-orange-300) / <alpha-value>)"
+          300: "hsl(var(--c-orange-300) / <alpha-value>)",
+          400: "hsl(var(--c-orange-400) / <alpha-value>)",
+          500: "hsl(var(--c-orange-500) / <alpha-value>)",
+          600: "hsl(var(--c-orange-600) / <alpha-value>)"
         },
         pink: {
           300: "hsl(var(--c-pink-300) / <alpha-value>)"
@@ -140,7 +146,9 @@ module.exports = {
         yellow: {
           200: "hsl(var(--c-yellow-200) / <alpha-value>)",
           300: "hsl(var(--c-yellow-300) / <alpha-value>)",
-          400: "hsl(var(--c-yellow-400) / <alpha-value>)"
+          400: "hsl(var(--c-yellow-400) / <alpha-value>)",
+          500: "hsl(var(--c-yellow-500) / <alpha-value>)",
+          600: "hsl(var(--c-yellow-600) / <alpha-value>)"
         },
         // The agent dashboards were built for a dark page, so surfaces and
         // text are written as white-with-opacity: `text-white`, `text-white/60`,

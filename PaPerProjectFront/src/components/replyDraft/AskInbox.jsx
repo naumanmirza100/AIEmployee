@@ -38,14 +38,14 @@ const AskInbox = ({ hasMailbox, onOpenEmail }) => {
 
   if (!hasMailbox) {
     return (
-      <div className="rounded-xl bg-white/5 border border-white/10 p-6 text-sm text-gray-300">
+      <div className="rounded-xl bg-card/90 dark:bg-white/5 border border-white/10 p-6 text-sm text-gray-300">
         Connect the inbox on the Dashboard first; then ask anything about its mail.
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl bg-white/5 border border-white/10 flex flex-col min-h-[60vh]">
+    <div className="rounded-xl bg-card/90 dark:bg-white/5 border border-white/10 flex flex-col min-h-[60vh]">
       <div className="flex-1 p-4 space-y-5 overflow-y-auto custom-scrollbar">
         {turns.length === 0 && (
           <div className="text-sm text-gray-400 space-y-3">
@@ -54,7 +54,7 @@ const AskInbox = ({ hasMailbox, onOpenEmail }) => {
             <div className="flex flex-wrap gap-2">
               {EXAMPLES.map((ex) => (
                 <button key={ex} type="button" onClick={() => ask(ex)} disabled={busy}
-                  className="text-xs text-cyan-200 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 hover:bg-cyan-500/20">
+                  className="text-xs text-[hsl(var(--primary-fill))] dark:text-violet-200 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 hover:bg-primary/20">
                   {ex}
                 </button>
               ))}
@@ -64,7 +64,7 @@ const AskInbox = ({ hasMailbox, onOpenEmail }) => {
         {turns.map((t, i) => (
           <div key={i} className="space-y-2">
             <div className="flex justify-end">
-              <div className="max-w-[80%] text-sm text-white bg-fuchsia-500/20 border border-fuchsia-500/30 rounded-xl px-3 py-2">
+              <div className="max-w-[80%] text-sm text-white bg-primary/20 border border-primary/30 rounded-xl px-3 py-2">
                 {t.question}
               </div>
             </div>
@@ -76,8 +76,8 @@ const AskInbox = ({ hasMailbox, onOpenEmail }) => {
                 {t.sources.map((s) => (
                   <button key={s.id} type="button" data-testid="rd-ask-source" onClick={() => onOpenEmail(s.id)}
                     className="inline-flex items-center gap-1.5 text-[11px] text-gray-300 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 max-w-[320px]">
-                    <Mail className="h-3 w-3 shrink-0 text-cyan-300" />
-                    <span className="text-cyan-200 shrink-0">#{s.id}</span>
+                    <Mail className="h-3 w-3 shrink-0 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
+                    <span className="text-[hsl(var(--primary-fill))] dark:text-violet-200 shrink-0">#{s.id}</span>
                     <span className="truncate">
                       {s.direction === 'out' ? `To ${s.to_email}` : (s.from_name || s.from_email)} · {s.subject}
                     </span>
@@ -103,11 +103,11 @@ const AskInbox = ({ hasMailbox, onOpenEmail }) => {
             onChange={(e) => setQuestion(e.target.value)}
             maxLength={500}
             placeholder="Ask about your email…"
-            className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50"
+            className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-primary/50"
           />
         </div>
         <button type="submit" data-testid="rd-ask-send" disabled={busy || question.trim().length < 3}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-pure-white bg-gradient-to-r from-fuchsia-500 to-purple-600 disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-pure-white bg-gradient-to-r from-primary to-primary disabled:opacity-50">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Ask
         </button>

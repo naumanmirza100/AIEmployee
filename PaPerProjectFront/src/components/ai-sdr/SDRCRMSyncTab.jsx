@@ -16,25 +16,25 @@ import {
 // Styles (matching project dark theme)
 // ---------------------------------------------------------------------------
 const card = {
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'hsl(var(--surface-invert) / 0.03)',
+  border: '1px solid hsl(var(--surface-invert) / 0.08)',
   borderRadius: 12,
   padding: 24,
 };
 
 const inputStyle = {
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'hsl(var(--surface-invert) / 0.05)',
+  border: '1px solid hsl(var(--surface-invert) / 0.1)',
   borderRadius: 8,
   padding: '10px 14px',
-  color: '#fff',
+  color: 'hsl(var(--foreground))',
   fontSize: 14,
   width: '100%',
   outline: 'none',
 };
 
 const btnPrimary = {
-  background: 'linear-gradient(135deg,#a855f7,#ec4899)',
+  background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))',
   border: 'none',
   borderRadius: 8,
   padding: '10px 20px',
@@ -48,11 +48,11 @@ const btnPrimary = {
 };
 
 const btnSecondary = {
-  background: 'rgba(255,255,255,0.06)',
-  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'hsl(var(--surface-invert) / 0.06)',
+  border: '1px solid hsl(var(--surface-invert) / 0.12)',
   borderRadius: 8,
   padding: '8px 16px',
-  color: '#d1d5db',
+  color: 'hsl(var(--pt-d1d5db))',
   cursor: 'pointer',
   display: 'flex',
   alignItems: 'center',
@@ -95,7 +95,7 @@ const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
           <Trash2 size={24} color="#f87171" />
         </div>
 
-        <div style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 8 }}>
+        <div style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 17, marginBottom: 8 }}>
           Remove {meta.label}?
         </div>
         <p style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 14, lineHeight: 1.6, marginBottom: 28 }}>
@@ -217,7 +217,7 @@ function ConnectModal({ provider, integration, onClose, onSaved }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <span style={{ fontSize: 28 }}>{cfg.logo}</span>
           <div>
-            <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>{editing ? `Change the ${cfg.label} details` : `Connect ${cfg.label}`}</div>
+            <div style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 18 }}>{editing ? `Change the ${cfg.label} details` : `Connect ${cfg.label}`}</div>
             <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>
               {editing ? 'Type only what changes; a field left empty keeps what is saved.' : `Enter your ${cfg.label} credentials`}
             </div>
@@ -307,7 +307,7 @@ function DealsRow({ integration, label, onRefresh }) {
   };
 
   const stages = (pipelines || []).find((p) => p.id === pick.pipeline_id)?.stages || [];
-  const select = { background: 'hsl(var(--surface-invert) / 0.05)', color: '#fff', border: '1px solid hsl(var(--surface-invert) / 0.12)',
+  const select = { background: 'hsl(var(--surface-invert) / 0.05)', color: 'hsl(var(--foreground))', border: '1px solid hsl(var(--surface-invert) / 0.12)',
     borderRadius: 8, padding: '6px 8px', fontSize: 12 };
 
   return (
@@ -456,10 +456,10 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 32 }}>{cfg.logo}</span>
           <div>
-            <div style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>{cfg.label}</div>
+            <div style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 16 }}>{cfg.label}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
               {neverPinged ? (
-                <span style={{ color: '#6b7280', fontSize: 12 }}>Not tested yet</span>
+                <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>Not tested yet</span>
               ) : isOk ? (
                 <><Wifi size={12} color="#10b981" /><span style={{ color: '#10b981', fontSize: 12 }}>Connected</span></>
               ) : (
@@ -597,8 +597,8 @@ function QueueStats({ stats }) {
         { label: 'Done',    value: stats.done,    color: '#10b981' },
         { label: 'Failed',  value: stats.failed,  color: '#ef4444' },
         ...(stats.waiting ? [{ label: 'Waiting for the key', value: stats.waiting, color: '#ef4444' }] : []),
-        ...(stats.skipped ? [{ label: 'Skipped', value: stats.skipped, color: '#9ca3af' }] : []),
-        { label: 'Total',   value: stats.total,   color: '#a855f7' },
+        ...(stats.skipped ? [{ label: 'Skipped', value: stats.skipped, color: 'hsl(var(--muted-foreground))' }] : []),
+        { label: 'Total',   value: stats.total,   color: 'hsl(var(--primary-fill))' },
       ].map(s => (
         <div key={s.label} style={{
           ...card, padding: '12px 20px', textAlign: 'center', minWidth: 90,
@@ -662,7 +662,7 @@ const SDRCRMSyncTab = () => {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2 style={{ color: '#fff', fontSize: 22, fontWeight: 700, margin: 0 }}>
+          <h2 style={{ color: 'hsl(var(--foreground))', fontSize: 22, fontWeight: 700, margin: 0 }}>
             CRM & System Sync
           </h2>
           <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, margin: '6px 0 0' }}>
@@ -701,14 +701,14 @@ const SDRCRMSyncTab = () => {
         </div>
 
         {loading ? (
-          <div style={{ color: '#6b7280', display: 'flex', gap: 8, alignItems: 'center', padding: 20 }}>
+          <div style={{ color: 'hsl(var(--muted-foreground))', display: 'flex', gap: 8, alignItems: 'center', padding: 20 }}>
             <Loader2 size={16} className="animate-spin" /> Loading...
           </div>
         ) : integrations.length === 0 ? (
           <div style={{ ...card, textAlign: 'center', padding: 40 }}>
             <WifiOff size={32} color="#4b5563" style={{ margin: '0 auto 12px' }} />
             <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 15 }}>No CRM connected yet</div>
-            <div style={{ color: '#6b7280', fontSize: 13, marginTop: 6 }}>
+            <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, marginTop: 6 }}>
               Connect a CRM below to start syncing automatically.
             </div>
           </div>
@@ -754,7 +754,7 @@ const SDRCRMSyncTab = () => {
                 >
                   <span style={{ fontSize: 24 }}>{cfg.logo}</span>
                   <div style={{ textAlign: 'left' }}>
-                    <div style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>{cfg.label}</div>
+                    <div style={{ color: 'hsl(var(--foreground))', fontWeight: 600, fontSize: 15 }}>{cfg.label}</div>
                     <div style={{ color: cfg.color, fontSize: 12, marginTop: 2 }}>Click to connect</div>
                   </div>
                 </button>

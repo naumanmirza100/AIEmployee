@@ -981,7 +981,7 @@ const ExecMeetingDashboard = () => {
               <Button
                 size="sm"
                 onClick={() => { setActiveTab('tasks'); setShowTaskDialog(true); }}
-                className="bg-sky-500 hover:bg-sky-700 text-pure-white font-semibold gap-1.5 h-8"
+                className="ui-btn-primary bg-[hsl(var(--primary-fill))] hover:bg-[hsl(var(--primary-fill)/0.9)] text-pure-white font-semibold gap-1.5 h-8"
               >
                 <ListChecks className="h-4 w-4" />
                 New Task

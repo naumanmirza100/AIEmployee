@@ -1,7 +1,7 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
 
-const SDRComingSoon = ({ icon: Icon, title, description, color = '#a855f7' }) => {
+const SDRComingSoon = ({ icon: Icon, title, description, color = 'hsl(var(--primary-fill))' }) => {
   return (
     <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
       {/* Glow ring */}
@@ -23,7 +23,7 @@ const SDRComingSoon = ({ icon: Icon, title, description, color = '#a855f7' }) =>
         {/* Sparkle badge */}
         <div
           className="absolute -top-2 -right-2 w-7 h-7 rounded-full flex items-center justify-center"
-          style={{ background: 'linear-gradient(135deg, #f43f5e, #a855f7)', boxShadow: '0 0 10px rgba(244,63,94,0.5)' }}
+          style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', boxShadow: '0 0 10px rgba(244,63,94,0.5)' }}
         >
           <Sparkles className="h-3.5 w-3.5 text-white" />
         </div>
@@ -47,7 +47,7 @@ const SDRComingSoon = ({ icon: Icon, title, description, color = '#a855f7' }) =>
             key={i}
             className="w-2 h-2 rounded-full"
             style={{
-              background: i === 0 ? '#f43f5e' : i === 1 ? '#a855f7' : '#06b6d4',
+              background: i === 0 ? '#f43f5e' : i === 1 ? 'hsl(var(--primary-fill))' : '#06b6d4',
               animation: `pulse 1.5s ease-in-out ${i * 0.3}s infinite`,
               opacity: 0.7,
             }}

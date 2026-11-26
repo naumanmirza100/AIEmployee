@@ -321,7 +321,7 @@ const CVRecords = () => {
       )}
 
       {total === 0 ? (
-        <Card id="REC-cvrecords-empty-state" data-testid="REC-cvrecords-empty-state" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+        <Card id="REC-cvrecords-empty-state" data-testid="REC-cvrecords-empty-state" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
             <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
             <p className="text-base sm:text-lg font-medium mb-2 text-white">No candidates yet</p>
@@ -389,7 +389,7 @@ const CVRecords = () => {
           </div>
 
           {/* Desktop Table View */}
-          <Card id="REC-cvrecords-table-wrapper" data-testid="REC-cvrecords-table-wrapper" className="hidden md:block border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card id="REC-cvrecords-table-wrapper" data-testid="REC-cvrecords-table-wrapper" className="hidden md:block border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -440,7 +440,7 @@ const CVRecords = () => {
           </Card>
 
           {/* Pagination */}
-          <Card className="md:border-t-0 md:rounded-t-none border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card className="md:border-t-0 md:rounded-t-none border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <CardContent className="py-3 px-3 sm:px-4">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">

@@ -110,7 +110,7 @@ function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, o
     doc: 'bg-violet-500/15 text-violet-400 border-violet-400/30',
     txt: 'bg-white/[0.04] text-white/55 border-white/[0.08]',
     md: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
-    html: 'bg-amber-500/15 text-amber-400 border-amber-400/30',
+    html: 'bg-primary/15 text-[hsl(var(--primary-fill))] dark:text-violet-300 border-primary/30',
   }[fmt] || 'bg-violet-500/15 text-violet-400 border-violet-400/30';
   const sizeKB = doc.file_size ? Math.max(1, Math.round(doc.file_size / 1024)) : null;
   const sizeDisplay = sizeKB && sizeKB >= 1024
@@ -238,7 +238,7 @@ function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, o
               Restore
             </Button>
           ) : (
-            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-amber-400 hover:text-amber-300"
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300"
               onClick={() => onToggleOutdated(doc, true)}
               title="Mark outdated — excluded from knowledge retrieval until restored">
               Outdated

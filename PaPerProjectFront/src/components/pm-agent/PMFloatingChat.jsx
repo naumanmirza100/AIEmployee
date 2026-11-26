@@ -399,14 +399,14 @@ const PMFloatingChat = () => {
             aria-label="Open PM Quick Chat"
             className="relative h-14 w-14 rounded-full flex items-center justify-center text-white shadow-2xl hover:scale-110 active:scale-95 transition-transform"
             style={{
-              background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
-              boxShadow: '0 12px 32px 0 rgba(59, 130, 246, 0.55), 0 0 0 1px hsl(var(--surface-invert) / 0.08) inset',
+              background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)',
+              boxShadow: '0 12px 32px 0 hsl(var(--primary)/0.55), 0 0 0 1px hsl(var(--surface-invert) / 0.08) inset',
             }}
           >
             <span aria-hidden="true" className="absolute inset-0 rounded-full"
-              style={{ background: 'rgba(59, 130, 246, 0.55)', animation: 'pmfcPing 2.2s cubic-bezier(0,0,0.2,1) infinite' }} />
+              style={{ background: 'hsl(var(--primary)/0.55)', animation: 'pmfcPing 2.2s cubic-bezier(0,0,0.2,1) infinite' }} />
             <span aria-hidden="true" className="absolute inset-1.5 rounded-full"
-              style={{ background: 'linear-gradient(135deg, #22d3ee 0%, #60a5fa 100%)', animation: 'pmfcBlink 1.6s ease-in-out infinite' }} />
+              style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, #60a5fa 100%)', animation: 'pmfcBlink 1.6s ease-in-out infinite' }} />
             <MessageCircle className="h-6 w-6 relative z-10 drop-shadow" />
             <span className="absolute -top-1 -right-1 z-20 rounded-md bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 border border-white/15">
               Ctrl+K
@@ -441,7 +441,7 @@ const PMFloatingChat = () => {
             data-tour-pmfc="header"
             {...dragHandleProps}
             className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 select-none"
-            style={{ ...dragHandleProps.style, background: 'linear-gradient(90deg, #06b6d4 0%, #3b82f6 100%)' }}
+            style={{ ...dragHandleProps.style, background: 'linear-gradient(90deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)' }}
           >
             <div className="flex items-center gap-2 min-w-0">
               <Sparkles className="h-4 w-4 text-white shrink-0" />
@@ -459,7 +459,7 @@ const PMFloatingChat = () => {
                 className={`p-1 rounded transition text-white relative ${showHistory ? 'bg-white/25' : 'hover:bg-white/25'}`}>
                 <History className="h-4 w-4" />
                 {history.length > 0 && !showHistory && (
-                  <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold bg-white text-cyan-600 rounded-full h-3.5 w-3.5 flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold bg-white text-[hsl(var(--primary-fill))] dark:text-violet-300 rounded-full h-3.5 w-3.5 flex items-center justify-center">
                     {Math.min(history.length, 9)}
                   </span>
                 )}
@@ -502,7 +502,7 @@ const PMFloatingChat = () => {
                         ? 'text-white'
                         : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'
                     }`}
-                    style={active ? { background: 'linear-gradient(90deg, #06b6d4 0%, #3b82f6 100%)' } : {}}
+                    style={active ? { background: 'linear-gradient(90deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)' } : {}}
                   >
                     <Icon className="h-3.5 w-3.5" />
                     {m.label}
@@ -516,14 +516,14 @@ const PMFloatingChat = () => {
           {/* Body */}
           {showHistory ? (
             <QuickChatHistoryList history={history} currentId={currentConv.id} heading={`${currentMode.label} · Recent conversations`}
-              accent="cyan" onOpen={openHistoryEntry} onRemove={removeHistoryEntry} />
+              accent="violet" onOpen={openHistoryEntry} onRemove={removeHistoryEntry} />
           ) : (
             <div data-tour-pmfc="messages" className="flex-1 overflow-y-auto p-3 space-y-2.5" style={{ background: 'var(--panel-3)' }}>
               {currentConv.messages.length === 0 ? (
                 <div className="text-white/60">
                   <div className="text-center py-4">
-                    <div className="h-10 w-10 mx-auto mb-2 rounded-full bg-cyan-500/10 border border-cyan-400/30 flex items-center justify-center">
-                      <ModeIcon className="h-5 w-5 text-cyan-300" />
+                    <div className="h-10 w-10 mx-auto mb-2 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center">
+                      <ModeIcon className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
                     </div>
                     <p className="text-sm px-2">{currentMode.empty}</p>
                     {hintsEnabled && <div className="mt-2 flex justify-center"><InfoHint {...PM_HINTS.pmFcMessages} /></div>}
@@ -574,7 +574,7 @@ const PMFloatingChat = () => {
                         return shown.map((sample) => (
                           <button key={sample} type="button"
                             onClick={() => { setInput(sample); inputRef.current?.focus(); }}
-                            className="block w-full text-left text-xs text-cyan-300/80 hover:text-cyan-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
+                            className="block w-full text-left text-xs text-[hsl(var(--primary-fill)/0.8)] dark:text-violet-300/80 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
                             → {sample}
                           </button>
                         ));
@@ -587,7 +587,7 @@ const PMFloatingChat = () => {
                   <div
                     className={`${m.draft ? 'w-full' : 'max-w-[85%]'} rounded-lg px-3 py-2 text-sm ${
                       m.role === 'user'
-                        ? 'bg-cyan-500/25 text-white border border-cyan-400/30'
+                        ? 'bg-primary/25 text-white border border-primary/30'
                         : m.error
                           ? 'bg-rose-500/15 text-rose-100 border border-rose-500/30'
                           : m.system
@@ -658,7 +658,7 @@ const PMFloatingChat = () => {
                 </div>
               )}
               {slashOpen && filteredCommands.length > 0 && (
-                <SlashCommandMenu commands={filteredCommands} active={slashActive} accent="cyan" panelClassName="border-[var(--sfc-1e3a5f)] bg-[var(--sfc-0a1929)]"
+                <SlashCommandMenu commands={filteredCommands} active={slashActive} accent="violet" panelClassName="border-[var(--sfc-1e3a5f)] bg-[var(--sfc-0a1929)]"
                   onPick={applyCommand} onHover={setSlashActive} />
               )}
 
@@ -669,7 +669,7 @@ const PMFloatingChat = () => {
                 <button type="button" onClick={() => fileInputRef.current?.click()}
                   disabled={sending || uploading}
                   title="Upload requirements — sent to Project Pilot"
-                  className="h-[38px] w-[38px] shrink-0 rounded-lg flex items-center justify-center text-white/60 hover:text-cyan-300 hover:bg-white/[0.05] border border-white/10 transition disabled:opacity-40">
+                  className="h-[38px] w-[38px] shrink-0 rounded-lg flex items-center justify-center text-white/60 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300 hover:bg-white/[0.05] border border-white/10 transition disabled:opacity-40">
                   <Paperclip className="h-4 w-4" />
                 </button>
                 <textarea
@@ -681,13 +681,13 @@ const PMFloatingChat = () => {
                   placeholder={currentMode.placeholder}
                   rows={1}
                   disabled={sending || uploading}
-                  className="flex-1 resize-none rounded-lg border border-white/10 bg-[var(--panel-3)] text-white text-sm px-3 py-2 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-cyan-400/60 min-h-[38px] max-h-[110px]"
+                  className="flex-1 resize-none rounded-lg border border-white/10 bg-[var(--panel-3)] text-white text-sm px-3 py-2 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-primary/60 min-h-[38px] max-h-[110px]"
                 />
                 <button
                   type="button" data-tour-pmfc="send" onClick={send}
                   disabled={sending || uploading || !input.trim()}
                   className="h-[38px] w-[38px] shrink-0 rounded-lg flex items-center justify-center text-white disabled:opacity-40 disabled:cursor-not-allowed transition-transform active:scale-95"
-                  style={{ background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)' }}
+                  style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)' }}
                 >
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </button>

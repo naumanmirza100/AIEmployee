@@ -17,7 +17,7 @@ const inputStyle = {
   borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
-const labelStyle = { color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 4 };
+const labelStyle = { color: 'hsl(var(--muted-foreground))', fontSize: 12, display: 'block', marginBottom: 4 };
 const buttonStyle = {
   borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
   display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -71,7 +71,7 @@ export default function SDRReplyDrafts({ campaignId, waiting = 0, onChanged }) {
       <h3 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 14, margin: '0 0 4px' }}>
         {drafts.length === 1 ? '1 answer is waiting for you' : `${drafts.length} answers are waiting for you`}
       </h3>
-      <p style={{ color: '#9ca3af', fontSize: 12, margin: '0 0 14px', lineHeight: 1.5 }}>
+      <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, margin: '0 0 14px', lineHeight: 1.5 }}>
         These leads replied asking for more. The AI has written an answer to each; nothing is sent until you
         press Send. Change the text first if you want to.
       </p>
@@ -79,12 +79,12 @@ export default function SDRReplyDrafts({ campaignId, waiting = 0, onChanged }) {
         {drafts.map((draft) => (
           <div key={draft.id} data-testid="sdr-answer" style={{ borderTop: '1px solid var(--line-1)', paddingTop: 14 }}>
             <div style={{ color: 'var(--text-soft)', fontSize: 13, fontWeight: 600 }}>
-              {draft.lead_name} <span style={{ color: '#9ca3af', fontWeight: 400 }}>· {draft.lead_email}</span>
+              {draft.lead_name} <span style={{ color: 'hsl(var(--muted-foreground))', fontWeight: 400 }}>· {draft.lead_email}</span>
             </div>
             {draft.lead_reply && (
               <blockquote style={{
                 margin: '8px 0 12px', padding: '8px 12px', borderLeft: '3px solid rgba(96,165,250,0.5)',
-                color: '#9ca3af', fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+                color: 'hsl(var(--muted-foreground))', fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
               }}>
                 {draft.lead_reply}
               </blockquote>
@@ -107,7 +107,7 @@ export default function SDRReplyDrafts({ campaignId, waiting = 0, onChanged }) {
                 Send to {draft.lead_name}
               </button>
               <button type="button" disabled={busy === draft.id} onClick={() => decide(draft, 'discard')} style={{
-                ...buttonStyle, background: 'transparent', border: '1px solid var(--line-1)', color: '#9ca3af',
+                ...buttonStyle, background: 'transparent', border: '1px solid var(--line-1)', color: 'hsl(var(--muted-foreground))',
               }}>
                 <Trash2 size={14} /> Discard
               </button>

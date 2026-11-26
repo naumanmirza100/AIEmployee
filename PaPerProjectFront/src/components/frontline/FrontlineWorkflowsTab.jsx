@@ -549,7 +549,7 @@ export function FrontlineWorkflowsTab() {
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <PlayCircle className="h-5 w-5 text-amber-400" />
+            <PlayCircle className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
             Dry run: {dryRunDialog.workflowName}
           </DialogTitle>
           <DialogDescription>

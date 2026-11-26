@@ -16,9 +16,9 @@ import { ElapsedTimer } from '@/components/frontline/chatShellUtils';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
 import { sidePanelStartsOpen } from '@/utils/sidePanel';
 
-const ACCENT = '#f59e0b'; // amber / operations accent
-const ACCENT_SOFT = 'rgba(245,158,11,0.12)';
-const ACCENT_BORDER = 'rgba(245,158,11,0.28)';
+const ACCENT = 'hsl(var(--primary-fill))'; // amber / operations accent
+const ACCENT_SOFT = 'hsl(var(--primary)/0.12)';
+const ACCENT_BORDER = 'hsl(var(--primary)/0.28)';
 
 // ──────────────────────────────────────────────
 // Lightweight markdown renderer tuned for the operations assistant.
@@ -35,9 +35,9 @@ function markdownToHtml(md) {
   const inline = (s) => {
     let out = escape(s);
     // inline code
-    out = out.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-white/10 text-amber-200 text-[0.85em] font-mono">$1</code>');
+    out = out.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-white/10 text-[hsl(var(--primary-fill))] dark:text-violet-200 text-[0.85em] font-mono">$1</code>');
     // bold
-    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-amber-200">$1</strong>');
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-200">$1</strong>');
     // italics (not after bold-closing)
     out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em class="italic text-white/85">$2</em>');
     return out;
@@ -79,8 +79,8 @@ function markdownToHtml(md) {
       i = j;
       if (rows.length) {
         out.push('<div class="my-3 overflow-x-auto rounded-lg border border-white/10">');
-        out.push('<table class="w-full text-sm"><thead><tr class="bg-amber-500/10">');
-        rows[0].forEach((c) => out.push(`<th class="px-3 py-2 text-left font-semibold text-amber-300">${inline(c)}</th>`));
+        out.push('<table class="w-full text-sm"><thead><tr class="bg-primary/10">');
+        rows[0].forEach((c) => out.push(`<th class="px-3 py-2 text-left font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-300">${inline(c)}</th>`));
         out.push('</tr></thead><tbody>');
         rows.slice(1).forEach((r, idx) => {
           out.push(`<tr class="${idx % 2 === 0 ? 'bg-white/[0.02]' : ''} hover:bg-white/[0.04] transition-colors">`);
@@ -100,22 +100,22 @@ function markdownToHtml(md) {
 
     if (/^#### /.test(t)) {
       closeLists(-1);
-      out.push(`<h4 class="text-sm font-semibold mt-2 mb-1 text-amber-100/90">${inline(t.slice(5))}</h4>`);
+      out.push(`<h4 class="text-sm font-semibold mt-2 mb-1 text-[hsl(var(--primary-fill)/0.9)] dark:text-violet-200/90">${inline(t.slice(5))}</h4>`);
       i++; continue;
     }
     if (/^### /.test(t)) {
       closeLists(-1);
-      out.push(`<h3 class="text-sm font-bold mt-3 mb-1.5 text-amber-200">${inline(t.slice(4))}</h3>`);
+      out.push(`<h3 class="text-sm font-bold mt-3 mb-1.5 text-[hsl(var(--primary-fill))] dark:text-violet-200">${inline(t.slice(4))}</h3>`);
       i++; continue;
     }
     if (/^## /.test(t)) {
       closeLists(-1);
-      out.push(`<h2 class="text-base font-bold mt-4 mb-2 text-amber-300 border-b border-amber-500/20 pb-1.5">${inline(t.slice(3))}</h2>`);
+      out.push(`<h2 class="text-base font-bold mt-4 mb-2 text-[hsl(var(--primary-fill))] dark:text-violet-300 border-b border-primary/20 pb-1.5">${inline(t.slice(3))}</h2>`);
       i++; continue;
     }
     if (/^# /.test(t)) {
       closeLists(-1);
-      out.push(`<h1 class="text-lg font-bold mt-4 mb-2 text-amber-300">${inline(t.slice(2))}</h1>`);
+      out.push(`<h1 class="text-lg font-bold mt-4 mb-2 text-[hsl(var(--primary-fill))] dark:text-violet-300">${inline(t.slice(2))}</h1>`);
       i++; continue;
     }
 
@@ -132,7 +132,7 @@ function markdownToHtml(md) {
         closeLists(indent);
       }
       const bullet = indent === 0 ? '•' : '›';
-      const color = indent === 0 ? 'text-amber-400' : 'text-white/30';
+      const color = indent === 0 ? 'text-[hsl(var(--primary-fill))] dark:text-violet-300' : 'text-white/30';
       const textColor = indent === 0 ? 'text-white/90' : 'text-white/70';
       out.push(
         `<li class="text-sm leading-relaxed ${textColor} flex gap-2 ${indent === 0 ? 'pt-1' : ''}">` +
@@ -529,7 +529,7 @@ const KnowledgeQA = () => {
 
   return (
     <div
-      className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)]"
+      className="w-full rounded-2xl border border-primary/10 overflow-hidden shadow-[0_8px_40px_-12px_hsl(var(--primary)/0.15)]"
       style={{
         background:
           'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, hsl(var(--sfr-40280a) / 0.55) 100%)',
@@ -543,7 +543,7 @@ const KnowledgeQA = () => {
           }`}
           style={{ minWidth: showSidebar ? '18rem' : 0, overflow: 'hidden' }}
         >
-          <div className="w-72 h-full flex flex-col bg-black/30">
+          <div className="w-72 h-full flex flex-col bg-muted/50 dark:bg-black/30">
             <div className="px-3 pt-3 pb-2 border-b border-white/10 flex flex-col gap-2 shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -560,7 +560,7 @@ const KnowledgeQA = () => {
                   data-testid="OPS-qa-hide-sidebar-btn"
                   onClick={() => setShowSidebar(false)}
                   title="Hide sidebar"
-                  className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/20 hover:bg-white/5 transition-colors"
+                  className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-muted/50 dark:bg-black/20 hover:bg-white/5 transition-colors"
                 >
                   <ChevronsLeft className="h-3.5 w-3.5 text-white/70" />
                 </button>
@@ -587,7 +587,7 @@ const KnowledgeQA = () => {
                   data-testid="OPS-qa-search-toggle-btn"
                   onClick={() => { setShowSearch((v) => !v); if (showSearch) setSidebarSearch(''); }}
                   title="Search chats"
-                  className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/20 hover:bg-white/5 transition-colors"
+                  className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-muted/50 dark:bg-black/20 hover:bg-white/5 transition-colors"
                 >
                   <Search className="h-3.5 w-3.5 text-white/70" />
                 </button>
@@ -600,7 +600,7 @@ const KnowledgeQA = () => {
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
                   placeholder="Search conversations..."
-                  className="w-full bg-black/30 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-amber-500/40"
+                  className="w-full bg-muted/50 dark:bg-black/30 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-primary/40"
                   autoFocus
                 />
               )}
@@ -639,7 +639,7 @@ const KnowledgeQA = () => {
                       data-testid={`OPS-qa-chat-item-${chat.id}`}
                       onClick={() => !isRenaming && handleSelectChat(chat.id)}
                       className={`group relative rounded-lg px-2.5 py-2 cursor-pointer transition-colors ${
-                        isActive ? 'bg-amber-500/10 border border-amber-500/25' : 'hover:bg-white/[0.04] border border-transparent'
+                        isActive ? 'bg-primary/10 border border-primary/25' : 'hover:bg-white/[0.04] border border-transparent'
                       }`}
                     >
                       {isRenaming ? (
@@ -653,7 +653,7 @@ const KnowledgeQA = () => {
                               if (e.key === 'Enter') commitRename(e, chat);
                               if (e.key === 'Escape') cancelRename(e);
                             }}
-                            className="flex-1 bg-black/40 border border-amber-500/40 rounded px-1.5 py-1 text-xs text-white/90 focus:outline-none"
+                            className="flex-1 bg-black/40 border border-primary/40 rounded px-1.5 py-1 text-xs text-white/90 focus:outline-none"
                             autoFocus
                           />
                           <button
@@ -702,7 +702,7 @@ const KnowledgeQA = () => {
                                 title="Rename"
                                 className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/10"
                               >
-                                <Pencil className="h-3 w-3 text-white/60 hover:text-amber-300" />
+                                <Pencil className="h-3 w-3 text-white/60 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300" />
                               </button>
                               <button
                                 id={`OPS-qa-chat-delete-btn-${chat.id}`}
@@ -728,14 +728,14 @@ const KnowledgeQA = () => {
         {/* ── Main chat area ── */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
-          <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3 bg-black/20">
+          <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3 bg-muted/50 dark:bg-black/20">
             {!showSidebar && (
               <button
                 id="OPS-qa-show-sidebar-btn"
                 data-testid="OPS-qa-show-sidebar-btn"
                 onClick={() => setShowSidebar(true)}
                 title="Show sidebar"
-                className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors"
+                className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-muted/50 dark:bg-black/30 hover:bg-white/5 transition-colors"
               >
                 <ChevronsRight className="h-4 w-4 text-white/70" />
               </button>
@@ -848,10 +848,10 @@ const KnowledgeQA = () => {
           </div>
 
           {/* Composer */}
-          <div className="border-t border-white/10 px-6 py-4 bg-black/25">
+          <div className="border-t border-white/10 px-6 py-4 bg-muted/50 dark:bg-black/25">
             <form id="OPS-qa-composer-form" data-testid="OPS-qa-composer-form" onSubmit={handleSend} className="max-w-4xl mx-auto">
               <div
-                className="rounded-2xl border bg-black/50 overflow-hidden transition-all focus-within:border-amber-500/40 focus-within:shadow-[0_0_0_3px_rgba(245,158,11,0.08)]"
+                className="rounded-2xl border bg-black/50 overflow-hidden transition-all focus-within:border-primary/40 focus-within:shadow-[0_0_0_3px_hsl(var(--primary)/0.08)]"
                 style={{ borderColor: 'hsl(var(--surface-invert) / 0.1)' }}
               >
                 <Textarea
@@ -865,7 +865,7 @@ const KnowledgeQA = () => {
                   disabled={sending}
                   className="w-full resize-none bg-transparent border-0 text-white/95 placeholder-white/45 text-[14px] leading-relaxed focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 px-4 py-2.5 min-h-[44px] max-h-[180px]"
                 />
-                <div className="flex items-center justify-between px-4 py-2.5 border-t border-white/[0.06] bg-black/20">
+                <div className="flex items-center justify-between px-4 py-2.5 border-t border-white/[0.06] bg-muted/50 dark:bg-black/20">
                   <div className="text-[11px] text-white/45">
                     Press <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] font-mono">Enter</kbd> to send,
                     {' '}
@@ -949,7 +949,7 @@ const KnowledgeQA = () => {
               </div>
             ))}
 
-            <div className="flex items-start gap-2 rounded-xl p-3" style={{ background: 'rgba(245,158,11,0.10)', border: `1px solid ${ACCENT_BORDER}` }}>
+            <div className="flex items-start gap-2 rounded-xl p-3" style={{ background: 'hsl(var(--primary)/0.10)', border: `1px solid ${ACCENT_BORDER}` }}>
               <Lightbulb className="h-4 w-4 shrink-0 mt-0.5" style={{ color: ACCENT }} />
               <p className="text-xs text-white/75 leading-relaxed">
                 <span className="font-semibold text-white">Tip:</span> Ask specific questions and mention the topic — the more precise your question, the better the cited answer.
@@ -961,7 +961,7 @@ const KnowledgeQA = () => {
               data-testid="OPS-qa-onboarding-close-btn"
               onClick={() => setShowOnboarding(false)}
               className="w-full border-0"
-              style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: '#fff' }}
+              style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)', color: '#fff' }}
             >
               Got it
             </Button>
@@ -1018,7 +1018,7 @@ const EmptyState = ({ onPick }) => (
           id={`OPS-qa-suggestion-btn-${i}`}
           data-testid={`OPS-qa-suggestion-btn-${i}`}
           onClick={() => onPick(s)}
-          className="text-left px-3 py-2.5 rounded-lg border border-white/10 bg-white/[0.02] hover:bg-white/[0.06] hover:border-amber-500/30 text-sm text-white/80 transition-colors"
+          className="text-left px-3 py-2.5 rounded-lg border border-white/10 bg-white/[0.02] hover:bg-white/[0.06] hover:border-primary/30 text-sm text-white/80 transition-colors"
         >
           {s}
         </button>
@@ -1050,7 +1050,7 @@ const CopyButton = ({ text, title = 'Copy', testId }) => {
     >
       {copied
         ? <Check className="h-3.5 w-3.5 text-green-400" />
-        : <Copy className="h-3.5 w-3.5 text-white/50 hover:text-amber-300" />}
+        : <Copy className="h-3.5 w-3.5 text-white/50 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300" />}
     </button>
   );
 };
@@ -1079,7 +1079,7 @@ const Message = ({
         >
           <div
             className="w-full max-w-[78%] rounded-2xl px-3 py-3"
-            style={{ backgroundColor: 'rgba(245,158,11,0.10)', border: `1px solid ${ACCENT_BORDER}` }}
+            style={{ backgroundColor: 'hsl(var(--primary)/0.10)', border: `1px solid ${ACCENT_BORDER}` }}
           >
             <Textarea
               id={`OPS-qa-message-edit-input-${index}`}
@@ -1092,7 +1092,7 @@ const Message = ({
               }}
               rows={2}
               autoFocus
-              className="w-full resize-none bg-black/30 border border-amber-500/30 rounded-lg text-white/95 text-[14px] leading-relaxed focus:outline-none focus-visible:ring-0 px-3 py-2 min-h-[44px] max-h-[160px]"
+              className="w-full resize-none bg-muted/50 dark:bg-black/30 border border-primary/30 rounded-lg text-white/95 text-[14px] leading-relaxed focus:outline-none focus-visible:ring-0 px-3 py-2 min-h-[44px] max-h-[160px]"
             />
             <div className="flex items-center justify-end gap-2 mt-2">
               <button
@@ -1138,14 +1138,14 @@ const Message = ({
               title="Edit & resend"
               className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
             >
-              <Pencil className="h-3.5 w-3.5 text-white/50 hover:text-amber-300" />
+              <Pencil className="h-3.5 w-3.5 text-white/50 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300" />
             </button>
           )}
         </div>
         <div
           className="max-w-[78%] rounded-2xl px-4 py-3 text-[14px] leading-relaxed"
           style={{
-            backgroundColor: 'rgba(245,158,11,0.14)',
+            backgroundColor: 'hsl(var(--primary)/0.14)',
             border: `1px solid ${ACCENT_BORDER}`,
             color: 'hsl(var(--surface-invert) / 0.96)',
           }}
@@ -1187,8 +1187,8 @@ const Message = ({
             className="mt-3 pt-3 border-t border-white/10"
           >
             <div className="flex items-center gap-1.5 mb-2">
-              <FileText className="h-3 w-3 text-amber-300" />
-              <span className="text-[11px] uppercase tracking-wider text-amber-300 font-semibold">
+              <FileText className="h-3 w-3 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
+              <span className="text-[11px] uppercase tracking-wider text-[hsl(var(--primary-fill))] dark:text-violet-300 font-semibold">
                 Sources ({sources.length})
               </span>
             </div>
@@ -1198,11 +1198,11 @@ const Message = ({
                   key={`${s.document_id || i}-${s.page || 0}-${i}`}
                   id={`OPS-qa-message-source-${index}-${i}`}
                   data-testid={`OPS-qa-message-source-${index}-${i}`}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/8 border border-amber-500/20 text-[11px] text-amber-100/90"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-primary/8 border border-primary/20 text-[11px] text-[hsl(var(--primary-fill)/0.9)] dark:text-violet-200/90"
                 >
                   <FileText className="h-2.5 w-2.5" />
                   <span className="max-w-[240px] truncate">{s.title || 'Document'}</span>
-                  {s.page && <span className="text-amber-300/70">p.{s.page}</span>}
+                  {s.page && <span className="text-[hsl(var(--primary-fill)/0.7)] dark:text-violet-300/70">p.{s.page}</span>}
                 </span>
               ))}
             </div>

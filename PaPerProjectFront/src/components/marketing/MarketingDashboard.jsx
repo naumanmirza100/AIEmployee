@@ -1021,7 +1021,7 @@ const MarketingDashboard = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+              <Card className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
                 <CardHeader>
                   <div className="flex flex-row items-center justify-between">
                     <CardTitle className="text-white">Marketing Overview</CardTitle>
@@ -1254,7 +1254,7 @@ const MarketingDashboard = () => {
 
         <TabsContent value="email" data-tour-mkt="page-email" className="space-y-4">
           <div className="relative flex gap-4">
-            <Card className={`border-white/10 bg-pure-black/20 backdrop-blur-sm ${selectedAccount ? 'flex-1 min-w-0' : 'w-full'}`}>
+            <Card className={`border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm ${selectedAccount ? 'flex-1 min-w-0' : 'w-full'}`}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div>
                   <CardTitle className="text-white">Email accounts</CardTitle>
@@ -1358,7 +1358,7 @@ const MarketingDashboard = () => {
 
             {/* Right-side account details sidebar */}
             {selectedAccount && (
-              <div className="w-[380px] shrink-0 flex flex-col rounded-lg border border-white/10 bg-pure-black/20 backdrop-blur-sm shadow-sm overflow-hidden">
+              <div className="w-[380px] shrink-0 flex flex-col rounded-lg border border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm shadow-sm overflow-hidden">
                 <div className="flex items-center justify-between p-4 border-b border-white/10 bg-white/[0.03]">
                   <h3 className="font-semibold text-base text-white">Account details</h3>
                   <Button variant="ghost" size="icon" onClick={() => setSelectedAccount(null)} aria-label="Close">

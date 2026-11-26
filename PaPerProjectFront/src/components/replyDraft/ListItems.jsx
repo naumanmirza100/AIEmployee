@@ -24,7 +24,7 @@ export const InboxItem = ({ reply, active, onClick }) => {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-3 border-b border-white/5 flex gap-3 transition-all ${active ? 'bg-gradient-to-r from-cyan-500/10 to-transparent border-l-2 border-l-cyan-400' : 'hover:bg-white/5 border-l-2 border-l-transparent'
+      className={`w-full text-left px-3 py-3 border-b border-white/5 flex gap-3 transition-all ${active ? 'bg-gradient-to-r from-primary/10 to-transparent border-l-2 border-l-primary' : 'hover:bg-white/5 border-l-2 border-l-transparent'
         }`}
     >
       <Avatar name={personName} email={personEmail} size="md" />
@@ -63,7 +63,7 @@ export const InboxItem = ({ reply, active, onClick }) => {
             </span>
           )}
           {!isOutgoing && reply.category && (
-            <span data-testid="rd-category" className="inline-flex items-center text-[10px] font-medium text-cyan-200 px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+            <span data-testid="rd-category" className="inline-flex items-center text-[10px] font-medium text-[hsl(var(--primary-fill))] dark:text-violet-200 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">
               {CATEGORY_LABELS[reply.category] || reply.category}
             </span>
           )}
@@ -78,7 +78,7 @@ export const InboxItem = ({ reply, active, onClick }) => {
           {reply.thread_count > 1 && (
             <span
               title={`${reply.thread_count} messages in this thread`}
-              className="inline-flex items-center gap-1 text-[10px] font-medium text-fuchsia-200 px-2 py-0.5 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20"
+              className="inline-flex items-center gap-1 text-[10px] font-medium text-[hsl(var(--primary-fill))] dark:text-violet-200 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20"
             >
               <Quote className="h-2.5 w-2.5" />
               {reply.thread_count}
@@ -101,7 +101,7 @@ export const DraftItem = ({ draft, active, onClick }) => {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-3 border-b border-white/5 flex gap-3 transition-all ${active ? 'bg-gradient-to-r from-fuchsia-500/10 to-transparent border-l-2 border-l-fuchsia-400' : 'hover:bg-white/5 border-l-2 border-l-transparent'
+      className={`w-full text-left px-3 py-3 border-b border-white/5 flex gap-3 transition-all ${active ? 'bg-gradient-to-r from-primary/10 to-transparent border-l-2 border-l-primary' : 'hover:bg-white/5 border-l-2 border-l-transparent'
         }`}
     >
       <Avatar name={draft.to_name} email={draft.to_email} size="md" />

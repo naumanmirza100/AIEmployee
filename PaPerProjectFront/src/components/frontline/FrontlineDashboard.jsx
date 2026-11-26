@@ -315,7 +315,7 @@ const FrontlineDashboard = () => {
         type="button"
         onClick={() => { dismiss(); handleReplayTabTour(tabKey); }}
         title={`Take a guided tour of the ${tour?.label || 'this'} tab`}
-        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-400/40 bg-amber-400/10 text-amber-300 text-xs font-semibold hover:bg-amber-400/20 hover:text-amber-200 transition ${glow ? 'flt-tab-spotlight' : ''}`}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/40 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-300 text-xs font-semibold hover:bg-primary/20 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 transition ${glow ? 'flt-tab-spotlight' : ''}`}
       >
         <GraduationCap className="h-3.5 w-3.5" />
         Tour this tab
@@ -336,7 +336,7 @@ const FrontlineDashboard = () => {
         title={enabled ? 'Hide the ! help icons on every element' : 'Show the ! help icons on every element'}
         className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition border ${
           enabled
-            ? 'border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20 hover:text-amber-200'
+            ? 'border-primary/40 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:bg-primary/20 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200'
             : 'border-white/10 bg-white/[0.03] text-white/50 hover:bg-white/[0.06] hover:text-white/70'
         }`}
       >
@@ -1441,27 +1441,27 @@ const FrontlineDashboard = () => {
           onClick={handleReplayTutorial}
           data-tour="replay"
           title="Replay the onboarding tutorial"
-          className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-amber-400/40 bg-amber-400/10 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 hover:text-amber-200 transition ${spotlightTour ? 'flt-spotlight' : ''}`}
+          className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-primary/40 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-300 text-sm font-semibold hover:bg-primary/20 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 transition ${spotlightTour ? 'flt-spotlight' : ''}`}
         >
           <GraduationCap className="h-4 w-4" />
           Take the Tour
         </button>
         {spotlightTooltip && (
-          <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-amber-400/40 bg-[var(--panel-4)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap flt-spotlight-tip">
+          <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-primary/40 bg-[var(--panel-4)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap flt-spotlight-tip">
             👋 Take the tour anytime from here
-            <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--panel-4)] border-t border-l border-amber-400/40 rotate-45" />
+            <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--panel-4)] border-t border-l border-primary/40 rotate-45" />
           </div>
         )}
       </div>
       <style>{`
         @keyframes fltSpotlight {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4), 0 0 0 0 rgba(245, 158, 11, 0.2); }
-          50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.15), 0 0 0 12px rgba(245, 158, 11, 0.08); }
+          0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary)/0.4), 0 0 0 0 hsl(var(--primary)/0.2); }
+          50%      { box-shadow: 0 0 0 6px hsl(var(--primary)/0.15), 0 0 0 12px hsl(var(--primary)/0.08); }
         }
         .flt-spotlight { animation: fltSpotlight 1.6s ease-in-out infinite; }
         @keyframes fltTabSpotlight {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35), 0 0 0 0 rgba(245, 158, 11, 0.18); }
-          50%      { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14), 0 0 0 8px rgba(245, 158, 11, 0.07); }
+          0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary)/0.35), 0 0 0 0 hsl(var(--primary)/0.18); }
+          50%      { box-shadow: 0 0 0 4px hsl(var(--primary)/0.14), 0 0 0 8px hsl(var(--primary)/0.07); }
         }
         .flt-tab-spotlight { animation: fltTabSpotlight 1.6s ease-in-out infinite; }
         @keyframes fltDotPulse {
@@ -1500,11 +1500,11 @@ const FrontlineDashboard = () => {
             value: stats?.resolved_tickets || 0,
             sub: 'Successfully resolved',
             icon: CheckCircle2,
-            color: '#fbbf24',
-            bgColor: 'rgba(251,191,36,0.2)',
-            borderColor: 'rgba(251,191,36,0.2)',
-            gradientFrom: 'rgba(251,191,36,0.15)',
-            gradientTo: 'rgba(245,158,11,0.08)',
+            color: '#14b8a6',
+            bgColor: 'rgba(20,184,166,0.2)',
+            borderColor: 'rgba(20,184,166,0.2)',
+            gradientFrom: 'rgba(20,184,166,0.15)',
+            gradientTo: 'rgba(20,184,166,0.08)',
           },
           {
             label: 'Auto-Resolved',
@@ -1602,10 +1602,10 @@ const FrontlineDashboard = () => {
                   className="relative whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                   style={activeTab === item.value
                     ? {
-                        background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
+                        background: 'linear-gradient(90deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)',
                         color: '#fff',
-                        border: '1.5px solid #f59e0b',
-                        boxShadow: '0 0 8px 0 #f59e0b55',
+                        border: '1.5px solid hsl(var(--primary-fill))',
+                        boxShadow: '0 0 8px 0 hsl(var(--primary)/0.33)',
                       }
                     : {
                         background: 'hsl(var(--sfr-3c1e5a) / 0.22)',
@@ -1620,7 +1620,7 @@ const FrontlineDashboard = () => {
                   {showBadge && (
                     <span
                       title="Tour available — hover to launch or click 'Tour this tab' inside"
-                      className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[var(--panel-1)]"
+                      className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary ring-2 ring-[var(--panel-1)]"
                       style={{ animation: 'fltDotPulse 2s ease-in-out infinite' }}
                     />
                   )}
@@ -1739,9 +1739,9 @@ const FrontlineDashboard = () => {
                 desc: 'Configure and embed a customer-facing chat widget on your site',
                 icon: Monitor,
                 tab: 'widget',
-                color: '#fbbf24',
-                bgColor: 'rgba(251,191,36,0.15)',
-                borderHover: 'rgba(251,191,36,0.4)',
+                color: 'hsl(var(--primary-fill))',
+                bgColor: 'hsl(var(--primary)/0.15)',
+                borderHover: 'hsl(var(--primary)/0.4)',
               },
               {
                 title: 'Workflows',
@@ -1766,7 +1766,7 @@ const FrontlineDashboard = () => {
                 desc: 'Reply to tickets escalated to human agents with AI-drafted responses',
                 icon: Headphones,
                 tab: 'handoffs',
-                color: '#fb923c',
+                color: 'var(--brand-ink)',
                 bgColor: 'rgba(251,146,60,0.15)',
                 borderHover: 'rgba(251,146,60,0.4)',
               },
@@ -1903,7 +1903,7 @@ const FrontlineDashboard = () => {
                       doc: 'bg-violet-500/15 text-violet-400 border-violet-400/30',
                       txt: 'bg-white/[0.04] text-white/55 border-white/[0.08]',
                       md: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
-                      html: 'bg-amber-500/15 text-amber-400 border-amber-400/30',
+                      html: 'bg-primary/15 text-[hsl(var(--primary-fill))] dark:text-violet-300 border-primary/30',
                     }[fmt] || 'bg-violet-500/15 text-violet-400 border-violet-400/30';
                     const sizeKB = doc.file_size ? Math.max(1, Math.round(doc.file_size / 1024)) : null;
                     const sizeDisplay = sizeKB && sizeKB >= 1024
@@ -2012,7 +2012,7 @@ const FrontlineDashboard = () => {
                                 Restore
                               </Button>
                             ) : (
-                              <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-amber-400 hover:text-amber-300"
+                              <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300"
                                 onClick={() => handleToggleDocOutdated(doc, true)}
                                 title="Mark outdated — excluded from knowledge retrieval until restored">
                                 Outdated
@@ -2328,7 +2328,7 @@ const FrontlineDashboard = () => {
                       <p className="font-medium">Ask your first question</p>
                       <p className="text-sm">Type a question to get an answer from your knowledge base.</p>
                       {documents.length === 0 && (
-                        <p className="text-xs mt-2 text-amber-600 dark:text-amber-400">💡 Tip: Upload documents in the Documents tab first</p>
+                        <p className="text-xs mt-2 text-[hsl(var(--primary-fill))] dark:text-violet-300 dark:text-violet-300">💡 Tip: Upload documents in the Documents tab first</p>
                       )}
                     </div>
                   )}
@@ -2387,7 +2387,7 @@ const FrontlineDashboard = () => {
                               {(msg.responseData?.has_verified_info) ? (
                                 <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
                               ) : (
-                                <XCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                                <XCircle className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300 dark:text-violet-300 mt-0.5 flex-shrink-0" />
                               )}
                               <div className="flex-1 min-w-0">
                                 {msg.streaming ? (
@@ -2407,7 +2407,7 @@ const FrontlineDashboard = () => {
                                   </ChatMarkdown>
                                 )}
                                 {msg.responseData?.confidence === 'low' && (
-                                  <div className="mt-2 text-xs rounded-md px-2 py-1 bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                                  <div className="mt-2 text-xs rounded-md px-2 py-1 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-300 dark:text-violet-300 border border-primary/30">
                                     Low-confidence match. Consider escalating to a human agent.
                                   </div>
                                 )}

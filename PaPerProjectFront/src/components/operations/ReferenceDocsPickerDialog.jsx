@@ -69,7 +69,7 @@ const ReferenceDocsPickerDialog = ({
       <DialogContent id="OPS-refpicker-dialog" data-testid="OPS-refpicker-dialog" className="bg-[var(--panel-1)] border border-white/10 text-white max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
-            <Layers className="h-4 w-4 text-amber-300" />
+            <Layers className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
             Select reference documents
           </DialogTitle>
           <DialogDescription className="text-white/55">
@@ -86,7 +86,7 @@ const ReferenceDocsPickerDialog = ({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search your documents..."
-            className="w-full bg-black/30 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white/90 placeholder-white/40 focus:outline-none focus:border-amber-500/40"
+            className="w-full bg-muted/50 dark:bg-black/30 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white/90 placeholder-white/40 focus:outline-none focus:border-primary/40"
           />
         </div>
 
@@ -94,7 +94,7 @@ const ReferenceDocsPickerDialog = ({
         <div className="flex items-center justify-between text-xs text-white/60 mt-2">
           <span>
             {selected.size > 0 ? (
-              <><strong className="text-amber-300">{selected.size}</strong> selected</>
+              <><strong className="text-[hsl(var(--primary-fill))] dark:text-violet-300">{selected.size}</strong> selected</>
             ) : 'None selected'}
             {' '}· {filtered.length} {search ? 'match' : 'available'}
           </span>
@@ -105,7 +105,7 @@ const ReferenceDocsPickerDialog = ({
                 id="OPS-refpicker-select-all-btn"
                 data-testid="OPS-refpicker-select-all-btn"
                 onClick={selectAll}
-                className="text-[11px] text-white/70 hover:text-amber-300"
+                className="text-[11px] text-white/70 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300"
               >
                 Select all
               </button>
@@ -116,7 +116,7 @@ const ReferenceDocsPickerDialog = ({
                 id="OPS-refpicker-clear-btn"
                 data-testid="OPS-refpicker-clear-btn"
                 onClick={clearAll}
-                className="text-[11px] text-white/70 hover:text-amber-300"
+                className="text-[11px] text-white/70 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300"
               >
                 Clear
               </button>
@@ -151,12 +151,12 @@ const ReferenceDocsPickerDialog = ({
                   id={`OPS-refpicker-doc-${d.id}`}
                   data-testid={`OPS-refpicker-doc-${d.id}`}
                   className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${
-                    active ? 'bg-amber-500/8' : 'hover:bg-white/[0.03]'
+                    active ? 'bg-primary/8' : 'hover:bg-white/[0.03]'
                   }`}
                 >
                   <div
                     className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
-                      active ? 'bg-amber-500 border-amber-500' : 'border-white/25 bg-black/30'
+                      active ? 'bg-primary border-primary' : 'border-white/25 bg-muted/50 dark:bg-black/30'
                     }`}
                     onClick={(e) => { e.preventDefault(); toggle(d.id); }}
                   >

@@ -57,7 +57,7 @@ export default function HRLeaveAllowancesCard() {
   const set = (data?.allowances || []).filter((a) => a.days > 0);
 
   return (
-    <Card data-testid="hr-leave-allowances" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+    <Card data-testid="hr-leave-allowances" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <CalendarCheck2 className="h-5 w-5 text-violet-400" /> Leave allowances

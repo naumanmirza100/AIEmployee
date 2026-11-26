@@ -16,7 +16,7 @@ const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 function trend(curr, prev) {
   if (curr > prev) return { icon: TrendingUp,   color: '#4ade80', label: `+${curr - prev} vs last week` };
   if (curr < prev) return { icon: TrendingDown,  color: '#f87171', label: `${curr - prev} vs last week` };
-  return           { icon: Minus,               color: '#9ca3af', label: 'same as last week' };
+  return           { icon: Minus,               color: 'hsl(var(--muted-foreground))', label: 'same as last week' };
 }
 
 // --------------------------------------------------------------------------
@@ -46,8 +46,8 @@ function StatCard({ icon: Icon, label, value, sub, color, trend: t }) {
         )}
       </div>
       <div style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-soft)', lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 12, color: '#6b7280' }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: '#4b5563' }}>{sub}</div>}
+      <div style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))' }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: 'hsl(var(--muted-foreground) / 0.85)' }}>{sub}</div>}
     </div>
   );
 }
@@ -62,7 +62,7 @@ function FunnelBar({ stages }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
             <span style={{ fontSize: 12, color: 'hsl(var(--pt-9ca3af))' }}>{s.stage}</span>
             <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600 }}>
-              {s.count} <span style={{ color: '#4b5563', fontWeight: 400 }}>({pct(s.count, max)}%)</span>
+              {s.count} <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontWeight: 400 }}>({pct(s.count, max)}%)</span>
             </span>
           </div>
           <div style={{ height: 8, borderRadius: 4, background: 'hsl(var(--surface-invert) / 0.06)' }}>
@@ -107,7 +107,7 @@ function DailyTrendChart({ trend: data }) {
             <div style={{
               width: 10, borderRadius: '2px 2px 0 0',
               height: `${(d.emails / maxEmails) * 64}px`,
-              background: '#a78bfa', minHeight: d.emails > 0 ? 3 : 0,
+              background: 'var(--brand-ink)', minHeight: d.emails > 0 ? 3 : 0,
             }} title={`${d.emails} emails`} />
             {/* Leads bar */}
             <div style={{
@@ -123,7 +123,7 @@ function DailyTrendChart({ trend: data }) {
               }} title={`${d.meetings} meeting(s)`} />
             )}
           </div>
-          <span style={{ fontSize: 10, color: '#4b5563' }}>{d.day}</span>
+          <span style={{ fontSize: 10, color: 'hsl(var(--muted-foreground) / 0.85)' }}>{d.day}</span>
         </div>
       ))}
     </div>
@@ -137,11 +137,11 @@ const SENTIMENT_CFG = {
   negative:       { label: 'Not Interested',color: '#f87171' },
   out_of_office:  { label: 'OOO',           color: '#f59e0b' },
   wants_more_info:{ label: 'Wants Info',    color: '#60a5fa' },
-  neutral:        { label: 'Neutral',       color: '#9ca3af' },
+  neutral:        { label: 'Neutral',       color: 'hsl(var(--muted-foreground))' },
 };
 
 const SOURCE_CFG = {
-  apollo:      { label: 'Apollo.io',  color: '#a78bfa' },
+  apollo:      { label: 'Apollo.io',  color: 'var(--brand-ink)' },
   apify:       { label: 'Apify',      color: '#60a5fa' },
   csv_import:  { label: 'CSV Import', color: '#4ade80' },
   manual:      { label: 'Manual',     color: '#f59e0b' },
@@ -207,7 +207,7 @@ export default function SDRAnalyticsTab() {
   );
 
   if (!metrics) return (
-    <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>
+    <div style={{ textAlign: 'center', padding: 60, color: 'hsl(var(--muted-foreground))' }}>
       <BarChart3 size={40} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
       <div>No analytics data available yet.</div>
       <div style={{ fontSize: 12, marginTop: 6 }}>Start a campaign and enroll leads to see metrics.</div>
@@ -254,7 +254,7 @@ export default function SDRAnalyticsTab() {
           <button onClick={handleSendSummary} disabled={sending} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
             borderRadius: 8, border: 'none',
-            background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)',
+            background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))',
             color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
           }}>
             {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
@@ -295,7 +295,7 @@ export default function SDRAnalyticsTab() {
         <div style={{ ...card, flex: 1 }}>
           {sectionTitle('Pipeline Funnel')}
           <FunnelBar stages={m.funnel} />
-          <div style={{ marginTop: 16, display: 'flex', gap: 12, fontSize: 11, color: '#6b7280' }}>
+          <div style={{ marginTop: 16, display: 'flex', gap: 12, fontSize: 11, color: 'hsl(var(--muted-foreground))' }}>
             <span>Reply rate: <strong style={{ color: 'hsl(var(--pt-4ade80))' }}>{m.reply_rate_week}%</strong></span>
             <span>Meeting rate: <strong style={{ color: '#34d399' }}>{m.meeting_rate}%</strong></span>
           </div>
@@ -305,9 +305,9 @@ export default function SDRAnalyticsTab() {
         <div style={{ ...card, flex: 1 }}>
           {sectionTitle('Last 7 Days')}
           <DailyTrendChart trend={m.daily_trend} />
-          <div style={{ marginTop: 10, display: 'flex', gap: 14, fontSize: 11, color: '#6b7280' }}>
+          <div style={{ marginTop: 10, display: 'flex', gap: 14, fontSize: 11, color: 'hsl(var(--muted-foreground))' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: '#a78bfa', display: 'inline-block' }} /> Emails
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--brand-ink)', display: 'inline-block' }} /> Emails
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ width: 10, height: 10, borderRadius: 2, background: '#60a5fa', display: 'inline-block' }} /> Leads
@@ -330,7 +330,7 @@ export default function SDRAnalyticsTab() {
               <thead>
                 <tr>
                   {['Campaign', 'Emails', 'Replies', 'Meetings', 'Reply %'].map(h => (
-                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Campaign' ? 'left' : 'center', color: '#4b5563', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--sfc-1e0f38)' }}>{h}</th>
+                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Campaign' ? 'left' : 'center', color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--sfc-1e0f38)' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -341,7 +341,7 @@ export default function SDRAnalyticsTab() {
                     <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: 'hsl(var(--pt-9ca3af))' }}>{row.emails_sent}</td>
                     <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: 'hsl(var(--pt-9ca3af))' }}>{row.replies}</td>
                     <td style={{ padding: '10px 10px', textAlign: 'center' }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: 'hsl(var(--pt-a78bfa))' }}>{row.meetings}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-ink)' }}>{row.meetings}</span>
                     </td>
                     <td style={{ padding: '10px 10px', textAlign: 'center' }}>
                       <span style={{
@@ -355,7 +355,7 @@ export default function SDRAnalyticsTab() {
               </tbody>
             </table>
           ) : (
-            <div style={{ color: '#4b5563', fontSize: 12, textAlign: 'center', padding: '24px 0' }}>
+            <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 12, textAlign: 'center', padding: '24px 0' }}>
               No active campaigns yet.
             </div>
           )}
@@ -392,10 +392,10 @@ export default function SDRAnalyticsTab() {
             {sectionTitle('Reply Sentiment')}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
               {Object.entries(m.sentiment_counts || {}).length === 0 ? (
-                <div style={{ color: '#4b5563', fontSize: 12 }}>No replies yet.</div>
+                <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 12 }}>No replies yet.</div>
               ) : (
                 Object.entries(m.sentiment_counts).map(([key, count]) => {
-                  const cfg = SENTIMENT_CFG[key] || { label: key, color: '#9ca3af' };
+                  const cfg = SENTIMENT_CFG[key] || { label: key, color: 'hsl(var(--muted-foreground))' };
                   return (
                     <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 11, color: 'hsl(var(--pt-9ca3af))', width: 80, flexShrink: 0 }}>{cfg.label}</span>
@@ -413,10 +413,10 @@ export default function SDRAnalyticsTab() {
             {sectionTitle('Lead Sources')}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
               {Object.entries(m.source_counts || {}).length === 0 ? (
-                <div style={{ color: '#4b5563', fontSize: 12 }}>No leads yet.</div>
+                <div style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 12 }}>No leads yet.</div>
               ) : (
                 Object.entries(m.source_counts).map(([key, count]) => {
-                  const cfg = SOURCE_CFG[key] || { label: key, color: '#9ca3af' };
+                  const cfg = SOURCE_CFG[key] || { label: key, color: 'hsl(var(--muted-foreground))' };
                   return (
                     <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 11, color: 'hsl(var(--pt-9ca3af))', width: 70, flexShrink: 0 }}>{cfg.label}</span>
@@ -437,9 +437,9 @@ export default function SDRAnalyticsTab() {
         {sectionTitle('Lead Status Breakdown')}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {[
-            { key: 'new',               label: 'New',         color: '#6b7280' },
+            { key: 'new',               label: 'New',         color: 'hsl(var(--muted-foreground))' },
             { key: 'qualified',         label: 'Qualified',   color: '#60a5fa' },
-            { key: 'contacted',         label: 'Contacted',   color: '#a78bfa' },
+            { key: 'contacted',         label: 'Contacted',   color: 'var(--brand-ink)' },
             { key: 'replied',           label: 'Replied',     color: '#4ade80' },
             { key: 'meeting_scheduled', label: 'Meeting',     color: '#34d399' },
             { key: 'converted',         label: 'Converted',   color: '#fbbf24' },
@@ -453,7 +453,7 @@ export default function SDRAnalyticsTab() {
                 background: `${color}10`, border: `1px solid ${color}25`,
               }}>
                 <div style={{ fontSize: 22, fontWeight: 700, color }}>{count}</div>
-                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>{label}</div>
+                <div style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', marginTop: 4 }}>{label}</div>
               </div>
             );
           })}

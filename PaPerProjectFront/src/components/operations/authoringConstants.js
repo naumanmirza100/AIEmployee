@@ -7,9 +7,9 @@ import {
   FileCheck, BookOpen, Briefcase, MessageSquare, ScrollText, PenTool,
 } from 'lucide-react';
 
-export const AUTHORING_ACCENT = '#f59e0b';
-export const AUTHORING_ACCENT_SOFT = 'rgba(245,158,11,0.12)';
-export const AUTHORING_ACCENT_BORDER = 'rgba(245,158,11,0.28)';
+export const AUTHORING_ACCENT = 'hsl(var(--primary-fill))';
+export const AUTHORING_ACCENT_SOFT = 'hsl(var(--primary)/0.12)';
+export const AUTHORING_ACCENT_BORDER = 'hsl(var(--primary)/0.28)';
 
 export const TEMPLATES = [
   {

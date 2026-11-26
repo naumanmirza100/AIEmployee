@@ -5,7 +5,7 @@
  *   * Outer wrapper: `rounded-2xl` gradient panel.
  *   * Stat cards: `rounded-xl` gradient + colored icon tile.
  *   * Tabs: violet pill-style with active gradient + mobile hamburger fallback.
- *   * Section cards: `border-white/10 bg-pure-black/20 backdrop-blur-sm`.
+ *   * Section cards: `border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm`.
  *   * List rows: `border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]`.
  *   * Empty states: centered icon tile + sub-line.
  */
@@ -1034,7 +1034,7 @@ ${note}` : '');
             <TabsContent value="employees" className="mt-6">
               <ErrorBoundary>
                 <div className="flex justify-end mb-3"><TabTourButton tabKey="employees" /></div>
-                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <CardTitle className="flex items-center gap-2">
@@ -1361,7 +1361,7 @@ ${note}` : '');
               <ErrorBoundary>
                 <div className="flex justify-end mb-3"><TabTourButton tabKey="documents" /></div>
                 <DocumentSearchBanner agent="hr_agent" refreshKey={documents.length} />
-                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <CardTitle className="flex items-center gap-2">

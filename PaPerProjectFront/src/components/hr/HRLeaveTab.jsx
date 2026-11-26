@@ -288,7 +288,7 @@ export default function HRLeaveTab() {
           )}
         </div>
       )}
-      <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+      <Card className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2">

@@ -148,7 +148,7 @@ const InfoHint = ({ title, body, className = '' }) => {
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        className={`inline-flex items-center justify-center h-5 w-5 shrink-0 rounded-full border border-amber-400/50 bg-amber-400/10 text-amber-300 hover:bg-amber-400/25 hover:text-amber-200 hover:border-amber-400/70 transition text-[11px] font-bold leading-none cursor-pointer ${className}`}
+        className={`inline-flex items-center justify-center h-5 w-5 shrink-0 rounded-full border border-primary/50 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:bg-primary/25 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 hover:border-primary/70 transition text-[11px] font-bold leading-none cursor-pointer ${className}`}
       >
         !
       </button>
@@ -175,7 +175,7 @@ const InfoHint = ({ title, body, className = '' }) => {
           </button>
           {title && (
             <div className="flex items-center gap-2 mb-1.5 pr-6">
-              <span className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-amber-400/20 text-amber-300 text-[10px] font-bold leading-none">
+              <span className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-300 text-[10px] font-bold leading-none">
                 !
               </span>
               <h4 className="text-sm font-bold text-white leading-tight">{title}</h4>

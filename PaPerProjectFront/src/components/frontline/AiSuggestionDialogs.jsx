@@ -18,7 +18,7 @@ export function TicketSuggestionDialog({ suggestion, busy, onResolve, onKeepOpen
       <DialogContent className="max-w-lg" data-testid="FL-ticket-suggestion-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-amber-400" /> The knowledge base has an answer
+            <Sparkles className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" /> The knowledge base has an answer
           </DialogTitle>
           <DialogDescription>
             Ticket #{suggestion?.ticketId} is created and open. Resolve it with this answer, or keep it open for a person
