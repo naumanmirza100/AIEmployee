@@ -569,7 +569,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
 
       {/* Bulk selection / delete bar */}
       {jobs.length > 0 && (
-        <div id="REC-jobs-bulk-bar" data-testid="REC-jobs-bulk-bar" className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+        <div id="REC-jobs-bulk-bar" data-testid="REC-jobs-bulk-bar" className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-card/80 dark:bg-black/20 px-3 py-2">
           <div className="flex items-center gap-2">
             <div className="relative inline-flex items-center justify-center">
               {selectedJobIds.size === 0 && (
@@ -627,7 +627,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             placeholder="Search by title, location or department…"
-            className="w-full pl-9 pr-10 py-2 text-sm rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30"
+            className="w-full pl-9 pr-10 py-2 text-sm rounded-lg bg-card/80 dark:bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30"
           />
           {fetching && (
             <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-violet-400 pointer-events-none" />
@@ -635,7 +635,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         </div>
 
         <Select value={statusFilter || '_all'} onValueChange={(v) => { setStatusFilter(v === '_all' ? '' : v); setPage(1); }}>
-          <SelectTrigger id="REC-jobs-filter-status" data-testid="REC-jobs-filter-status" className="w-[130px] bg-white/5 border-white/10 text-white text-sm">
+          <SelectTrigger id="REC-jobs-filter-status" data-testid="REC-jobs-filter-status" className="w-[130px] bg-card/80 dark:bg-white/5 border-white/10 text-white text-sm">
             <SelectValue placeholder="All Status" />
           </SelectTrigger>
           <SelectContent>
@@ -646,7 +646,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         </Select>
 
         <Select value={typeFilter || '_all'} onValueChange={(v) => { setTypeFilter(v === '_all' ? '' : v); setPage(1); }}>
-          <SelectTrigger id="REC-jobs-filter-type" data-testid="REC-jobs-filter-type" className="w-[140px] bg-white/5 border-white/10 text-white text-sm">
+          <SelectTrigger id="REC-jobs-filter-type" data-testid="REC-jobs-filter-type" className="w-[140px] bg-card/80 dark:bg-white/5 border-white/10 text-white text-sm">
             <SelectValue placeholder="All Types" />
           </SelectTrigger>
           <SelectContent>
@@ -730,11 +730,68 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                       className="mt-1 shrink-0"
                     />
                     <div className="min-w-0">
-                      <CardTitle className="text-lg">{job.title}</CardTitle>
+                      <CardTitle className="text-lg leading-snug break-words">{job.title}</CardTitle>
                       <CardDescription className="mt-1">
                         {job.location && `${job.location} • `}
                         {job.type}
                       </CardDescription>
+                      {/* Setup/Configured and Active sit under the place and type, not beside the title, which
+                          they squeezed to one word per line in a three-column grid (26 Nov 2026). */}
+                      <div className="mt-2 flex items-center gap-2 flex-wrap">
+                        {onGoToSettings && (
+                          configuredJobIds.has(job.id) ? (
+                            <button
+                              id={`REC-jobs-configured-btn-${job.id}`}
+                              data-testid={`REC-jobs-configured-btn-${job.id}`}
+                              onClick={(e) => { e.stopPropagation(); onGoToSettings(job.id); }}
+                              title="Interview settings configured — click to view"
+                              className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer bg-emerald-500/10 border-emerald-500/35 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-400"
+                            >
+                              <CheckCircle className="h-3 w-3" />
+                              Configured
+                            </button>
+                          ) : (
+                            <span className="relative inline-flex">
+                              {highlightSetupJobId === job.id && (
+                                <>
+                                  {/* pulsing ring around the Setup badge */}
+                                  <span className="absolute inset-0 rounded-full animate-ping pointer-events-none" style={{ background: 'rgba(251,191,36,0.45)' }} />
+                                  {/* bouncing arrow pointing down at the badge */}
+                                  <span className="absolute left-1/2 -translate-x-1/2 -top-6 text-amber-400 animate-bounce pointer-events-none">
+                                    <ArrowDown className="h-4 w-4" />
+                                  </span>
+                                </>
+                              )}
+                              <button
+                                id={`REC-jobs-setup-btn-${job.id}`}
+                                data-testid={`REC-jobs-setup-btn-${job.id}`}
+                                onClick={(e) => { e.stopPropagation(); setHighlightSetupJobId(null); onGoToSettings(job.id); }}
+                                title="Complete email, interview & qualification settings"
+                                className="relative inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
+                                style={highlightSetupJobId === job.id
+                                  ? { background: 'rgba(251,191,36,0.28)', borderColor: '#fbbf24', color: '#fbbf24', boxShadow: '0 0 10px 0 rgba(251,191,36,0.6)' }
+                                  : { background: 'rgba(251,191,36,0.12)', borderColor: 'rgba(251,191,36,0.35)', color: '#fbbf24' }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(251,191,36,0.24)'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = highlightSetupJobId === job.id ? 'rgba(251,191,36,0.28)' : 'rgba(251,191,36,0.12)'; }}
+                              >
+                                <Settings className="h-3 w-3" />
+                                Setup
+                              </button>
+                            </span>
+                          )
+                        )}
+                        {job.is_active ? (
+                          <Badge className="bg-green-600 text-pure-white hover:bg-green-600 dark:bg-green-500 dark:hover:bg-green-500">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Active
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">
+                            <XCircle className="h-3 w-3 mr-1" />
+                            Inactive
+                          </Badge>
+                        )}
+                      </div>
                       {/* The company shares jobs: say whose this is (its settings are theirs). */}
                       {job.owner && (
                         <p data-testid={`REC-jobs-owner-${job.id}`} className="mt-0.5 text-xs text-muted-foreground">
@@ -746,64 +803,6 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                       <HiringManagers job={job} logins={logins} canEdit={myRole === 'recruiter'}
                         onSaved={(managers) => setJobs((all) => all.map((j) => (j.id === job.id ? { ...j, hiring_managers: managers } : j)))} />
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap justify-end">
-                    {onGoToSettings && (
-                      configuredJobIds.has(job.id) ? (
-                        <button
-                          id={`REC-jobs-configured-btn-${job.id}`}
-                          data-testid={`REC-jobs-configured-btn-${job.id}`}
-                          onClick={(e) => { e.stopPropagation(); onGoToSettings(job.id); }}
-                          title="Interview settings configured — click to view"
-                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
-                          style={{ background: 'rgba(52,211,153,0.12)', borderColor: 'rgba(52,211,153,0.35)', color: '#34d399' }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(52,211,153,0.24)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(52,211,153,0.12)'; }}
-                        >
-                          <CheckCircle className="h-3 w-3" />
-                          Configured
-                        </button>
-                      ) : (
-                        <span className="relative inline-flex">
-                          {highlightSetupJobId === job.id && (
-                            <>
-                              {/* pulsing ring around the Setup badge */}
-                              <span className="absolute inset-0 rounded-full animate-ping pointer-events-none" style={{ background: 'rgba(251,191,36,0.45)' }} />
-                              {/* bouncing arrow pointing down at the badge */}
-                              <span className="absolute left-1/2 -translate-x-1/2 -top-6 text-amber-400 animate-bounce pointer-events-none">
-                                <ArrowDown className="h-4 w-4" />
-                              </span>
-                            </>
-                          )}
-                          <button
-                            id={`REC-jobs-setup-btn-${job.id}`}
-                            data-testid={`REC-jobs-setup-btn-${job.id}`}
-                            onClick={(e) => { e.stopPropagation(); setHighlightSetupJobId(null); onGoToSettings(job.id); }}
-                            title="Complete email, interview & qualification settings"
-                            className="relative inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
-                            style={highlightSetupJobId === job.id
-                              ? { background: 'rgba(251,191,36,0.28)', borderColor: '#fbbf24', color: '#fbbf24', boxShadow: '0 0 10px 0 rgba(251,191,36,0.6)' }
-                              : { background: 'rgba(251,191,36,0.12)', borderColor: 'rgba(251,191,36,0.35)', color: '#fbbf24' }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(251,191,36,0.24)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = highlightSetupJobId === job.id ? 'rgba(251,191,36,0.28)' : 'rgba(251,191,36,0.12)'; }}
-                          >
-                            <Settings className="h-3 w-3" />
-                            Setup
-                          </button>
-                        </span>
-                      )
-                    )}
-                    {job.is_active ? (
-                      <Badge className="bg-green-500">
-                        <CheckCircle className="h-3 w-3 mr-1" />
-                        Active
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline">
-                        <XCircle className="h-3 w-3 mr-1" />
-                        Inactive
-                      </Badge>
-                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -828,7 +827,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                     variant="outline"
                     size="sm"
                     onClick={() => handleViewApplications(job)}
-                    className="flex-1 text-blue-400 border-blue-400/30 hover:bg-blue-400/10"
+                    className="order-first basis-full text-blue-400 border-blue-400/30 hover:bg-blue-400/10"
                   >
                     <Users className="h-3 w-3 mr-1" />
                     Applications
