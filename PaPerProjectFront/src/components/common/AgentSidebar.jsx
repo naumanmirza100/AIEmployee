@@ -179,17 +179,14 @@ const AgentSidebar = ({
             <div key={item.section || item.path || item.label}>
               {/* Agent row */}
               <div
-                className={`group relative w-full flex items-center rounded-lg transition-colors ${
+                className={`group relative w-full flex items-center rounded-xl transition-colors ${
                   collapsed ? 'justify-center h-11 px-0' : 'h-11 pl-3 pr-1.5'
                 } ${
                   active
-                    ? 'bg-violet-600/90 text-white shadow-[0_0_14px_rgba(139,92,246,0.35)]'
+                    ? 'bg-card text-foreground font-semibold ring-1 ring-border/70 shadow-[0_6px_18px_-8px_rgba(30,40,80,0.28)] dark:bg-pure-white/[0.08] dark:ring-pure-white/10 dark:shadow-none'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                 }`}
               >
-                {active && !collapsed && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r bg-primary-foreground/90" />
-                )}
                 {/* Label/icon → navigate to the agent */}
                 <button
                   onClick={() => handleAgentClick(item)}
@@ -197,7 +194,7 @@ const AgentSidebar = ({
                   className={`flex items-center min-w-0 flex-1 ${collapsed ? 'justify-center' : 'gap-3'}`}
                 >
                   <span className="relative shrink-0">
-                    {Icon && <Icon className={`${collapsed ? 'h-5 w-5' : 'h-[18px] w-[18px]'}`} />}
+                    {Icon && <Icon className={`${collapsed ? 'h-5 w-5' : 'h-[18px] w-[18px]'} ${active ? 'text-primary dark:text-violet-300' : ''}`} />}
                     {/* Collapsed sidebar: badge sits on the icon so it stays visible. */}
                     {collapsed && item.badge > 0 && (
                       <span
@@ -216,7 +213,7 @@ const AgentSidebar = ({
                       className={`ml-auto min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center ${
                         item.badgeTone === 'danger'
                           ? 'bg-red-500/90 text-white'
-                          : active ? 'bg-white/20 text-white' : 'bg-violet-500/80 text-white'
+                          : active ? 'bg-primary/15 text-primary dark:text-violet-200' : 'bg-violet-500/80 text-pure-white'
                       }`}
                     >
                       {item.badge > 99 ? '99+' : item.badge}
@@ -229,7 +226,7 @@ const AgentSidebar = ({
                     onClick={(e) => toggleExpand(e, item)}
                     title={open ? 'Collapse' : 'Expand'}
                     className={`shrink-0 h-7 w-7 flex items-center justify-center rounded-md transition-colors ${
-                      active ? 'hover:bg-white/15 text-white/80' : 'hover:bg-accent text-muted-foreground'
+                      'hover:bg-accent text-muted-foreground'
                     }`}
                   >
                     {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -250,13 +247,13 @@ const AgentSidebar = ({
                       <div key={child.path + (child.tab || '') + (child.sub || '')}>
                         <button
                           onClick={() => goToChild(child)}
-                          className={`w-full flex items-center gap-2.5 rounded-md h-9 px-2.5 text-[13px] transition-colors ${
+                          className={`w-full flex items-center gap-2.5 rounded-lg h-9 px-2.5 text-[13px] transition-colors ${
                             cActive
-                              ? 'bg-violet-500/15 text-violet-200 font-medium'
+                              ? 'bg-primary/10 text-primary font-semibold dark:bg-violet-500/15 dark:text-violet-200'
                               : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                           }`}
                         >
-                          {CIcon && <CIcon className={`h-4 w-4 shrink-0 ${cActive ? 'text-violet-300' : ''}`} />}
+                          {CIcon && <CIcon className={`h-4 w-4 shrink-0 ${cActive ? 'text-primary dark:text-violet-300' : ''}`} />}
                           <span className="truncate">{child.label}</span>
                         </button>
 
@@ -271,13 +268,13 @@ const AgentSidebar = ({
                                 <button
                                   key={gc.path + (gc.tab || '') + (gc.sub || '')}
                                   onClick={() => goToChild(gc)}
-                                  className={`w-full flex items-center gap-2 rounded-md h-8 px-2.5 text-[12.5px] transition-colors ${
+                                  className={`w-full flex items-center gap-2 rounded-lg h-8 px-2.5 text-[12.5px] transition-colors ${
                                     gActive
-                                      ? 'bg-violet-500/15 text-violet-200 font-medium'
+                                      ? 'bg-primary/10 text-primary font-semibold dark:bg-violet-500/15 dark:text-violet-200'
                                       : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                                   }`}
                                 >
-                                  {GIcon && <GIcon className={`h-3.5 w-3.5 shrink-0 ${gActive ? 'text-violet-300' : ''}`} />}
+                                  {GIcon && <GIcon className={`h-3.5 w-3.5 shrink-0 ${gActive ? 'text-primary dark:text-violet-300' : ''}`} />}
                                   <span className="truncate">{gc.label}</span>
                                 </button>
                               );
