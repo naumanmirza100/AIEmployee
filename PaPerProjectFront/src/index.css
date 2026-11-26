@@ -23,9 +23,6 @@
         --brand-600: 220.6 90% 61%;
         /* Lighter half of the brand gradients (was the fixed #a259ff). */
         --brand-accent: 214 100% 71%;
-        /* #3268E0: filled buttons. The brand blue one step deeper, so white text on it reads at 5:1 (the
-           brand #427CF5 gives 3.8:1). The UI refresh, 26 Nov 2026. */
-        --primary-fill: 221 74% 54%;
 
         /* Accent shades chosen for a dark page. The pale ones (100-400)
            are text and vanish on white; the deep ones (700-900) are fills
@@ -236,11 +233,7 @@
         /* The dashboards paint these two gradients through inline styles, which
            no `dark:` class can reach — so they are variables the inline style
            can point at instead of a hardcoded colour string. */
-        /* A faint dotted grid and a soft brand glow behind the cards (UI refresh, 26 Nov 2026). */
-        --app-page-bg: radial-gradient(rgb(18 18 26 / 0.06) 1px, transparent 1.3px) 0 0 / 22px 22px,
-          radial-gradient(60rem 36rem at 100% 0%, hsl(var(--brand-600) / 0.10), transparent 65%),
-          radial-gradient(48rem 34rem at 0% 85%, hsl(var(--brand-accent) / 0.10), transparent 65%),
-          linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--secondary)) 50%, hsl(var(--background)) 100%);
+        --app-page-bg: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--secondary)) 50%, hsl(var(--background)) 100%);
         --app-hero-bg: linear-gradient(90deg, hsl(var(--secondary)) 0%, hsl(var(--secondary)) 55%, hsl(var(--brand-600) / 0.10) 85%, hsl(var(--brand-600) / 0.16) 100%);
 
         /* Tells the browser to render native controls, scrollbars and form
@@ -261,7 +254,6 @@
         --brand-600: 262.1 83.3% 57.8%;
         /* #a259ff — unchanged. */
         --brand-accent: 270 100% 63%;
-        --primary-fill: 262.1 83.3% 57.8%;
 
         --c-violet-100: 251.4 91.3% 95.5%;    /* violet-100 #ede9fe */
         --c-violet-200: 250.5 95.2% 91.8%;    /* violet-200 #ddd6fe */
@@ -437,10 +429,7 @@
         --sfc-1a1a2e: #1a1a2e;
         --sfc-1e0f38: #1e0f38;
 
-        --app-page-bg: radial-gradient(rgb(255 255 255 / 0.045) 1px, transparent 1.3px) 0 0 / 22px 22px,
-          radial-gradient(60rem 36rem at 100% 0%, rgb(124 58 237 / 0.16), transparent 65%),
-          radial-gradient(48rem 34rem at 0% 85%, rgb(162 89 255 / 0.08), transparent 65%),
-          linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%);
+        --app-page-bg: linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%);
         --app-hero-bg: linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%);
 
         color-scheme: dark;
@@ -462,22 +451,12 @@
       /* The dashboard chrome used hardcoded gradients in inline styles, which
          no theme class can reach. These keep the dark gradients exactly as
          they were and give light mode a plain equivalent. */
-      /* Frosted glass (UI refresh, 26 Nov 2026). The blur sits on a layer BEHIND the header and the sidebar, not
-         on them: a backdrop-filter on the element itself would make it the box that every position:fixed child
-         (menus, drawers) is placed in. */
-      .app-header-surface { background: none; }
-      .app-header-surface::before,
-      .app-sidebar-surface::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        z-index: -1;
-        pointer-events: none;
-        -webkit-backdrop-filter: blur(20px) saturate(160%);
-        backdrop-filter: blur(20px) saturate(160%);
+      .app-header-surface {
+        background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--secondary)) 100%);
       }
-      .app-header-surface::before { background: hsl(var(--background) / 0.72); }
-      .dark .app-header-surface::before { background: rgb(10 9 20 / 0.72); }
+      .dark .app-header-surface {
+        background: linear-gradient(180deg, #0a0a14 0%, #0d0b1a 40%, #110e1f 100%);
+      }
 
       .app-panel-surface {
         background: hsl(var(--popover));
@@ -486,21 +465,18 @@
         background: linear-gradient(180deg, #0d0b1a 0%, #1a0a2e 100%);
       }
 
-      .app-sidebar-surface { position: relative; isolation: isolate; }
-      .app-sidebar-surface::before { background: hsl(var(--card) / 0.62); }
-      .dark .app-sidebar-surface::before { background: rgb(13 11 26 / 0.82); }
+      .app-sidebar-surface {
+        background: linear-gradient(180deg, hsl(var(--secondary)) 0%, hsl(var(--background)) 100%);
+      }
+      .dark .app-sidebar-surface {
+        background: linear-gradient(180deg, #0d0b1a 0%, #110e1f 100%);
+      }
 
       /* Full-page background behind every agent dashboard, and the banner
          strip at the top of each one. Available as classes for JSX that can
          take one; the inline styles use the variables directly. */
       .app-page-surface { background: var(--app-page-bg); }
       .app-hero-surface { background: var(--app-hero-bg); }
-
-      /* The shared card and button finish (UI refresh, 26 Nov 2026). Classes in this layer, so a page's own
-         shadow-* utility still wins over them. */
-      .ui-card-shadow { box-shadow: 0 1px 2px rgb(18 18 26 / 0.04), 0 16px 40px -22px rgb(30 40 80 / 0.25); }
-      .dark .ui-card-shadow { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 22px 50px -26px rgb(0 0 0 / 0.85); }
-      .ui-btn-primary { box-shadow: 0 8px 22px -12px hsl(var(--primary) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.2); }
     }
     
     @layer base {
