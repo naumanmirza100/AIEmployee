@@ -15,18 +15,18 @@ import { getGoogleCalendarStatus, connectGoogleCalendar, disconnectGoogleCalenda
 // Shared styles (dark theme, matches rest of SDR tabs)
 // ---------------------------------------------------------------------------
 const card = {
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'hsl(var(--surface-invert) / 0.03)',
+  border: '1px solid hsl(var(--surface-invert) / 0.08)',
   borderRadius: 12,
   padding: 24,
 };
 
 const inputStyle = {
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'hsl(var(--surface-invert) / 0.05)',
+  border: '1px solid hsl(var(--surface-invert) / 0.1)',
   borderRadius: 8,
   padding: '10px 14px',
-  color: '#fff',
+  color: 'hsl(var(--foreground))',
   fontSize: 14,
   width: '100%',
   outline: 'none',
@@ -37,19 +37,19 @@ const labelStyle = {
   display: 'block',
   fontSize: 13,
   fontWeight: 600,
-  color: '#cfc6e6',
+  color: 'var(--brand-ink)',
   marginBottom: 6,
 };
 
 const hintStyle = {
   fontSize: 12,
-  color: 'rgba(255,255,255,0.35)',
+  color: 'hsl(var(--surface-invert) / 0.35)',
   marginTop: 5,
   lineHeight: 1.5,
 };
 
 const btnPrimary = {
-  background: 'linear-gradient(135deg,#a855f7,#ec4899)',
+  background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))',
   border: 'none',
   borderRadius: 8,
   padding: '10px 20px',
@@ -68,7 +68,7 @@ const sectionHeader = {
   gap: 10,
   marginBottom: 20,
   paddingBottom: 12,
-  borderBottom: '1px solid rgba(255,255,255,0.06)',
+  borderBottom: '1px solid hsl(var(--surface-invert) / 0.06)',
 };
 
 // ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ const KeyField = ({ label, value, placeholder, hint, isSet, onChange, link, link
         <p style={hintStyle}>{hint}</p>
         {link && (
           <a href={link} target="_blank" rel="noopener noreferrer"
-            style={{ fontSize: 12, color: '#a855f7', display: 'flex', alignItems: 'center', gap: 4,
+            style={{ fontSize: 12, color: 'hsl(var(--primary-fill))', display: 'flex', alignItems: 'center', gap: 4,
               textDecoration: 'none', whiteSpace: 'nowrap', marginLeft: 12 }}>
             {linkLabel} <ExternalLink size={11} />
           </a>
@@ -141,20 +141,20 @@ const Section = ({ icon: Icon, title, subtitle, badge, children, defaultOpen = t
           borderBottom: open ? '1px solid hsl(var(--surface-invert) / 0.06)' : 'none' }}>
           <div style={{
             width: 36, height: 36, borderRadius: 10,
-            background: 'linear-gradient(135deg,#a855f720,#ec489920)',
-            border: '1px solid rgba(168,85,247,0.25)',
+            background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))',
+            border: '1px solid hsl(var(--primary) / 0.25)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <Icon size={18} color="#a855f7" />
           </div>
           <div style={{ flex: 1, textAlign: 'left' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>{title}</span>
+              <span style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 15 }}>{title}</span>
               {badge && (
                 <span style={{
                   fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
-                  background: 'rgba(168,85,247,0.15)', color: 'hsl(var(--pt-c084fc))',
-                  border: '1px solid rgba(168,85,247,0.3)',
+                  background: 'hsl(var(--primary) / 0.15)', color: 'var(--brand-ink)',
+                  border: '1px solid hsl(var(--primary) / 0.3)',
                 }}>
                   {badge}
                 </span>
@@ -221,7 +221,7 @@ const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
           <Trash2 size={24} color="#f87171" />
         </div>
 
-        <div style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 8 }}>
+        <div style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 17, marginBottom: 8 }}>
           Remove {cfg.label}?
         </div>
         <p style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 14, lineHeight: 1.6, marginBottom: 28 }}>
@@ -326,10 +326,10 @@ const CRMIntegrationCard = ({ integration, onRefresh }) => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 24 }}>{cfg.logo}</span>
           <div>
-            <span style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>{cfg.label}</span>
+            <span style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 14 }}>{cfg.label}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
               {neverPinged
-                ? <span style={{ color: '#6b7280', fontSize: 11 }}>Not tested</span>
+                ? <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11 }}>Not tested</span>
                 : isOk
                   ? <><Wifi size={11} color="#10b981" /><span style={{ color: '#10b981', fontSize: 11 }}>Connected</span></>
                   : <><WifiOff size={11} color="#ef4444" /><span style={{ color: '#ef4444', fontSize: 11 }}>Failed</span></>}
@@ -378,7 +378,7 @@ const CRMIntegrationCard = ({ integration, onRefresh }) => {
           Test Connection
         </button>
         <button onClick={handleSave} disabled={saving}
-          style={{ background: 'linear-gradient(135deg,#a855f7,#ec4899)', border: 'none',
+          style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', border: 'none',
             borderRadius: 7, padding: '7px 14px', color: '#fff', fontSize: 12, fontWeight: 600,
             cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
           {saving ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={12} />}
@@ -431,7 +431,7 @@ const CRMConnectForm = ({ provider, onSaved }) => {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ color: '#a855f7', fontSize: 12, fontWeight: 600 }}>Connect</span>
+          <span style={{ color: 'hsl(var(--primary-fill))', fontSize: 12, fontWeight: 600 }}>Connect</span>
           {open ? <ChevronUp size={14} color="rgba(255,255,255,0.4)" /> : <ChevronDown size={14} color="rgba(255,255,255,0.4)" />}
         </div>
       </button>
@@ -461,7 +461,7 @@ const CRMConnectForm = ({ provider, onSaved }) => {
           ))}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
             <button onClick={handleConnect} disabled={saving}
-              style={{ background: 'linear-gradient(135deg,#a855f7,#ec4899)', border: 'none',
+              style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', border: 'none',
                 borderRadius: 7, padding: '8px 18px', color: '#fff', fontSize: 13, fontWeight: 600,
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
               {saving ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={13} />}
@@ -549,12 +549,12 @@ const GoogleMeetCard = () => {
     <div style={{ ...card }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 14 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 10, background: connected ? 'rgba(16,185,129,0.12)' : 'rgba(168,85,247,0.1)', border: `1px solid ${connected ? 'rgba(16,185,129,0.3)' : 'rgba(168,85,247,0.25)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Video size={20} color={connected ? '#34d399' : '#a855f7'} />
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: connected ? 'rgba(16,185,129,0.12)' : 'hsl(var(--primary) / 0.1)', border: `1px solid ${connected ? 'rgba(16,185,129,0.3)' : 'hsl(var(--primary) / 0.25)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Video size={20} color={connected ? '#34d399' : 'hsl(var(--primary-fill))'} />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 16, margin: 0 }}>Google Meet</h3>
+              <h3 style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 16, margin: 0 }}>Google Meet</h3>
               {connected
                 ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#34d399', fontSize: 11, fontWeight: 600, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 20, padding: '2px 10px' }}><Wifi size={11} /> Connected</span>
                 : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'hsl(var(--surface-invert) / 0.4)', fontSize: 11, fontWeight: 600, background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)', borderRadius: 20, padding: '2px 10px' }}><WifiOff size={11} /> Not connected</span>}
@@ -582,7 +582,7 @@ const GoogleMeetCard = () => {
           ) : (
             <button onClick={handleConnect} disabled={busy || !configured}
               title={!configured ? 'Google integration is not configured on the server.' : ''}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: configured ? 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)' : 'hsl(var(--surface-invert) / 0.06)', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: (busy || !configured) ? 'default' : 'pointer', opacity: (busy || !configured) ? 0.5 : 1 }}>
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: configured ? 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))' : 'hsl(var(--surface-invert) / 0.06)', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: (busy || !configured) ? 'default' : 'pointer', opacity: (busy || !configured) ? 0.5 : 1 }}>
               {busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Link2 size={14} />} Connect with Google
             </button>
           )}
@@ -749,7 +749,7 @@ const SDRSettingsTab = () => {
       }}>
         {/* Header */}
         <div style={{ padding: '8px 10px 14px', borderBottom: '1px solid hsl(var(--surface-invert) / 0.06)', marginBottom: 8 }}>
-          <div style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>SDR Settings</div>
+          <div style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 14 }}>SDR Settings</div>
           <div style={{ color: 'hsl(var(--surface-invert) / 0.35)', fontSize: 11, marginTop: 2 }}>Per-account credentials</div>
         </div>
 
@@ -763,21 +763,21 @@ const SDRSettingsTab = () => {
               style={{
                 width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer',
                 borderRadius: 10, padding: '10px 12px', marginBottom: 4,
-                background: active ? 'linear-gradient(135deg,rgba(168,85,247,0.18),rgba(236,72,153,0.12))' : 'transparent',
-                outline: active ? '1px solid rgba(168,85,247,0.3)' : '1px solid transparent',
+                background: active ? 'linear-gradient(135deg,hsl(var(--primary) / 0.18),hsl(var(--primary) / 0.12))' : 'transparent',
+                outline: active ? '1px solid hsl(var(--primary) / 0.3)' : '1px solid transparent',
                 transition: 'all 0.15s',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                  background: active ? 'linear-gradient(135deg,#a855f7,#ec4899)' : 'hsl(var(--surface-invert) / 0.06)',
+                  background: active ? 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))' : 'hsl(var(--surface-invert) / 0.06)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <Icon size={15} color={active ? '#fff' : 'rgba(255,255,255,0.4)'} />
+                  <Icon size={15} color={active ? '#fff' : 'hsl(var(--surface-invert) / 0.4)'} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: active ? '#fff' : 'hsl(var(--surface-invert) / 0.65)', fontWeight: active ? 700 : 500, fontSize: 13 }}>
+                  <div style={{ color: active ? 'hsl(var(--foreground))' : 'hsl(var(--surface-invert) / 0.65)', fontWeight: active ? 700 : 500, fontSize: 13 }}>
                     {tab.label}
                   </div>
                   <div style={{ color: 'hsl(var(--surface-invert) / 0.3)', fontSize: 11, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -879,7 +879,7 @@ const SDRSettingsTab = () => {
                     <a
                       href={`https://apify.com/${apifyActor.trim().replace('~', '/')}`}
                       target="_blank" rel="noopener noreferrer"
-                      style={{ color: 'hsl(var(--pt-c084fc))', textDecoration: 'underline' }}
+                      style={{ color: 'var(--brand-ink)', textDecoration: 'underline' }}
                     >
                       Open this actor on Apify
                     </a>
@@ -889,14 +889,14 @@ const SDRSettingsTab = () => {
             </Section>
 
             {/* Info */}
-            <div style={{ ...card, background: 'rgba(168,85,247,0.05)', border: '1px solid rgba(168,85,247,0.15)', marginBottom: 24 }}>
+            <div style={{ ...card, background: 'hsl(var(--primary) / 0.05)', border: '1px solid hsl(var(--primary) / 0.15)', marginBottom: 24 }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <Settings size={16} color="#a855f7" style={{ marginTop: 2, flexShrink: 0 }} />
                 <div>
-                  <p style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>How lead sources work</p>
+                  <p style={{ color: 'var(--brand-ink)', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>How lead sources work</p>
                   <ul style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 12, lineHeight: 1.8, paddingLeft: 16 }}>
-                    <li><strong style={{ color: 'hsl(var(--pt-c084fc))' }}>Apollo</strong> — real emails, job titles, company data</li>
-                    <li><strong style={{ color: 'hsl(var(--pt-c084fc))' }}>Apify</strong> — LinkedIn scraping; great coverage</li>
+                    <li><strong style={{ color: 'var(--brand-ink)' }}>Apollo</strong> — real emails, job titles, company data</li>
+                    <li><strong style={{ color: 'var(--brand-ink)' }}>Apify</strong> — LinkedIn scraping; great coverage</li>
                   </ul>
                   <p style={{ color: 'hsl(var(--surface-invert) / 0.3)', fontSize: 11, marginTop: 8 }}>
                     Apollo is tried first, then Apify. You can also choose the source manually.
@@ -924,7 +924,7 @@ const SDRSettingsTab = () => {
               CRM Sync is a separate agent and is not part of your plan. With it, your leads, emails, calls and replies
               go to HubSpot, Salesforce or Pipedrive.{' '}
               <button type="button" onClick={() => navigate('/company/dashboard/ai-agents')}
-                style={{ background: 'none', border: 'none', color: '#a78bfa', textDecoration: 'underline', cursor: 'pointer', fontSize: 13, padding: 0 }}>
+                style={{ background: 'none', border: 'none', color: 'var(--brand-ink)', textDecoration: 'underline', cursor: 'pointer', fontSize: 13, padding: 0 }}>
                 See AI agents
               </button>
             </p>
@@ -935,7 +935,7 @@ const SDRSettingsTab = () => {
           <div>
             {/* Header */}
             <div style={{ marginBottom: 20 }}>
-              <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 4 }}>CRM Integrations</h3>
+              <h3 style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 17, marginBottom: 4 }}>CRM Integrations</h3>
               <p style={{ color: 'hsl(var(--surface-invert) / 0.4)', fontSize: 13 }}>
                 Connect your CRM to automatically sync leads, emails, and meetings.
               </p>
@@ -952,7 +952,7 @@ const SDRSettingsTab = () => {
               .map(p => <CRMConnectForm key={p} provider={p} onSaved={fetchSettings} />)}
 
             {crmIntegrations.length === 0 && (
-              <div style={{ ...card, background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', marginTop: 8, padding: '14px 18px' }}>
+              <div style={{ ...card, background: 'hsl(var(--primary) / 0.04)', border: '1px solid hsl(var(--primary) / 0.12)', marginTop: 8, padding: '14px 18px' }}>
                 <p style={{ color: 'hsl(var(--surface-invert) / 0.3)', fontSize: 12 }}>
                   No CRM connected yet. Click a provider above to get started.
                 </p>
@@ -965,7 +965,7 @@ const SDRSettingsTab = () => {
         {activePanel === 'meetings' && (
           <div>
             <div style={{ marginBottom: 20 }}>
-              <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Meeting Links</h3>
+              <h3 style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Meeting Links</h3>
               <p style={{ color: 'hsl(var(--surface-invert) / 0.4)', fontSize: 13 }}>
                 Choose how video links are generated for meetings you schedule with leads.
               </p>
@@ -981,7 +981,7 @@ const SDRSettingsTab = () => {
                 </div>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 16, margin: 0 }}>Jitsi</h3>
+                    <h3 style={{ color: 'hsl(var(--foreground))', fontWeight: 700, fontSize: 16, margin: 0 }}>Jitsi</h3>
                     <span style={{ color: 'hsl(var(--surface-invert) / 0.5)', fontSize: 11, fontWeight: 600, background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)', borderRadius: 20, padding: '2px 10px' }}>Default</span>
                   </div>
                   <p style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 13, margin: '6px 0 0', maxWidth: 460, lineHeight: 1.5 }}>

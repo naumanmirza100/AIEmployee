@@ -35,19 +35,19 @@ const NEXT_STEP = {
 };
 
 const card = { background: 'var(--sfc-0f0a1f)', border: '1px solid var(--line-1)', borderRadius: 12, padding: 20 };
-const label = { color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 6, display: 'block' };
+const label = { color: 'hsl(var(--muted-foreground))', fontSize: 12, fontWeight: 600, marginBottom: 6, display: 'block' };
 const input = {
   width: '100%', background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 8,
   color: 'var(--text-soft)', padding: '8px 12px', fontSize: 14, boxSizing: 'border-box', outline: 'none',
 };
 const chip = (active) => ({
   padding: '6px 12px', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: active ? 700 : 500,
-  border: `1px solid ${active ? '#a855f7' : 'var(--line-1)'}`,
-  background: active ? 'rgba(168,85,247,0.15)' : 'transparent', color: active ? '#c084fc' : '#c4b5d4',
+  border: `1px solid ${active ? 'hsl(var(--primary-fill))' : 'var(--line-1)'}`,
+  background: active ? 'hsl(var(--primary) / 0.15)' : 'transparent', color: active ? '#c084fc' : '#c4b5d4',
 });
 
 const EmailResult = ({ email, onCopy }) => (
-  <div data-testid="sdr-assistant-email" style={{ ...card, marginTop: 14, background: 'rgba(168,85,247,0.05)' }}>
+  <div data-testid="sdr-assistant-email" style={{ ...card, marginTop: 14, background: 'hsl(var(--primary) / 0.05)' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
       <div style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 14 }}>{email.subject}</div>
       <Button variant="outline" onClick={onCopy} style={{ border: '1px solid var(--line-1)', borderRadius: 8, height: 30 }}>
@@ -117,9 +117,9 @@ const SDREmailAssistantTab = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div>
         <h2 style={{ color: 'var(--text-soft)', fontSize: 20, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Sparkles size={18} style={{ color: '#ec4899' }} /> AI Email Assistant
+          <Sparkles size={18} style={{ color: 'var(--brand-ink)' }} /> AI Email Assistant
         </h2>
-        <p style={{ color: '#6b7280', fontSize: 13, marginTop: 4 }}>
+        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, marginTop: 4 }}>
           Write a personal email for a prospect, or paste a lead's reply to see what it means and get an answer.
         </p>
       </div>
@@ -172,7 +172,7 @@ const SDREmailAssistantTab = () => {
               onChange={e => setProspect(p => ({ ...p, notes: e.target.value }))} />
           </div>
           <Button data-testid="sdr-assistant-write" onClick={write} disabled={busy} style={{
-            marginTop: 14, background: 'linear-gradient(90deg,#ec4899,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600,
+            marginTop: 14, background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600,
           }}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Write the email
           </Button>
@@ -185,7 +185,7 @@ const SDREmailAssistantTab = () => {
             placeholder="Paste the reply here, in any language."
             onChange={e => setReply(e.target.value)} />
           <Button data-testid="sdr-assistant-read" onClick={read} disabled={busy || !reply.trim()} style={{
-            marginTop: 14, background: 'linear-gradient(90deg,#ec4899,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600,
+            marginTop: 14, background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600,
           }}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <MailOpen size={14} />} Read the reply
           </Button>
@@ -193,12 +193,12 @@ const SDREmailAssistantTab = () => {
             <div data-testid="sdr-assistant-reading" style={{ marginTop: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ color: CATEGORY_COLOR[reading.category] || '#9ca3af', fontWeight: 700, fontSize: 15 }}>{reading.label}</span>
-                <span style={{ color: '#6b7280', fontSize: 13 }}>{reading.reason}</span>
+                <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>{reading.reason}</span>
               </div>
-              <p style={{ color: '#9ca3af', fontSize: 13, margin: '6px 0 0' }}>{NEXT_STEP[reading.action] || ''}</p>
+              <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, margin: '6px 0 0' }}>{NEXT_STEP[reading.action] || ''}</p>
               {reading.answer
                 ? <EmailResult email={reading.answer} onCopy={() => copy(reading.answer)} />
-                : <p style={{ color: '#6b7280', fontSize: 13, marginTop: 10 }}>No answer is needed for this one.</p>}
+                : <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, marginTop: 10 }}>No answer is needed for this one.</p>}
             </div>
           )}
         </div>

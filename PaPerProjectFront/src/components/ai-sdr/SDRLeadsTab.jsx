@@ -43,8 +43,8 @@ const SCORE_CATEGORIES = [
   { min: 90, key: 'hot_lead',        label: 'Hot Lead 🔥',        color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',  border: 'rgba(244,63,94,0.35)'  },
   { min: 75, key: 'high_potential',  label: 'High Potential',     color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.35)' },
   { min: 60, key: 'qualified',       label: 'Qualified Lead',     color: '#10b981', bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.35)' },
-  { min: 40, key: 'low_priority',    label: 'Low Priority',       color: '#6b7280', bg: 'rgba(107,114,128,0.1)', border: 'rgba(107,114,128,0.3)' },
-  { min: 0,  key: 'reject',          label: 'Reject',             color: '#4b5563', bg: 'rgba(75,85,99,0.08)',   border: 'rgba(75,85,99,0.25)'   },
+  { min: 40, key: 'low_priority',    label: 'Low Priority',       color: 'hsl(var(--muted-foreground))', bg: 'rgba(107,114,128,0.1)', border: 'rgba(107,114,128,0.3)' },
+  { min: 0,  key: 'reject',          label: 'Reject',             color: 'hsl(var(--muted-foreground) / 0.85)', bg: 'rgba(75,85,99,0.08)',   border: 'rgba(75,85,99,0.25)'   },
 ];
 
 function getScoreCategory(score) {
@@ -129,7 +129,7 @@ function parseCsvPreview(text) {
 const SCORE_COLOR = (s) => {
   if (s == null) return '#4b5563';
   const cat = getScoreCategory(s);
-  return cat ? cat.color : '#4b5563';
+  return cat ? cat.color : 'hsl(var(--muted-foreground) / 0.85)';
 };
 
 const TEMP_CONFIG = {
@@ -151,9 +151,9 @@ const ENRICHMENT_DOT = {
 };
 
 const LEAD_STATUS_CONFIG = {
-  new:              { label: 'New',             color: '#6b7280', bg: 'rgba(107,114,128,0.12)', border: 'rgba(107,114,128,0.25)' },
+  new:              { label: 'New',             color: 'hsl(var(--muted-foreground))', bg: 'rgba(107,114,128,0.12)', border: 'rgba(107,114,128,0.25)' },
   qualified:        { label: 'Qualified',        color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.25)'  },
-  contacted:        { label: 'Contacted',        color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.25)' },
+  contacted:        { label: 'Contacted',        color: 'var(--brand-ink)', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.25)' },
   replied:          { label: 'Replied',          color: '#4ade80', bg: 'rgba(74,222,128,0.12)',  border: 'rgba(74,222,128,0.25)'  },
   meeting_scheduled:{ label: 'Meeting',          color: '#34d399', bg: 'rgba(52,211,153,0.12)',  border: 'rgba(52,211,153,0.25)'  },
   converted:        { label: 'Converted',        color: '#fbbf24', bg: 'rgba(251,191,36,0.12)',  border: 'rgba(251,191,36,0.25)'  },
@@ -170,11 +170,11 @@ const BLANK_LEAD = {
 // Score breakdown categories (new 5-dim model)
 // --------------------------------------------------------------------------
 const SCORE_DIMS = [
-  { key: 'company_quality',    label: 'Company Quality',    max: 30, icon: Briefcase, color: '#a855f7' },
+  { key: 'company_quality',    label: 'Company Quality',    max: 30, icon: Briefcase, color: 'hsl(var(--primary-fill))' },
   { key: 'contact_quality',    label: 'Contact Quality',    max: 20, icon: ShieldCheck, color: '#10b981' },
   { key: 'business_fit',       label: 'Business Fit',       max: 25, icon: Target,    color: '#3b82f6' },
   { key: 'engagement_signals', label: 'Engagement Signals', max: 15, icon: TrendingUp, color: '#f59e0b' },
-  { key: 'data_completeness',  label: 'Data Completeness',  max: 10, icon: CheckCircle2, color: '#6b7280' },
+  { key: 'data_completeness',  label: 'Data Completeness',  max: 10, icon: CheckCircle2, color: 'hsl(var(--muted-foreground))' },
 ];
 
 // --------------------------------------------------------------------------
@@ -283,8 +283,8 @@ const inputStyle = {
 const pgBtn = (disabled, active = false) => ({
   minWidth: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
   borderRadius: 7, fontSize: 13, fontWeight: active ? 700 : 400, cursor: disabled ? 'not-allowed' : 'pointer',
-  border: `1px solid ${active ? '#a855f7' : 'rgba(255,255,255,0.08)'}`,
-  background: active ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)',
+  border: `1px solid ${active ? 'hsl(var(--primary-fill))' : 'hsl(var(--surface-invert) / 0.08)'}`,
+  background: active ? 'hsl(var(--primary) / 0.18)' : 'hsl(var(--surface-invert) / 0.03)',
   color: disabled ? 'var(--line-1)' : active ? '#c084fc' : '#9ca3af',
   opacity: disabled ? 0.5 : 1, transition: 'all 0.15s', padding: '0 8px',
 });
@@ -320,10 +320,10 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
           minWidth: fullWidth ? 'auto' : 120, width: fullWidth ? '100%' : 'auto',
         }}
       >
-        {LabelIcon && <LabelIcon size={13} style={{ color: value ? selected?.color : '#6b7280' }} />}
+        {LabelIcon && <LabelIcon size={13} style={{ color: value ? selected?.color : 'hsl(var(--muted-foreground))' }} />}
         {value && selected?.dot && <span style={{ width: 8, height: 8, borderRadius: '50%', background: selected.color, flexShrink: 0, display: 'inline-block' }} />}
         <span style={{ flex: 1, textAlign: 'left', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }} title={value ? selected?.label : undefined}>{value ? selected?.label : label}</span>
-        <ChevronDown size={12} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
+        <ChevronDown size={12} style={{ color: 'hsl(var(--muted-foreground))', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
       </button>
 
       {open && (
@@ -349,7 +349,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
                   borderBottom: idx < options.length - 1 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none',
                   transition: 'background 0.1s',
                 }}
-                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'hsl(var(--surface-invert) / 0.05)'; }}
                 onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
               >
                 <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid var(--line-1)' }} />
@@ -386,7 +386,7 @@ const IndustryPicker = ({ industries, value, onChange, emptyLabel = 'No industry
         <input autoFocus value={value} maxLength={255} onChange={e => onChange(e.target.value)}
           placeholder="New industry, e.g. Educational Institutes" style={inputStyle} />
         <button type="button" title="Pick from your industries" onClick={() => { setTyping(false); onChange(''); }}
-          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, cursor: 'pointer', color: '#6b7280' }}>
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, cursor: 'pointer', color: 'hsl(var(--muted-foreground))' }}>
           <X size={14} />
         </button>
       </div>
@@ -458,7 +458,7 @@ const IndustryManagerDialog = ({ open, onOpenChange, industries, onChanged }) =>
           </DialogTitle>
         </DialogHeader>
         {industries.length === 0 ? (
-          <p style={{ color: '#6b7280', fontSize: 13, padding: '8px 0' }}>
+          <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, padding: '8px 0' }}>
             No industries yet. They come from the leads: the provider's industry, the CSV's Industry column, or the one you type in.
           </p>
         ) : (
@@ -472,12 +472,12 @@ const IndustryManagerDialog = ({ open, onOpenChange, industries, onChanged }) =>
                 ) : (
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ind.name}</span>
                 )}
-                <span style={{ color: '#6b7280', fontSize: 12, whiteSpace: 'nowrap' }}>{ind.lead_count ?? 0} leads</span>
-                {busy === ind.name ? <Loader2 size={14} className="animate-spin" style={{ color: '#6b7280', margin: 6 }} />
+                <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, whiteSpace: 'nowrap' }}>{ind.lead_count ?? 0} leads</span>
+                {busy === ind.name ? <Loader2 size={14} className="animate-spin" style={{ color: 'hsl(var(--muted-foreground))', margin: 6 }} />
                   : editing === ind.name ? (
                     <button title="Save" onClick={() => rename(ind.name)} style={{ ...iconBtn, color: 'hsl(var(--pt-4ade80))' }}><Check size={14} /></button>
                   ) : (
-                    <button title="Rename on every lead" onClick={() => { setEditing(ind.name); setDraft(ind.name); }} style={{ ...iconBtn, color: '#9ca3af' }}><Pencil size={13} /></button>
+                    <button title="Rename on every lead" onClick={() => { setEditing(ind.name); setDraft(ind.name); }} style={{ ...iconBtn, color: 'hsl(var(--muted-foreground))' }}><Pencil size={13} /></button>
                   )}
               </div>
             ))}
@@ -556,7 +556,7 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage, totalCount = 0, 
       >
         {exporting ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={13} />}
         {label}
-        <ChevronDown size={11} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
+        <ChevronDown size={11} style={{ color: 'hsl(var(--muted-foreground))', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
       </button>
       {open && (
         <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 60, background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))', border: '1px solid var(--line-1)', borderRadius: 11, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', minWidth: 190, width: 'max-content', overflow: 'hidden' }}>
@@ -575,11 +575,11 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage, totalCount = 0, 
           ))}
           {/* Export ALL matching leads (every page) as CSV, streamed from the server. */}
           <button onClick={doExportAll}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', gap: 10, width: '100%', padding: '11px 16px', border: 'none', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)', cursor: 'pointer', background: 'rgba(168,85,247,0.06)', transition: 'background 0.1s' }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.14)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.06)'; }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', gap: 10, width: '100%', padding: '11px 16px', border: 'none', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)', cursor: 'pointer', background: 'hsl(var(--primary) / 0.06)', transition: 'background 0.1s' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'hsl(var(--primary) / 0.14)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'hsl(var(--primary) / 0.06)'; }}
           >
-            <Download size={15} style={{ color: '#a855f7', flexShrink: 0 }} />
+            <Download size={15} style={{ color: 'hsl(var(--primary-fill))', flexShrink: 0 }} />
             <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13, whiteSpace: 'nowrap' }}>
               Export ALL{totalCount ? ` ${totalCount.toLocaleString()}` : ''} leads (CSV)
             </span>
@@ -682,7 +682,7 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
   };
 
   const iconBtn = { display: 'flex', alignItems: 'center', gap: 4, padding: '4px 6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12 };
-  const smallBtn = { background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 8, padding: '5px 12px', color: '#a855f7', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 };
+  const smallBtn = { background: 'hsl(var(--primary) / 0.1)', border: '1px solid hsl(var(--primary) / 0.3)', borderRadius: 8, padding: '5px 12px', color: 'hsl(var(--primary-fill))', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 };
 
   return (
     <div style={{ ...cardStyle, padding: '14px 18px' }}>
@@ -695,7 +695,7 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
           ) : (
             <span style={{ color: 'hsl(var(--pt-f59e0b))', fontSize: 12 }}>Not configured — scoring won't work without this</span>
           )}
-          {icps.length > 1 && <span style={{ color: '#6b7280', fontSize: 12 }}>+{icps.length - 1} more</span>}
+          {icps.length > 1 && <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>+{icps.length - 1} more</span>}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {icps.length > 0 && (
@@ -712,7 +712,7 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
       {defaultIcp && (
         <div style={{ marginTop: 10, display: 'flex', flexWrap: 'nowrap', gap: 6, overflow: 'hidden' }}>
           {[...(defaultIcp.industries || []), ...(defaultIcp.job_titles || [])].slice(0, 8).map(t => (
-            <span key={t} style={{ flexShrink: 0, padding: '2px 8px', borderRadius: 10, fontSize: 11, whiteSpace: 'nowrap', background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)', color: 'hsl(var(--pt-c4b5fd))' }}>{t}</span>
+            <span key={t} style={{ flexShrink: 0, padding: '2px 8px', borderRadius: 10, fontSize: 11, whiteSpace: 'nowrap', background: 'hsl(var(--primary) / 0.1)', border: '1px solid hsl(var(--primary) / 0.2)', color: 'hsl(var(--pt-c4b5fd))' }}>{t}</span>
           ))}
         </div>
       )}
@@ -731,7 +731,7 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
 
       {editingId === null && icps.length > 0 && (
         <>
-        <p style={{ color: '#6b7280', fontSize: 12, margin: 0 }}>
+        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, margin: 0 }}>
           Each lead is scored with the ICP it was found for. The default one is preselected in Generate, Import and Add lead.
         </p>
         <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, maxHeight: '50vh', overflowY: 'auto' }}>
@@ -748,19 +748,19 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
                   <Loader2 size={11} className="animate-spin" /> {icp.waiting.toLocaleString()} being scored
                 </span>
               )}
-              <span style={{ color: '#6b7280', fontSize: 12, whiteSpace: 'nowrap' }}>{(icp.lead_count ?? 0).toLocaleString()} leads</span>
-              {busyId === icp.id ? <Loader2 size={14} className="animate-spin" style={{ color: '#6b7280', margin: 6 }} />
+              <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, whiteSpace: 'nowrap' }}>{(icp.lead_count ?? 0).toLocaleString()} leads</span>
+              {busyId === icp.id ? <Loader2 size={14} className="animate-spin" style={{ color: 'hsl(var(--muted-foreground))', margin: 6 }} />
                 : confirmDeleteId === icp.id ? (
                   <>
                     <button onClick={() => remove(icp)} style={{ ...iconBtn, color: '#f87171', fontWeight: 600 }}>Delete</button>
-                    <button onClick={() => setConfirmDeleteId(null)} style={{ ...iconBtn, color: '#6b7280' }}>Keep</button>
+                    <button onClick={() => setConfirmDeleteId(null)} style={{ ...iconBtn, color: 'hsl(var(--muted-foreground))' }}>Keep</button>
                   </>
                 ) : (
                   <>
                     {!icp.is_active && (
-                      <button title="Preselect this ICP in Generate, Import and Add lead" onClick={() => makeDefault(icp)} style={{ ...iconBtn, color: '#a855f7' }}>Make default</button>
+                      <button title="Preselect this ICP in Generate, Import and Add lead" onClick={() => makeDefault(icp)} style={{ ...iconBtn, color: 'hsl(var(--primary-fill))' }}>Make default</button>
                     )}
-                    <button title="Edit" onClick={() => startEdit(icp)} style={{ ...iconBtn, color: '#9ca3af' }}><Pencil size={13} /></button>
+                    <button title="Edit" onClick={() => startEdit(icp)} style={{ ...iconBtn, color: 'hsl(var(--muted-foreground))' }}><Pencil size={13} /></button>
                     {!icp.is_active && (
                       <button title="Delete" onClick={() => setConfirmDeleteId(icp.id)} style={{ ...iconBtn, color: '#f87171' }}><Trash2 size={13} /></button>
                     )}
@@ -805,7 +805,7 @@ const ICPProfilePanel = ({ icps, onChanged, onSaved }) => {
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             {/* Back to the list when the form was opened from it; else close. */}
             <button onClick={() => { setEditingId(null); if (formOnly || !icps.length) setOpen(false); }} style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '7px 16px', color: 'hsl(var(--pt-9ca3af))', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
-            <button onClick={handleSave} disabled={saving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', border: 'none', borderRadius: 8, padding: '7px 20px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button onClick={handleSave} disabled={saving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', border: 'none', borderRadius: 8, padding: '7px 20px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {saving ? <Loader2 size={12} className="animate-spin" /> : null} Save ICP
             </button>
           </div>
@@ -1626,9 +1626,9 @@ const SDRLeadsTab = () => {
   };
 
   const CheckIcon = ({ checked, indeterminate, size = 16 }) => {
-    if (indeterminate) return <MinusSquare size={size} style={{ color: '#a855f7' }} />;
-    if (checked) return <CheckSquare size={size} style={{ color: '#a855f7' }} />;
-    return <Square size={size} style={{ color: '#4b5563' }} />;
+    if (indeterminate) return <MinusSquare size={size} style={{ color: 'hsl(var(--primary-fill))' }} />;
+    if (checked) return <CheckSquare size={size} style={{ color: 'hsl(var(--primary-fill))' }} />;
+    return <Square size={size} style={{ color: 'hsl(var(--muted-foreground) / 0.85)' }} />;
   };
 
   // ── Render ────────────────────────────────────────────────────────────
@@ -1643,11 +1643,11 @@ const SDRLeadsTab = () => {
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
         {[
-          { label: 'Total',    value: stats.total,    color: '#a855f7' },
+          { label: 'Total',    value: stats.total,    color: 'hsl(var(--primary-fill))' },
           { label: 'Hot',      value: stats.hot,      color: '#f43f5e', icon: Flame },
           { label: 'Warm',     value: stats.warm,     color: '#f59e0b', icon: Thermometer },
           { label: 'Cold',     value: stats.cold,     color: '#60a5fa', icon: Snowflake },
-          { label: 'Unscored', value: stats.unscored, color: '#6b7280' },
+          { label: 'Unscored', value: stats.unscored, color: 'hsl(var(--muted-foreground))' },
         ].map(({ label, value, color, icon: Icon }) => (
           <div key={label} style={{ ...cardStyle, padding: '14px 16px', textAlign: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 4 }}>
@@ -1662,11 +1662,11 @@ const SDRLeadsTab = () => {
       {/* Action bar */}
       <div style={{ ...cardStyle, padding: '14px 18px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <Button onClick={() => setShowAddModal(true)} style={{ background: 'linear-gradient(90deg,#f43f5e 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
+          <Button onClick={() => setShowAddModal(true)} style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
             <Plus size={15} /> Add Lead
           </Button>
           <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
-          <Button onClick={() => openGenModal()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
+          <Button onClick={() => openGenModal()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,hsl(var(--primary-fill-deep)) 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
             <Zap size={15} /> Generate Leads
           </Button>
           <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
@@ -1711,19 +1711,19 @@ const SDRLeadsTab = () => {
               </span>
             )}
             {stats.enriching > 0 && (
-              <span title="Leads are being enriched in the background — missing fields (phone, email, LinkedIn…) will appear on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: 'hsl(var(--pt-c084fc))', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
+              <span title="Leads are being enriched in the background — missing fields (phone, email, LinkedIn…) will appear on their own." style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'hsl(var(--primary) / 0.1)', border: '1px solid hsl(var(--primary) / 0.3)', color: 'var(--brand-ink)', borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '3px 10px' }}>
                 <Loader2 size={12} className="animate-spin" /> Enriching {stats.enriching.toLocaleString()}…
               </span>
             )}
-            <span style={{ color: '#6b7280', fontSize: 12 }}>Runs in the background; scores and details fill in on their own.</span>
+            <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>Runs in the background; scores and details fill in on their own.</span>
           </div>
         )}
       </div>
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 18px', borderRadius: 12, background: 'linear-gradient(90deg, rgba(168,85,247,0.08), rgba(99,102,241,0.08))', border: '1px solid rgba(168,85,247,0.3)' }}>
-          <span style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 700, fontSize: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 18px', borderRadius: 12, background: 'linear-gradient(90deg, hsl(var(--primary) / 0.08), rgba(99,102,241,0.08))', border: '1px solid hsl(var(--primary) / 0.3)' }}>
+          <span style={{ color: 'var(--brand-ink)', fontWeight: 700, fontSize: 14 }}>
             {allMatching
               ? `All ${pagination.total_count.toLocaleString()} matching leads selected`
               : `${selectedIds.size} lead${selectedIds.size > 1 ? 's' : ''} selected`}
@@ -1737,23 +1737,23 @@ const SDRLeadsTab = () => {
           <div style={{ width: 1, height: 20, background: 'var(--line-1)' }} />
           {/* Set the selection's industry (pick one, type a new one, or "No industry" to clear it). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Tag size={13} style={{ color: '#a78bfa', flexShrink: 0 }} />
+            <Tag size={13} style={{ color: 'var(--brand-ink)', flexShrink: 0 }} />
             <div style={{ width: 220 }}>
               <IndustryPicker industries={industries} value={bulkIndustry} onChange={setBulkIndustry} emptyLabel="No industry (clear)" />
             </div>
-            <button onClick={handleBulkSetIndustry} disabled={bulkIndustrySaving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.35)', color: 'hsl(var(--pt-a78bfa))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            <button onClick={handleBulkSetIndustry} disabled={bulkIndustrySaving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.35)', color: 'var(--brand-ink)', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
               {bulkIndustrySaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Set industry
             </button>
           </div>
           {/* Move the selection to an ICP, e.g. leads uploaded before leads had one (they list under "No ICP"). */}
           {icpProfiles.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Target size={13} style={{ color: '#a78bfa', flexShrink: 0 }} />
+              <Target size={13} style={{ color: 'var(--brand-ink)', flexShrink: 0 }} />
               <div style={{ width: 180 }}>
                 <SdrSelect value={bulkIcpId} onChange={setBulkIcpId} style={inputStyle} placeholder="Move to ICP…" options={icpOptions} />
               </div>
               {rescoreBox}
-              <button onClick={handleBulkSetIcp} disabled={icpMoving || !bulkIcpId} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: bulkIcpId ? 'pointer' : 'not-allowed', opacity: bulkIcpId ? 1 : 0.5, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.35)', color: 'hsl(var(--pt-a78bfa))', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+              <button onClick={handleBulkSetIcp} disabled={icpMoving || !bulkIcpId} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: bulkIcpId ? 'pointer' : 'not-allowed', opacity: bulkIcpId ? 1 : 0.5, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.35)', color: 'var(--brand-ink)', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
                 {icpMoving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Move
               </button>
             </div>
@@ -1767,7 +1767,7 @@ const SDRLeadsTab = () => {
               <Trash2 size={13} /> Delete {selectedIds.size} selected
             </button>
           )}
-          <button onClick={() => { setSelectedIds(new Set()); setAllMatching(false); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', background: 'none', border: '1px solid var(--line-1)', color: '#6b7280', fontSize: 13 }}>
+          <button onClick={() => { setSelectedIds(new Set()); setAllMatching(false); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', background: 'none', border: '1px solid var(--line-1)', color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>
             <X size={12} /> Deselect all
           </button>
         </div>
@@ -1777,11 +1777,11 @@ const SDRLeadsTab = () => {
       <div style={{ ...cardStyle, padding: '12px 16px' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
-            <Search size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', pointerEvents: 'none' }} />
+            <Search size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-foreground))', pointerEvents: 'none' }} />
             <input value={searchRaw} onChange={e => setSearchRaw(e.target.value)} placeholder="Search name, company, email…"
               style={{ ...inputStyle, paddingLeft: 34, paddingRight: searchRaw ? 32 : 12, border: '1px solid var(--line-1)', borderRadius: 9, fontSize: 13 }} />
             {searchRaw && (
-              <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
+              <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--muted-foreground))', display: 'flex', padding: 0 }}>
                 <X size={13} />
               </button>
             )}
@@ -1790,51 +1790,51 @@ const SDRLeadsTab = () => {
           {icpProfiles.length > 1 && (
             <FilterDropdown label="All ICPs" value={filterIcp} onChange={setFilterIcp} icon={Target}
               options={[
-                { key: '', label: 'All ICPs', color: '#6b7280' },
-                ...icpProfiles.map(i => ({ key: String(i.id), label: `${i.name} (${(i.lead_count ?? 0).toLocaleString()})`, color: '#a78bfa' })),
-                { key: 'none', label: 'No ICP (older leads)', color: '#9ca3af' },
+                { key: '', label: 'All ICPs', color: 'hsl(var(--muted-foreground))' },
+                ...icpProfiles.map(i => ({ key: String(i.id), label: `${i.name} (${(i.lead_count ?? 0).toLocaleString()})`, color: 'var(--brand-ink)' })),
+                { key: 'none', label: 'No ICP (older leads)', color: 'hsl(var(--muted-foreground))' },
               ]} />
           )}
           {/* The lead's industry: the main way to keep one industry's leads apart from another's. */}
           <FilterDropdown label="All industries" value={filterIndustry} onChange={setFilterIndustry} icon={Tag}
             options={[
-              { key: '', label: 'All industries', color: '#6b7280' },
-              ...industries.map(i => ({ key: i.name, label: `${i.name} (${i.lead_count ?? 0})`, color: '#a78bfa' })),
-              { key: 'none', label: `No industry (${noIndustryCount})`, color: '#9ca3af' },
+              { key: '', label: 'All industries', color: 'hsl(var(--muted-foreground))' },
+              ...industries.map(i => ({ key: i.name, label: `${i.name} (${i.lead_count ?? 0})`, color: 'var(--brand-ink)' })),
+              { key: 'none', label: `No industry (${noIndustryCount})`, color: 'hsl(var(--muted-foreground))' },
             ]}
           />
           <button onClick={() => setShowIndustryManager(true)} title="Rename industries"
-            style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
+            style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: 'hsl(var(--muted-foreground))' }}>
             <Pencil size={13} />
           </button>
           {(() => {
             const totalActive = activeFiltersCount + (sortBy !== 'score_desc' ? 1 : 0);
             return (
-              <button onClick={() => setFiltersOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap', background: filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.12)' : 'hsl(var(--surface-invert) / 0.04)', border: `1px solid ${filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.5)' : 'var(--line-1)'}`, color: filtersOpen || totalActive > 0 ? 'hsl(var(--pt-c084fc))' : '#9ca3af', fontSize: 13, fontWeight: totalActive > 0 ? 600 : 400 }}>
+              <button onClick={() => setFiltersOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap', background: filtersOpen || totalActive > 0 ? 'hsl(var(--primary) / 0.12)' : 'hsl(var(--surface-invert) / 0.04)', border: `1px solid ${filtersOpen || totalActive > 0 ? 'hsl(var(--primary) / 0.5)' : 'var(--line-1)'}`, color: filtersOpen || totalActive > 0 ? 'var(--brand-ink)' : '#9ca3af', fontSize: 13, fontWeight: totalActive > 0 ? 600 : 400 }}>
                 <SlidersHorizontal size={13} />
                 Filters
-                {totalActive > 0 && <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{totalActive}</span>}
-                <ChevronDown size={11} style={{ color: '#6b7280', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
+                {totalActive > 0 && <span style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{totalActive}</span>}
+                <ChevronDown size={11} style={{ color: 'hsl(var(--muted-foreground))', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
               </button>
             );
           })()}
           <SdrSelect value={String(pageSize)} onChange={v => setPageSize(Number(v))} style={{ ...inputStyle, width: 'auto', padding: '7px 10px', fontSize: 13, border: '1px solid var(--line-1)', borderRadius: 9 }}
             options={PAGE_SIZE_OPTIONS.map(n => ({ value: String(n), label: `${n} / page` }))} />
-          <button onClick={() => loadLeads()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
+          <button onClick={() => loadLeads()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: 'hsl(var(--muted-foreground))' }}>
             <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           </button>
         </div>
 
         {filtersOpen && (
-          <div style={{ marginTop: 10, padding: '16px 16px 14px', background: 'linear-gradient(135deg,hsl(var(--sfr-0a041c) / 0.9),hsl(var(--sfr-100626) / 0.95))', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 11, boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06)' }}>
+          <div style={{ marginTop: 10, padding: '16px 16px 14px', background: 'linear-gradient(135deg,hsl(var(--sfr-0a041c) / 0.9),hsl(var(--sfr-100626) / 0.95))', border: '1px solid hsl(var(--primary) / 0.2)', borderRadius: 11, boxShadow: 'inset 0 1px 0 hsl(var(--primary) / 0.06)' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
               <div>
-                <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Thermometer size={11} style={{ color: 'hsl(var(--pt-f59e0b))' }} /> TEMPERATURE
                 </div>
                 <FilterDropdown fullWidth label="All Temperatures" value={filterTemp} onChange={setFilterTemp}
                   options={[
-                    { key: '',     label: 'All Temperatures', color: '#6b7280' },
+                    { key: '',     label: 'All Temperatures', color: 'hsl(var(--muted-foreground))' },
                     { key: 'hot',  label: 'Hot',  color: '#f43f5e', dot: true, Icon: Flame },
                     { key: 'warm', label: 'Warm', color: '#f59e0b', dot: true, Icon: Thermometer },
                     { key: 'cold', label: 'Cold', color: '#60a5fa', dot: true, Icon: Snowflake },
@@ -1842,15 +1842,15 @@ const SDRLeadsTab = () => {
                 />
               </div>
               <div>
-                <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#a78bfa', display: 'inline-block' }} /> STATUS
+                <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--brand-ink)', display: 'inline-block' }} /> STATUS
                 </div>
                 <FilterDropdown fullWidth label="All Statuses" value={filterStatus} onChange={setFilterStatus}
                   options={[
-                    { key: '',                  label: 'All Statuses',      color: '#6b7280' },
-                    { key: 'new',               label: 'New',               color: '#6b7280', dot: true },
+                    { key: '',                  label: 'All Statuses',      color: 'hsl(var(--muted-foreground))' },
+                    { key: 'new',               label: 'New',               color: 'hsl(var(--muted-foreground))', dot: true },
                     { key: 'qualified',         label: 'Qualified',         color: '#60a5fa', dot: true },
-                    { key: 'contacted',         label: 'Contacted',         color: '#a78bfa', dot: true },
+                    { key: 'contacted',         label: 'Contacted',         color: 'var(--brand-ink)', dot: true },
                     { key: 'replied',           label: 'Replied',           color: '#4ade80', dot: true },
                     { key: 'meeting_scheduled', label: 'Meeting Scheduled', color: '#34d399', dot: true },
                     { key: 'converted',         label: 'Converted',         color: '#fbbf24', dot: true },
@@ -1859,41 +1859,41 @@ const SDRLeadsTab = () => {
                 />
               </div>
               <div>
-                <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} /> SOURCE
                 </div>
                 <FilterDropdown fullWidth label="All Sources" value={filterSource} onChange={setFilterSource}
                   options={[
-                    { key: '',           label: 'All Sources', color: '#6b7280' },
+                    { key: '',           label: 'All Sources', color: 'hsl(var(--muted-foreground))' },
                     { key: 'apollo',     label: 'Apollo.io',   color: '#3b82f6', dot: true },
-                    { key: 'apify',      label: 'Apify',       color: '#a855f7', dot: true },
+                    { key: 'apify',      label: 'Apify',       color: 'hsl(var(--primary-fill))', dot: true },
                     { key: 'csv_import', label: 'CSV Import',  color: '#10b981', dot: true },
-                    { key: 'manual',     label: 'Manual',      color: '#6b7280', dot: true },
+                    { key: 'manual',     label: 'Manual',      color: 'hsl(var(--muted-foreground))', dot: true },
                   ]}
                 />
               </div>
               <div>
-                <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Sparkles size={11} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> ENRICHMENT
+                <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Sparkles size={11} style={{ color: 'var(--brand-ink)' }} /> ENRICHMENT
                 </div>
                 <FilterDropdown fullWidth label="All Enrichment" value={filterEnrichment} onChange={setFilterEnrichment}
                   options={[
-                    { key: '',            label: 'All Enrichment', color: '#6b7280' },
+                    { key: '',            label: 'All Enrichment', color: 'hsl(var(--muted-foreground))' },
                     { key: 'done',        label: 'Enriched',       color: '#34d399', dot: true },
-                    { key: 'not',         label: 'Not enriched',   color: '#6b7280', dot: true },
+                    { key: 'not',         label: 'Not enriched',   color: 'hsl(var(--muted-foreground))', dot: true },
                     { key: 'in_progress', label: 'Enriching',      color: '#60a5fa', dot: true },
                     { key: 'failed',      label: 'Enrichment failed', color: '#f87171', dot: true },
                   ]}
                 />
               </div>
               <div>
-                <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <ArrowUpDown size={11} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> SORT BY
+                <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <ArrowUpDown size={11} style={{ color: 'var(--brand-ink)' }} /> SORT BY
                 </div>
                 <FilterDropdown fullWidth label="Sort by" value={sortBy} onChange={setSortBy} icon={ArrowUpDown}
                   options={[
-                    { key: 'score_desc',   label: 'Score: High → Low', color: '#a78bfa' },
-                    { key: 'score_asc',    label: 'Score: Low → High', color: '#a78bfa' },
+                    { key: 'score_desc',   label: 'Score: High → Low', color: 'var(--brand-ink)' },
+                    { key: 'score_asc',    label: 'Score: Low → High', color: 'var(--brand-ink)' },
                     { key: 'created_desc', label: 'Newest First',      color: '#60a5fa' },
                     { key: 'created_asc',  label: 'Oldest First',      color: '#60a5fa' },
                     { key: 'name_asc',     label: 'Name A → Z',        color: '#4ade80' },
@@ -1910,19 +1910,19 @@ const SDRLeadsTab = () => {
                     style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 8, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}>
                     <X size={11} /> Clear all
                   </button>
-                  <span style={{ color: '#6b7280', fontSize: 12 }}>{totalActive} active</span>
+                  <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>{totalActive} active</span>
                 </div>
               ) : null;
             })()}
           </div>
         )}
 
-        <div style={{ marginTop: 8, fontSize: 12, color: '#4b5563', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ marginTop: 8, fontSize: 12, color: 'hsl(var(--muted-foreground) / 0.85)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {loading
-            ? <span style={{ color: 'hsl(var(--pt-a78bfa))' }}>Loading…</span>
+            ? <span style={{ color: 'var(--brand-ink)' }}>Loading…</span>
             : <>
                 <span>Showing <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count === 0 ? 0 : ((pagination.page - 1) * pagination.page_size) + 1}–{Math.min(pagination.page * pagination.page_size, pagination.total_count)}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count.toLocaleString()}</strong> leads</span>
-                {(searchRaw || anyFilter) && <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'hsl(var(--pt-a78bfa))', fontSize: 11 }}>filtered</span>}
+                {(searchRaw || anyFilter) && <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'var(--brand-ink)', fontSize: 11 }}>filtered</span>}
                 {/* Key to the dot beside each name. */}
                 <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   {[['#34d399', 'Enriched'], ['#60a5fa', 'Enriching'], ['#f87171', 'Enrichment failed']].map(([color, label]) => (
@@ -1943,13 +1943,13 @@ const SDRLeadsTab = () => {
           <LeadTableSkeleton />
         ) : leads.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '56px 24px' }}>
-            <div style={{ width: 64, height: 64, borderRadius: 16, margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}>
-              <Users size={30} style={{ color: '#a855f7' }} />
+            <div style={{ width: 64, height: 64, borderRadius: 16, margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'hsl(var(--primary) / 0.08)', border: '1px solid hsl(var(--primary) / 0.2)' }}>
+              <Users size={30} style={{ color: 'hsl(var(--primary-fill))' }} />
             </div>
             <p style={{ color: 'var(--text-soft)', fontWeight: 600, marginBottom: 6, fontSize: 15 }}>
               {(search || anyFilter) ? 'No leads match your filters' : 'No leads yet'}
             </p>
-            <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 20, maxWidth: 360, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
+            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, marginBottom: 20, maxWidth: 360, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
               {(search || anyFilter)
                 ? 'Try clearing your search or filters to see more leads.'
                 : hasSource
@@ -1963,7 +1963,7 @@ const SDRLeadsTab = () => {
             ) : (
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
                 {hasSource && (
-                <Button onClick={() => openGenModal()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => openGenModal()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,hsl(var(--primary-fill-deep)) 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Zap size={15} /> Generate Leads
                 </Button>
                 )}
@@ -1986,7 +1986,7 @@ const SDRLeadsTab = () => {
                   </button>
                 </th>
                 {['Lead', 'Title', 'Score', 'Category', 'Status', 'Quality', 'Source', 'Actions'].map(h => (
-                  <th key={h} style={{ padding: '12px 16px', textAlign: 'left', color: '#4b5563', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                  <th key={h} style={{ padding: '12px 16px', textAlign: 'left', color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -2000,9 +2000,9 @@ const SDRLeadsTab = () => {
                 const confScore = lead.confidence_score;
                 return (
                   <tr key={lead.id}
-                    style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.4)', cursor: 'pointer', transition: 'background 0.15s', background: isChecked ? 'rgba(168,85,247,0.06)' : 'transparent' }}
-                    onMouseEnter={e => { if (!isChecked) e.currentTarget.style.background = 'rgba(168,85,247,0.04)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = isChecked ? 'rgba(168,85,247,0.06)' : 'transparent'; }}
+                    style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.4)', cursor: 'pointer', transition: 'background 0.15s', background: isChecked ? 'hsl(var(--primary) / 0.06)' : 'transparent' }}
+                    onMouseEnter={e => { if (!isChecked) e.currentTarget.style.background = 'hsl(var(--primary) / 0.04)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = isChecked ? 'hsl(var(--primary) / 0.06)' : 'transparent'; }}
                   >
                     <td style={{ padding: '13px 14px' }} onClick={e => { e.stopPropagation(); toggleSelect(lead.id); }}>
                       <button style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}>
@@ -2021,7 +2021,7 @@ const SDRLeadsTab = () => {
                       {lead.company_industry && (
                         <span title={`Show only "${lead.company_industry}" leads`}
                           onClick={e => { e.stopPropagation(); setFilterIndustry(lead.company_industry); }}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, marginRight: 4, padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600, background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)', color: 'hsl(var(--pt-a78bfa))', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, marginRight: 4, padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600, background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)', color: 'var(--brand-ink)', whiteSpace: 'nowrap', cursor: 'pointer' }}>
                           <Tag size={9} /> {lead.company_industry}
                         </span>
                       )}
@@ -2064,7 +2064,7 @@ const SDRLeadsTab = () => {
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       {(() => {
                         const sc = LEAD_STATUS_CONFIG[lead.status];
-                        return sc ? <span style={{ padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, whiteSpace: 'nowrap' }}>{sc.label}</span> : <span style={{ color: '#4b5563', fontSize: 12 }}>—</span>;
+                        return sc ? <span style={{ padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, whiteSpace: 'nowrap' }}>{sc.label}</span> : <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 12 }}>—</span>;
                       })()}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
@@ -2077,7 +2077,7 @@ const SDRLeadsTab = () => {
                       ) : <span style={{ color: 'var(--line-1)', fontSize: 12 }}>—</span>}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
-                      <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 11, background: 'hsl(var(--surface-invert) / 0.05)', color: '#6b7280', whiteSpace: 'nowrap' }}>
+                      <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 11, background: 'hsl(var(--surface-invert) / 0.05)', color: 'hsl(var(--muted-foreground))', whiteSpace: 'nowrap' }}>
                         {SOURCE_LABELS[lead.source] || lead.source}
                       </span>
                     </td>
@@ -2090,7 +2090,7 @@ const SDRLeadsTab = () => {
                             {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <><Brain size={12} /> Qualify</>}
                           </button>
                         ) : (
-                          <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Re-score with AI" style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: 'hsl(var(--pt-c084fc))' }}>
+                          <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Re-score with AI" style={{ background: 'hsl(var(--primary) / 0.12)', border: '1px solid hsl(var(--primary) / 0.3)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: 'var(--brand-ink)' }}>
                             {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <Brain size={12} />}
                           </button>
                         )}
@@ -2110,9 +2110,9 @@ const SDRLeadsTab = () => {
       {/* Pagination */}
       {pagination.total_pages > 1 && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, ...cardStyle, padding: '12px 18px' }}>
-          <span style={{ fontSize: 13, color: '#6b7280' }}>
+          <span style={{ fontSize: 13, color: 'hsl(var(--muted-foreground))' }}>
             Page <strong style={{ color: 'var(--text-soft)' }}>{pagination.page}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_pages}</strong>
-            <span style={{ color: '#4b5563', marginLeft: 8 }}>({pagination.total_count.toLocaleString()} total)</span>
+            <span style={{ color: 'hsl(var(--muted-foreground) / 0.85)', marginLeft: 8 }}>({pagination.total_count.toLocaleString()} total)</span>
           </span>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <button onClick={() => goToPage(1)} disabled={!pagination.has_prev} style={pgBtn(!pagination.has_prev)}><ChevronsLeft size={14} /></button>
@@ -2121,7 +2121,7 @@ const SDRLeadsTab = () => {
               .filter(p => p === 1 || p === pagination.total_pages || Math.abs(p - pagination.page) <= 2)
               .reduce((acc, p, idx, arr) => { if (idx > 0 && p - arr[idx - 1] > 1) acc.push('…'); acc.push(p); return acc; }, [])
               .map((p, i) => p === '…'
-                ? <span key={`e-${i}`} style={{ color: '#4b5563', padding: '0 4px', fontSize: 13 }}>…</span>
+                ? <span key={`e-${i}`} style={{ color: 'hsl(var(--muted-foreground) / 0.85)', padding: '0 4px', fontSize: 13 }}>…</span>
                 : <button key={p} onClick={() => goToPage(p)} style={pgBtn(false, p === pagination.page)}>{p}</button>
               )}
             <button onClick={() => goToPage(pagination.page + 1)} disabled={!pagination.has_next} style={pgBtn(!pagination.has_next)}><ChevronRight size={14} /></button>
@@ -2149,14 +2149,14 @@ const SDRLeadsTab = () => {
                   </div>
                 )}
               </div>
-              <button onClick={() => setSelectedLead(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280' }}>
+              <button onClick={() => setSelectedLead(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--muted-foreground))' }}>
                 <X size={20} />
               </button>
             </div>
 
             {/* The lead's industry: change it to another one, or type a new one. */}
             <div style={{ marginBottom: 20 }}>
-              <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
                 <Tag size={11} /> Industry
               </h4>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -2164,7 +2164,7 @@ const SDRLeadsTab = () => {
                   <IndustryPicker key={selectedLead.id} industries={industries} value={detailIndustry} onChange={setDetailIndustry} />
                 </div>
                 {detailIndustry.trim().toLowerCase() !== (selectedLead.company_industry || '').toLowerCase() && (
-                  <Button onClick={handleSaveDetailIndustry} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, height: 38 }}>
+                  <Button onClick={handleSaveDetailIndustry} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, height: 38 }}>
                     Save
                   </Button>
                 )}
@@ -2173,7 +2173,7 @@ const SDRLeadsTab = () => {
 
             {/* The ICP this lead was found for and is scored with. */}
             <div style={{ marginBottom: 20 }}>
-              <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
                 <Target size={11} /> ICP
               </h4>
               <span style={{ fontSize: 13, color: selectedLead.icp_name ? 'var(--text-soft)' : '#6b7280' }}>
@@ -2186,7 +2186,7 @@ const SDRLeadsTab = () => {
                   </div>
                   {selectedLead.score != null && rescoreBox}
                   {detailIcpId && detailIcpId !== String(selectedLead.icp_id || '') && (
-                    <Button onClick={handleSaveDetailIcp} disabled={icpMoving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, height: 38 }}>
+                    <Button onClick={handleSaveDetailIcp} disabled={icpMoving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, height: 38 }}>
                       {icpMoving ? <Loader2 size={13} className="animate-spin" /> : 'Save'}
                     </Button>
                   )}
@@ -2203,7 +2203,7 @@ const SDRLeadsTab = () => {
                 <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 20, padding: '14px 16px', borderRadius: 10, background: `${cat.color}10`, border: `1px solid ${cat.color}30` }}>
                   <div style={{ textAlign: 'center', flexShrink: 0 }}>
                     <div style={{ fontSize: 30, fontWeight: 800, color: cat.color }}>{selectedLead.score}</div>
-                    <div style={{ fontSize: 11, color: '#6b7280' }}>/ 100</div>
+                    <div style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))' }}>/ 100</div>
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
@@ -2230,7 +2230,7 @@ const SDRLeadsTab = () => {
               const hasNewDims = SCORE_DIMS.some(d => bd[d.key] !== undefined);
               return (
                 <div style={{ marginBottom: 20 }}>
-                  <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Score Breakdown</h4>
+                  <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Score Breakdown</h4>
                   {hasNewDims ? (
                     SCORE_DIMS.map(dim => (
                       <ScoreBar key={dim.key} label={dim.label} value={bd[dim.key] ?? 0} max={dim.max} color={dim.color} icon={dim.icon} />
@@ -2252,7 +2252,7 @@ const SDRLeadsTab = () => {
             {/* Key Strengths */}
             {(selectedLead.key_strengths || []).length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Key Strengths</h4>
+                <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Key Strengths</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {selectedLead.key_strengths.map((s, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
@@ -2267,7 +2267,7 @@ const SDRLeadsTab = () => {
             {/* Concerns */}
             {(selectedLead.concerns || []).length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Concerns</h4>
+                <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Concerns</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {selectedLead.concerns.map((c, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
@@ -2331,7 +2331,7 @@ const SDRLeadsTab = () => {
                         <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, textTransform: 'capitalize', flexShrink: 0 }}>{key.replace(/_/g, ' ')}</span>
                         <span style={{ color: 'var(--text-soft)', fontSize: 12.5, textAlign: 'right', wordBreak: 'break-word' }}>
                           {String(f.value)}
-                          {f.source && <span style={{ marginLeft: 6, color: '#6b7280', fontSize: 10 }}>({f.source})</span>}
+                          {f.source && <span style={{ marginLeft: 6, color: 'hsl(var(--muted-foreground))', fontSize: 10 }}>({f.source})</span>}
                         </span>
                       </div>
                     ))}
@@ -2342,24 +2342,24 @@ const SDRLeadsTab = () => {
 
             {/* Contact */}
             <div style={{ marginBottom: 20 }}>
-              <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Contact</h4>
+              <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Contact</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {selectedLead.email && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Mail size={13} style={{ color: '#6b7280' }} />
-                    <a href={`mailto:${selectedLead.email}`} style={{ color: 'hsl(var(--pt-c084fc))', fontSize: 13 }}>{selectedLead.email}</a>
+                    <Mail size={13} style={{ color: 'hsl(var(--muted-foreground))' }} />
+                    <a href={`mailto:${selectedLead.email}`} style={{ color: 'var(--brand-ink)', fontSize: 13 }}>{selectedLead.email}</a>
                     {selectedLead.email_bounced && <span style={{ fontSize: 11, color: '#f87171', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 4, padding: '1px 6px' }}>bounced</span>}
                   </div>
                 )}
                 {selectedLead.phone && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Phone size={13} style={{ color: '#6b7280' }} />
+                    <Phone size={13} style={{ color: 'hsl(var(--muted-foreground))' }} />
                     <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.phone}</span>
                   </div>
                 )}
                 {selectedLead.linkedin_url && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Linkedin size={13} style={{ color: '#6b7280' }} />
+                    <Linkedin size={13} style={{ color: 'hsl(var(--muted-foreground))' }} />
                     <a href={safeUrl(selectedLead.linkedin_url)} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', fontSize: 13 }}>
                       LinkedIn Profile <ExternalLink size={10} style={{ display: 'inline', marginLeft: 2 }} />
                     </a>
@@ -2370,12 +2370,12 @@ const SDRLeadsTab = () => {
 
             {/* Company */}
             <div style={{ marginBottom: 20 }}>
-              <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Company</h4>
+              <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Company</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {selectedLead.company_industry && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Briefcase size={13} style={{ color: '#6b7280' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_industry}</span></div>}
-                {selectedLead.company_size && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Users size={13} style={{ color: '#6b7280' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_size.toLocaleString()} employees</span></div>}
-                {selectedLead.company_location && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><MapPin size={13} style={{ color: '#6b7280' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_location}</span></div>}
-                {selectedLead.company_website && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Globe size={13} style={{ color: '#6b7280' }} /><a href={safeUrl(selectedLead.company_website)} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', fontSize: 13 }}>{selectedLead.company_website} <ExternalLink size={10} style={{ display: 'inline' }} /></a></div>}
+                {selectedLead.company_industry && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Briefcase size={13} style={{ color: 'hsl(var(--muted-foreground))' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_industry}</span></div>}
+                {selectedLead.company_size && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Users size={13} style={{ color: 'hsl(var(--muted-foreground))' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_size.toLocaleString()} employees</span></div>}
+                {selectedLead.company_location && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><MapPin size={13} style={{ color: 'hsl(var(--muted-foreground))' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_location}</span></div>}
+                {selectedLead.company_website && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Globe size={13} style={{ color: 'hsl(var(--muted-foreground))' }} /><a href={safeUrl(selectedLead.company_website)} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', fontSize: 13 }}>{selectedLead.company_website} <ExternalLink size={10} style={{ display: 'inline' }} /></a></div>}
               </div>
             </div>
 
@@ -2390,7 +2390,7 @@ const SDRLeadsTab = () => {
               if (!techList.length) return null;
               return (
                 <div style={{ marginBottom: 20 }}>
-                  <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Technologies</h4>
+                  <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Technologies</h4>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {techList.map((t, idx) => (
                       <span key={`${t}-${idx}`} style={{ padding: '3px 10px', borderRadius: 10, fontSize: 12, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: 'hsl(var(--pt-93c5fd))' }}>{t}</span>
@@ -2481,7 +2481,7 @@ const SDRLeadsTab = () => {
               if (!signalsList.length) return null;
               return (
                 <div style={{ marginBottom: 20 }}>
-                  <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Buying Signals</h4>
+                  <h4 style={{ color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Buying Signals</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {signalsList.map((s, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
@@ -2556,7 +2556,7 @@ const SDRLeadsTab = () => {
                 style={{
                   height: 38,
                   padding: '0 10px',
-                  background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)',
+                  background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))',
                   color: '#fff',
                   border: 'none',
                   borderRadius: 8,
@@ -2612,7 +2612,7 @@ const SDRLeadsTab = () => {
           </DialogHeader>
           <div style={{ padding: '8px 0', lineHeight: 1.6 }}>
             <p style={{ color: 'var(--text-soft)', marginBottom: 8 }}>Delete <strong style={{ color: '#f87171' }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''}</strong>?</p>
-            <p style={{ color: '#6b7280', fontSize: 13 }}>You can undo this from the notification right after.</p>
+            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>You can undo this from the notification right after.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowBulkDeleteConfirm(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
@@ -2636,7 +2636,7 @@ const SDRLeadsTab = () => {
             <p style={{ color: 'var(--text-soft)', marginBottom: 8 }}>
               Delete <strong style={{ color: '#f87171' }}>{pendingDeleteLead?.display_name || pendingDeleteLead?.full_name || 'this lead'}</strong>?
             </p>
-            <p style={{ color: '#6b7280', fontSize: 13 }}>You can undo this from the notification right after.</p>
+            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>You can undo this from the notification right after.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPendingDeleteLead(null)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
@@ -2678,11 +2678,11 @@ const SDRLeadsTab = () => {
                   { n: 9, col: 'LinkedIn URL', req: false, ex: 'https://linkedin.com/in/jane' },
                 ].map((r) => (
                   <div key={r.n} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
-                    <span style={{ width: 22, height: 22, borderRadius: 6, background: 'rgba(168,85,247,0.15)', color: 'hsl(var(--pt-c084fc))', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{r.n}</span>
+                    <span style={{ width: 22, height: 22, borderRadius: 6, background: 'hsl(var(--primary) / 0.15)', color: 'var(--brand-ink)', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{r.n}</span>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-soft)', minWidth: 110 }}>{r.col}</span>
                     {r.req
                       ? <span style={{ fontSize: 10, fontWeight: 700, color: '#f87171', background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: 6, padding: '1px 7px' }}>Required</span>
-                      : <span style={{ fontSize: 10, color: '#6b7280' }}>optional</span>}
+                      : <span style={{ fontSize: 10, color: 'hsl(var(--muted-foreground))' }}>optional</span>}
                     <span style={{ marginLeft: 'auto', fontSize: 12, color: '#8b7bb5', fontFamily: 'monospace' }}>{r.ex}</span>
                   </div>
                 ))}
@@ -2690,12 +2690,12 @@ const SDRLeadsTab = () => {
 
               {/* Example line */}
               <div style={{ background: 'var(--sfc-0b0716)', border: '1px solid var(--line-1)', borderRadius: 8, padding: '10px 12px', marginBottom: 14, overflowX: 'auto' }}>
-                <p style={{ fontSize: 10, color: '#6b7280', margin: '0 0 4px' }}>Example CSV</p>
+                <p style={{ fontSize: 10, color: 'hsl(var(--muted-foreground))', margin: '0 0 4px' }}>Example CSV</p>
                 <pre style={{ margin: 0, fontSize: 11, color: 'hsl(var(--pt-c4b5d4))', fontFamily: 'monospace', whiteSpace: 'pre' }}>{`Full Name,Email,Job Title,Company,Industry,Employees,Location,Phone,LinkedIn URL
 Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://linkedin.com/in/jane`}</pre>
               </div>
 
-              <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
+              <p style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', marginBottom: 4 }}>
                 Only <b style={{ color: 'hsl(var(--pt-c4b5d4))' }}>Full Name</b> and <b style={{ color: 'hsl(var(--pt-c4b5d4))' }}>Email</b> are required — the rest are optional. Duplicate emails are skipped automatically.
               </p>
             </div>
@@ -2741,7 +2741,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                 </table>
               </div>
               {csvImport.total > 10 && (
-                <p style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>Showing first 10 of {csvImport.total}. All will be imported.</p>
+                <p style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', marginTop: 8 }}>Showing first 10 of {csvImport.total}. All will be imported.</p>
               )}
               <div style={{ marginTop: 12 }}>
                 <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>Industry for rows without one (optional)</label>
@@ -2751,7 +2751,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               <div style={{ marginTop: 12 }}>
                 <IcpPicker icps={icpProfiles} value={csvIcpId} onChange={setCsvIcpId} />
               </div>
-              <p style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
+              <p style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', marginTop: 8 }}>
                 Duplicate emails already in your list are skipped automatically.
               </p>
             </div>
@@ -2762,14 +2762,14 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                 <Button variant="outline" onClick={downloadCsvTemplate} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Download size={14} /> Download template
                 </Button>
-                <Button onClick={() => fileInputRef.current?.click()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => fileInputRef.current?.click()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Upload size={14} /> Choose CSV file
                 </Button>
               </>
             ) : (
               <>
                 <Button variant="outline" onClick={() => setCsvImport(null)} disabled={csvImporting} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
-                <Button onClick={handleCsvConfirm} disabled={csvImporting || !csvImport?.total} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={handleCsvConfirm} disabled={csvImporting || !csvImport?.total} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {csvImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                   {csvImporting ? 'Importing…' : `Import ${csvImport?.total || 0} leads`}
                 </Button>
@@ -2811,7 +2811,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); }} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
-            <Button onClick={handleAddLead} disabled={addingLead} style={{ background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Button onClick={handleAddLead} disabled={addingLead} style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {addingLead ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
               Add Lead
             </Button>
@@ -2834,7 +2834,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 8 }}>Data Source</label>
               <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
                 {[
-                  { key: 'apify',  label: 'Apify',     desc: 'Web scraping — LinkedIn & Google search', color: '#a855f7', paid: true },
+                  { key: 'apify',  label: 'Apify',     desc: 'Web scraping — LinkedIn & Google search', color: 'hsl(var(--primary-fill))', paid: true },
                   { key: 'apollo', label: 'Apollo.io', desc: 'Verified B2B contact database',           color: '#3b82f6', paid: true },
                 ].map(s => (
                   <button key={s.key} onClick={() => setGenSource(s.key)} style={{
@@ -2852,7 +2852,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                           <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(16,185,129,0.15)', color: '#34d399' }}>FREE</span>
                         )}
                         {s.paid && (
-                          <span onClick={(e) => { e.stopPropagation(); setShowSetupGuide(s.key); }} style={{ color: '#4b5563', cursor: 'pointer', display: 'flex', alignItems: 'center', transition: 'color 0.2s' }}
+                          <span onClick={(e) => { e.stopPropagation(); setShowSetupGuide(s.key); }} style={{ color: 'hsl(var(--muted-foreground) / 0.85)', cursor: 'pointer', display: 'flex', alignItems: 'center', transition: 'color 0.2s' }}
                             onMouseEnter={e => e.currentTarget.style.color = s.color}
                             onMouseLeave={e => e.currentTarget.style.color = '#4b5563'}>
                             <HelpCircle size={13} />
@@ -2860,7 +2860,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                         )}
                       </div>
                     </div>
-                    <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>{s.desc}</div>
+                    <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, marginTop: 2 }}>{s.desc}</div>
                   </button>
                 ))}
               </div>
@@ -2875,7 +2875,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                     {genSource === 'apollo' ? 'Apollo.io' : 'Apify'} API key not configured
                   </p>
                   <button onClick={() => { setShowGenModal(false); navigate('/ai-sdr/settings'); }}
-                    style={{ background: 'linear-gradient(135deg,#a855f7,#ec4899)', border: 'none', borderRadius: 6, padding: '6px 14px', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)), hsl(var(--primary-fill-deep)))', border: 'none', borderRadius: 6, padding: '6px 14px', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                     Go to Settings →
                   </button>
                 </div>
@@ -2900,10 +2900,10 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             {/* Count */}
             <div>
               <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>
-                Number of Leads: <span style={{ color: '#a855f7', fontWeight: 700 }}>{genCount}</span>
+                Number of Leads: <span style={{ color: 'hsl(var(--primary-fill))', fontWeight: 700 }}>{genCount}</span>
               </label>
-              <input type="range" min={5} max={MAX_SEARCH} step={5} value={genCount} onChange={e => { setGenCount(Number(e.target.value)); setGenConfirmBig(false); }} style={{ width: '100%', accentColor: '#a855f7' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563', fontSize: 11, marginTop: 2 }}>
+              <input type="range" min={5} max={MAX_SEARCH} step={5} value={genCount} onChange={e => { setGenCount(Number(e.target.value)); setGenConfirmBig(false); }} style={{ width: '100%', accentColor: 'hsl(var(--primary-fill))' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: 'hsl(var(--muted-foreground) / 0.85)', fontSize: 11, marginTop: 2 }}>
                 <span>5</span><span>{MAX_SEARCH.toLocaleString()}</span>
               </div>
               {genConfirmBig && genCount > BIG_SEARCH && (
@@ -2927,7 +2927,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               <div style={{ fontSize: 11.5, color: 'hsl(var(--pt-9ca3af))' }}>Import leads from your finished Apify runs (works on the free plan).</div>
             </div>
             <button onClick={handleFetchApify} disabled={fetchingApify}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'hsl(var(--brand-600) / 0.15)', border: '1px solid rgba(168,85,247,0.35)', color: 'hsl(var(--pt-c4b5fd))', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: fetchingApify ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'hsl(var(--brand-600) / 0.15)', border: '1px solid hsl(var(--primary) / 0.35)', color: 'hsl(var(--pt-c4b5fd))', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: fetchingApify ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
               {fetchingApify ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
               {fetchingApify ? 'Fetching…' : 'Fetch from Apify'}
             </button>
@@ -2937,7 +2937,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={() => { if (genCount > BIG_SEARCH && !genConfirmBig) setGenConfirmBig(true); else handleGenerate(); }}
               disabled={generating || icpProfiles.length === 0 || (sdrKeyStatus.loaded && !sdrKeyStatus[genSource])}
-              style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {generating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               {generating
                 ? 'Starting…'
@@ -2971,13 +2971,13 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                   { step: 4, title: 'Restart server & generate', code: 'python manage.py runserver' },
                 ].map(s => (
                   <div key={s.step} style={{ display: 'flex', gap: 12 }}>
-                    <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', border: '1px solid hsl(var(--brand-600))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a855f7', fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
+                    <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: 'hsl(var(--primary) / 0.2)', border: '1px solid hsl(var(--brand-600))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'hsl(var(--primary-fill))', fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
                       {s.detail && <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
                       {s.code && (
                         <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                          <code style={{ color: '#a855f7', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
+                          <code style={{ color: 'hsl(var(--primary-fill))', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
                           <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step ? 'hsl(var(--pt-4ade80))' : '#6b7280' }}>
                             {copiedKey === s.step ? <CheckCircle size={13} /> : <Copy size={13} />}
                           </button>
@@ -3020,7 +3020,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           </div>
           <DialogFooter>
             <Button onClick={() => { setShowSetupGuide(null); setGenSource(showSetupGuide); }}
-              style={{ background: showSetupGuide === 'apify' ? 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)' : 'linear-gradient(90deg,#1d4ed8,#3b82f6)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
+              style={{ background: showSetupGuide === 'apify' ? 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))' : 'linear-gradient(90deg,#1d4ed8,#3b82f6)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
               Use {showSetupGuide === 'apify' ? 'Apify' : 'Apollo.io'}
             </Button>
           </DialogFooter>

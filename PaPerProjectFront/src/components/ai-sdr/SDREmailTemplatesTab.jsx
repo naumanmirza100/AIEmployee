@@ -27,9 +27,9 @@ const inputStyle = {
   borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
-const labelStyle = { color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 4 };
+const labelStyle = { color: 'hsl(var(--muted-foreground))', fontSize: 12, display: 'block', marginBottom: 4 };
 const primaryBtn = {
-  background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none',
+  background: 'linear-gradient(90deg,hsl(var(--brand-600)),hsl(var(--primary-fill-deep)))', color: '#fff', border: 'none',
   borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
 };
 const ghostBtn = { border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 };
@@ -38,7 +38,7 @@ const iconBtn = { display: 'flex', alignItems: 'center', background: 'none', bor
 const SEND_STATUS = {
   sending: { label: 'Sending', color: '#60a5fa' },
   done:    { label: 'Done',    color: '#34d399' },
-  stopped: { label: 'Stopped', color: '#9ca3af' },
+  stopped: { label: 'Stopped', color: 'hsl(var(--muted-foreground))' },
 };
 const RECIPIENT_COLOR = { queued: '#9ca3af', sent: '#34d399', skipped: '#f59e0b', failed: '#f87171' };
 
@@ -51,7 +51,7 @@ const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { dateSt
 const EmailFrame = ({ subject, html, loading, height = 560 }) => (
   <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden', background: '#ffffff' }}>
     <div style={{ padding: '10px 14px', borderBottom: '1px solid #ececf1', background: '#fafafc' }}>
-      <div style={{ color: '#6b7280', fontSize: 11 }}>Subject</div>
+      <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11 }}>Subject</div>
       <div style={{ color: '#111827', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {subject || '(no subject)'}
       </div>
@@ -99,17 +99,17 @@ const CompanyPicker = ({ value, onChange }) => {
         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60, maxHeight: 280, overflowY: 'auto',
           background: 'var(--sfc-14082a, #160d26)', border: '1px solid var(--line-1)', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.45)', padding: 4 }}>
           {loading && !options.length ? (
-            <div style={{ padding: 12, display: 'flex', justifyContent: 'center' }}><Loader2 size={14} className="animate-spin" style={{ color: '#a78bfa' }} /></div>
+            <div style={{ padding: 12, display: 'flex', justifyContent: 'center' }}><Loader2 size={14} className="animate-spin" style={{ color: 'var(--brand-ink)' }} /></div>
           ) : !options.length ? (
-            <div style={{ padding: '9px 10px', color: '#6b7280', fontSize: 13 }}>No company with an emailable lead matches.</div>
+            <div style={{ padding: '9px 10px', color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>No company with an emailable lead matches.</div>
           ) : options.map(o => (
             <button key={o.name} onClick={() => { onChange(o.name); setQuery(o.name); setOpen(false); }}
               style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '7px 10px', border: 'none', borderRadius: 7, cursor: 'pointer', textAlign: 'left',
-                background: o.name === value ? 'rgba(168,85,247,0.15)' : 'transparent', color: 'var(--text-soft)', fontSize: 13 }}
-              onMouseEnter={e => { if (o.name !== value) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                background: o.name === value ? 'hsl(var(--primary) / 0.15)' : 'transparent', color: 'var(--text-soft)', fontSize: 13 }}
+              onMouseEnter={e => { if (o.name !== value) e.currentTarget.style.background = 'hsl(var(--surface-invert) / 0.05)'; }}
               onMouseLeave={e => { if (o.name !== value) e.currentTarget.style.background = 'transparent'; }}>
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>
-              <span style={{ color: '#6b7280', fontSize: 12, flexShrink: 0 }}>{o.lead_count} lead{o.lead_count === 1 ? '' : 's'}</span>
+              <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, flexShrink: 0 }}>{o.lead_count} lead{o.lead_count === 1 ? '' : 's'}</span>
             </button>
           ))}
         </div>
@@ -277,13 +277,13 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
             <input ref={subjectRef} value={draft.subject} maxLength={500} onFocus={() => { focused.current = 'subject'; }}
               onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} placeholder="e.g. A quick idea for {company_name}" style={inputStyle} />
           </div>
-          <div style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)' }}>
-            <p style={{ color: '#a855f7', fontSize: 11, fontWeight: 600, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <div style={{ padding: '10px 12px', borderRadius: 8, background: 'hsl(var(--primary) / 0.06)', border: '1px solid hsl(var(--primary) / 0.2)' }}>
+            <p style={{ color: 'hsl(var(--primary-fill))', fontSize: 11, fontWeight: 600, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Variables — click to insert at the cursor
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {variables.map(v => (
-                <button key={v} onClick={() => insert(v)} style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', color: 'hsl(var(--pt-c084fc))', fontSize: 11, fontFamily: 'monospace' }}>{v}</button>
+                <button key={v} onClick={() => insert(v)} style={{ background: 'hsl(var(--primary) / 0.12)', border: '1px solid hsl(var(--primary) / 0.35)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', color: 'var(--brand-ink)', fontSize: 11, fontFamily: 'monospace' }}>{v}</button>
               ))}
             </div>
           </div>
@@ -292,20 +292,20 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
               <div style={{ display: 'flex', border: '1px solid var(--line-1)', borderRadius: 7, overflow: 'hidden' }}>
                 {[['visual', 'Visual', Type], ['code', 'HTML code', Code2]].map(([k, l, Icon]) => (
                   <button key={k} onClick={() => setMode(k)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', fontSize: 12, border: 'none', cursor: 'pointer',
-                    background: mode === k ? 'rgba(168,85,247,0.2)' : 'transparent', color: mode === k ? 'hsl(var(--pt-c084fc))' : '#9ca3af', fontWeight: mode === k ? 600 : 400 }}>
+                    background: mode === k ? 'hsl(var(--primary) / 0.2)' : 'transparent', color: mode === k ? 'var(--brand-ink)' : '#9ca3af', fontWeight: mode === k ? 600 : 400 }}>
                     <Icon size={12} /> {l}
                   </button>
                 ))}
               </div>
               <button onClick={() => { if (!draft.html.trim() || window.confirm('Replace the HTML with the starter layout?')) setDraft(d => ({ ...d, html: starterHtml })); }}
-                style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#a78bfa', fontSize: 12 }}>
+                style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand-ink)', fontSize: 12 }}>
                 <Wand2 size={12} /> Start from a simple layout
               </button>
             </div>
             {mode === 'visual' ? (
               <div onFocusCapture={() => { focused.current = 'html'; }} onMouseDown={() => { focused.current = 'html'; }}>
                 <VisualEditor ref={visualRef} html={draft.html} onChange={html => setDraft(d => ({ ...d, html }))} />
-                <p style={{ color: '#6b7280', fontSize: 11, margin: '6px 0 0' }}>
+                <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, margin: '6px 0 0' }}>
                   Click into the email and type. Select text for bold, links and lists; click a button and use the link tool to change where it goes.
                 </p>
               </div>
@@ -322,7 +322,7 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
               placeholder={'<p>Hi {first_name},</p>\n<p>...</p>\n<p><a href="{unsubscribe_url}">Unsubscribe</a></p>'}
               style={{ ...inputStyle, minHeight: 420, resize: 'vertical', fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre', tabSize: 2 }} />
             )}
-            <p style={{ color: '#6b7280', fontSize: 11, margin: '6px 0 0' }}>
+            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, margin: '6px 0 0' }}>
               Without {'{unsubscribe_url}'} in it, an unsubscribe link and your campaign's postal address are added at the bottom.
             </p>
           </div>
@@ -332,7 +332,7 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ color: 'var(--text-soft)', fontSize: 13, fontWeight: 600 }}>Preview</span>
-            {previewing && <Loader2 size={13} className="animate-spin" style={{ color: '#a78bfa' }} />}
+            {previewing && <Loader2 size={13} className="animate-spin" style={{ color: 'var(--brand-ink)' }} />}
             <div style={{ marginLeft: 'auto', width: 210 }}>
               <SdrSelect value={previewIndustry} onChange={v => { setPreviewIndustry(v); setLeadIndex(0); }} style={{ ...inputStyle, padding: '5px 10px', fontSize: 12 }}
                 options={[{ value: '', label: 'A lead from any industry' }, ...industries.map(i => ({ value: i.name, label: i.name }))]} />
@@ -340,12 +340,12 @@ const TemplateEditor = ({ initial, variables, starterHtml, industries, onSaved, 
             {count > 1 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <button title="Previous lead" onClick={() => setLeadIndex(i => (i - 1 + count) % count)} style={iconBtn}><ChevronLeft size={13} /></button>
-                <span style={{ color: '#6b7280', fontSize: 12, minWidth: 40, textAlign: 'center' }}>{(preview?.lead_index ?? 0) + 1}/{count}</span>
+                <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, minWidth: 40, textAlign: 'center' }}>{(preview?.lead_index ?? 0) + 1}/{count}</span>
                 <button title="Next lead" onClick={() => setLeadIndex(i => (i + 1) % count)} style={iconBtn}><ChevronRight size={13} /></button>
               </div>
             )}
           </div>
-          <span style={{ color: '#6b7280', fontSize: 12 }}>
+          <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>
             {lead ? (lead.sample ? 'Shown with a sample lead.' : `As ${lead.name || lead.email}${lead.company ? ` at ${lead.company}` : ''} will see it.`) : ' '}
             {/* {sender_...} come from a campaign: say which, so a blank one can be filled in there. */}
             {preview?.sender_campaign && (
@@ -397,13 +397,13 @@ const Stepper = ({ step, reached, onGo }) => (
       const canGo = n <= reached && n !== step;
       return (
         <React.Fragment key={label}>
-          {i > 0 && <span style={{ width: 24, height: 1, background: n <= reached ? 'rgba(168,85,247,0.5)' : 'var(--line-1)' }} />}
+          {i > 0 && <span style={{ width: 24, height: 1, background: n <= reached ? 'hsl(var(--primary) / 0.5)' : 'var(--line-1)' }} />}
           <button onClick={() => canGo && onGo(n)} disabled={!canGo}
             style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px 5px 5px', borderRadius: 20, border: 'none', cursor: canGo ? 'pointer' : 'default',
-              background: active ? 'rgba(168,85,247,0.16)' : 'transparent' }}>
+              background: active ? 'hsl(var(--primary) / 0.16)' : 'transparent' }}>
             <span style={{ width: 22, height: 22, borderRadius: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
-              background: active ? '#a855f7' : done ? 'rgba(168,85,247,0.25)' : 'hsl(var(--surface-invert) / 0.06)',
-              color: active ? '#fff' : done ? 'hsl(var(--pt-c084fc))' : '#6b7280' }}>
+              background: active ? 'hsl(var(--primary-fill))' : done ? 'hsl(var(--primary) / 0.25)' : 'hsl(var(--surface-invert) / 0.06)',
+              color: active ? '#fff' : done ? 'var(--brand-ink)' : '#6b7280' }}>
               {done ? <Check size={12} /> : n}
             </span>
             <span style={{ fontSize: 13, fontWeight: active ? 700 : 500, color: active ? 'var(--text-soft)' : n <= reached ? 'hsl(var(--pt-9ca3af))' : '#6b7280' }}>{label}</span>
@@ -417,7 +417,7 @@ const Stepper = ({ step, reached, onGo }) => (
 const SectionTitle = ({ children, hint }) => (
   <div style={{ marginBottom: 12 }}>
     <h4 style={{ margin: 0, color: 'var(--text-soft)', fontSize: 14, fontWeight: 700 }}>{children}</h4>
-    {hint && <p style={{ margin: '2px 0 0', color: '#6b7280', fontSize: 12 }}>{hint}</p>}
+    {hint && <p style={{ margin: '2px 0 0', color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>{hint}</p>}
   </div>
 );
 
@@ -614,20 +614,20 @@ const SDREmailTemplatesTab = () => {
         {/* ── 1. Choose a template ───────────────────────────────────── */}
         {step === 1 && (
           loading ? (
-            <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}><Loader2 size={18} className="animate-spin" style={{ color: '#a78bfa' }} /></div>
+            <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}><Loader2 size={18} className="animate-spin" style={{ color: 'var(--brand-ink)' }} /></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
               <div>
                 <SectionTitle hint="Templates you've saved. Pick one to check it and send it.">Your templates</SectionTitle>
                 {templates.length === 0 ? (
-                  <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>None yet — start from a ready-made one below, or a blank page.</p>
+                  <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, margin: 0 }}>None yet — start from a ready-made one below, or a blank page.</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     {templates.map(t => (
                       <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 4px', borderTop: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</div>
-                          <div style={{ color: '#6b7280', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject || '(no subject)'} · edited {fmtDate(t.updated_at)}</div>
+                          <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject || '(no subject)'} · edited {fmtDate(t.updated_at)}</div>
                         </div>
                         <button title="Duplicate" onClick={() => handleDuplicate(t)} style={iconBtn}><Copy size={13} /></button>
                         <button title="Delete" onClick={() => setDeleting(t)} style={{ ...iconBtn, color: '#f87171' }}><Trash2 size={13} /></button>
@@ -646,14 +646,14 @@ const SDREmailTemplatesTab = () => {
                       <div style={{ height: 6, width: '100%', background: p.accent || '#7c3aed' }} />
                       <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <span style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{p.name}</span>
-                        <span style={{ color: '#6b7280', fontSize: 12, lineHeight: 1.5 }}>{p.description}</span>
-                        <span style={{ color: 'hsl(var(--pt-c084fc))', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>Use this <ChevronRight size={12} /></span>
+                        <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, lineHeight: 1.5 }}>{p.description}</span>
+                        <span style={{ color: 'var(--brand-ink)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>Use this <ChevronRight size={12} /></span>
                       </div>
                     </button>
                   ))}
                   <button onClick={pickBlank} style={{ textAlign: 'left', border: '1px dashed var(--line-1)', borderRadius: 10, background: 'transparent', cursor: 'pointer', padding: '18px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <span style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}><Plus size={14} /> Blank template</span>
-                    <span style={{ color: '#6b7280', fontSize: 12, lineHeight: 1.5 }}>A simple layout to write your own email in.</span>
+                    <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, lineHeight: 1.5 }}>A simple layout to write your own email in.</span>
                   </button>
                 </div>
               </div>
@@ -676,7 +676,7 @@ const SDREmailTemplatesTab = () => {
                 <div style={{ display: 'flex', border: '1px solid var(--line-1)', borderRadius: 8, overflow: 'hidden', marginBottom: 10, width: 'fit-content' }}>
                   {[['industry', 'An industry'], ['company', 'One company'], ['emails', 'Specific addresses']].map(([k, l]) => (
                     <button key={k} onClick={() => setSendTo(k)} style={{ padding: '6px 14px', fontSize: 13, border: 'none', cursor: 'pointer',
-                      background: sendTo === k ? 'rgba(168,85,247,0.2)' : 'transparent', color: sendTo === k ? 'hsl(var(--pt-c084fc))' : '#9ca3af', fontWeight: sendTo === k ? 600 : 400 }}>{l}</button>
+                      background: sendTo === k ? 'hsl(var(--primary) / 0.2)' : 'transparent', color: sendTo === k ? 'var(--brand-ink)' : '#9ca3af', fontWeight: sendTo === k ? 600 : 400 }}>{l}</button>
                   ))}
                 </div>
                 {sendTo === 'company' ? (
@@ -686,7 +686,7 @@ const SDREmailTemplatesTab = () => {
                     <textarea value={emailsText} onChange={e => setEmailsText(e.target.value)} spellCheck={false}
                       placeholder={'kiran@smileline.co.uk\nalex@northwind.com, sam@acme.com'}
                       style={{ ...inputStyle, minHeight: 110, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
-                    <p style={{ color: '#6b7280', fontSize: 11, margin: '4px 0 0', lineHeight: 1.5 }}>
+                    <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 11, margin: '4px 0 0', lineHeight: 1.5 }}>
                       Separate them with commas, spaces or new lines (up to 500). An address that's one of your leads uses their details;
                       a new one is added to your leads when you send, so bounces and unsubscribes are tracked.
                     </p>
@@ -705,7 +705,7 @@ const SDREmailTemplatesTab = () => {
                     label: m.ready ? `${m.campaign_name} — ${m.from_email}` : `${m.campaign_name} (no mailbox set up)`,
                   })) : [{ value: '__none__', label: 'No campaigns yet — create one in Outreach', disabled: true }]} />
                 {mailbox?.ready && (
-                  <p style={{ color: '#6b7280', fontSize: 12, margin: '6px 0 0' }}>
+                  <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, margin: '6px 0 0' }}>
                     From {mailbox.sender_name || mailbox.from_email}{mailbox.sender_company ? `, ${mailbox.sender_company}` : ''} · {mailbox.left_today} more email{mailbox.left_today === 1 ? '' : 's'} today
                   </p>
                 )}
@@ -715,7 +715,7 @@ const SDREmailTemplatesTab = () => {
             {(summaryLoading || summary) && (
               <div style={{ marginTop: 18 }}>
                 {summaryLoading ? (
-                  <span style={{ color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={13} className="animate-spin" /> Counting the leads…</span>
+                  <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={13} className="animate-spin" /> Counting the leads…</span>
                 ) : summary?.error ? (
                   <div style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', fontSize: 13 }}>{summary.error}</div>
                 ) : (
@@ -723,7 +723,7 @@ const SDREmailTemplatesTab = () => {
                     <span style={{ color: '#34d399', fontSize: 22, fontWeight: 700 }}>{summary.will_send.toLocaleString()}</span>
                     <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{sendTo === 'emails' ? 'address' : 'lead'}{summary.will_send === 1 ? '' : (sendTo === 'emails' ? 'es' : 's')} {audienceLabel} will get this email</span>
                     {summary.skipped > 0 && <span style={{ color: '#f59e0b', fontSize: 12 }}>· {summary.skipped} skipped (do-not-email list or bounced)</span>}
-                    {summary.new_leads > 0 && <span style={{ color: '#6b7280', fontSize: 12 }}>· {summary.new_leads} new — added to your leads when you send</span>}
+                    {summary.new_leads > 0 && <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>· {summary.new_leads} new — added to your leads when you send</span>}
                     {summary.waits_until_tomorrow > 0 && (
                       <span style={{ color: 'hsl(var(--pt-fbbf24))', fontSize: 12, flexBasis: '100%' }}>
                         {summary.waits_until_tomorrow} of {summary.will_send === 1 ? 'it was' : 'these were'} already emailed today, so {summary.waits_until_tomorrow === 1 ? 'it goes' : 'they go'} out tomorrow (one email a day per lead).
@@ -758,12 +758,12 @@ const SDREmailTemplatesTab = () => {
                   ['From', mailbox ? `${mailbox.sender_name || ''}${mailbox.sender_name ? ' · ' : ''}${mailbox.from_email}` : '', 3],
                 ].map(([k, v, back]) => (
                   <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'baseline', paddingBottom: 10, borderBottom: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
-                    <span style={{ color: '#6b7280', fontSize: 12, width: 70, flexShrink: 0 }}>{k}</span>
+                    <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, width: 70, flexShrink: 0 }}>{k}</span>
                     <span style={{ color: 'var(--text-soft)', fontSize: 14, flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{v}</span>
-                    <button onClick={() => setStep(back)} style={{ background: 'none', border: 'none', color: '#a78bfa', fontSize: 12, cursor: 'pointer' }}>Change</button>
+                    <button onClick={() => setStep(back)} style={{ background: 'none', border: 'none', color: 'var(--brand-ink)', fontSize: 12, cursor: 'pointer' }}>Change</button>
                   </div>
                 ))}
-                <p style={{ color: '#6b7280', fontSize: 12, margin: 0, lineHeight: 1.6 }}>
+                <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, margin: 0, lineHeight: 1.6 }}>
                   It goes out a few at a time, within the mailbox's daily limit (shared with its campaigns), and each lead gets at most one email a day.
                   {mailbox && summary.will_send > mailbox.left_today ? ` With ${mailbox.left_today} left today, the rest go out over the next days.` : ''}
                   {summary.waits_until_tomorrow ? ` ${summary.waits_until_tomorrow} already emailed today ${summary.waits_until_tomorrow === 1 ? 'goes' : 'go'} out tomorrow.` : ''} You can stop it at any time below.
@@ -771,13 +771,13 @@ const SDREmailTemplatesTab = () => {
               </div>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ color: '#6b7280', fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {review?.lead ? `As ${review.lead.name || review.lead.email}${review.lead.company ? ` at ${review.lead.company}` : ''} will get it` : 'Preview'}
                   </span>
                   {(review?.lead_count || 0) > 1 && (
                     <>
                       <button title="Previous recipient" onClick={() => setReviewIndex(i => (i - 1 + review.lead_count) % review.lead_count)} style={iconBtn}><ChevronLeft size={13} /></button>
-                      <span style={{ color: '#6b7280', fontSize: 12 }}>{(review.lead_index ?? 0) + 1}/{review.lead_count}</span>
+                      <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>{(review.lead_index ?? 0) + 1}/{review.lead_count}</span>
                       <button title="Next recipient" onClick={() => setReviewIndex(i => (i + 1) % review.lead_count)} style={iconBtn}><ChevronRight size={13} /></button>
                     </>
                   )}
@@ -804,7 +804,7 @@ const SDREmailTemplatesTab = () => {
           <h3 style={{ margin: 0, color: 'var(--text-soft)', fontSize: 16, fontWeight: 700 }}>Sends</h3>
         </div>
         {sends.length === 0 ? (
-          <p style={{ color: '#6b7280', fontSize: 13, margin: 0, padding: '10px 0' }}>Nothing sent yet.</p>
+          <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13, margin: 0, padding: '10px 0' }}>Nothing sent yet.</p>
         ) : sends.map(s => {
           const st = SEND_STATUS[s.status] || SEND_STATUS.done;
           const done = s.counts.sent + s.counts.skipped + s.counts.failed;
@@ -814,12 +814,12 @@ const SDREmailTemplatesTab = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <div style={{ color: 'var(--text-soft)', fontSize: 14, fontWeight: 600 }}>{s.template_name || 'Template'} → {s.company || s.industry || `${s.total} chosen address${s.total === 1 ? '' : 'es'}`}</div>
-                  <div style={{ color: '#6b7280', fontSize: 12 }}>{fmtDate(s.created_at)} · from {s.campaign_name || 'a deleted campaign'}</div>
+                  <div style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>{fmtDate(s.created_at)} · from {s.campaign_name || 'a deleted campaign'}</div>
                 </div>
                 <span style={{ color: st.color, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
                   {s.status === 'sending' && <Loader2 size={12} className="animate-spin" />}{st.label}
                 </span>
-                <span style={{ color: '#9ca3af', fontSize: 12 }}>
+                <span style={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>
                   <span style={{ color: RECIPIENT_COLOR.sent }}>{s.counts.sent} sent</span> · {s.counts.queued} queued
                   {s.waiting_tomorrow ? <span title="Already emailed today: one email a day per lead" style={{ color: 'hsl(var(--pt-fbbf24))' }}> ({s.waiting_tomorrow} wait{s.waiting_tomorrow === 1 ? 's' : ''} for tomorrow)</span> : null}
                   {s.counts.skipped ? <> · <span style={{ color: RECIPIENT_COLOR.skipped }}>{s.counts.skipped} skipped</span></> : null}
@@ -836,13 +836,13 @@ const SDREmailTemplatesTab = () => {
               {openSend === s.id && (
                 <div style={{ marginTop: 10, maxHeight: 280, overflowY: 'auto', border: '1px solid var(--line-1)', borderRadius: 8 }}>
                   {!openSendData ? (
-                    <div style={{ padding: 16, display: 'flex', justifyContent: 'center' }}><Loader2 size={14} className="animate-spin" style={{ color: '#a78bfa' }} /></div>
+                    <div style={{ padding: 16, display: 'flex', justifyContent: 'center' }}><Loader2 size={14} className="animate-spin" style={{ color: 'var(--brand-ink)' }} /></div>
                   ) : openSendData.recipients.map((r, i) => (
                     <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 10px', borderTop: i ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', fontSize: 12 }}>
                       <span style={{ width: 8, height: 8, borderRadius: 4, background: RECIPIENT_COLOR[r.status], flexShrink: 0 }} />
                       <span style={{ color: 'var(--text-soft)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{r.name ? `${r.name} · ` : ''}{r.email}</span>
                       <span style={{ color: RECIPIENT_COLOR[r.status], textTransform: 'capitalize' }}>{r.status}</span>
-                      {r.error && <span title={r.error} style={{ color: '#6b7280', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.error}</span>}
+                      {r.error && <span title={r.error} style={{ color: 'hsl(var(--muted-foreground))', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.error}</span>}
                     </div>
                   ))}
                 </div>
