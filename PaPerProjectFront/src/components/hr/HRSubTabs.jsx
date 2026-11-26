@@ -26,7 +26,7 @@ export function SubTabTrigger({ value, active, icon: Icon, label }) {
   return (
     <TabsTrigger
       value={value}
-      className="relative whitespace-nowrap shrink-0 px-4 py-1.5 text-sm font-medium rounded-full border transition-all duration-150"
+      className="relative whitespace-nowrap shrink-0 px-3.5 py-1.5 text-sm font-medium rounded-md border transition-all duration-150"
       style={isActive
         ? { background: 'hsl(var(--primary-fill))', color: '#fff', borderColor: 'transparent', boxShadow: '0 6px 16px -8px hsl(var(--primary) / 0.9)' }
         : { background: 'transparent', color: 'hsl(var(--muted-foreground))', borderColor: 'transparent' }}

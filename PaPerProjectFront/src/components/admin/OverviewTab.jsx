@@ -38,7 +38,7 @@ const NeedsYouNow = ({ stats }) => {
         <div className="divide-y divide-border">
           {rows.map((r) => (
             <div key={r.key} className="py-1">
-            <Link to={r.to} className="flex items-center gap-4 py-2.5 px-2 -mx-2 rounded-xl hover:bg-muted/40 transition-colors">
+            <Link to={r.to} className="flex items-center gap-4 py-2.5 px-2 -mx-2 rounded-md hover:bg-muted/40 transition-colors">
               <span className={`h-2 w-2 rounded-full shrink-0 ${r.n > 0 || !r.ok ? r.dot : 'bg-muted-foreground/40'}`} />
               <span className="flex-1 min-w-0">
                 <span className="block text-[15px] font-semibold text-foreground">{r.title}</span>
@@ -58,7 +58,7 @@ const NeedsYouNow = ({ stats }) => {
         <div className="flex flex-wrap gap-2">
           {[['Pricing', '/admin/api-keys?tab=pricing'], ['Per-company keys', '/admin/api-keys?tab=keys'],
             ['Reset logs', '/admin/api-keys?tab=reset-logs'], ['Backups', '/admin/backups']].map(([label, to]) => (
-            <Link key={to} to={to} className="rounded-full border border-border/70 bg-card/70 px-3.5 py-1.5 text-xs font-medium text-foreground hover:border-primary/40 hover:text-primary transition-colors">
+            <Link key={to} to={to} className="rounded-md border border-border/70 bg-card/70 px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/40 hover:text-primary transition-colors">
               {label}
             </Link>
           ))}

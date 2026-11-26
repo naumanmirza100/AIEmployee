@@ -180,7 +180,7 @@ export default function HomeView() {
       `}</style>
 
       {profileIncomplete && (
-        <div className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
             <User className="h-4 w-4 text-amber-600 dark:text-amber-300 shrink-0" />
             <p className="text-sm text-foreground/80">
@@ -252,7 +252,7 @@ export default function HomeView() {
                   <div key={item.key} className="py-1">
                   <button
                     onClick={item.onClick}
-                    className="w-full text-left flex items-center gap-4 py-2.5 hover:bg-muted/40 px-2 -mx-2 rounded-xl transition-colors"
+                    className="w-full text-left flex items-center gap-4 py-2.5 hover:bg-muted/40 px-2 -mx-2 rounded-md transition-colors"
                   >
                     <span className={`h-2 w-2 rounded-full shrink-0 ${dotFor(item.key)}`} />
                     <div className="flex-1 min-w-0">
@@ -271,7 +271,7 @@ export default function HomeView() {
           </CardContent>
         </Card>
 
-        <section className="ui-ink lg:col-span-2 rounded-3xl p-6 sm:p-8 flex flex-col" data-tour="me-summary">
+        <section className="ui-ink lg:col-span-2 rounded-xl p-6 sm:p-8 flex flex-col" data-tour="me-summary">
           <div className="flex items-center justify-between">
             <span className="text-base font-medium text-pure-white">My work</span>
             <Link to="/me/tasks" className="text-xs font-semibold text-pure-white/70 hover:text-pure-white">Open my tasks</Link>
@@ -284,7 +284,7 @@ export default function HomeView() {
             {week.map((d) => (
               <div key={d.key} className="flex flex-col items-center justify-end gap-1.5 h-full">
                 <span className="text-[11px] font-semibold text-pure-white/80">{d.n || ''}</span>
-                <div className={`w-full max-w-[34px] rounded-lg ${d.n ? 'ui-ink-chart' : 'bg-pure-white/10'}`}
+                <div className={`w-full max-w-[34px] rounded-md ${d.n ? 'ui-ink-chart' : 'bg-pure-white/10'}`}
                   style={{ height: `${Math.max(8, (d.n / weekMax) * 120)}px` }} />
                 <span className="text-[11px] text-pure-white/55">{d.label}</span>
               </div>
@@ -310,8 +310,8 @@ export default function HomeView() {
           <p className="text-sm text-muted-foreground">Everything that's yours, one click away.</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
             {quickLinks.map((q) => (
-              <Link key={q.to} to={q.to} className="group rounded-2xl border border-border/70 bg-card/70 p-4 flex flex-col gap-3 hover:border-primary/40 hover:shadow-md transition-all">
-                <span className="h-10 w-10 rounded-xl bg-primary/10 text-primary dark:text-violet-300 flex items-center justify-center">
+              <Link key={q.to} to={q.to} className="group rounded-lg border border-border/70 bg-card/70 p-4 flex flex-col gap-3 hover:border-primary/40 hover:shadow-md transition-all">
+                <span className="h-10 w-10 rounded-lg bg-primary/10 text-primary dark:text-violet-300 flex items-center justify-center">
                   <q.icon className="h-[18px] w-[18px]" />
                 </span>
                 <span className="flex items-center justify-between text-sm font-semibold text-foreground">

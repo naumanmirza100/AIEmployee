@@ -41,7 +41,7 @@ export const AISpendCard = () => {
   const barColour = pct == null ? 'bg-violet-400' : pct >= 100 ? 'bg-red-400' : pct >= 80 ? 'bg-amber-400' : 'bg-emerald-400';
 
   return (
-    <section className="ui-ink rounded-3xl" data-testid="ai-spend-card">
+    <section className="ui-ink rounded-xl" data-testid="ai-spend-card">
       <CardHeader>
         <CardTitle className="text-pure-white flex items-center gap-2">
           <DollarSign className="w-5 h-5 text-[#b98aff]" /> AI spend on the platform's keys

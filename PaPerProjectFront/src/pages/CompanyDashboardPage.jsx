@@ -1263,10 +1263,10 @@ const CompanyDashboardPage = () => {
 
                     {jobs.length > 0 && (
                       <div className="flex items-center gap-3 flex-wrap">
-                        <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-card/70 p-1" role="tablist" aria-label="Show jobs">
+                        <div className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/70 p-1" role="tablist" aria-label="Show jobs">
                           {[['all', 'All', jobs.length], ['open', 'Open', openCount], ['closed', 'Closed', jobs.length - openCount]].map(([key, label, n]) => (
                             <button key={key} type="button" role="tab" aria-selected={jobFilter === key} onClick={() => setJobFilter(key)}
-                              className={`rounded-full px-4 h-9 text-sm transition-colors ${jobFilter === key
+                              className={`rounded-sm px-3 h-8 text-sm transition-colors ${jobFilter === key
                                 ? 'bg-card text-foreground font-semibold shadow-sm ring-1 ring-border/70 dark:bg-pure-white/[0.08]'
                                 : 'text-muted-foreground hover:text-foreground'}`}>
                               {label} <span className="tabular-nums">{n}</span>
@@ -1287,7 +1287,7 @@ const CompanyDashboardPage = () => {
                     ) : jobs.length === 0 ? (
                       <Card>
                         <CardContent className="py-14 text-center">
-                          <span className="mx-auto mb-4 h-14 w-14 rounded-2xl bg-primary/10 text-primary dark:text-violet-300 flex items-center justify-center">
+                          <span className="mx-auto mb-4 h-14 w-14 rounded-xl bg-primary/10 text-primary dark:text-violet-300 flex items-center justify-center">
                             <Briefcase className="h-7 w-7" />
                           </span>
                           <p className="font-heading text-xl font-semibold mb-1 text-foreground">No jobs posted yet</p>

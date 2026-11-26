@@ -79,7 +79,7 @@ export const formatTokens = (n) => {
 
 
 export const StatCard = ({ icon: Icon, label, value, accent }) => (
-  <div className={`${CARD_CLASS} ui-card-shadow rounded-2xl p-4 hover:border-violet-500/30 transition-colors`}>
+  <div className={`${CARD_CLASS} ui-card-shadow rounded-xl p-4 hover:border-violet-500/30 transition-colors`}>
     <div className="flex items-center justify-between">
       <div>
         <p className="text-[11px] uppercase tracking-wider text-white/40 mb-1">{label}</p>
