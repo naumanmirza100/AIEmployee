@@ -53,7 +53,7 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
                 onClick={() => setSelected(t.value)}
                 className={`relative text-left rounded-xl border px-3 py-3 transition-all ${
                   active
-                    ? 'border-amber-500/50 bg-amber-500/10 shadow-[0_0_0_3px_rgba(245,158,11,0.08)]'
+                    ? 'border-primary/50 bg-primary/10 shadow-[0_0_0_3px_hsl(var(--primary)/0.08)]'
                     : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/20'
                 }`}
               >
@@ -72,7 +72,7 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
                   >
                     <Icon className="h-3.5 w-3.5" style={{ color: active ? AUTHORING_ACCENT : 'hsl(var(--surface-invert) / 0.7)' }} />
                   </div>
-                  <span className={`text-sm font-semibold ${active ? 'text-amber-200' : 'text-white/90'}`}>
+                  <span className={`text-sm font-semibold ${active ? 'text-[hsl(var(--primary-fill))] dark:text-violet-200' : 'text-white/90'}`}>
                     {t.label}
                   </span>
                 </div>

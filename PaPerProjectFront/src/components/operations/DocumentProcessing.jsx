@@ -96,7 +96,7 @@ const StatCard = ({ icon: Icon, label, value, color, sub }) => (
   <motion.div
     variants={itemVariants}
     className="relative rounded-xl border border-white/[0.06] p-4 overflow-hidden"
-    style={{ background: 'rgba(0,0,0,0.2)' }}
+    style={{ background: 'hsl(var(--card)/0.7)' }}
   >
     <div className="absolute top-0 left-0 w-1 h-full rounded-full" style={{ background: color }} />
     <div className="flex items-center gap-3 pl-2">
@@ -279,8 +279,8 @@ const DocumentProcessing = () => {
           <Input
             id="OPS-docprocessing-search-input"
             data-testid="OPS-docprocessing-search-input"
-            className="pl-10 h-10 rounded-xl text-sm text-white placeholder:text-white/30 border-white/[0.08] focus:border-amber-500/40"
-            style={{ background: 'rgba(0,0,0,0.25)' }}
+            className="pl-10 h-10 rounded-xl text-sm text-white placeholder:text-white/30 border-white/[0.08] focus:border-primary/40"
+            style={{ background: 'hsl(var(--card)/0.7)' }}
             placeholder="Search documents by title..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
@@ -288,32 +288,32 @@ const DocumentProcessing = () => {
         </div>
         {/* Rows per page */}
         <select id="OPS-docprocessing-page-size-select" data-testid="OPS-docprocessing-page-size-select" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-          className="h-10 rounded-xl border border-white/[0.08] text-xs text-white/70 pl-3 pr-8 shrink-0 cursor-pointer outline-none focus:border-amber-500/40 transition-colors"
-          style={{ background: 'rgba(0,0,0,0.25)', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}>
+          className="h-10 rounded-xl border border-white/[0.08] text-xs text-white/70 pl-3 pr-8 shrink-0 cursor-pointer outline-none focus:border-primary/40 transition-colors"
+          style={{ background: 'hsl(var(--card)/0.7)', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}>
           {[5, 10, 20, 30, 50].map(n => (
             <option key={n} value={n} className="bg-[var(--sfc-1a1028)] text-white">{n} rows</option>
           ))}
         </select>
         {/* View Toggle */}
-        <div id="OPS-docprocessing-view-toggle" data-testid="OPS-docprocessing-view-toggle" className="flex items-center h-10 rounded-xl border border-white/[0.08] overflow-hidden" style={{ background: 'rgba(0,0,0,0.25)' }}>
+        <div id="OPS-docprocessing-view-toggle" data-testid="OPS-docprocessing-view-toggle" className="flex items-center h-10 rounded-xl border border-white/[0.08] overflow-hidden" style={{ background: 'hsl(var(--card)/0.7)' }}>
           <button id="OPS-docprocessing-view-list-btn" data-testid="OPS-docprocessing-view-list-btn" onClick={() => setViewMode('list')}
-            className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'list' ? 'text-amber-400 bg-amber-500/10' : 'text-white/30 hover:text-white/50'}`}>
+            className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'list' ? 'text-[hsl(var(--primary-fill))] dark:text-violet-300 bg-primary/10' : 'text-white/30 hover:text-white/50'}`}>
             <LayoutList className="h-4 w-4" />
           </button>
           <div className="w-px h-5 bg-white/[0.08]" />
           <button id="OPS-docprocessing-view-table-btn" data-testid="OPS-docprocessing-view-table-btn" onClick={() => setViewMode('table')}
-            className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'table' ? 'text-amber-400 bg-amber-500/10' : 'text-white/30 hover:text-white/50'}`}>
+            className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'table' ? 'text-[hsl(var(--primary-fill))] dark:text-violet-300 bg-primary/10' : 'text-white/30 hover:text-white/50'}`}>
             <LayoutGrid className="h-4 w-4" />
           </button>
         </div>
         <Button id="OPS-docprocessing-refresh-btn" data-testid="OPS-docprocessing-refresh-btn" variant="outline" size="icon" onClick={fetchDocuments}
           className="h-10 w-10 rounded-xl border-white/[0.08] text-white/40 hover:text-white hover:border-white/20"
-          style={{ background: 'rgba(0,0,0,0.25)' }}>
+          style={{ background: 'hsl(var(--card)/0.7)' }}>
           <RefreshCw className="h-4 w-4" />
         </Button>
         <Button id="OPS-docprocessing-upload-btn" data-testid="OPS-docprocessing-upload-btn" onClick={() => setShowUpload(true)}
           className="h-10 rounded-xl px-5 text-sm font-medium border-0"
-          style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: '#fff', boxShadow: '0 0 20px rgba(245,158,11,0.25)' }}>
+          style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)', color: '#fff', boxShadow: '0 0 20px hsl(var(--primary)/0.25)' }}>
           <Upload className="mr-2 h-4 w-4" />Upload Document
         </Button>
       </motion.div>
@@ -327,16 +327,16 @@ const DocumentProcessing = () => {
             type="button"
             onClick={() => navigate(`/operations/documents/${highlightDocId}`)}
             className="group flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors"
-            style={{ background: 'linear-gradient(90deg, rgba(245,158,11,0.14) 0%, rgba(217,119,6,0.08) 100%)', border: '1px solid rgba(245,158,11,0.35)' }}
+            style={{ background: 'linear-gradient(90deg, hsl(var(--primary)/0.14) 0%, hsl(var(--primary)/0.08) 100%)', border: '1px solid hsl(var(--primary)/0.35)' }}
           >
-            <div className="shrink-0 rounded-lg p-1.5" style={{ background: 'rgba(245,158,11,0.18)' }}>
-              <CheckCircle2 className="h-4 w-4 text-amber-400" />
+            <div className="shrink-0 rounded-lg p-1.5" style={{ background: 'hsl(var(--primary)/0.18)' }}>
+              <CheckCircle2 className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white">Document uploaded &amp; analyzed</p>
               <p className="text-xs text-white/60 mt-0.5">Click to open its details, or use the eye icon in the list.</p>
             </div>
-            <ArrowRight className="h-5 w-5 text-amber-400 shrink-0 transition-transform group-hover:translate-x-1" />
+            <ArrowRight className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300 shrink-0 transition-transform group-hover:translate-x-1" />
             <span
               id="OPS-docprocessing-uploaded-nudge-dismiss-btn"
               data-testid="OPS-docprocessing-uploaded-nudge-dismiss-btn"
@@ -353,15 +353,15 @@ const DocumentProcessing = () => {
       {/* ── Documents List ── */}
       {docsLoading ? (
         <motion.div id="OPS-docprocessing-loading-state" data-testid="OPS-docprocessing-loading-state" variants={itemVariants} className="flex flex-col items-center justify-center py-20">
-          <Loader2 className="h-10 w-10 animate-spin text-amber-500/60" />
+          <Loader2 className="h-10 w-10 animate-spin text-[hsl(var(--primary-fill)/0.6)] dark:text-violet-300/60" />
           <p className="mt-4 text-sm text-white/40">Loading documents...</p>
         </motion.div>
       ) : documents.length === 0 ? (
         <motion.div id="OPS-docprocessing-empty-state" data-testid="OPS-docprocessing-empty-state" variants={itemVariants}>
-          <Card className="border-dashed border-white/[0.08]" style={{ background: 'rgba(0,0,0,0.15)' }}>
+          <Card className="border-dashed border-white/[0.08]" style={{ background: 'hsl(var(--card)/0.7)' }}>
             <CardContent className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="w-20 h-20 rounded-2xl flex items-center justify-center mb-5" style={{ background: 'rgba(245,158,11,0.1)' }}>
-                <Upload className="h-10 w-10 text-amber-500/60" />
+              <div className="w-20 h-20 rounded-2xl flex items-center justify-center mb-5" style={{ background: 'hsl(var(--primary)/0.1)' }}>
+                <Upload className="h-10 w-10 text-[hsl(var(--primary-fill)/0.6)] dark:text-violet-300/60" />
               </div>
               <h3 className="text-lg font-semibold text-white mb-2">No documents yet</h3>
               <p className="text-white/40 mb-6 max-w-sm text-sm">
@@ -372,7 +372,7 @@ const DocumentProcessing = () => {
                 data-testid="OPS-docprocessing-empty-upload-btn"
                 onClick={() => setShowUpload(true)}
                 className="rounded-xl border-0"
-                style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: '#fff' }}
+                style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)', color: '#fff' }}
               >
                 <Upload className="mr-2 h-4 w-4" />Upload Document
               </Button>
@@ -398,7 +398,7 @@ const DocumentProcessing = () => {
                       variants={itemVariants}
                       layout
                       className="group relative rounded-xl border border-white/[0.06] overflow-hidden transition-all duration-200 hover:border-white/[0.12]"
-                      style={{ background: 'rgba(0,0,0,0.2)' }}
+                      style={{ background: 'hsl(var(--card)/0.7)' }}
                     >
                       <div
                         className="absolute top-0 left-0 w-full h-[2px]"
@@ -437,19 +437,19 @@ const DocumentProcessing = () => {
                         </div>
                         <div className={`flex items-center gap-1 shrink-0 transition-opacity ${doc.id === highlightDocId ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`}>
                           {doc.id === highlightDocId && (
-                            <span className="flex items-center gap-1 mr-1 text-amber-400 animate-blink">
+                            <span className="flex items-center gap-1 mr-1 text-[hsl(var(--primary-fill))] dark:text-violet-300 animate-blink">
                               <span className="text-xs font-semibold whitespace-nowrap">View here</span>
                               <ArrowRight className="h-6 w-6 animate-nudge-x" />
                             </span>
                           )}
                           <Button id={`OPS-docprocessing-view-btn-${doc.id}`} data-testid={`OPS-docprocessing-view-btn-${doc.id}`} variant="ghost" size="sm"
-                            className={`h-8 px-3 rounded-lg gap-1.5 text-xs ${doc.id === highlightDocId ? 'text-amber-400 bg-amber-500/15 ring-1 ring-amber-500/40' : 'text-white/60 hover:text-amber-400 hover:bg-amber-500/10'}`}
+                            className={`h-8 px-3 rounded-lg gap-1.5 text-xs ${doc.id === highlightDocId ? 'text-[hsl(var(--primary-fill))] dark:text-violet-300 bg-primary/15 ring-1 ring-primary/40' : 'text-white/60 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300 hover:bg-primary/10'}`}
                             onClick={() => { setHighlightDocId(null); navigate(`/operations/documents/${doc.id}`); }}>
                             <Eye className="h-3.5 w-3.5" />View
                           </Button>
                           {getDocStatus(doc) === 'failed' && (
                             <Button id={`OPS-docprocessing-reprocess-btn-${doc.id}`} data-testid={`OPS-docprocessing-reprocess-btn-${doc.id}`} variant="ghost" size="sm"
-                              className="h-8 px-3 rounded-lg gap-1.5 text-xs text-amber-400 hover:bg-amber-500/10"
+                              className="h-8 px-3 rounded-lg gap-1.5 text-xs text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:bg-primary/10"
                               onClick={() => handleRetry(doc)} disabled={retryingId === doc.id}>
                               {retryingId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                               Retry
@@ -470,7 +470,7 @@ const DocumentProcessing = () => {
 
           {/* ── Table View ── */}
           {viewMode === 'table' && (
-            <motion.div id="OPS-docprocessing-table-view" data-testid="OPS-docprocessing-table-view" variants={itemVariants} className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'rgba(0,0,0,0.2)' }}>
+            <motion.div id="OPS-docprocessing-table-view" data-testid="OPS-docprocessing-table-view" variants={itemVariants} className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'hsl(var(--card)/0.7)' }}>
               <div className="overflow-x-auto">
                 <table id="OPS-docprocessing-table" data-testid="OPS-docprocessing-table" className="w-full text-left">
                   <thead>
@@ -527,18 +527,18 @@ const DocumentProcessing = () => {
                           <td className="px-4 py-3">
                             <div className={`flex items-center justify-end gap-1 transition-opacity ${doc.id === highlightDocId ? 'opacity-100' : 'opacity-50 group-hover:opacity-100'}`}>
                               {doc.id === highlightDocId && (
-                                <span className="flex items-center gap-0.5 text-amber-400 animate-blink">
+                                <span className="flex items-center gap-0.5 text-[hsl(var(--primary-fill))] dark:text-violet-300 animate-blink">
                                   <span className="text-[10px] font-semibold whitespace-nowrap">View</span>
                                   <ArrowRight className="h-5 w-5 animate-nudge-x" />
                                 </span>
                               )}
                               <Button id={`OPS-docprocessing-table-view-btn-${doc.id}`} data-testid={`OPS-docprocessing-table-view-btn-${doc.id}`} variant="ghost" size="icon"
-                                className={`h-7 w-7 rounded-md ${doc.id === highlightDocId ? 'text-amber-400 bg-amber-500/15 ring-1 ring-amber-500/40' : 'text-white/60 hover:text-amber-400 hover:bg-amber-500/10'}`}
+                                className={`h-7 w-7 rounded-md ${doc.id === highlightDocId ? 'text-[hsl(var(--primary-fill))] dark:text-violet-300 bg-primary/15 ring-1 ring-primary/40' : 'text-white/60 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300 hover:bg-primary/10'}`}
                                 onClick={() => { setHighlightDocId(null); navigate(`/operations/documents/${doc.id}`); }}>
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
                               {getDocStatus(doc) === 'failed' && (
-                                <Button id={`OPS-docprocessing-table-reprocess-btn-${doc.id}`} data-testid={`OPS-docprocessing-table-reprocess-btn-${doc.id}`} variant="ghost" size="icon" className="h-7 w-7 rounded-md text-amber-400 hover:bg-amber-500/10"
+                                <Button id={`OPS-docprocessing-table-reprocess-btn-${doc.id}`} data-testid={`OPS-docprocessing-table-reprocess-btn-${doc.id}`} variant="ghost" size="icon" className="h-7 w-7 rounded-md text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:bg-primary/10"
                                   onClick={() => handleRetry(doc)} disabled={retryingId === doc.id} title="Retry processing">
                                   {retryingId === doc.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                                 </Button>
@@ -581,7 +581,7 @@ const DocumentProcessing = () => {
                       <span key={`dot-${i}`} className="text-[11px] text-white/20 px-1">...</span>
                     ) : (
                       <button key={p} id={`OPS-docprocessing-page-btn-${p}`} data-testid={`OPS-docprocessing-page-btn-${p}`} onClick={() => setPage(p)}
-                        className={`h-8 min-w-[32px] rounded-lg text-[11px] font-medium transition-colors ${p === page ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white hover:bg-white/[0.05]'}`}>
+                        className={`h-8 min-w-[32px] rounded-lg text-[11px] font-medium transition-colors ${p === page ? 'bg-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-300' : 'text-white/40 hover:text-white hover:bg-white/[0.05]'}`}>
                         {p}
                       </button>
                     )
@@ -601,7 +601,7 @@ const DocumentProcessing = () => {
         <DialogContent id="OPS-docprocessing-upload-dialog" data-testid="OPS-docprocessing-upload-dialog" className="sm:max-w-md border-white/[0.08] text-white" style={{ background: 'var(--sfc-0c0816)' }}>
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
-              <Upload className="h-5 w-5 text-amber-500" />
+              <Upload className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
               Upload & Process Document
             </DialogTitle>
             <DialogDescription className="text-white/40">
@@ -611,8 +611,8 @@ const DocumentProcessing = () => {
 
           <div className="space-y-4 mt-2">
             {/* Processing steps indicator */}
-            <div className="rounded-xl border border-white/[0.06] p-3" style={{ background: 'rgba(245,158,11,0.05)' }}>
-              <p className="text-[11px] text-amber-400/80 font-medium mb-2 flex items-center gap-1.5">
+            <div className="rounded-xl border border-white/[0.06] p-3" style={{ background: 'hsl(var(--primary)/0.05)' }}>
+              <p className="text-[11px] text-[hsl(var(--primary-fill)/0.8)] dark:text-violet-300/80 font-medium mb-2 flex items-center gap-1.5">
                 <Zap className="h-3.5 w-3.5" /> AI Processing Pipeline
               </p>
               <div className="grid grid-cols-2 gap-2">
@@ -623,7 +623,7 @@ const DocumentProcessing = () => {
                   { label: 'Summary Generation', icon: Sparkles },
                 ].map((step, i) => (
                   <div key={i} className="flex items-center gap-2 text-[10px] text-white/35">
-                    <step.icon className="h-3 w-3 text-amber-500/50" />
+                    <step.icon className="h-3 w-3 text-[hsl(var(--primary-fill)/0.5)] dark:text-violet-300/50" />
                     {step.label}
                   </div>
                 ))}
@@ -638,8 +638,8 @@ const DocumentProcessing = () => {
                 type="file"
                 accept=".pdf,.docx,.xlsx,.csv,.pptx,.txt,.md"
                 onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                className="h-10 rounded-xl border-white/[0.08] text-white file:text-amber-400 file:bg-transparent file:border-0 file:font-medium cursor-pointer"
-                style={{ background: 'rgba(0,0,0,0.3)' }}
+                className="h-10 rounded-xl border-white/[0.08] text-white file:text-[hsl(var(--primary-fill))] dark:file:text-violet-300 file:bg-transparent file:border-0 file:font-medium cursor-pointer"
+                style={{ background: 'hsl(var(--card)/0.7)' }}
               />
               {uploadFile && (
                 <div className="flex items-center gap-2 text-xs text-white/40 px-1">
@@ -657,7 +657,7 @@ const DocumentProcessing = () => {
                 value={uploadTitle}
                 onChange={(e) => setUploadTitle(e.target.value)}
                 className="h-10 rounded-xl border-white/[0.08] text-white placeholder:text-white/20"
-                style={{ background: 'rgba(0,0,0,0.3)' }}
+                style={{ background: 'hsl(var(--card)/0.7)' }}
               />
             </div>
             <div className="space-y-2">
@@ -669,7 +669,7 @@ const DocumentProcessing = () => {
                 value={uploadTags}
                 onChange={(e) => setUploadTags(e.target.value)}
                 className="h-10 rounded-xl border-white/[0.08] text-white placeholder:text-white/20"
-                style={{ background: 'rgba(0,0,0,0.3)' }}
+                style={{ background: 'hsl(var(--card)/0.7)' }}
               />
             </div>
 
@@ -704,7 +704,7 @@ const DocumentProcessing = () => {
               disabled={!uploadFile}
               className="rounded-xl border-0"
               style={{
-                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)',
                 color: '#fff',
               }}
             >

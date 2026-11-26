@@ -26,6 +26,9 @@
         /* #3268E0: filled buttons. The brand blue one step deeper, so white text on it reads at 5:1 (the
            brand #427CF5 gives 3.8:1). The UI refresh, 26 Nov 2026. */
         --primary-fill: 221 74% 54%;
+        /* The deeper end of a brand gradient, and brand-coloured text that reads on this theme's page. */
+        --primary-fill-deep: 221 66% 46%;
+        --brand-ink: hsl(221 74% 48%);
 
         /* Accent shades chosen for a dark page. The pale ones (100-400)
            are text and vanish on white; the deep ones (700-900) are fills
@@ -262,6 +265,8 @@
         /* #a259ff — unchanged. */
         --brand-accent: 270 100% 63%;
         --primary-fill: 262.1 83.3% 57.8%;
+        --primary-fill-deep: 263 70% 50%;
+        --brand-ink: #c4b5fd;
 
         --c-violet-100: 251.4 91.3% 95.5%;    /* violet-100 #ede9fe */
         --c-violet-200: 250.5 95.2% 91.8%;    /* violet-200 #ddd6fe */

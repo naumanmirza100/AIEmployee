@@ -113,7 +113,7 @@ const OperationsDashboard = () => {
     { label: 'Total Documents', slug: 'total-documents', value: stats?.total_documents ?? '-', icon: FileText, color: '#3b82f6', gradient: 'from-blue-500/10 to-blue-600/5' },
     { label: 'Processed', slug: 'processed', value: stats?.processed_documents ?? '-', icon: TrendingUp, color: '#10b981', gradient: 'from-emerald-500/10 to-emerald-600/5' },
     { label: 'Text Chunks', slug: 'text-chunks', value: stats?.total_chunks ?? '-', icon: Hash, color: '#8b5cf6', gradient: 'from-violet-500/10 to-violet-600/5' },
-    { label: 'Doc Types', slug: 'doc-types', value: stats?.document_types ? Object.keys(stats.document_types).length : '-', icon: Tag, color: '#f59e0b', gradient: 'from-amber-500/10 to-amber-600/5' },
+    { label: 'Doc Types', slug: 'doc-types', value: stats?.document_types ? Object.keys(stats.document_types).length : '-', icon: Tag, color: '#14b8a6', gradient: 'from-teal-500/10 to-teal-600/5' },
   ];
 
   return (
@@ -150,7 +150,7 @@ const OperationsDashboard = () => {
           {/* Quick Actions */}
           <div>
             <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-amber-400" />
+              <TrendingUp className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
               Quick Actions
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 w-full max-w-full">
@@ -187,9 +187,9 @@ const OperationsDashboard = () => {
                   desc: 'Ask questions about your documents',
                   icon: MessageSquareText,
                   tab: 'knowledge-qa',
-                  color: '#f59e0b',
-                  bgColor: 'rgba(245,158,11,0.15)',
-                  borderHover: 'rgba(245,158,11,0.4)',
+                  color: 'hsl(var(--primary-fill))',
+                  bgColor: 'hsl(var(--primary)/0.15)',
+                  borderHover: 'hsl(var(--primary)/0.4)',
                 },
                 {
                   label: 'Authoring',
