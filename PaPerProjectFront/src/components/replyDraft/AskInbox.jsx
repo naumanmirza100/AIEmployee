@@ -38,14 +38,14 @@ const AskInbox = ({ hasMailbox, onOpenEmail }) => {
 
   if (!hasMailbox) {
     return (
-      <div className="rounded-xl bg-white/5 border border-white/10 p-6 text-sm text-gray-300">
+      <div className="rounded-xl bg-card/90 dark:bg-white/5 border border-white/10 p-6 text-sm text-gray-300">
         Connect the inbox on the Dashboard first; then ask anything about its mail.
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl bg-white/5 border border-white/10 flex flex-col min-h-[60vh]">
+    <div className="rounded-xl bg-card/90 dark:bg-white/5 border border-white/10 flex flex-col min-h-[60vh]">
       <div className="flex-1 p-4 space-y-5 overflow-y-auto custom-scrollbar">
         {turns.length === 0 && (
           <div className="text-sm text-gray-400 space-y-3">

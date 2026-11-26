@@ -53,7 +53,7 @@ export default function FrontlineEmbedCsatPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-violet-950/40 to-slate-900">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-pure-black/40 backdrop-blur-sm p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-card/90 dark:bg-pure-black/40 backdrop-blur-sm p-6 shadow-xl">
         {submitted ? (
           <div className="text-center py-8">
             <CheckCircle className="h-12 w-12 text-emerald-400 mx-auto mb-3" />

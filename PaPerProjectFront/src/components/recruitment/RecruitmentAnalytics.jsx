@@ -254,7 +254,7 @@ const RecruitmentAnalytics = () => {
 
   if (!analytics) {
     return (
-      <Card className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-empty-state" data-testid="REC-analytics-empty-state">
+      <Card className="overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-empty-state" data-testid="REC-analytics-empty-state">
         <CardContent className="py-8 sm:py-12 px-4 text-center">
           <p className="text-white/60 text-sm sm:text-base">No analytics data available</p>
         </CardContent>
@@ -271,7 +271,7 @@ const RecruitmentAnalytics = () => {
   return (
     <div className="space-y-4 sm:space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Filters */}
-      <Card className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-filters-card" data-testid="REC-analytics-filters-card">
+      <Card className="overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-filters-card" data-testid="REC-analytics-filters-card">
         <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6 space-y-3">
           {/* Row 1: Job filter */}
           <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
@@ -417,7 +417,7 @@ const RecruitmentAnalytics = () => {
 
       {/* Recruitment Funnel */}
       {funnel && funnel.length > 0 && (
-        <Card className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-funnel-card" data-testid="REC-analytics-funnel-card">
+        <Card className="overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-funnel-card" data-testid="REC-analytics-funnel-card">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -470,7 +470,7 @@ const RecruitmentAnalytics = () => {
 
       {/* CV Statistics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <Card className="min-w-0 overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-chart-cvs-by-decision" data-testid="REC-analytics-chart-cvs-by-decision">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-chart-cvs-by-decision" data-testid="REC-analytics-chart-cvs-by-decision">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <PieChart className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -486,7 +486,7 @@ const RecruitmentAnalytics = () => {
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-chart-cvs-over-time" data-testid="REC-analytics-chart-cvs-over-time">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-chart-cvs-over-time" data-testid="REC-analytics-chart-cvs-over-time">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -506,7 +506,7 @@ const RecruitmentAnalytics = () => {
 
       {/* Interview Statistics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <Card className="min-w-0 overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-chart-interviews-by-status" data-testid="REC-analytics-chart-interviews-by-status">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-chart-interviews-by-status" data-testid="REC-analytics-chart-interviews-by-status">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <Activity className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -523,7 +523,7 @@ const RecruitmentAnalytics = () => {
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-chart-interviews-over-time" data-testid="REC-analytics-chart-interviews-over-time">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm" id="REC-analytics-chart-interviews-over-time" data-testid="REC-analytics-chart-interviews-over-time">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />

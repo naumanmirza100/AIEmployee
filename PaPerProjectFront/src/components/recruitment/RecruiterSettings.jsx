@@ -648,7 +648,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
             content switching. */}
 
         <TabsContent id="REC-settings-email-panel" data-testid="REC-settings-email-panel" value="email">
-          <Card id="REC-settings-email-card" data-testid="REC-settings-email-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-email-card" data-testid="REC-settings-email-card" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Email Settings</CardTitle>
               <CardDescription>
@@ -788,7 +788,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
         </TabsContent>
 
         <TabsContent id="REC-settings-interview-panel" data-testid="REC-settings-interview-panel" value="interview">
-          <Card id="REC-settings-interview-card" data-testid="REC-settings-interview-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-interview-card" data-testid="REC-settings-interview-card" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Interview Settings</CardTitle>
               <CardDescription>
@@ -1355,7 +1355,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
         </TabsContent>
 
         <TabsContent id="REC-settings-qualification-panel" data-testid="REC-settings-qualification-panel" value="qualification">
-          <Card id="REC-settings-qualification-card" data-testid="REC-settings-qualification-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-qualification-card" data-testid="REC-settings-qualification-card" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Qualification Settings</CardTitle>
               <CardDescription>

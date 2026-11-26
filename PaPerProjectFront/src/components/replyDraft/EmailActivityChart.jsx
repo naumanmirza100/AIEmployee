@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, Loader2 } from 'lucide-react';
 import { getReplyAnalytics } from '@/services/replyDraftService';
+import { useTheme } from '@/theme/ThemeProvider';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -46,6 +47,14 @@ export const EmailActivityChart = ({ active = true, variant = 'modal', days, ref
   }, [active, windowDays, refreshKey]);
 
   const buckets = analytics?.buckets || [];
+  // The chart is drawn on a canvas, which can't read CSS variables (an `hsl(var(--…))` colour came out black,
+  // 26 Nov 2026). The brand colour is read from the page when drawing, and again when the theme changes.
+  const { isDark } = useTheme();
+  const brand = (alpha) => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--primary-fill').trim();
+    if (!v) return alpha == null ? (isDark ? '#7c3aed' : '#427cf5') : `rgba(${isDark ? '124, 58, 237' : '66, 124, 245'}, ${alpha})`;
+    return alpha == null ? `hsl(${v})` : `hsl(${v} / ${alpha})`;
+  };
   const granularity = analytics?.granularity || 'day';  // 'day' | 'week'
   const isDash = variant === 'dashboard';
 
@@ -59,8 +68,8 @@ export const EmailActivityChart = ({ active = true, variant = 'modal', days, ref
       {
         label: 'Received',
         data: buckets.map((b) => (b.received != null ? b.received : (b.count || 0))),
-        borderColor: 'hsl(var(--primary-fill))',
-        backgroundColor: 'hsl(var(--primary)/0.15)',
+        borderColor: brand(),
+        backgroundColor: brand(0.15),
         fill: true,
         tension: 0.35,
         pointRadius: granularity === 'week' ? 3 : 2.5,
@@ -138,7 +147,7 @@ export const EmailActivityChart = ({ active = true, variant = 'modal', days, ref
   // The dashboard sits on the dark agent shell, so it gets the glass-card
   // treatment. The modal keeps the theme-token border it always had.
   const wrapCls = isDash
-    ? 'rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm p-4 space-y-3'
+    ? 'rounded-2xl bg-card/90 dark:bg-pure-black/40 border border-white/10 backdrop-blur-sm p-4 space-y-3'
     : 'rounded-lg border p-4 space-y-3';
   const titleCls = isDash ? 'text-sm font-semibold text-white' : 'text-sm font-semibold';
   const iconCls = isDash ? 'h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300' : 'h-4 w-4 text-primary';

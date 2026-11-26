@@ -418,7 +418,7 @@ const Documents = () => {
       {/* Header with gradient */}
       <motion.div 
         variants={itemVariants}
-        className="relative overflow-hidden rounded-2xl border border-white/10 bg-pure-black/20 backdrop-blur-sm p-6"
+        className="relative overflow-hidden rounded-2xl border border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm p-6"
       >
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -471,7 +471,7 @@ const Documents = () => {
 
       {/* Create form — now a pop-up dialog (was an inline expanding card). */}
       <Dialog open={createExpanded} onOpenChange={(o) => { if (!o) closeCreateForm(); }}>
-        <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar p-0 border-white/10 bg-pure-black/40 backdrop-blur-sm">
+        <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar p-0 border-white/10 bg-card/90 dark:bg-pure-black/40 backdrop-blur-sm">
           {/* Named for screen readers; the heading below is what everyone else sees (the test report's Marketing 6). */}
           <DialogTitle className="sr-only">Create a new document</DialogTitle>
           <div className="relative">
@@ -637,7 +637,7 @@ const Documents = () => {
 
       {/* Search and filters */}
       <motion.div variants={itemVariants}>
-        <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+        <Card className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3" data-tour-mkt="docs-search">
@@ -737,7 +737,7 @@ const Documents = () => {
 
       {/* Document list */}
       <motion.div variants={itemVariants}>
-        <Card className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm shadow-lg">
+        <Card className="overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm shadow-lg">
           <CardContent className="p-0">
             {loadingList ? (
               <div className="flex flex-col items-center justify-center py-24">

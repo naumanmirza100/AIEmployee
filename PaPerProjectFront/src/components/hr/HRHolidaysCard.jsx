@@ -83,7 +83,7 @@ export default function HRHolidaysCard() {
   const past = (holidays || []).length - upcoming.length;
 
   return (
-    <Card data-testid="hr-holidays" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+    <Card data-testid="hr-holidays" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <CalendarOff className="h-5 w-5 text-violet-400" /> Company holidays

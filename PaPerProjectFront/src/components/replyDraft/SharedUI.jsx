@@ -94,7 +94,7 @@ export const FolderTile = ({ icon: Icon, label, count, subtitle, accent = 'cyan'
     <button
       type="button"
       onClick={onClick}
-      className={`w-full text-left rounded-2xl bg-gradient-to-br ${a.glow} bg-pure-black/40 border border-white/10 backdrop-blur-sm p-5 flex items-start gap-4 transition ${a.ring} hover:bg-white/[0.04]`}
+      className={`w-full text-left rounded-2xl bg-gradient-to-br ${a.glow} bg-card/90 dark:bg-pure-black/40 border border-white/10 backdrop-blur-sm p-5 flex items-start gap-4 transition ${a.ring} hover:bg-white/[0.04]`}
     >
       <div className="h-12 w-12 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center shrink-0">
         <Icon className={`h-6 w-6 ${a.icon}`} />

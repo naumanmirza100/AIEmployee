@@ -415,7 +415,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
         </div>
 
         {/* Upload Form Card */}
-        <Card id="REC-cvprocessing-upload-card" data-testid="REC-cvprocessing-upload-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+        <Card id="REC-cvprocessing-upload-card" data-testid="REC-cvprocessing-upload-card" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
           <CardHeader className="p-4 sm:p-6">
             <CardTitle className="text-lg sm:text-xl text-white">Process CV Files</CardTitle>
             <CardDescription className="text-xs sm:text-sm text-white/60">
@@ -627,7 +627,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
 
         {/* Results */}
         {results && results.results && (
-          <Card id="REC-cvprocessing-results-card" data-testid="REC-cvprocessing-results-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+          <Card id="REC-cvprocessing-results-card" data-testid="REC-cvprocessing-results-card" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
             <CardHeader className="p-4 sm:p-6">
               <CardTitle className="text-lg sm:text-xl text-white">Processing Results</CardTitle>
               <CardDescription className="text-xs sm:text-sm text-white/60">

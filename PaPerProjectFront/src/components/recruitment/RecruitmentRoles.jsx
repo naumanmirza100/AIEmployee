@@ -39,7 +39,7 @@ export default function RecruitmentRoles() {
   };
 
   return (
-    <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm" data-testid="REC-settings-roles-card">
+    <Card className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm" data-testid="REC-settings-roles-card">
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-violet-400" /> Roles</CardTitle>
         <CardDescription>

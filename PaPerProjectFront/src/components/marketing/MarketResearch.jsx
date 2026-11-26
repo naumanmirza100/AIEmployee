@@ -502,7 +502,7 @@ const MarketResearch = () => {
       <motion.div 
         variants={itemVariants}
         className={cn(
-          "shrink-0 flex flex-col rounded-2xl border border-white/10 bg-pure-black/20 backdrop-blur-sm overflow-hidden transition-all duration-300",
+          "shrink-0 flex flex-col rounded-2xl border border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm overflow-hidden transition-all duration-300",
           sidebarOpen ? "w-80" : "w-16"
         )}
       >
@@ -724,7 +724,7 @@ const MarketResearch = () => {
         variants={itemVariants}
         className="flex-1 min-w-0 min-h-0"
       >
-        <Card className="h-full flex flex-col overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm rounded-2xl">
+        <Card className="h-full flex flex-col overflow-hidden border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm rounded-2xl">
           {/* Header */}
           <CardHeader className="shrink-0 border-b border-white/10 pb-3 rounded-t-2xl bg-white/[0.03]">
             <div className="flex items-center justify-between">

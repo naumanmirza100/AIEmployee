@@ -46,7 +46,7 @@ export default function ColleaguesCampaigns() {
   if (!campaigns.length) return null;
 
   return (
-    <Card data-testid="MKT-colleagues-campaigns" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
+    <Card data-testid="MKT-colleagues-campaigns" className="border-white/10 bg-card/90 dark:bg-pure-black/20 backdrop-blur-sm">
       <CardHeader className="pb-3">
         <CardTitle className="text-base text-white flex items-center gap-2">
           <Users className="h-4 w-4" /> Colleagues' campaigns
