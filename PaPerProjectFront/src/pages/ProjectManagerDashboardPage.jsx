@@ -227,7 +227,7 @@ const ProjectManagerDashboardPage = () => {
         type="button"
         onClick={() => { dismiss(); handleReplayTabTour(tabKey); }}
         title={`Take a guided tour of the ${tour?.label || 'this'} tab`}
-        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-xs font-semibold hover:bg-cyan-500/20 hover:text-cyan-100 transition ${glow ? 'pm-tab-spotlight' : ''}`}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/40 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-200 text-xs font-semibold hover:bg-primary/20 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 transition ${glow ? 'pm-tab-spotlight' : ''}`}
       >
         <GraduationCap className="h-3.5 w-3.5" />
         Tour this tab
@@ -245,7 +245,7 @@ const ProjectManagerDashboardPage = () => {
         title={enabled ? 'Hide the ! help icons on every element' : 'Show the ! help icons on every element'}
         className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition border ${
           enabled
-            ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 hover:text-cyan-100'
+            ? 'border-primary/40 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-200 hover:bg-primary/20 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200'
             : 'border-white/10 bg-white/[0.03] text-white/50 hover:bg-white/[0.06] hover:text-white/70'
         }`}
       >
@@ -468,27 +468,27 @@ const ProjectManagerDashboardPage = () => {
               onClick={handleReplayTutorial}
               data-tour-pm="replay"
               title="Replay the onboarding tutorial"
-              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-sm font-semibold hover:bg-cyan-500/20 hover:text-cyan-100 transition ${spotlightTour ? 'pm-spotlight' : ''}`}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-primary/40 bg-primary/10 text-[hsl(var(--primary-fill))] dark:text-violet-200 text-sm font-semibold hover:bg-primary/20 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 transition ${spotlightTour ? 'pm-spotlight' : ''}`}
             >
               <GraduationCap className="h-4 w-4" />
               Take the Tour
             </button>
             {spotlightTooltip && (
-              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-cyan-400/40 bg-[var(--sfc-0a1929)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-primary/40 bg-[var(--sfc-0a1929)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
                 👋 Take the tour anytime from here
-                <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--sfc-0a1929)] border-t border-l border-cyan-400/40 rotate-45" />
+                <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--sfc-0a1929)] border-t border-l border-primary/40 rotate-45" />
               </div>
             )}
           </div>
           <style>{`
             @keyframes pmSpotlight {
-              0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.4), 0 0 0 0 rgba(6, 182, 212, 0.2); }
-              50%      { box-shadow: 0 0 0 6px rgba(6, 182, 212, 0.15), 0 0 0 12px rgba(6, 182, 212, 0.08); }
+              0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary)/0.4), 0 0 0 0 hsl(var(--primary)/0.2); }
+              50%      { box-shadow: 0 0 0 6px hsl(var(--primary)/0.15), 0 0 0 12px hsl(var(--primary)/0.08); }
             }
             .pm-spotlight { animation: pmSpotlight 1.6s ease-in-out infinite; }
             @keyframes pmTabSpotlight {
-              0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.35), 0 0 0 0 rgba(6, 182, 212, 0.18); }
-              50%      { box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.14), 0 0 0 8px rgba(6, 182, 212, 0.07); }
+              0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary)/0.35), 0 0 0 0 hsl(var(--primary)/0.18); }
+              50%      { box-shadow: 0 0 0 4px hsl(var(--primary)/0.14), 0 0 0 8px hsl(var(--primary)/0.07); }
             }
             .pm-tab-spotlight { animation: pmTabSpotlight 1.6s ease-in-out infinite; }
             @keyframes pmDotPulse {
@@ -555,7 +555,7 @@ const ProjectManagerDashboardPage = () => {
                 bgColor: 'rgba(96,165,250,0.2)',
                 borderColor: 'rgba(96,165,250,0.2)',
                 gradientFrom: 'rgba(96,165,250,0.2)',
-                gradientTo: 'rgba(34,211,238,0.1)',
+                gradientTo: 'hsl(var(--primary)/0.1)',
               },
             ].map((card) => (
               <div

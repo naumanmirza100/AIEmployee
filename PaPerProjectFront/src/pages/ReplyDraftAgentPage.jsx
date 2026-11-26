@@ -1050,7 +1050,7 @@ const ReplyDraftAgentPage = () => {
                     data-tour="rd-compose"
                     variant="outline"
                     aria-label="Compose"
-                    className="h-9 w-9 p-0 shrink-0 bg-white/5 border-fuchsia-500/30 text-fuchsia-200 hover:bg-fuchsia-500/10 hover:text-fuchsia-100"
+                    className="h-9 w-9 p-0 shrink-0 bg-white/5 border-primary/30 text-[hsl(var(--primary-fill))] dark:text-violet-200 hover:bg-primary/10 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200"
                     onClick={() => setComposeOpen(true)}
                   >
                     <PenSquare className="h-4 w-4" />
@@ -1082,7 +1082,7 @@ const ReplyDraftAgentPage = () => {
                   onClick={refreshAll}
                   disabled={refreshing}
                   aria-label="Refresh"
-                  className="h-9 w-9 p-0 shrink-0 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-pure-white shadow-lg shadow-cyan-500/20 disabled:opacity-60"
+                  className="h-9 w-9 p-0 shrink-0 bg-gradient-to-r from-primary to-primary hover:from-primary hover:to-primary text-pure-white shadow-lg shadow-primary/20 disabled:opacity-60"
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                 </Button>
@@ -1107,7 +1107,7 @@ const ReplyDraftAgentPage = () => {
               {/* Contextual Stats — each card deep-links into the matching
                   tab of the Emails page. */}
               <div data-tour="rd-stats" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-                <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300"
+                <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-primary/20 to-primary/10" iconTint="text-[hsl(var(--primary-fill))] dark:text-violet-300"
                   onClick={() => openEmails('inbox')} />
                 <StatCard icon={FileText} label="Drafts to Review" value={stats.draftsPending} tint="from-amber-500/20 to-orange-500/10" iconTint="text-amber-300"
                   onClick={() => openEmails('drafts')} />
@@ -1175,13 +1175,13 @@ const ReplyDraftAgentPage = () => {
                 <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                     <div className="flex items-center gap-2">
-                      <Inbox className="h-4 w-4 text-cyan-300" />
+                      <Inbox className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
                       <span className="text-sm font-semibold text-white">Latest inbox</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => openEmails('inbox')}
-                      className="text-xs text-cyan-300 hover:text-cyan-200 font-medium"
+                      className="text-xs text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 font-medium"
                     >
                       View all
                     </button>
@@ -1205,13 +1205,13 @@ const ReplyDraftAgentPage = () => {
                 <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                     <div className="flex items-center gap-2">
-                      <Edit3 className="h-4 w-4 text-fuchsia-300" />
+                      <Edit3 className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
                       <span className="text-sm font-semibold text-white">Drafts to review</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => openEmails('drafts')}
-                      className="text-xs text-fuchsia-300 hover:text-fuchsia-200 font-medium"
+                      className="text-xs text-[hsl(var(--primary-fill))] dark:text-violet-300 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 font-medium"
                     >
                       View all
                     </button>
@@ -1253,14 +1253,14 @@ const ReplyDraftAgentPage = () => {
                       <button
                         onClick={() => setActiveTab('inbox')}
                         className={`w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'inbox'
-                            ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-200 border border-cyan-500/30'
+                            ? 'bg-gradient-to-r from-primary/20 to-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200 border border-primary/30'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                           }`}
                       >
                         <Inbox className="h-4 w-4 shrink-0" />
                         Inbox
                         {pendingReplies.length > 0 && (
-                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-cyan-500/30 text-cyan-100' : 'bg-white/10 text-gray-300'}`}>
+                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-primary/30 text-[hsl(var(--primary-fill))] dark:text-violet-200' : 'bg-white/10 text-gray-300'}`}>
                             {pendingReplies.length}
                           </span>
                         )}
@@ -1270,14 +1270,14 @@ const ReplyDraftAgentPage = () => {
                       <button
                         onClick={() => setActiveTab('drafts')}
                         className={`w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'drafts'
-                            ? 'bg-gradient-to-r from-fuchsia-500/20 to-purple-500/20 text-fuchsia-200 border border-fuchsia-500/30'
+                            ? 'bg-gradient-to-r from-primary/20 to-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200 border border-primary/30'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                           }`}
                       >
                         <Edit3 className="h-4 w-4 shrink-0" />
                         Drafts
                         {unsentDrafts.length > 0 && (
-                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
+                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-primary/30 text-[hsl(var(--primary-fill))] dark:text-violet-200' : 'bg-white/10 text-gray-300'}`}>
                             {unsentDrafts.length}
                           </span>
                         )}
@@ -1287,14 +1287,14 @@ const ReplyDraftAgentPage = () => {
                       <button
                         onClick={() => setActiveTab('sent')}
                         className={`w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'sent'
-                            ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-200 border border-emerald-500/30'
+                            ? 'bg-gradient-to-r from-primary/20 to-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200 border border-primary/30'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                           }`}
                       >
                         <Check className="h-4 w-4 shrink-0" />
                         Sent
                         {sentEmails.length > 0 && (
-                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'sent' ? 'bg-emerald-500/30 text-emerald-100' : 'bg-white/10 text-gray-300'}`}>
+                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'sent' ? 'bg-primary/30 text-[hsl(var(--primary-fill))] dark:text-violet-100' : 'bg-white/10 text-gray-300'}`}>
                             {sentEmails.length}
                           </span>
                         )}
@@ -1318,7 +1318,7 @@ const ReplyDraftAgentPage = () => {
                             ? 'Search unsent drafts…'
                             : 'Search sent emails…'
                       }
-                      className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-white/10 transition"
                     />
                   </div>
 
@@ -1327,7 +1327,7 @@ const ReplyDraftAgentPage = () => {
                       value={effectiveSyncDays}
                       onChange={(e) => setSyncDays(Number(e.target.value))}
                       title="Filter to a rolling time window. Mail is pre-synced in the background, so switching is instant."
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-primary/50 focus:bg-white/10 transition"
                     >
                       {timeWindowOptions.map((o) => (
                         <option key={o.value} value={o.value} className="bg-gray-900">
@@ -1343,7 +1343,7 @@ const ReplyDraftAgentPage = () => {
                       value={inboxFilter}
                       onChange={(e) => setInboxFilter(e.target.value)}
                       title="The AI reads each new email as it arrives: show only what is urgent, what waits for an answer, or one kind of email."
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-primary/50 focus:bg-white/10 transition"
                     >
                       {INBOX_FILTERS.map((o) => (
                         <option key={o.value} value={o.value} className="bg-gray-900">
@@ -1360,7 +1360,7 @@ const ReplyDraftAgentPage = () => {
                     30s poll; sits above the list so rows don't shift. */}
                 {((inboxLoading && activeTab === 'inbox') || (sentLoading && activeTab === 'sent')) && (
                   <div className="relative h-0.5 overflow-hidden bg-white/5">
-                    <div className={`absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent ${activeTab === 'sent' ? 'via-emerald-400/70' : 'via-cyan-400/70'} to-transparent animate-[inbox-loading_1.2s_ease-in-out_infinite]`} />
+                    <div className={`absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-primary/70 to-transparent animate-[inbox-loading_1.2s_ease-in-out_infinite]`} />
                   </div>
                 )}
 
@@ -1444,13 +1444,13 @@ const ReplyDraftAgentPage = () => {
               {!selectedReply && !selectedDraft && (
                 <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm min-h-[60vh] lg:min-h-0 lg:h-full flex items-center justify-center">
                   <div className="text-center max-w-md px-6">
-                    <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500/20 to-fuchsia-500/20 border border-white/10 flex items-center justify-center mb-5">
-                      <MailOpen className="h-10 w-10 text-cyan-300" />
+                    <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-primary/20 to-primary/20 border border-white/10 flex items-center justify-center mb-5">
+                      <MailOpen className="h-10 w-10 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
                     </div>
                     <h3 className="text-xl font-bold text-white mb-2">Select a message to begin</h3>
                     <p className="text-sm text-gray-400">
-                      Pick an incoming reply from the <span className="text-cyan-300 font-medium">Inbox</span> to generate an AI draft,
-                      or open an existing <span className="text-fuchsia-300 font-medium">Draft</span> to review and send it.
+                      Pick an incoming reply from the <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-medium">Inbox</span> to generate an AI draft,
+                      or open an existing <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-medium">Draft</span> to review and send it.
                     </p>
                   </div>
                 </div>
@@ -1523,10 +1523,10 @@ const ReplyDraftAgentPage = () => {
                           <X className="h-4 w-4" />
                         </button>
                         {isComposeDraft && (
-                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-fuchsia-500/10 border border-fuchsia-500/30 text-xs text-fuchsia-200">
+                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-xs text-[hsl(var(--primary-fill))] dark:text-violet-200">
                             <PenSquare className="h-3 w-3 shrink-0" />
                             <span className="font-semibold">New message</span>
-                            <span className="hidden sm:inline text-fuchsia-300/70">— edit and send below</span>
+                            <span className="hidden sm:inline text-[hsl(var(--primary-fill)/0.7)] dark:text-violet-300/70">— edit and send below</span>
                           </div>
                         )}
                         {/* "In reply to" chip — only on Sent-tab rows whose
@@ -1537,16 +1537,16 @@ const ReplyDraftAgentPage = () => {
                           <button
                             type="button"
                             onClick={() => handleOpenParentEmail(selectedReply.replies_to)}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-500/50 transition group max-w-[320px]"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-xs text-[hsl(var(--primary-fill))] dark:text-violet-200 hover:bg-primary/20 hover:border-primary/50 transition group max-w-[320px]"
                             title="Open the message this reply was sent in response to"
                           >
                             <CornerUpLeft className="h-3 w-3 shrink-0" />
-                            <span className="text-cyan-300/80 font-semibold shrink-0">In reply to:</span>
+                            <span className="text-[hsl(var(--primary-fill)/0.8)] dark:text-violet-300/80 font-semibold shrink-0">In reply to:</span>
                             <span className="truncate text-white/90 group-hover:text-white">
                               {selectedReply.replies_to.subject || '(no subject)'}
                             </span>
                             {selectedReply.replies_to.from_email && (
-                              <span className="hidden sm:inline text-cyan-300/60 shrink-0">
+                              <span className="hidden sm:inline text-[hsl(var(--primary-fill)/0.6)] dark:text-violet-300/60 shrink-0">
                                 · {selectedReply.replies_to.from_name || selectedReply.replies_to.from_email}
                               </span>
                             )}
@@ -1604,10 +1604,10 @@ const ReplyDraftAgentPage = () => {
                         <div className="mt-3 text-xs text-gray-500">{originalEmail.attachments_missing}</div>
                       )}
                       {selectedReply?.analysis && (
-                        <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
-                          <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
+                        <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/20 flex gap-2.5">
+                          <Sparkles className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300 shrink-0 mt-0.5" />
                           <div>
-                            <div className="text-xs font-semibold text-cyan-200 mb-0.5">AI Analysis</div>
+                            <div className="text-xs font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-200 mb-0.5">AI Analysis</div>
                             <div className="text-xs text-gray-300 leading-relaxed">{selectedReply.analysis}</div>
                           </div>
                         </div>
@@ -1625,7 +1625,7 @@ const ReplyDraftAgentPage = () => {
                       <HoverTip tip="Draft a reply to this email with AI">
                         <Button
                           onClick={() => setComposerOpen(true)}
-                          className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-pure-white"
+                          className="bg-gradient-to-r from-primary to-primary hover:from-primary hover:to-primary text-pure-white"
                         >
                           <CornerUpLeft className="h-4 w-4 mr-2" />
                           Reply
@@ -1649,8 +1649,8 @@ const ReplyDraftAgentPage = () => {
                 <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
                   <div className="p-5 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-fuchsia-500/30 to-purple-600/30 border border-fuchsia-500/30 flex items-center justify-center">
-                        <Sparkles className="h-4 w-4 text-fuchsia-200" />
+                      <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-primary/30 to-primary/30 border border-primary/30 flex items-center justify-center">
+                        <Sparkles className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-200" />
                       </div>
                       <div>
                         <h3 className="text-sm font-bold text-white">
@@ -1709,7 +1709,7 @@ const ReplyDraftAgentPage = () => {
                         <div>
                           <label className="text-xs font-medium text-gray-300 mb-1.5 block">Tone</label>
                           <select
-                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary/50 focus:bg-white/10 transition"
                             value={tone}
                             onChange={(e) => setTone(e.target.value)}
                             disabled={busy}
@@ -1720,7 +1720,7 @@ const ReplyDraftAgentPage = () => {
                         <div>
                           <label className="text-xs font-medium text-gray-300 mb-1.5 block">Length</label>
                           <select
-                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary/50 focus:bg-white/10 transition"
                             value={length}
                             onChange={(e) => setLength(e.target.value)}
                             disabled={busy}
@@ -1739,7 +1739,7 @@ const ReplyDraftAgentPage = () => {
                             onChange={(e) => setUserContext(e.target.value)}
                             disabled={busy}
                             placeholder="e.g. keep it brief, propose a demo next Tuesday…"
-                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-white/10 transition"
                           />
                         </div>
                       </div>
@@ -1751,7 +1751,7 @@ const ReplyDraftAgentPage = () => {
                         <Button
                           onClick={handleGenerate}
                           disabled={busy}
-                          className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-pure-white font-semibold shadow-lg shadow-cyan-500/20 h-11"
+                          className="w-full bg-gradient-to-r from-primary to-primary hover:from-primary hover:to-primary text-pure-white font-semibold shadow-lg shadow-primary/20 h-11"
                         >
                           {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
                           {busy ? 'Drafting reply…' : 'Generate AI Draft'}
@@ -1765,7 +1765,7 @@ const ReplyDraftAgentPage = () => {
                         <div>
                           <label className="text-xs font-medium text-gray-300 mb-1.5 block">Subject</label>
                           <input
-                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition disabled:opacity-60"
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-white/10 transition disabled:opacity-60"
                             value={editedSubject}
                             onChange={(e) => setEditedSubject(e.target.value)}
                             disabled={busy || isReadOnly}
@@ -1782,13 +1782,13 @@ const ReplyDraftAgentPage = () => {
                               <button
                                 type="button"
                                 onClick={() => setShowBodyPreview(false)}
-                                className={`px-2.5 py-1 transition ${!showBodyPreview ? 'bg-cyan-500/20 text-cyan-200' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}>
+                                className={`px-2.5 py-1 transition ${!showBodyPreview ? 'bg-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}>
                                 Edit
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setShowBodyPreview(true)}
-                                className={`px-2.5 py-1 transition border-l border-white/10 ${showBodyPreview ? 'bg-cyan-500/20 text-cyan-200' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                                className={`px-2.5 py-1 transition border-l border-white/10 ${showBodyPreview ? 'bg-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                               >
                                 Preview
                               </button>
@@ -1808,7 +1808,7 @@ const ReplyDraftAgentPage = () => {
                             </div>
                           ) : (
                             <textarea
-                              className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition disabled:opacity-60 font-sans leading-relaxed min-h-[180px] max-h-[48vh] overflow-y-auto resize-y"
+                              className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-white/10 transition disabled:opacity-60 font-sans leading-relaxed min-h-[180px] max-h-[48vh] overflow-y-auto resize-y"
                               rows={9}
                               value={editedBody}
                               onChange={(e) => setEditedBody(e.target.value)}
@@ -1832,10 +1832,10 @@ const ReplyDraftAgentPage = () => {
                         />
 
                         {selectedDraft.ai_notes && (
-                          <div className="p-3 rounded-lg bg-fuchsia-500/5 border border-fuchsia-500/20 flex gap-2.5">
-                            <Sparkles className="h-4 w-4 text-fuchsia-300 shrink-0 mt-0.5" />
+                          <div className="p-3 rounded-lg bg-primary/5 border border-primary/20 flex gap-2.5">
+                            <Sparkles className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300 shrink-0 mt-0.5" />
                             <div>
-                              <div className="text-xs font-semibold text-fuchsia-200 mb-0.5">AI Reasoning</div>
+                              <div className="text-xs font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-200 mb-0.5">AI Reasoning</div>
                               <div className="text-xs text-gray-300 leading-relaxed italic">{selectedDraft.ai_notes}</div>
                             </div>
                           </div>
@@ -1844,7 +1844,7 @@ const ReplyDraftAgentPage = () => {
                         {/* The answer goes to the address the sender asked for (Reply-To), shown with the one the
                             email came from so the reviewer sees where it will go (CO-205). */}
                         {selectedDraft.reply_to_used && selectedDraft.status !== 'sent' && (
-                          <div data-testid="rd-reply-to-note" className="p-3 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-200 text-xs">
+                          <div data-testid="rd-reply-to-note" className="p-3 rounded-lg bg-primary/10 border border-primary/30 text-[hsl(var(--primary-fill))] dark:text-violet-200 text-xs">
                             This answer goes to <span className="font-semibold">{selectedDraft.to_email}</span>, the address
                             the sender asked replies to go to. The email came from {selectedDraft.original_from_email}.
                           </div>
@@ -1912,7 +1912,7 @@ const ReplyDraftAgentPage = () => {
                                 <Button
                                   onClick={handleApproveAndSend}
                                   disabled={busy || !editedBody.trim() || !editedSubject.trim()}
-                                  className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-pure-white font-semibold shadow-lg shadow-emerald-500/20"
+                                  className="ui-btn-primary bg-[hsl(var(--primary-fill))] hover:bg-[hsl(var(--primary-fill)/0.9)] text-pure-white font-semibold"
                                 >
                                   {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
                                   Approve & Send

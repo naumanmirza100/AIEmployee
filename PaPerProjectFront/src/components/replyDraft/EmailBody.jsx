@@ -34,7 +34,7 @@ export const EmailBody = ({ body, bodyHtml, direction = 'in' }) => {
   if (bodyHtml && bodyHtml.trim()) {
     return (
       <div>
-        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--primary-fill))] dark:text-violet-300 mb-1">
           <CornerUpLeft className="h-3 w-3" />
           {messageLabel}
         </div>
@@ -52,7 +52,7 @@ export const EmailBody = ({ body, bodyHtml, direction = 'in' }) => {
   if (!quoted) {
     return (
       <div>
-        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--primary-fill))] dark:text-violet-300 mb-1">
           <CornerUpLeft className="h-3 w-3" />
           {messageLabel}
         </div>
@@ -69,11 +69,11 @@ export const EmailBody = ({ body, bodyHtml, direction = 'in' }) => {
     <div className="space-y-3">
       {reply && (
         <div>
-          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--primary-fill))] dark:text-violet-300 mb-2">
             <CornerUpLeft className="h-3 w-3" />
             {replyLabelForQuote}
           </div>
-          <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed bg-cyan-500/5 border border-cyan-500/15 rounded-lg p-3">
+          <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed bg-primary/5 border border-primary/15 rounded-lg p-3">
             {reply}
           </div>
         </div>

@@ -236,9 +236,9 @@ Thanks for reaching out…" />
               {/* Inline create panel — list stays visible underneath so
                   agents can reference an existing macro while drafting. */}
               {createOpen && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2">
+                <div className="rounded-lg border border-primary/30 bg-primary/[0.04] p-3 space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-amber-300">New macro</Label>
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--primary-fill))] dark:text-violet-300">New macro</Label>
                     <Button variant="ghost" size="icon" className="h-6 w-6"
                       onClick={cancelCreate} aria-label="Close new macro form">
                       <X className="h-3 w-3" />

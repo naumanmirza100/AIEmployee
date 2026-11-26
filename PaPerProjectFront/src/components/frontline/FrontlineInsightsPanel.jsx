@@ -276,7 +276,7 @@ export default function FrontlineInsightsPanel({ onNavigateToTab }) {
                   </div>
                 </div>
                 <div>
-                  <div className="text-2xl font-bold text-amber-300">
+                  <div className="text-2xl font-bold text-[hsl(var(--primary-fill))] dark:text-violet-300">
                     {sla.data.at_risk ?? 0}
                   </div>
                   <div className="text-[10px] uppercase tracking-wider text-white/45">

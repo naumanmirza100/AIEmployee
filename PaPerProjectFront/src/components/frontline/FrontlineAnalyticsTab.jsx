@@ -452,7 +452,7 @@ export function FrontlineAnalyticsTab() {
                         && r.median_resolution_seconds >= 1.5 * avgMedianRes;
                       const bg = isBreachOutlier
                         ? 'bg-rose-500/[0.05]'
-                        : isSlowOutlier ? 'bg-amber-500/[0.05]' : '';
+                        : isSlowOutlier ? 'bg-primary/[0.05]' : '';
                       return (
                         <tr key={r.assigned_to_id} className={`border-b border-white/[0.04] ${bg}`}>
                           <td className="px-2 py-1.5 text-white/85">
@@ -468,7 +468,7 @@ export function FrontlineAnalyticsTab() {
                           <td className="px-2 py-1.5 text-white/70">
                             {r.tickets_assigned > 0 ? `${Math.round(r.resolution_rate * 100)}%` : '—'}
                           </td>
-                          <td className={`px-2 py-1.5 ${isSlowOutlier ? 'text-amber-300' : 'text-white/70'}`}>
+                          <td className={`px-2 py-1.5 ${isSlowOutlier ? 'text-[hsl(var(--primary-fill))] dark:text-violet-300' : 'text-white/70'}`}>
                             {fmtSecs(r.median_resolution_seconds)}
                           </td>
                           <td className={`px-2 py-1.5 ${isBreachOutlier ? 'text-rose-300 font-medium' : 'text-white/70'}`}>
@@ -490,7 +490,7 @@ export function FrontlineAnalyticsTab() {
                     {' · '}
                     SLA breach <span className="text-white/70">{Math.round(avgBreachPct * 100)}%</span>.
                     <span className="text-rose-300"> Rose </span>rows = breach % ≥ 15pp over team avg.
-                    <span className="text-amber-300"> Amber </span>rows = median resolve ≥ 1.5× team median.
+                    <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300"> Amber </span>rows = median resolve ≥ 1.5× team median.
                   </p>
                 )}
               </div>
@@ -550,7 +550,7 @@ export function FrontlineAnalyticsTab() {
                         <span className="w-4 text-white/50 text-right">{star}</span>
                         <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
                           <div
-                            className={`h-full ${star >= 4 ? 'bg-emerald-500' : star === 3 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                            className={`h-full ${star >= 4 ? 'bg-emerald-500' : star === 3 ? 'bg-primary' : 'bg-rose-500'}`}
                             style={{ width: `${pct}%` }}
                           />
                         </div>

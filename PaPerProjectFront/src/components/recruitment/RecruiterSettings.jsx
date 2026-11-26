@@ -1169,7 +1169,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       onClick={handleUpdateTimeSlotAvailability}
                       disabled={saving}
                       variant="outline"
-                      className="bg-indigo-600 hover:bg-indigo-700 text-pure-white border-indigo-600"
+                      className="bg-[hsl(var(--primary-fill))] hover:bg-[hsl(var(--primary-fill)/0.9)] text-pure-white border-transparent"
                     >
                       <Lock className="h-4 w-4 mr-2" />
                       {saving ? 'Updating...' : 'Update Availability'}
@@ -1221,7 +1221,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                 ? 'invisible' 
                                 : dateInfo.isInRange
                                   ? dateInfo.isStart
-                                    ? 'bg-indigo-600 text-pure-white font-bold'
+                                    ? 'bg-[hsl(var(--primary-fill))] text-pure-white font-bold'
                                     : dateInfo.isEnd
                                       ? 'bg-indigo-500 text-pure-white font-bold'
                                       : 'bg-indigo-500/70 text-white font-bold'

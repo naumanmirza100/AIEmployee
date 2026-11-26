@@ -26,10 +26,10 @@ export function SubTabTrigger({ value, active, icon: Icon, label }) {
   return (
     <TabsTrigger
       value={value}
-      className="relative whitespace-nowrap shrink-0 px-3.5 py-1.5 text-sm font-medium rounded-md border transition-all duration-150"
+      className="relative whitespace-nowrap shrink-0 px-4 py-1.5 text-sm font-medium rounded-full border transition-all duration-150"
       style={isActive
-        ? { background: 'linear-gradient(90deg, #8b5cf6 0%, #d946ef 100%)', color: '#fff', borderColor: 'transparent' }
-        : { background: 'transparent', color: 'rgba(255,255,255,0.55)', borderColor: 'transparent' }}
+        ? { background: 'hsl(var(--primary-fill))', color: '#fff', borderColor: 'transparent', boxShadow: '0 6px 16px -8px hsl(var(--primary) / 0.9)' }
+        : { background: 'transparent', color: 'hsl(var(--muted-foreground))', borderColor: 'transparent' }}
     >
       <span className="inline-flex items-center gap-1.5">
         <Icon className="h-3.5 w-3.5" />

@@ -83,8 +83,8 @@ export const StatCard = ({ icon: Icon, label, value, tint, iconTint, onClick }) 
 
 // Large mail-folder tile for the dashboard — Inbox / Drafts / Sent.
 const FOLDER_ACCENTS = {
-  cyan:     { ring: 'hover:border-cyan-500/40',    icon: 'text-cyan-300',    glow: 'from-cyan-500/15 to-blue-500/5' },
-  fuchsia:  { ring: 'hover:border-fuchsia-500/40', icon: 'text-fuchsia-300', glow: 'from-fuchsia-500/15 to-purple-500/5' },
+  cyan:     { ring: 'hover:border-primary/40',    icon: 'text-[hsl(var(--primary-fill))] dark:text-violet-300',    glow: 'from-primary/15 to-primary/5' },
+  fuchsia:  { ring: 'hover:border-primary/40', icon: 'text-[hsl(var(--primary-fill))] dark:text-violet-300', glow: 'from-primary/15 to-primary/5' },
   emerald:  { ring: 'hover:border-emerald-500/40', icon: 'text-emerald-300', glow: 'from-emerald-500/15 to-teal-500/5' },
 };
 

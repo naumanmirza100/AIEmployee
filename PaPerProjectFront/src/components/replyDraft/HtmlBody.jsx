@@ -160,7 +160,7 @@ export const HtmlBody = ({ html }) => {
     body{padding:0;}
     #er,#er *,#er *::before,#er *::after{background-color:transparent !important;background-image:none !important;color:#e4e4e7 !important;box-shadow:none !important;}
     #er [bgcolor]{background-color:transparent !important;}
-    #er a,#er a *{color:#7dd3fc !important;text-decoration:underline;}
+    #er a,#er a *{color:var(--brand-ink) !important;text-decoration:underline;}
     #er img{max-width:100%;height:auto;background-color:transparent !important;}
     /* An inline image still pointing at cid: is one whose bytes we haven't
        pulled from IMAP yet — the browser can't resolve that scheme, so it

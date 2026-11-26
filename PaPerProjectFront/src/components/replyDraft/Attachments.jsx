@@ -14,7 +14,7 @@ import { ATTACHMENT_ORIGIN, fileIconChar, formatFileSize } from './replyDraftHel
 // attachments.
 export const AttachmentLoading = () => (
   <div className="mt-4 pt-4 border-t border-white/10">
-    <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+    <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--primary-fill))] dark:text-violet-300 mb-2">
       <Loader2 className="h-3 w-3 animate-spin" />
       Loading attachments…
     </div>

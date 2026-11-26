@@ -59,8 +59,8 @@ export const EmailActivityChart = ({ active = true, variant = 'modal', days, ref
       {
         label: 'Received',
         data: buckets.map((b) => (b.received != null ? b.received : (b.count || 0))),
-        borderColor: '#22d3ee',
-        backgroundColor: 'rgba(34, 211, 238, 0.15)',
+        borderColor: 'hsl(var(--primary-fill))',
+        backgroundColor: 'hsl(var(--primary)/0.15)',
         fill: true,
         tension: 0.35,
         pointRadius: granularity === 'week' ? 3 : 2.5,
@@ -141,7 +141,7 @@ export const EmailActivityChart = ({ active = true, variant = 'modal', days, ref
     ? 'rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm p-4 space-y-3'
     : 'rounded-lg border p-4 space-y-3';
   const titleCls = isDash ? 'text-sm font-semibold text-white' : 'text-sm font-semibold';
-  const iconCls = isDash ? 'h-4 w-4 text-cyan-300' : 'h-4 w-4 text-primary';
+  const iconCls = isDash ? 'h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300' : 'h-4 w-4 text-primary';
   const mutedCls = isDash ? 'text-xs text-gray-400' : 'text-xs text-muted-foreground';
 
   return (
@@ -165,7 +165,7 @@ export const EmailActivityChart = ({ active = true, variant = 'modal', days, ref
       ) : (
         <>
           <div className={mutedCls}>
-            <span className="font-semibold text-cyan-300">{analytics?.received_total ?? 0}</span>
+            <span className="font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-300">{analytics?.received_total ?? 0}</span>
             {' '}received ·{' '}
             <span className="font-semibold text-emerald-300">{analytics?.sent_total ?? 0}</span>
             {' '}sent in the last {windowDays} days

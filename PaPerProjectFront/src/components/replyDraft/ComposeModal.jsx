@@ -276,7 +276,7 @@ export const ComposeModal = ({ open, onClose, onSent }) => {
       <DialogContent className="max-w-2xl bg-[var(--sfc-0d0b1f)] border border-white/10 text-white p-4 max-h-[85vh] flex flex-col gap-2">
         <DialogHeader className="space-y-0">
           <DialogTitle className="flex items-center gap-2 text-white text-sm font-semibold">
-            <PenSquare className="h-4 w-4 text-fuchsia-300" />
+            <PenSquare className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
             New message
           </DialogTitle>
         </DialogHeader>
@@ -328,7 +328,7 @@ export const ComposeModal = ({ open, onClose, onSent }) => {
                 type="button"
                 onClick={() => setBodyFormat('text')}
                 className={`px-1.5 py-0.5 rounded flex items-center gap-1 transition ${bodyFormat === 'text'
-                    ? 'bg-cyan-500/20 text-cyan-200'
+                    ? 'bg-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200'
                     : 'text-gray-500 hover:text-white'
                   }`}
                 disabled={busy}
@@ -341,7 +341,7 @@ export const ComposeModal = ({ open, onClose, onSent }) => {
                 type="button"
                 onClick={() => setBodyFormat('html')}
                 className={`px-1.5 py-0.5 rounded flex items-center gap-1 transition ${bodyFormat === 'html'
-                    ? 'bg-fuchsia-500/20 text-fuchsia-200'
+                    ? 'bg-primary/20 text-[hsl(var(--primary-fill))] dark:text-violet-200'
                     : 'text-gray-500 hover:text-white'
                   }`}
                 disabled={busy}
@@ -467,7 +467,7 @@ export const ComposeModal = ({ open, onClose, onSent }) => {
             type="button"
             onClick={handleSend}
             disabled={!canSend}
-            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-pure-white font-semibold shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+            className="ui-btn-primary bg-[hsl(var(--primary-fill))] hover:bg-[hsl(var(--primary-fill)/0.9)] text-pure-white font-semibold disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
             {busy ? 'Sending…' : 'Send'}

@@ -539,14 +539,14 @@ const FrontlineFloatingChat = () => {
             aria-label="Open Quick Chat"
             className="relative h-14 w-14 rounded-full flex items-center justify-center text-white shadow-2xl hover:scale-110 active:scale-95 transition-transform"
             style={{
-              background: 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)',
-              boxShadow: '0 12px 32px 0 rgba(245, 158, 11, 0.55), 0 0 0 1px hsl(var(--surface-invert) / 0.08) inset',
+              background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)',
+              boxShadow: '0 12px 32px 0 hsl(var(--primary)/0.55), 0 0 0 1px hsl(var(--surface-invert) / 0.08) inset',
             }}
           >
             <span aria-hidden="true" className="absolute inset-0 rounded-full"
-              style={{ background: 'rgba(245, 158, 11, 0.55)', animation: 'fcPing 2.2s cubic-bezier(0,0,0.2,1) infinite' }} />
+              style={{ background: 'hsl(var(--primary)/0.55)', animation: 'fcPing 2.2s cubic-bezier(0,0,0.2,1) infinite' }} />
             <span aria-hidden="true" className="absolute inset-1.5 rounded-full"
-              style={{ background: 'linear-gradient(135deg, #fbbf24 0%, #fb923c 100%)', animation: 'fcBlink 1.6s ease-in-out infinite' }} />
+              style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, var(--brand-ink) 100%)', animation: 'fcBlink 1.6s ease-in-out infinite' }} />
             <MessageCircle className="h-6 w-6 relative z-10 drop-shadow" />
             {/* Ctrl+K badge */}
             <span className="absolute -top-1 -right-1 z-20 rounded-md bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 border border-white/15">
@@ -583,7 +583,7 @@ const FrontlineFloatingChat = () => {
             data-tour-fc="header"
             {...dragHandleProps}
             className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 select-none"
-            style={{ ...dragHandleProps.style, background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)' }}
+            style={{ ...dragHandleProps.style, background: 'linear-gradient(90deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)' }}
           >
             <div className="flex items-center gap-2 min-w-0">
               <Sparkles className="h-4 w-4 text-white shrink-0" />
@@ -602,7 +602,7 @@ const FrontlineFloatingChat = () => {
                 className={`p-1 rounded transition text-white relative ${showHistory ? 'bg-white/25' : 'hover:bg-white/25'}`}>
                 <History className="h-4 w-4" />
                 {history.length > 0 && !showHistory && (
-                  <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold bg-white text-orange-600 rounded-full h-3.5 w-3.5 flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold bg-white text-[hsl(var(--primary-fill))] dark:text-violet-300 rounded-full h-3.5 w-3.5 flex items-center justify-center">
                     {Math.min(history.length, 9)}
                   </span>
                 )}
@@ -632,16 +632,16 @@ const FrontlineFloatingChat = () => {
           {/* Body: either the chat area or the history sidebar */}
           {showHistory ? (
             <QuickChatHistoryList history={history} currentId={conversationId}
-              accent="amber" onOpen={openHistoryEntry} onRemove={removeHistoryEntry} />
+              accent="violet" onOpen={openHistoryEntry} onRemove={removeHistoryEntry} />
           ) : (
             <div data-tour-fc="messages" className="flex-1 overflow-y-auto p-3 space-y-2.5" style={{ background: 'var(--panel-3)' }}>
               {messages.length === 0 ? (
                 <div className="text-white/60">
                   <div className="text-center py-4">
-                    <div className="h-10 w-10 mx-auto mb-2 rounded-full bg-amber-400/10 border border-amber-400/30 flex items-center justify-center">
-                      <MessageCircle className="h-5 w-5 text-amber-300" />
+                    <div className="h-10 w-10 mx-auto mb-2 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center">
+                      <MessageCircle className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
                     </div>
-                    <p className="text-sm px-2">Ask a question or type <span className="text-amber-300 font-mono">/</span> for commands.</p>
+                    <p className="text-sm px-2">Ask a question or type <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-mono">/</span> for commands.</p>
                     {hintsEnabled && (
                       <div className="mt-2 flex justify-center">
                         <InfoHint {...HINTS.fcMessages} />
@@ -692,7 +692,7 @@ const FrontlineFloatingChat = () => {
                         return shown.map((sample) => (
                           <button key={sample} type="button"
                             onClick={() => { setInput(sample); inputRef.current?.focus(); }}
-                            className="block w-full text-left text-xs text-amber-300/80 hover:text-amber-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
+                            className="block w-full text-left text-xs text-[hsl(var(--primary-fill)/0.8)] dark:text-violet-300/80 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
                             → {sample}
                           </button>
                         ));
@@ -706,7 +706,7 @@ const FrontlineFloatingChat = () => {
                     <div
                       className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                         m.role === 'user'
-                          ? 'bg-amber-500/25 text-white border border-amber-400/30'
+                          ? 'bg-primary/25 text-white border border-primary/30'
                           : m.error
                             ? 'bg-rose-500/15 text-rose-100 border border-rose-500/30'
                             : m.system
@@ -791,7 +791,7 @@ const FrontlineFloatingChat = () => {
                       <div>
                         <div className="flex items-center justify-between text-[11px] text-white/70 mb-1">
                           <span className="flex items-center gap-1.5">
-                            <Loader2 className={`h-3 w-3 text-amber-300 ${indexProgress.status === 'processing' ? 'animate-spin' : ''}`} />
+                            <Loader2 className={`h-3 w-3 text-[hsl(var(--primary-fill))] dark:text-violet-300 ${indexProgress.status === 'processing' ? 'animate-spin' : ''}`} />
                             {indexProgress.status === 'ready'
                               ? 'Indexing complete'
                               : indexProgress.status === 'failed'
@@ -809,7 +809,7 @@ const FrontlineFloatingChat = () => {
                                 ? 'bg-red-500/70'
                                 : indexProgress.status === 'ready'
                                   ? 'bg-emerald-500/80'
-                                  : 'bg-gradient-to-r from-amber-500 to-orange-500'
+                                  : 'bg-gradient-to-r from-primary to-primary'
                             }`}
                             style={{ width: `${indexProgress.percent}%` }}
                           />
@@ -837,7 +837,7 @@ const FrontlineFloatingChat = () => {
               )}
               {/* Slash-command menu */}
               {slashOpen && filteredCommands.length > 0 && (
-                <SlashCommandMenu commands={filteredCommands} active={slashActive} accent="amber"
+                <SlashCommandMenu commands={filteredCommands} active={slashActive} accent="violet"
                   onPick={applyCommand} onHover={setSlashActive} />
               )}
 
@@ -850,7 +850,7 @@ const FrontlineFloatingChat = () => {
                   disabled={sending || uploading}
                   title="Upload a document to the knowledge base"
                   aria-label="Upload document"
-                  className="h-[38px] w-[38px] shrink-0 rounded-lg flex items-center justify-center text-white/60 hover:text-amber-300 hover:bg-white/[0.05] border border-white/10 transition disabled:opacity-40">
+                  className="h-[38px] w-[38px] shrink-0 rounded-lg flex items-center justify-center text-white/60 hover:text-[hsl(var(--primary-fill))] dark:hover:text-violet-300 hover:bg-white/[0.05] border border-white/10 transition disabled:opacity-40">
                   <Paperclip className="h-4 w-4" />
                 </button>
                 <textarea
@@ -862,13 +862,13 @@ const FrontlineFloatingChat = () => {
                   placeholder="Ask anything or type / for commands…"
                   rows={1}
                   disabled={sending || uploading}
-                  className="flex-1 resize-none rounded-lg border border-white/10 bg-[var(--panel-3)] text-white text-sm px-3 py-2 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-amber-400/60 min-h-[38px] max-h-[110px]"
+                  className="flex-1 resize-none rounded-lg border border-white/10 bg-[var(--panel-3)] text-white text-sm px-3 py-2 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-primary/60 min-h-[38px] max-h-[110px]"
                 />
                 <button
                   type="button" data-tour-fc="send" onClick={send}
                   disabled={sending || uploading || !input.trim()} aria-label="Send"
                   className="h-[38px] w-[38px] shrink-0 rounded-lg flex items-center justify-center text-white disabled:opacity-40 disabled:cursor-not-allowed transition-transform active:scale-95"
-                  style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)' }}
+                  style={{ background: 'linear-gradient(135deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)' }}
                 >
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </button>

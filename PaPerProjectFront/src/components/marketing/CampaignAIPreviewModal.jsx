@@ -155,7 +155,7 @@ export const CampaignAIPreviewModal = ({
                       type="button"
                       onClick={onRegenerateAI}
                       disabled={regenerating}
-                      className="gap-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-pure-white border-0"
+                      className="gap-1.5 ui-btn-primary bg-[hsl(var(--primary-fill))] hover:bg-[hsl(var(--primary-fill)/0.9)] text-pure-white border-0"
                     >
                       {regenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       {regenerating ? 'Regenerating…' : 'Regenerate with AI'}
@@ -287,7 +287,7 @@ export const CampaignAIPreviewModal = ({
               <Button
                 onClick={onRegenerate}
                 disabled={creating}
-                className="gap-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-pure-white border-0"
+                className="gap-1.5 ui-btn-primary bg-[hsl(var(--primary-fill))] hover:bg-[hsl(var(--primary-fill)/0.9)] text-pure-white border-0"
                 title="Edit the details here, then regenerate"
               >
                 <RefreshCw className="h-4 w-4 mr-2" />

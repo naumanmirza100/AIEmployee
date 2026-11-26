@@ -142,20 +142,20 @@ export const SyncSourceCard = ({ accounts, onConfigure }) => {
   // long as the backend reports sync_in_progress=True; no time cap.
   if (firstSyncActive) {
     return (
-      <div className="mb-4 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-5 py-4 flex items-start gap-4 flex-wrap">
-        <div className="h-11 w-11 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center shrink-0">
-          <Loader2 className="h-5 w-5 text-cyan-300 animate-spin" />
+      <div className="mb-4 rounded-2xl border border-primary/30 bg-primary/10 px-5 py-4 flex items-start gap-4 flex-wrap">
+        <div className="h-11 w-11 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
+          <Loader2 className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300 animate-spin" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-cyan-100">
+            <span className="text-sm font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-200">
               Syncing your inbox… ({STAGE_LABEL[currentStageDays] || `${currentStageDays} days`})
             </span>
-            <span className="text-xs font-mono text-cyan-200/80 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5">
+            <span className="text-xs font-mono text-[hsl(var(--primary-fill)/0.8)] dark:text-violet-200/80 bg-primary/10 border border-primary/30 rounded px-1.5 py-0.5">
               {mmss(elapsedMs)}
             </span>
           </div>
-          <div className="text-xs text-cyan-200/80 mt-1">
+          <div className="text-xs text-[hsl(var(--primary-fill)/0.8)] dark:text-violet-200/80 mt-1">
             Pulling mail from{' '}
             <span className="text-white font-medium">
               {firstSync.map((a) => a.email).join(', ')}
@@ -175,12 +175,12 @@ export const SyncSourceCard = ({ accounts, onConfigure }) => {
   // it stays up through the full 90-day staged backfill.
   if (activelySyncing) {
     return (
-      <div className="mb-4 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
-        <div className="h-8 w-8 rounded-lg bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center shrink-0">
-          <Loader2 className="h-4 w-4 text-cyan-300 animate-spin" />
+      <div className="mb-4 rounded-xl border border-primary/25 bg-primary/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
+        <div className="h-8 w-8 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0">
+          <Loader2 className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300 animate-spin" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-xs text-cyan-200/90">
+          <div className="text-xs text-[hsl(var(--primary-fill)/0.9)] dark:text-violet-200/90">
             Syncing {STAGE_LABEL[currentStageDays] || `${currentStageDays}-day window`} —{' '}
             <span className="text-white font-medium">{totalInboxCount}</span>{' '}
             email{totalInboxCount === 1 ? '' : 's'} loaded so far from{' '}
@@ -190,7 +190,7 @@ export const SyncSourceCard = ({ accounts, onConfigure }) => {
             . More are still streaming in.
           </div>
         </div>
-        <span className="text-xs font-mono text-cyan-200/80 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5 shrink-0">
+        <span className="text-xs font-mono text-[hsl(var(--primary-fill)/0.8)] dark:text-violet-200/80 bg-primary/10 border border-primary/30 rounded px-1.5 py-0.5 shrink-0">
           {mmss(elapsedMs)}
         </span>
       </div>

@@ -35,9 +35,9 @@ export const TriageCard = ({ email }) => {
   };
 
   return (
-    <div data-testid="rd-triage-card" className="mb-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+    <div data-testid="rd-triage-card" className="mb-4 p-3 rounded-lg bg-primary/5 border border-primary/20">
       <div className="flex items-start gap-2.5">
-        <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
+        <Sparkles className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300 shrink-0 mt-0.5" />
         <div className="min-w-0 flex-1">
           {email.triaged ? (
             <>
@@ -48,12 +48,12 @@ export const TriageCard = ({ email }) => {
                   </span>
                 )}
                 {email.category && (
-                  <span className="text-[10px] font-medium text-cyan-200 px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+                  <span className="text-[10px] font-medium text-[hsl(var(--primary-fill))] dark:text-violet-200 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">
                     {CATEGORY_LABELS[email.category] || email.category}
                   </span>
                 )}
                 {email.needs_reply && (
-                  <span className="text-[10px] font-medium text-fuchsia-200 px-2 py-0.5 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20">
+                  <span className="text-[10px] font-medium text-[hsl(var(--primary-fill))] dark:text-violet-200 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">
                     Waiting for an answer
                   </span>
                 )}
@@ -81,7 +81,7 @@ export const TriageCard = ({ email }) => {
             data-testid="rd-summarize-conversation"
             onClick={summarize}
             disabled={busy}
-            className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-cyan-200 px-2.5 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 disabled:opacity-60"
+            className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--primary-fill))] dark:text-violet-200 px-2.5 py-1.5 rounded-lg bg-primary/10 border border-primary/30 hover:bg-primary/20 disabled:opacity-60"
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />}
             {(email.thread_count || 1) > 1 ? `Summarise the conversation (${email.thread_count})` : 'Summarise'}
@@ -95,8 +95,8 @@ export const TriageCard = ({ email }) => {
 };
 
 export const ConversationSummary = ({ summary }) => (
-  <div data-testid="rd-conversation-summary" className="mt-3 pt-3 border-t border-cyan-500/20 text-xs text-gray-300 space-y-2">
-    <div className="font-semibold text-cyan-200">
+  <div data-testid="rd-conversation-summary" className="mt-3 pt-3 border-t border-primary/20 text-xs text-gray-300 space-y-2">
+    <div className="font-semibold text-[hsl(var(--primary-fill))] dark:text-violet-200">
       {summary.messages > 1 ? `The conversation, ${summary.messages} messages` : 'The email in short'}
     </div>
     <ul className="list-disc pl-4 space-y-1">
@@ -127,13 +127,13 @@ export const NeedsYouCard = ({ onOpen }) => {
   if (!data) return null;
   const figures = [
     { label: 'Urgent', value: data.urgent, tint: 'text-red-300' },
-    { label: 'Waiting for an answer', value: data.waiting_for_answer, tint: 'text-fuchsia-300' },
+    { label: 'Waiting for an answer', value: data.waiting_for_answer, tint: 'text-[hsl(var(--primary-fill))] dark:text-violet-300' },
     { label: 'Not read by the AI yet', value: data.not_read_yet, tint: 'text-gray-300' },
   ];
   return (
     <div data-testid="rd-needs-you" className="mb-6 rounded-xl bg-white/5 border border-white/10 p-4">
       <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="h-4 w-4 text-cyan-300" />
+        <Sparkles className="h-4 w-4 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
         <div className="text-sm font-semibold text-white">Needs you this week</div>
         <div className="text-[11px] text-gray-500">The AI reads each new email as it arrives.</div>
       </div>
@@ -165,7 +165,7 @@ export const NeedsYouCard = ({ onOpen }) => {
       {Object.keys(data.by_category || {}).length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-3">
           {Object.entries(data.by_category).sort((a, b) => b[1] - a[1]).map(([c, n]) => (
-            <span key={c} className="text-[10px] text-cyan-200 px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+            <span key={c} className="text-[10px] text-[hsl(var(--primary-fill))] dark:text-violet-200 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">
               {CATEGORY_LABELS[c] || c}: {n}
             </span>
           ))}

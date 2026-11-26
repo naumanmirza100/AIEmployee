@@ -483,7 +483,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
             left: targetRect.left - 6,
             width: targetRect.width + 12,
             height: targetRect.height + 12,
-            boxShadow: '0 0 0 3px #f59e0b, 0 0 0 9999px hsl(var(--sfr-020308) / 0.72)',
+            boxShadow: '0 0 0 3px hsl(var(--primary-fill)), 0 0 0 9999px hsl(var(--sfr-020308) / 0.72)',
             animation: 'fltPulse 1.8s ease-in-out infinite',
             transition: 'top 220ms cubic-bezier(0.4, 0, 0.2, 1), left 220ms cubic-bezier(0.4, 0, 0.2, 1), width 220ms cubic-bezier(0.4, 0, 0.2, 1), height 220ms cubic-bezier(0.4, 0, 0.2, 1)',
           }}
@@ -554,7 +554,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
               key={i}
               className="flex-1 h-1 rounded-full transition-colors"
               style={{
-                background: i === index ? '#f59e0b' : i < index ? '#a78bfa66' : 'var(--line-2)',
+                background: i === index ? 'hsl(var(--primary-fill))' : i < index ? '#a78bfa66' : 'var(--line-2)',
               }}
             />
           ))}
@@ -562,7 +562,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
 
         {/* Step counter + title */}
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 bg-amber-400/10 border border-amber-400/30 px-2 py-0.5 rounded-full">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--primary-fill))] dark:text-violet-300 bg-primary/10 border border-primary/30 px-2 py-0.5 rounded-full">
             Step {index + 1} of {stepsArr.length}
           </span>
         </div>
@@ -571,8 +571,8 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
 
         {/* Interactive step waiting indicator */}
         {interactiveGate && step?.waitFor?.hint && (
-          <div className="mb-3 -mt-2 flex items-center gap-2 text-xs text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-md px-2 py-1.5">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-300 animate-pulse" />
+          <div className="mb-3 -mt-2 flex items-center gap-2 text-xs text-[hsl(var(--primary-fill))] dark:text-violet-300 bg-primary/10 border border-primary/30 rounded-md px-2 py-1.5">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
             <span>{step.waitFor.hint}</span>
           </div>
         )}
@@ -604,8 +604,8 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
               title={interactiveGate ? (step?.waitFor?.hint || 'Do the action first to continue.') : undefined}
               className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
-                background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
-                boxShadow: interactiveGate ? 'none' : '0 0 8px 0 #f59e0b55',
+                background: 'linear-gradient(90deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)',
+                boxShadow: interactiveGate ? 'none' : '0 0 8px 0 hsl(var(--primary)/0.33)',
               }}
             >
               {isLast ? (
@@ -639,13 +639,13 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
             }}
           >
             <div className="flex items-start gap-3 mb-3">
-              <div className="shrink-0 h-9 w-9 rounded-full bg-amber-400/15 border border-amber-400/40 flex items-center justify-center">
-                <GraduationCap className="h-5 w-5 text-amber-300" />
+              <div className="shrink-0 h-9 w-9 rounded-full bg-primary/15 border border-primary/40 flex items-center justify-center">
+                <GraduationCap className="h-5 w-5 text-[hsl(var(--primary-fill))] dark:text-violet-300" />
               </div>
               <div className="min-w-0">
                 <h3 className="text-base font-bold text-white mb-1">Pick up where you left off?</h3>
                 <p className="text-sm text-white/70 leading-relaxed">
-                  You closed this tour on <span className="text-amber-300 font-semibold">step {resumePrompt.atIndex + 1}</span> of {stepsArr.length}. Resume from there, or start over from the beginning.
+                  You closed this tour on <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-semibold">step {resumePrompt.atIndex + 1}</span> of {stepsArr.length}. Resume from there, or start over from the beginning.
                 </p>
               </div>
             </div>
@@ -656,7 +656,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
               </button>
               <button type="button" onClick={handleResume} autoFocus
                 className="inline-flex items-center gap-1 px-3.5 py-1.5 text-xs font-semibold rounded-md text-white transition"
-                style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', boxShadow: '0 0 8px 0 #f59e0b55' }}>
+                style={{ background: 'linear-gradient(90deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)', boxShadow: '0 0 8px 0 hsl(var(--primary)/0.33)' }}>
                 Resume at step {resumePrompt.atIndex + 1}
               </button>
             </div>
@@ -688,13 +688,13 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
             }}
           >
             <div className="flex items-start gap-3 mb-3">
-              <div className="shrink-0 h-9 w-9 rounded-full bg-amber-400/15 border border-amber-400/40 flex items-center justify-center">
-                <span className="text-amber-300 font-bold text-lg leading-none">!</span>
+              <div className="shrink-0 h-9 w-9 rounded-full bg-primary/15 border border-primary/40 flex items-center justify-center">
+                <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-bold text-lg leading-none">!</span>
               </div>
               <div className="min-w-0">
                 <h3 id="flt-skip-title" className="text-base font-bold text-white mb-1">Skip this tour?</h3>
                 <p className="text-sm text-white/70 leading-relaxed">
-                  You can replay it anytime from the <span className="text-amber-300 font-semibold">"Take the Tour"</span> button in the header, or <span className="text-amber-300 font-semibold">"Tour this tab"</span> inside any tab.
+                  You can replay it anytime from the <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-semibold">"Take the Tour"</span> button in the header, or <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-semibold">"Tour this tab"</span> inside any tab.
                 </p>
               </div>
             </div>
@@ -704,10 +704,10 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
                   type="checkbox"
                   checked={skipSiblings}
                   onChange={(e) => setSkipSiblings(e.target.checked)}
-                  className="mt-0.5 h-3.5 w-3.5 accent-amber-500"
+                  className="mt-0.5 h-3.5 w-3.5 accent-primary"
                 />
                 <span className="text-xs text-white/70 leading-relaxed">
-                  Also skip the other <span className="text-amber-300 font-semibold">{siblingKeys.length}</span> tab tours for this dashboard. You can still replay any of them from its "Tour this tab" button.
+                  Also skip the other <span className="text-[hsl(var(--primary-fill))] dark:text-violet-300 font-semibold">{siblingKeys.length}</span> tab tours for this dashboard. You can still replay any of them from its "Tour this tab" button.
                 </span>
               </label>
             )}
@@ -725,8 +725,8 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
                 onClick={confirmSkip}
                 className="inline-flex items-center gap-1 px-3.5 py-1.5 text-xs font-semibold rounded-md text-white transition"
                 style={{
-                  background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
-                  boxShadow: '0 0 8px 0 #f59e0b55',
+                  background: 'linear-gradient(90deg, hsl(var(--primary-fill)) 0%, hsl(var(--primary-fill-deep)) 100%)',
+                  boxShadow: '0 0 8px 0 hsl(var(--primary)/0.33)',
                 }}
               >
                 Skip tutorial
@@ -739,8 +739,8 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
       {/* Pulse animation keyframes */}
       <style>{`
         @keyframes fltPulse {
-          0%, 100% { box-shadow: 0 0 0 3px #f59e0b, 0 0 0 9999px hsl(var(--sfr-020308) / 0.72); }
-          50%      { box-shadow: 0 0 0 7px #f59e0b88, 0 0 0 9999px hsl(var(--sfr-020308) / 0.72); }
+          0%, 100% { box-shadow: 0 0 0 3px hsl(var(--primary-fill)), 0 0 0 9999px hsl(var(--sfr-020308) / 0.72); }
+          50%      { box-shadow: 0 0 0 7px hsl(var(--primary)/0.53), 0 0 0 9999px hsl(var(--sfr-020308) / 0.72); }
         }
       `}</style>
     </>
