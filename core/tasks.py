@@ -278,30 +278,3 @@ def sync_personal_calendars():
     from core.personal_calendars import sync_all
     return sync_all()
 
-
-@shared_task(name='core.tasks.make_company_backups')
-def make_company_backups(keep=7):
-    """Each active company's nightly backup (core.backups, Company dashboard → Backups), one after another, at
-    21:00 UTC (02:00 in Pakistan) with the whole-system one. A company whose backup fails, or is already being
-    made, is logged and the rest go on; its older nightly ones are kept until one succeeds."""
-    from core import backups
-    from core.models import Company
-
-    done = failed = 0
-    for company in Company.objects.filter(is_active=True).order_by('pk').iterator():
-        try:
-            backup = backups.make_nightly_backup(keep=keep, company=company)
-        except ValueError as exc:
-            logger.warning('Company %s nightly backup skipped: %s', company.pk, exc)
-            failed += 1
-            continue
-        except Exception:  # noqa: BLE001 - one company must not stop the others
-            logger.exception('Company %s nightly backup failed', company.pk)
-            failed += 1
-            continue
-        if backup.status == 'done':
-            done += 1
-        else:
-            logger.error('Company %s nightly backup failed: %s', company.pk, backup.error)
-            failed += 1
-    return f'Company backups: {done} made, {failed} failed'

@@ -31,7 +31,7 @@ const STATUS_BADGE = {
 /**
  * /company/settings/backups — the company's own backups (backend: api/views/company_backups.py), as Admin → Backups
  * is for the whole platform. An owner or admin can make one, download it and delete it; one is also made every
- * night and the newest seven of those are kept. Passwords, API keys and sign-in tokens are not in them.
+ * night, encrypted and sent off-site, and the newest seven of those are kept on the server. Passwords, API keys and sign-in tokens are not in them.
  */
 export default function CompanyBackupsPage() {
   const navigate = useNavigate();
@@ -147,8 +147,8 @@ export default function CompanyBackupsPage() {
                     One zip with your company's data across every agent (leads, campaigns, tickets, employees,
                     recruitment, meetings and the rest), the files you uploaded, and your leads as spreadsheets.
                     Passwords, API keys and mailbox or CRM credentials are left out. It is made in the background and
-                    kept until you delete it. One is also made every night at 2 AM (Pakistan time); the newest seven
-                    of those are kept.
+                    kept until you delete it. One is also made every night at 2 AM (Pakistan time), encrypted and sent
+                    off-site; the server keeps the newest seven of those.
                   </p>
                 </div>
                 <Button onClick={handleStart} disabled={starting || running || loading}

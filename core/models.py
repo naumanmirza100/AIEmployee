@@ -3003,7 +3003,8 @@ class SystemBackup(models.Model):
 
     With no company it is the super admin's whole-system backup. With a company it is that company's own backup
     (Company dashboard → Backups): only its rows and uploads, made by one of its owners or admins (company_user) or
-    the nightly job (core.tasks.make_company_backups), and kept in BACKUP_ROOT/companies/<company id>/."""
+    the nightly script (manage.py make_company_backups, then encrypted to Backblaze B2), and kept in
+    BACKUP_ROOT/companies/<company id>/."""
     STATUS_CHOICES = [
         ('running', 'Running'),
         ('done', 'Done'),

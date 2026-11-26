@@ -1,6 +1,7 @@
 #!/bin/bash
 # Nightly FULL backup off the VPS: the database AND the uploaded files (CVs, HR and
-# Frontline documents, attachments), encrypted and sent to Backblaze B2.
+# Frontline documents, attachments), encrypted and sent to Backblaze B2. Then each
+# company's own backup (its dashboard's Backups page), encrypted and sent the same way.
 #
 # Installed at /usr/local/bin/ppp-full-backup.sh, run from /etc/cron.d/ppp-full-backup:
 #   0 21 * * * root /usr/local/bin/ppp-full-backup.sh >> /var/log/ppp-backup.log 2>&1
@@ -10,6 +11,12 @@
 # not the uploaded files: a lost VPS took every CV and document with it. This sends
 # the app's own backup (manage.py make_backup, the same zip as Admin -> Backups; the
 # server keeps the last 7 of them) and keeps 30 days in B2, as it is ten times the size.
+#
+# Each company's backup (manage.py make_company_backups: that company's data and
+# uploads, its passwords and keys left out) goes to B2:<bucket>/companies/<id>/, also
+# kept 30 days; the server keeps the last 7 of each. A company that fails does not
+# stop the others, and the script ends with FAIL so the log shows it. The whole-system
+# backup is still the one to restore a server from; a company's is its copy to keep.
 #
 # Same bucket and passphrase (BACKUP_GPG_PASSPHRASE) as the database copies. The
 # passphrase must also be in a password manager. To restore on a new server:
@@ -54,19 +61,35 @@ fi
 # Straight from the container into gpg: no unencrypted copy is written on the host.
 mkdir -p "$WORK"
 chmod 700 "$WORK"
+trap 'rm -f "$WORK"/*.gpg' EXIT      # never leave an encrypted copy lying around
+
+# encrypt <path under /app/backups> <encrypted file>: succeeds only if the copy
+# decrypts to exactly the zip the app made.
+encrypt() {
+  docker compose exec -T web cat "/app/backups/$1" | \
+    gpg --batch --yes --quiet --symmetric --cipher-algo AES256 \
+        --passphrase-fd 3 --pinentry-mode loopback --output "$2" \
+        3< <(printf '%s' "$BACKUP_GPG_PASSPHRASE")
+  local want got
+  want=$(docker compose exec -T web sha256sum "/app/backups/$1" | cut -d' ' -f1)
+  got=$(gpg --batch --quiet --decrypt --passphrase-fd 3 --pinentry-mode loopback "$2" \
+          3< <(printf '%s' "$BACKUP_GPG_PASSPHRASE") | sha256sum | cut -d' ' -f1)
+  [ -n "$want" ] && [ "$want" = "$got" ]
+}
+
+# ship <encrypted file> <folder in the bucket>: succeeds only once it is in B2 at its
+# full size, rather than trusting a zero exit code.
+ship() {
+  rclone copy "$1" "B2:${B2_BUCKET}/$2/" --no-traverse --quiet || return 1
+  local name local_size remote_size
+  name=$(basename "$1")
+  local_size=$(stat -c %s "$1")
+  remote_size=$(rclone lsf "B2:${B2_BUCKET}/$2/" --include "$name" --format s --quiet | head -1)
+  [ "$remote_size" = "$local_size" ]
+}
+
 ENC="$WORK/$NAME.gpg"
-trap 'rm -f "$ENC"' EXIT      # never leave the encrypted copy lying around
-
-docker compose exec -T web cat "/app/backups/$NAME" | \
-  gpg --batch --yes --quiet --symmetric --cipher-algo AES256 \
-      --passphrase-fd 3 --pinentry-mode loopback --output "$ENC" \
-      3< <(printf '%s' "$BACKUP_GPG_PASSPHRASE")
-
-# Trust it only if it decrypts to exactly the zip the app made.
-WANT=$(docker compose exec -T web sha256sum "/app/backups/$NAME" | cut -d' ' -f1)
-GOT=$(gpg --batch --quiet --decrypt --passphrase-fd 3 --pinentry-mode loopback "$ENC" \
-        3< <(printf '%s' "$BACKUP_GPG_PASSPHRASE") | sha256sum | cut -d' ' -f1)
-if [ -z "$WANT" ] || [ "$WANT" != "$GOT" ]; then
+if ! encrypt "$NAME" "$ENC"; then
   echo "$(date -Is) full FAIL: the encrypted copy of $NAME does not decrypt to the backup" >&2
   exit 1
 fi
@@ -77,17 +100,47 @@ export RCLONE_CONFIG_B2_TYPE=b2
 export RCLONE_CONFIG_B2_ACCOUNT="$B2_KEY_ID"
 export RCLONE_CONFIG_B2_KEY="$B2_APP_KEY"
 
-rclone copy "$ENC" "B2:${B2_BUCKET}/full/" --no-traverse --quiet
-
-# Confirm it landed, at its full size, rather than trusting a zero exit code.
-REMOTE_NAME=$(basename "$ENC")
-LOCAL_SIZE=$(stat -c %s "$ENC")
-REMOTE_SIZE=$(rclone lsf "B2:${B2_BUCKET}/full/" --include "$REMOTE_NAME" --format s --quiet | head -1)
-if [ "$REMOTE_SIZE" != "$LOCAL_SIZE" ]; then
-  echo "$(date -Is) full FAIL: $REMOTE_NAME in B2 is ${REMOTE_SIZE:-missing}, expected $LOCAL_SIZE bytes" >&2
+if ! ship "$ENC" full; then
+  echo "$(date -Is) full FAIL: $(basename "$ENC") did not arrive whole in B2:${B2_BUCKET}/full/" >&2
   exit 1
 fi
 
 # Older copies are deleted for good (B2 would otherwise keep them as hidden versions).
 rclone delete "B2:${B2_BUCKET}/full/" --min-age "${KEEP_REMOTE_DAYS}d" --b2-hard-delete --quiet || true
-echo "$(date -Is) full offsite ok B2:${B2_BUCKET}/full/$REMOTE_NAME ($(du -h "$ENC" | cut -f1))"
+echo "$(date -Is) full offsite ok B2:${B2_BUCKET}/full/$(basename "$ENC") ($(du -h "$ENC" | cut -f1))"
+rm -f "$ENC"
+
+# ---- 4. each company's backup -----------------------------------------------
+# make_company_backups prints one line per finished backup, companies/<id>/<name>. A
+# company whose backup failed is on stderr and makes it exit non-zero; the ones that
+# were made are still encrypted and sent.
+COMPANY_FAILED=0
+COMPANY_LIST=$(docker compose exec -T web python manage.py make_company_backups --keep "$KEEP_SERVER" | tr -d '\r') \
+  || COMPANY_FAILED=1
+SENT=0
+# The list is read on fd 4: docker compose exec reads stdin, and would eat the rest of it.
+while IFS= read -r -u 4 REL; do
+  case "$REL" in
+    companies/*/backup-*-nightly.zip) ;;
+    *) continue ;;
+  esac
+  DIR=$(dirname "$REL")                         # companies/<id>
+  CENC="$WORK/$(basename "$REL").gpg"
+  if ! encrypt "$REL" "$CENC"; then
+    echo "$(date -Is) company FAIL: the encrypted copy of $REL does not decrypt to the backup" >&2
+    COMPANY_FAILED=1
+  elif ! ship "$CENC" "$DIR"; then
+    echo "$(date -Is) company FAIL: $REL did not arrive whole in B2:${B2_BUCKET}/$DIR/" >&2
+    COMPANY_FAILED=1
+  else
+    SENT=$((SENT + 1))
+  fi
+  rm -f "$CENC"
+done 4<<< "$COMPANY_LIST"
+
+rclone delete "B2:${B2_BUCKET}/companies/" --min-age "${KEEP_REMOTE_DAYS}d" --b2-hard-delete --quiet || true
+if [ "$COMPANY_FAILED" -ne 0 ]; then
+  echo "$(date -Is) company FAIL: $SENT company backup(s) sent to B2:${B2_BUCKET}/companies/, but some failed (see above)" >&2
+  exit 1
+fi
+echo "$(date -Is) company offsite ok: $SENT company backup(s) in B2:${B2_BUCKET}/companies/"

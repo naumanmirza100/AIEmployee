@@ -2,7 +2,8 @@
 
 The same as Admin → Backups, for one company: its data across the agents and its uploaded files, with passwords, API
 keys and sign-in tokens left out. Only an owner or admin of the company (IsCompanyAdmin.ADMIN_ROLES) gets in; a login
-only ever sees its own company's. One is also made every night (core.tasks.make_company_backups).
+only ever sees its own company's. One is also made every night (manage.py make_company_backups), encrypted and
+sent off-site.
 
 The download is a plain link the browser opens, so it can stream a backup of any size; it carries a signed ticket for
 this company and this backup, good for a few minutes, in place of the login (backup_download_link).

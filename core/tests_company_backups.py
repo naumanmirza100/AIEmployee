@@ -1,8 +1,9 @@
-"""One company's backups (core.backups.build_company_zip, api.views.company_backups, core.tasks.make_company_backups):
+"""One company's backups (core.backups.build_company_zip, api.views.company_backups, manage.py make_company_backups):
 only its rows and its uploads go in, its secrets stay out, only its owners and admins get in, and each company has
 its own nightly ones."""
 import json
 import zipfile
+from pathlib import Path
 from unittest import mock
 
 from django.contrib.auth.models import User
@@ -146,23 +147,38 @@ class EndpointTests(CompanyBackupBase):
 
 
 class NightlyTests(CompanyBackupBase):
+    """manage.py make_company_backups, run each night by scripts/ppp-full-backup.sh after the whole-system backup,
+    which then encrypts each zip it prints and sends it to Backblaze B2."""
+
+    def run_command(self, *args):
+        from io import StringIO
+        from django.core.management import call_command
+        out, err = StringIO(), StringIO()
+        call_command('make_company_backups', *args, stdout=out, stderr=err)
+        return out.getvalue().strip().splitlines(), err.getvalue()
+
     def test_each_active_company_gets_one_and_keeps_only_its_newest(self):
-        from core.tasks import make_company_backups
         Company.objects.create(name='Gone Co', email='g@test.local', is_active=False)
         old = SystemBackup.objects.create(company=self.company, status='done',
                                           file_name='backup-20261101-210000-nightly.zip')
         system = SystemBackup.objects.create(status='done', file_name='backup-20261101-210000-nightly.zip')
 
-        self.assertEqual(make_company_backups(keep=1), 'Company backups: 2 made, 0 failed')
+        lines, _ = self.run_command('--keep', '1')
 
-        self.assertEqual(SystemBackup.objects.filter(company=self.company).count(), 1)
+        mine = SystemBackup.objects.get(company=self.company)
+        theirs = SystemBackup.objects.get(company=self.other)
+        # One line per backup, its path under BACKUP_ROOT, for the script to encrypt and send.
+        self.assertEqual(lines, [f'companies/{self.company.pk}/{mine.file_name}',
+                                 f'companies/{self.other.pk}/{theirs.file_name}'])
+        for line in lines:
+            self.assertTrue((self.root / line).is_file())
+        self.assertTrue(mine.file_name.endswith('-nightly.zip'))
         self.assertFalse(SystemBackup.objects.filter(pk=old.pk).exists())
         self.assertTrue(SystemBackup.objects.filter(pk=system.pk).exists())     # the system's own are not touched
-        self.assertEqual(SystemBackup.objects.filter(company=self.other, status='done').count(), 1)
         self.assertFalse(SystemBackup.objects.filter(company__is_active=False).exists())
 
-    def test_one_company_failing_does_not_stop_the_others(self):
-        from core.tasks import make_company_backups
+    def test_one_company_failing_does_not_stop_the_others_and_the_command_says_so(self):
+        from django.core.management.base import CommandError
         real = backups.build_company_zip
 
         def flaky(path, company, created_by=''):
@@ -170,12 +186,19 @@ class NightlyTests(CompanyBackupBase):
                 raise RuntimeError('disk full')
             return real(path, company, created_by)
 
-        with mock.patch.object(backups, 'build_company_zip', side_effect=flaky):
-            self.assertEqual(make_company_backups(), 'Company backups: 1 made, 1 failed')
+        from io import StringIO
+        from django.core.management import call_command
+        out, err = StringIO(), StringIO()
+        with mock.patch.object(backups, 'build_company_zip', side_effect=flaky),                 self.assertRaisesMessage(CommandError, '1 company backup(s) failed'):
+            call_command('make_company_backups', stdout=out, stderr=err)
+        theirs = SystemBackup.objects.get(company=self.other)
+        self.assertEqual(out.getvalue().strip(), f'companies/{self.other.pk}/{theirs.file_name}')
+        self.assertIn('disk full', err.getvalue())
         self.assertEqual(SystemBackup.objects.get(company=self.company).error, 'disk full')
 
-    def test_it_is_on_the_beat_schedule_at_two_in_the_morning_in_pakistan(self):
+    def test_the_nightly_script_encrypts_and_sends_each_company_backup(self):
         from django.conf import settings
-        entry = settings.CELERY_BEAT_SCHEDULE['make-company-backups']
-        self.assertEqual(entry['task'], 'core.tasks.make_company_backups')
-        self.assertEqual((entry['schedule'].hour, entry['schedule'].minute), ({21}, {0}))
+        script = (Path(settings.BASE_DIR) / 'scripts' / 'ppp-full-backup.sh').read_text(encoding='utf-8')
+        self.assertIn('manage.py make_company_backups --keep', script)
+        self.assertIn('ship "$CENC" "$DIR"', script)
+        self.assertNotIn('make-company-backups', settings.CELERY_BEAT_SCHEDULE)   # cron makes them, as the system one

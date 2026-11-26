@@ -106,8 +106,6 @@ services:
     stop_grace_period: 10m
     volumes:
       - media:/app/media
-      # Each company's nightly backup is made here (core.tasks.make_company_backups) and downloaded from web.
-      - backups:/app/backups
     depends_on:
       redis:
         condition: service_healthy

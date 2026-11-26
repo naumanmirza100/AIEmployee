@@ -25,9 +25,10 @@ One company's backup (Company dashboard → Backups, 27 Nov 2026) is the same zi
 (company_querysets: every table, by the links that lead from it to the company), the files those rows point at, and
 its leads as CSVs. Passwords, API keys and sign-in tokens are left out (COMPANY_SECRET_FIELDS), since any owner or
 admin of the company can download it. It is the company's copy to keep and read; restore_backup does not load one,
-as it puts back a whole server. Each company's is also made every night by core.tasks.make_company_backups (21:00 UTC,
-02:00 in Pakistan, with the whole-system one), and the newest seven nightly ones of each company are kept. They are
-in BACKUP_ROOT/companies/<company id>/.
+as it puts back a whole server. Each company's is also made every night by `manage.py make_company_backups`, which
+scripts/ppp-full-backup.sh runs right after the whole-system one (21:00 UTC, 02:00 in Pakistan), then encrypts and
+sends to Backblaze B2 (companies/<company id>/), as it does the whole-system one. The server keeps the newest seven
+nightly ones of each company, in BACKUP_ROOT/companies/<company id>/.
 """
 import csv
 import io
@@ -114,7 +115,7 @@ def is_nightly(backup) -> bool:
 
 
 def make_nightly_backup(keep: int = 7, company=None):
-    """The nightly backup (manage.py make_backup, or one company's from core.tasks.make_company_backups): made here and
+    """The nightly backup (manage.py make_backup, or one company's from make_company_backups): made here and
     now, not on a thread, so the script that runs it can send the zip on once this returns. When it is done, nightly
     backups (of the same company, or the system's) past the newest `keep` are deleted. Returns the backup, done or
     failed; ValueError when another one is being made."""
@@ -124,6 +125,23 @@ def make_nightly_backup(keep: int = 7, company=None):
     if backup.status == 'done':
         prune_nightly(keep, company=company)
     return backup
+
+
+def make_nightly_company_backups(keep: int = 7):
+    """Each active company's nightly backup, one after another (manage.py make_company_backups, which the nightly
+    script runs after the whole-system one). Returns [(company, backup or None, error)]: a company whose backup fails,
+    or is already being made, does not stop the others, and keeps its older nightly ones until one succeeds."""
+    from core.models import Company
+    results = []
+    for company in Company.objects.filter(is_active=True).order_by('pk').iterator():
+        try:
+            backup = make_nightly_backup(keep=keep, company=company)
+        except Exception as exc:  # noqa: BLE001 - one company must not stop the others
+            logger.exception('Company %s nightly backup failed', company.pk)
+            results.append((company, None, str(exc) or type(exc).__name__))
+            continue
+        results.append((company, backup, '' if backup.status == 'done' else backup.error))
+    return results
 
 
 def prune_nightly(keep: int, company=None):
