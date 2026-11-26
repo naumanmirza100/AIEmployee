@@ -69,10 +69,10 @@ const solutions = [
 
 const resources = {
   learn: [
+    // Only pages that exist (26 Nov 2026): Featured Videos and Academy only said "Coming Soon", so they're out
+    // until they're written; Customer Stories shows the reviews page.
     { to: '/blog', title: 'Blog', icon: BookOpen },
-    { to: '/resources/customer-stories', title: 'Customer Stories', icon: Users },
-    { to: '/resources/featured-videos', title: 'Featured Videos', icon: Video },
-    { to: '/resources/academy', title: 'Academy', icon: GraduationCap },
+    { to: '/reviews', title: 'Customer Stories', icon: Users },
   ],
   agenticAI: [
     { to: '/resources/agentic-ai-explained#what-is-agentic-ai', title: 'What is agentic AI', icon: Lightbulb },
@@ -84,9 +84,7 @@ const resources = {
     { to: '/resources/agentic-ai-explained#use-cases', title: 'Business Use Cases', icon: BrainCircuit },
   ],
   support: [
-    { to: '/resources/help-docs', title: 'Help Docs', icon: FileText },
-    { to: '/resources/partners', title: 'Partners', icon: Handshake },
-    { to: '/resources/community', title: 'Community', icon: Users },
+    // Help Docs, Partners and Community only said "Coming Soon"; they come back when their pages exist.
     { to: '/contact', title: 'Support', icon: LifeBuoy },
   ]
 };

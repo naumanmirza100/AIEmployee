@@ -1,6 +1,27 @@
 // Contact Service
 
 import api from './api';
+import { API_BASE_URL } from '@/config/apiConfig';
+
+/**
+ * A message from the public site (the message box and the complaints form), sent without any sign-in: the
+ * endpoint is public, and a stale token in this browser would otherwise get a 401 and a bounce to the login page.
+ * Resolves to the response body; throws when it wasn't saved.
+ */
+export const sendPublicMessage = async ({ fullName, email, message, projectTitle }) => {
+  const body = new FormData();
+  body.append('fullName', fullName || '');
+  body.append('email', email || '');
+  body.append('message', message || '');
+  if (projectTitle) body.append('projectTitle', projectTitle);
+  const res = await fetch(`${API_BASE_URL}/contact`, { method: 'POST', body });
+  let data = null;
+  try { data = await res.json(); } catch { /* not JSON */ }
+  if (!res.ok || (data && data.status && data.status !== 'success')) {
+    throw new Error(data?.message || `Request failed (${res.status})`);
+  }
+  return data;
+};
 
 /**
  * Submit contact form (supports file upload)
