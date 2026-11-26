@@ -326,7 +326,21 @@ def _fulfill_purchase_from_metadata(metadata, subscription=None):
     stripe_sub_id = None
     period_start = None
     period_end = None
+    new_status = 'active'
     if subscription:
+        # A checkout session stays 'paid' forever, so the same session can be
+        # fulfilled again long after its subscription ended (verify_session is
+        # public and the id sits in the success-page URL). Doing so used to point
+        # the row back at the dead subscription, orphaning the one the company
+        # pays for now, and to undo an admin deactivation. A subscription Stripe
+        # has finished with grants nothing.
+        if subscription.get('status') in _ENDED_AT_STRIPE + ('unpaid',):
+            logger.warning('Fulfill refused: sub %s for %s/%s is %s at Stripe.',
+                           subscription.get('id'), company_id, module_name, subscription.get('status'))
+            return False, 'subscription_ended'
+        # Not 'active' unconditionally: an `incomplete` first payment grants no
+        # access until Stripe says it cleared (customer.subscription.updated).
+        new_status = _stripe_map_status(subscription.get('status'))
         stripe_sub_id = subscription.get('id')
         period_start, period_end = _extract_period(subscription)
         # Derive billing_interval from Stripe if the plan didn't give us one
@@ -347,7 +361,7 @@ def _fulfill_purchase_from_metadata(metadata, subscription=None):
     if existing:
         # Update existing record
         update_fields = ['status', 'price_paid', 'updated_at']
-        existing.status = 'active'
+        existing.status = new_status
         existing.price_paid = price
         existing.cancelled_at = None
         existing.cancelled_reason = None
@@ -388,7 +402,7 @@ def _fulfill_purchase_from_metadata(metadata, subscription=None):
         purchase = CompanyModulePurchase.objects.create(
             company=company,
             module_name=module_name,
-            status='active',
+            status=new_status,
             price_paid=price,
             purchased_by=purchased_by,
             expires_at=expires_at,
@@ -781,14 +795,13 @@ def _handle_checkout_completed(session):
         _handle_key_request_payment(metadata)
         return
 
-    # Module subscription — retrieve the subscription object
+    # Module subscription — retrieve the subscription object. A StripeError is
+    # left to propagate: fulfilling without it stored the purchase as a 30-day
+    # one-time buy with no subscription id, which no later webhook could match,
+    # so the customer was locked out after 30 days while still being billed. The
+    # webhook view turns the error into a 500 and Stripe retries.
     subscription_id = session.get('subscription')
-    subscription = None
-    if subscription_id:
-        try:
-            subscription = stripe.Subscription.retrieve(subscription_id)
-        except stripe.error.StripeError as exc:
-            logger.warning('Could not retrieve subscription %s: %s', subscription_id, exc)
+    subscription = stripe.Subscription.retrieve(subscription_id) if subscription_id else None
 
     ok, _ = _fulfill_purchase_from_metadata(metadata, subscription=subscription)
     if not ok:
@@ -1351,9 +1364,20 @@ def verify_session(request):
         try:
             subscription = stripe.Subscription.retrieve(subscription_id)
         except stripe.error.StripeError as exc:
+            # Don't fulfill without it (see _handle_checkout_completed); the
+            # webhook will activate the module once Stripe is reachable.
             logger.warning('Verify session: could not retrieve subscription %s: %s', subscription_id, exc)
+            return Response(
+                {'status': 'error', 'message': 'Could not verify payment. Please refresh in a minute.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
     ok, mod = _fulfill_purchase_from_metadata(metadata, subscription=subscription)
+    if not ok and mod == 'subscription_ended':
+        return Response(
+            {'status': 'error', 'message': 'This checkout belongs to a subscription that has ended.'},
+            status=status.HTTP_409_CONFLICT,
+        )
     if not ok:
         logger.warning('Verify session fulfill failed for session %s metadata: %s', session_id, metadata)
         return Response(
