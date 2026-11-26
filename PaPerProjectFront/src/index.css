@@ -210,6 +210,10 @@
         --sfc-1a1028: #faf9fa;
         --sfc-1c1030: #fafafb;
         --sfc-1e1035: #fbfbfc;
+        /* Inset panels painted inline with black at 20/25/40% (a dark-page idiom): a card in light mode. */
+        --inset-20: hsl(var(--card) / 0.85);
+        --inset-25: hsl(var(--card) / 0.85);
+        --inset-40: hsl(var(--card) / 0.85);
         --sfc-241638: #fcfcfc;
         --sfc-0a0616: #f6f6f7;
         --sfc-0e0820: #f8f7f9;
@@ -423,6 +427,9 @@
         --sfc-1a1028: #1a1028;
         --sfc-1c1030: #1c1030;
         --sfc-1e1035: #1e1035;
+        --inset-20: rgba(0, 0, 0, 0.2);
+        --inset-25: rgba(0, 0, 0, 0.25);
+        --inset-40: rgba(0, 0, 0, 0.4);
         --sfc-241638: #241638;
         --sfc-0a0616: #0a0616;
         --sfc-0e0820: #0e0820;

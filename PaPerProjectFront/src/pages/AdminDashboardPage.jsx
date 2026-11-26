@@ -716,17 +716,17 @@ const AdminDashboardPage = () => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'pending':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+        return 'bg-yellow-500/10 text-yellow-700 hover:bg-yellow-500/10 dark:bg-yellow-100 dark:text-yellow-800 dark:hover:bg-yellow-100 border-yellow-500/25 dark:border-yellow-200';
       case 'reviewing':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
+        return 'bg-blue-500/10 text-blue-700 hover:bg-blue-500/10 dark:bg-blue-100 dark:text-blue-800 dark:hover:bg-blue-100 border-blue-500/25 dark:border-blue-200';
       case 'interview':
-        return 'bg-purple-100 text-purple-800 border-purple-200';
+        return 'bg-purple-500/10 text-purple-700 hover:bg-purple-500/10 dark:bg-purple-100 dark:text-purple-800 dark:hover:bg-purple-100 border-purple-500/25 dark:border-purple-200';
       case 'accepted':
-        return 'bg-green-100 text-green-800 border-green-200';
+        return 'bg-green-500/10 text-green-700 hover:bg-green-500/10 dark:bg-green-100 dark:text-green-800 dark:hover:bg-green-100 border-green-500/25 dark:border-green-200';
       case 'rejected':
-        return 'bg-red-100 text-red-800 border-red-200';
+        return 'bg-red-500/10 text-red-700 hover:bg-red-500/10 dark:bg-red-100 dark:text-red-800 dark:hover:bg-red-100 border-red-500/25 dark:border-red-200';
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return 'bg-gray-500/10 text-gray-700 hover:bg-gray-500/10 dark:bg-gray-100 dark:text-gray-800 dark:hover:bg-gray-100 border-gray-500/25 dark:border-gray-200';
     }
   };
 

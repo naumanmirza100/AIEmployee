@@ -57,10 +57,10 @@ function useDebounce(value, delay = 400) {
 
 // ─── type badge colour ────────────────────────────────────────────────────────
 const TYPE_COLORS = {
-  'Full-time':  'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  'Part-time':  'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  'Contract':   'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
-  'Internship': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+  'Full-time':  'bg-green-500/10 text-green-700 hover:bg-green-500/10 dark:bg-green-900/30 dark:text-green-300',
+  'Part-time':  'bg-blue-500/10 text-blue-700 hover:bg-blue-500/10 dark:bg-blue-900/30 dark:text-blue-300',
+  'Contract':   'bg-orange-500/10 text-orange-700 hover:bg-orange-500/10 dark:bg-orange-900/30 dark:text-orange-300',
+  'Internship': 'bg-purple-500/10 text-purple-700 hover:bg-purple-500/10 dark:bg-purple-900/30 dark:text-purple-300',
 };
 
 // ─── component ────────────────────────────────────────────────────────────────

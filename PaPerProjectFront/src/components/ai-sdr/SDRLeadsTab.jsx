@@ -2440,7 +2440,7 @@ const SDRLeadsTab = () => {
 
                 {selectedLead.research_profile.prospect_research?.decision_making_relevance
                   && selectedLead.research_profile.prospect_research.decision_making_relevance.toLowerCase() !== 'unknown' && (
-                  <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, background: 'rgba(0,0,0,0.2)' }}>
+                  <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, background: 'var(--inset-20)' }}>
                     <span style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', display: 'block', marginBottom: 2 }}>Prospect Context</span>
                     <span style={{ color: '#f1f5f9', fontSize: 12 }}>
                       {selectedLead.research_profile.prospect_research.decision_making_relevance}
@@ -2976,7 +2976,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                       <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
                       {s.detail && <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
                       {s.code && (
-                        <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'var(--inset-40)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                           <code style={{ color: 'hsl(var(--primary-fill))', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
                           <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step ? 'hsl(var(--pt-4ade80))' : '#6b7280' }}>
                             {copiedKey === s.step ? <CheckCircle size={13} /> : <Copy size={13} />}
@@ -3005,7 +3005,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                       <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
                       {s.detail && <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
                       {s.code && (
-                        <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'var(--inset-40)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                           <code style={{ color: '#60a5fa', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
                           <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step + 10); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step + 10 ? 'hsl(var(--pt-4ade80))' : '#6b7280' }}>
                             {copiedKey === s.step + 10 ? <CheckCircle size={13} /> : <Copy size={13} />}

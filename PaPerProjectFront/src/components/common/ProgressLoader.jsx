@@ -68,7 +68,7 @@ const ProgressLoader = ({
   return (
     <div
       className="rounded-xl border border-border p-5 space-y-4"
-      style={{ background: 'rgba(0,0,0,0.25)' }}
+      style={{ background: 'var(--inset-25)' }}
       aria-live="polite"
       aria-busy="true"
     >

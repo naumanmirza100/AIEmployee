@@ -814,7 +814,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       <CalendarCheck className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
                       <div>
                         <p className="text-sm font-medium text-amber-100">Connect Google Calendar for Meet links</p>
-                        <p className="text-xs text-amber-200/70 mt-0.5">
+                        <p className="text-xs text-amber-200 dark:text-amber-200/70 mt-0.5">
                           Online interviews won't include a Google Meet link until you connect your calendar. Go to your profile, open Integrations, and connect Google Calendar.
                         </p>
                       </div>
@@ -850,7 +850,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                         data-testid="REC-settings-job-select-trigger"
                         type="button"
                         onClick={() => { if (!loadingJobs) { setJobSearchOpen(!jobSearchOpen); setJobSearchQuery(''); } }}
-                        className="w-full flex items-center justify-between text-sm bg-black/30 border border-white/20 text-white rounded-md px-3 py-2 hover:bg-black/40 transition-colors disabled:opacity-50"
+                        className="w-full flex items-center justify-between text-sm bg-card/80 dark:bg-black/30 border border-white/20 text-white rounded-md px-3 py-2 hover:bg-muted dark:hover:bg-black/40 transition-colors disabled:opacity-50"
                         disabled={loadingJobs}
                       >
                         <span className={selectedJobTitle ? 'text-white' : 'text-white/50'}>
@@ -1188,7 +1188,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                         >
                           <ChevronLeft className="h-5 w-5" />
                         </button>
-                        <div className="text-lg font-semibold text-white">
+                        <div className="text-lg font-semibold text-pure-white">
                           {formatMonthYear(calendarMonth)}
                         </div>
                         <button
@@ -1224,7 +1224,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                     ? 'bg-[hsl(var(--primary-fill))] text-pure-white font-bold'
                                     : dateInfo.isEnd
                                       ? 'bg-indigo-500 text-pure-white font-bold'
-                                      : 'bg-indigo-500/70 text-white font-bold'
+                                      : 'bg-indigo-500/70 text-pure-white font-bold'
                                   : dateInfo.isAvailable
                                     ? 'bg-slate-600 text-pure-white font-bold cursor-pointer hover:bg-indigo-600'
                                     : 'text-slate-500'
@@ -1258,7 +1258,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                 id={`REC-settings-slot-date-header-${formatDateLocal(date)}`}
                                 data-testid={`REC-settings-slot-date-header-${formatDateLocal(date)}`}
                                 className={`
-                                  bg-slate-700 border border-slate-600 rounded-lg p-4 text-center font-semibold text-white text-sm
+                                  bg-slate-700 border border-slate-600 rounded-lg p-4 text-center font-semibold text-pure-white text-sm
                                   ${isStart ? 'bg-indigo-600 border-indigo-600' : isInRange ? 'bg-indigo-500/80 border-indigo-500' : ''}
                                 `}
                               >
@@ -1295,7 +1295,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                       id={`REC-settings-slot-cell-${dateStr}-${timeStr}`}
                                       data-testid={`REC-settings-slot-cell-${dateStr}-${timeStr}`}
                                       className={`
-                                        bg-slate-800 border border-slate-600 rounded-lg p-3.5 text-sm text-white cursor-pointer transition-all relative min-h-[52px] flex items-center
+                                        bg-slate-800 border border-slate-600 rounded-lg p-3.5 text-sm text-pure-white cursor-pointer transition-all relative min-h-[52px] flex items-center
                                         ${isAvailable
                                           ? 'hover:bg-indigo-600 hover:border-indigo-500'
                                           : 'opacity-50 line-through bg-slate-700'
