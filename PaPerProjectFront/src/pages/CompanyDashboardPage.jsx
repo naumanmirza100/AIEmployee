@@ -68,6 +68,9 @@ const CompanyDashboardPage = () => {
 
   const [companyUser, setCompanyUser] = useState(null);
   const [jobs, setJobs] = useState([]);
+  // My Jobs' filter and search (UI refresh, 26 Nov 2026).
+  const [jobFilter, setJobFilter] = useState('all');
+  const [jobSearch, setJobSearch] = useState('');
   const [projects, setProjects] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -1203,13 +1206,8 @@ const CompanyDashboardPage = () => {
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               {/* Tab navigation now lives in the left sidebar (under "Dashboard").
                   This row keeps only the per-tab action buttons, aligned right. */}
+              {activeTab === 'users' && (
               <div className="flex justify-end items-center mb-6">
-              {activeTab === 'jobs' && (
-                <Button onClick={() => setShowCreateJobModal(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Post New Job
-                </Button>
-              )}
               {activeTab === 'users' && (
                 <Button variant="outline" className="mr-2" onClick={() => setShowImportUsers(true)} data-testid="import-users-button">
                   <FileSpreadsheet className="h-4 w-4 mr-2" />
@@ -1230,79 +1228,125 @@ const CompanyDashboardPage = () => {
                 </Button>
               )}
             </div>
+              )}
             
 
-            <TabsContent value="jobs" className="space-y-4">
-              {loading ? (
-                <div className="flex justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
-                </div>
-              ) : jobs.length === 0 ? (
-                <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
-                  <CardContent className="py-12 text-center">
-                    <Briefcase className="h-12 w-12 mx-auto text-white/20 mb-4" />
-                    <p className="text-lg font-medium mb-2 text-white">No jobs posted yet</p>
-                    <Button onClick={() => setShowCreateJobModal(true)} className="bg-violet-600 hover:bg-violet-700">
-                      Post Your First Job
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="grid gap-4">
-                  {jobs.map((job) => (
-                    <Card key={job.id} className="bg-[var(--panel-2)] border border-[var(--line-3)] hover:border-violet-500/30 transition-colors">
-                      <CardHeader>
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <CardTitle className="text-white">{job.title}</CardTitle>
-                            <div className="flex gap-4 mt-2 text-sm text-white/50">
-                              <span className="flex items-center gap-1">
-                                <MapPin className="h-4 w-4" />
-                                {job.location}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Briefcase className="h-4 w-4" />
-                                {job.department}
-                              </span>
-                              <Badge className="bg-violet-600/20 text-violet-300 border border-violet-500/30">{job.type}</Badge>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                const url = `${window.location.origin}/jobs/apply/${job.id}`;
-                                navigator.clipboard.writeText(url).then(() => {
-                                  toast({ title: 'Link copied!', description: 'Application link copied to clipboard.' });
-                                }).catch(() => {
-                                  toast({ title: 'Error', description: 'Failed to copy link.', variant: 'destructive' });
-                                });
-                              }}
-                              className="border-white/20 text-white/70 hover:text-white hover:bg-white/10"
-                            >
-                              <Copy className="h-4 w-4 mr-2" />
-                              Copy Link
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleViewApplications(job.id)}
-                              className="border-white/20 text-white/70 hover:text-white hover:bg-white/10"
-                            >
-                              <Eye className="h-4 w-4 mr-2" />
-                              View Applications
-                            </Button>
-                          </div>
+            <TabsContent value="jobs" className="space-y-6">
+              {(() => {
+                const openCount = jobs.filter((j) => j.is_active).length;
+                const q = jobSearch.trim().toLowerCase();
+                const shown = jobs.filter((j) => (jobFilter === 'all' || (jobFilter === 'open') === !!j.is_active)
+                  && (!q || [j.title, j.department, j.location, j.type].some((v) => String(v || '').toLowerCase().includes(q))));
+                const fmt = (v) => (v ? new Date(v).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null);
+                const copyLink = (job) => {
+                  const url = `${window.location.origin}/jobs/apply/${job.id}`;
+                  navigator.clipboard.writeText(url).then(() => {
+                    toast({ title: 'Link copied!', description: 'Application link copied to clipboard.' });
+                  }).catch(() => {
+                    toast({ title: 'Error', description: 'Failed to copy link.', variant: 'destructive' });
+                  });
+                };
+                return (
+                  <>
+                    <div className="flex items-end justify-between gap-4 flex-wrap">
+                      <div>
+                        <h1 className="font-heading font-semibold tracking-tight text-4xl sm:text-5xl leading-none text-foreground">My Jobs</h1>
+                        <p className="mt-3 text-base text-muted-foreground">
+                          {loading ? 'Loading your jobs…' : `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'} · ${openCount} open · ${jobs.length - openCount} closed`}
+                        </p>
+                      </div>
+                      <Button onClick={() => setShowCreateJobModal(true)}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Post New Job
+                      </Button>
+                    </div>
+
+                    {jobs.length > 0 && (
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-card/70 p-1" role="tablist" aria-label="Show jobs">
+                          {[['all', 'All', jobs.length], ['open', 'Open', openCount], ['closed', 'Closed', jobs.length - openCount]].map(([key, label, n]) => (
+                            <button key={key} type="button" role="tab" aria-selected={jobFilter === key} onClick={() => setJobFilter(key)}
+                              className={`rounded-full px-4 h-9 text-sm transition-colors ${jobFilter === key
+                                ? 'bg-card text-foreground font-semibold shadow-sm ring-1 ring-border/70 dark:bg-pure-white/[0.08]'
+                                : 'text-muted-foreground hover:text-foreground'}`}>
+                              {label} <span className="tabular-nums">{n}</span>
+                            </button>
+                          ))}
                         </div>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-sm text-white/50 line-clamp-2">{job.description}</p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
+                        <div className="relative flex-1 min-w-[220px] max-w-md">
+                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                          <Input value={jobSearch} onChange={(e) => setJobSearch(e.target.value)} placeholder="Search jobs" className="pl-11" aria-label="Search jobs" />
+                        </div>
+                      </div>
+                    )}
+
+                    {loading ? (
+                      <div className="flex justify-center py-12">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      </div>
+                    ) : jobs.length === 0 ? (
+                      <Card>
+                        <CardContent className="py-14 text-center">
+                          <span className="mx-auto mb-4 h-14 w-14 rounded-2xl bg-primary/10 text-primary dark:text-violet-300 flex items-center justify-center">
+                            <Briefcase className="h-7 w-7" />
+                          </span>
+                          <p className="font-heading text-xl font-semibold mb-1 text-foreground">No jobs posted yet</p>
+                          <p className="text-sm text-muted-foreground mb-5">Post a job and share its link; applications come in here.</p>
+                          <Button onClick={() => setShowCreateJobModal(true)}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Post Your First Job
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ) : shown.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-10 text-center">No jobs match. Try another word or show all jobs.</p>
+                    ) : (
+                      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                        {shown.map((job) => (
+                          <Card key={job.id} className="flex flex-col hover:border-primary/40 transition-colors">
+                            <CardContent className="p-6 flex flex-col flex-1">
+                              <div className="flex items-start justify-between gap-3">
+                                <h3 className="font-heading font-semibold text-xl leading-tight text-foreground break-words min-w-0">{job.title}</h3>
+                                <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold border ${job.is_active
+                                  ? 'bg-emerald-500/10 text-emerald-700 border-emerald-500/25 dark:text-emerald-300'
+                                  : 'bg-muted text-muted-foreground border-border'}`}>
+                                  {job.is_active ? 'Open' : 'Closed'}
+                                </span>
+                              </div>
+                              <p className="mt-1.5 text-sm text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                                {[job.department, job.location, job.type].filter(Boolean).join(' · ')}
+                              </p>
+                              {job.description && <p className="mt-4 text-sm text-foreground/70 line-clamp-3">{job.description}</p>}
+                              <div className="flex-1" />
+                              <div className="mt-5 grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  <div className="text-muted-foreground">Posted</div>
+                                  <div className="mt-0.5 font-semibold text-foreground">{fmt(job.created_at) || '–'}</div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground">Applications close</div>
+                                  <div className="mt-0.5 font-semibold text-foreground">{fmt(job.application_close_date) || 'No closing date'}</div>
+                                </div>
+                              </div>
+                              <div className="h-px bg-border my-4" />
+                              <div className="flex items-center justify-between gap-2">
+                                <Button variant="ghost" size="sm" onClick={() => copyLink(job)} className="text-muted-foreground -ml-2">
+                                  <Copy className="h-4 w-4 mr-2" />
+                                  Copy Link
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => handleViewApplications(job.id)}>
+                                  View Applications
+                                  <ChevronRight className="h-4 w-4 ml-1" />
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </TabsContent>
 
             <TabsContent value="projects" className="space-y-4">
