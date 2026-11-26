@@ -2998,8 +2998,12 @@ class PersonalCalendarEvent(models.Model):
 
 
 class SystemBackup(models.Model):
-    """One whole-system backup the super admin made: the database and the uploaded files in one zip (core.backups).
-    The zip is in BACKUP_ROOT; this row says how far it got, so the admin page can show it and hand it out."""
+    """One backup: the database and the uploaded files in one zip (core.backups). The zip is in BACKUP_ROOT; this row
+    says how far it got, so the page can show it and hand it out.
+
+    With no company it is the super admin's whole-system backup. With a company it is that company's own backup
+    (Company dashboard → Backups): only its rows and uploads, made by one of its owners or admins (company_user) or
+    the nightly job (core.tasks.make_company_backups), and kept in BACKUP_ROOT/companies/<company id>/."""
     STATUS_CHOICES = [
         ('running', 'Running'),
         ('done', 'Done'),
@@ -3013,6 +3017,9 @@ class SystemBackup(models.Model):
     summary = models.JSONField(default=dict, blank=True)
     error = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='system_backups')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, null=True, blank=True, related_name='backups')
+    company_user = models.ForeignKey(CompanyUser, on_delete=models.SET_NULL, null=True, blank=True,
+                                     related_name='backups_made')
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 

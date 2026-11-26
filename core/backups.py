@@ -20,6 +20,14 @@ A backup runs in a thread of the web process, so it neither waits on a Celery wo
 Every night one is also made by `manage.py make_backup`, which scripts/ppp-full-backup.sh runs from cron (21:00 UTC),
 then encrypts and sends to Backblaze B2 (25 Nov 2026). Those are named backup-...-nightly.zip; the server keeps the
 last seven of them. Backups made with the button stay until the admin deletes them.
+
+One company's backup (Company dashboard → Backups, 27 Nov 2026) is the same zip for that company alone: its rows
+(company_querysets: every table, by the links that lead from it to the company), the files those rows point at, and
+its leads as CSVs. Passwords, API keys and sign-in tokens are left out (COMPANY_SECRET_FIELDS), since any owner or
+admin of the company can download it. It is the company's copy to keep and read; restore_backup does not load one,
+as it puts back a whole server. Each company's is also made every night by core.tasks.make_company_backups (21:00 UTC,
+02:00 in Pakistan, with the whole-system one), and the newest seven nightly ones of each company are kept. They are
+in BACKUP_ROOT/companies/<company id>/.
 """
 import csv
 import io
@@ -40,6 +48,7 @@ from django.conf import settings
 from django.core.files import File
 from django.core.files.storage import FileSystemStorage, default_storage
 from django.core.management import call_command
+from django.core.serializers.json import Serializer as JSONSerializer
 from django.db import close_old_connections, connection, models
 from django.db.models import signals as model_signals
 from django.utils import timezone
@@ -68,6 +77,8 @@ def backup_root() -> Path:
 
 def backup_path(backup) -> Path:
     # Only the name: a file_name in the database never reaches outside the backups folder.
+    if backup.company_id:
+        return backup_root() / 'companies' / str(backup.company_id) / Path(backup.file_name).name
     return backup_root() / Path(backup.file_name).name
 
 
@@ -79,14 +90,21 @@ def fail_stale_backups():
         finished_at=timezone.now())
 
 
-def start_backup(user):
-    """Create the backup's row and build the zip in the background. ValueError when one is already running."""
+def _new_backup(company=None, suffix='.zip', **who):
+    """The row for a new backup, whole-system (no company) or one company's. ValueError when one of the same kind is
+    already being made: one at a time for the system, and one at a time for each company."""
     from core.models import SystemBackup
     fail_stale_backups()
-    if SystemBackup.objects.filter(status='running').exists():
+    if SystemBackup.objects.filter(status='running', company=company).exists():
         raise ValueError('A backup is already being made. Wait for it to finish.')
-    backup = SystemBackup.objects.create(
-        created_by=user, file_name=f"backup-{timezone.now():%Y%m%d-%H%M%S}.zip")
+    return SystemBackup.objects.create(
+        company=company, file_name=f"backup-{timezone.now():%Y%m%d-%H%M%S}{suffix}", **who)
+
+
+def start_backup(user, company=None, company_user=None):
+    """Create the backup's row and build the zip in the background. ValueError when one is already running.
+    With a company, it is that company's backup, made by `company_user` (one of its dashboard logins)."""
+    backup = _new_backup(company, created_by=user, company_user=company_user)
     threading.Thread(target=run_backup, args=(backup.pk,), name=f'system-backup-{backup.pk}', daemon=True).start()
     return backup
 
@@ -95,29 +113,25 @@ def is_nightly(backup) -> bool:
     return (backup.file_name or '').endswith(NIGHTLY_SUFFIX)
 
 
-def make_nightly_backup(keep: int = 7):
-    """The nightly backup (manage.py make_backup): made here and now, not on a thread, so the script that runs it can
-    send the zip on once this returns. When it is done, nightly backups past the newest `keep` are deleted. Returns the
-    backup, done or failed; ValueError when another one is being made."""
-    from core.models import SystemBackup
-    fail_stale_backups()
-    if SystemBackup.objects.filter(status='running').exists():
-        raise ValueError('A backup is already being made. Wait for it to finish.')
-    backup = SystemBackup.objects.create(
-        created_by=None, file_name=f"backup-{timezone.now():%Y%m%d-%H%M%S}{NIGHTLY_SUFFIX}")
+def make_nightly_backup(keep: int = 7, company=None):
+    """The nightly backup (manage.py make_backup, or one company's from core.tasks.make_company_backups): made here and
+    now, not on a thread, so the script that runs it can send the zip on once this returns. When it is done, nightly
+    backups (of the same company, or the system's) past the newest `keep` are deleted. Returns the backup, done or
+    failed; ValueError when another one is being made."""
+    backup = _new_backup(company, suffix=NIGHTLY_SUFFIX, created_by=None)
     run_backup(backup.pk)
     backup.refresh_from_db()
     if backup.status == 'done':
-        prune_nightly(keep)
+        prune_nightly(keep, company=company)
     return backup
 
 
-def prune_nightly(keep: int):
+def prune_nightly(keep: int, company=None):
     """Keep the newest `keep` finished nightly backups and delete the older ones, with any nightly failure older than
-    the oldest one kept. Backups made with the button are never touched."""
+    the oldest one kept. Backups made with the button are never touched. With a company, only that company's."""
     from core.models import SystemBackup
-    nightly = list(SystemBackup.objects.filter(file_name__endswith=NIGHTLY_SUFFIX).exclude(status='running')
-                   .order_by('-created_at', '-pk'))
+    nightly = list(SystemBackup.objects.filter(file_name__endswith=NIGHTLY_SUFFIX, company=company)
+                   .exclude(status='running').order_by('-created_at', '-pk'))
     kept = [b for b in nightly if b.status == 'done'][:max(keep, 1)]
     if not kept:
         return 0
@@ -216,9 +230,9 @@ def _write_csv(zf, arcname, header, rows):
     return count
 
 
-def _lead_exports():
+def _lead_exports(company_id=None):
     """(file name, header, {company folder: [rows]}) for each kind of lead. A kind whose app is not installed is
-    skipped."""
+    skipped. With a company, only its leads."""
     folders = _company_folders()
 
     try:
@@ -227,10 +241,13 @@ def _lead_exports():
         SDRLead = None
     if SDRLead is not None:
         by_company = {}
-        for row in SDRLead._base_manager.order_by('pk').values_list(
+        sdr_leads = SDRLead._base_manager.all()
+        if company_id is not None:
+            sdr_leads = sdr_leads.filter(company_user__company_id=company_id)
+        for row in sdr_leads.order_by('pk').values_list(
                 'company_user__company_id', 'company_user__email', *SDR_LEAD_COLUMNS).iterator():
-            company_id, added_by, values = row[0], row[1], row[2:]
-            by_company.setdefault(folders.get(company_id, NO_COMPANY_FOLDER), []).append([*values, added_by])
+            lead_company, added_by, values = row[0], row[1], row[2:]
+            by_company.setdefault(folders.get(lead_company, NO_COMPANY_FOLDER), []).append([*values, added_by])
         yield 'sdr_leads.csv', SDR_LEAD_COLUMNS + ['added_by'], by_company
 
     try:
@@ -242,15 +259,18 @@ def _lead_exports():
         # A marketing lead belongs to a login (auth.User); its company is the dashboard login that acts as it.
         from core.models import CompanyUser
         user_company = {}
-        for user_id, company_id in CompanyUser._base_manager.filter(login_user__isnull=False).order_by(
+        for user_id, owner_company in CompanyUser._base_manager.filter(login_user__isnull=False).order_by(
                 'pk').values_list('login_user_id', 'company_id').iterator():
-            user_company.setdefault(user_id, company_id)
+            user_company.setdefault(user_id, owner_company)
+        leads, links = Lead._base_manager.all(), CampaignLead._base_manager.all()
+        if company_id is not None:
+            owners = [u for u, c in user_company.items() if c == company_id]
+            leads, links = leads.filter(owner_id__in=owners), links.filter(lead__owner_id__in=owners)
         campaigns = {}
-        for lead_id, name in CampaignLead._base_manager.order_by('pk').values_list(
-                'lead_id', 'campaign__name').iterator():
+        for lead_id, name in links.order_by('pk').values_list('lead_id', 'campaign__name').iterator():
             campaigns.setdefault(lead_id, []).append(name)
         by_company = {}
-        for row in Lead._base_manager.order_by('pk').values_list(
+        for row in leads.order_by('pk').values_list(
                 'owner_id', 'owner__email', *MARKETING_LEAD_COLUMNS).iterator():
             owner_id, owner_email, values = row[0], row[1], row[2:]
             folder = folders.get(user_company.get(owner_id), NO_COMPANY_FOLDER)
@@ -314,14 +334,211 @@ def build_zip(path: Path, created_by: str = '') -> dict:
     return summary
 
 
+# ---- One company's backup ---------------------------------------------------------------------------------------
+# On top of EXCLUDED_MODELS: the company's sign-in tokens, and the platform's own settings a company login reaches.
+COMPANY_EXCLUDED_MODELS = {
+    'core.companyusertoken', 'core.companyregistrationtoken', 'core.platformapikey', 'core.adminpricingconfig',
+}
+# Any owner or admin of the company can download its backup, so what would let someone sign in or act as the
+# company is left out: passwords, API keys, mailbox and CRM credentials, and the links sent to candidates and
+# customers. Fields of an Encrypted...Field type are left out wherever they are.
+COMPANY_SECRET_FIELDS = {
+    'auth.user': {'password'},
+    'core.companyuser': {'password_hash', 'reset_otp', 'reset_otp_expires', 'reset_otp_attempts'},
+    'core.userverification': {'token'},
+    'core.companyapikey': {'encrypted_key'},
+    'core.personalcalendar': {'refresh_token'},
+    'marketing_agent.emailaccount': {'smtp_password', 'imap_password'},
+    'marketing_agent.emailsendhistory': {'tracking_token'},
+    'ai_sdr_agent.sdrcampaign': {'smtp_password'},
+    'ai_sdr_agent.sdragentsettings': {'apollo_api_key', 'apify_api_token'},
+    'ai_sdr_agent.sdrmeeting': {'booking_token', 'approval_token'},
+    'crm_sync_agent.crmintegration': {'credentials'},
+    'data_analyst_agent.datasource': {'password_encrypted'},
+    'recruitment_agent.jobapplication': {'access_token'},
+    'recruitment_agent.interview': {'confirmation_token'},
+    'recruitment_agent.careerapplication': {'application_token'},
+    'Frontline_agent.ticketsatisfaction': {'token'},
+}
+
+
+# Uploads whose place is kept in a text field rather than a FileField: a path under MEDIA_ROOT (most are relative to
+# it, some written as the full path), or the file's key in S3. The whole-system backup takes all of MEDIA_ROOT, so
+# only a company's backup needs to know these.
+COMPANY_PATH_FIELDS = {
+    'core.projectdocument': ['file_path'],
+    'core.taskattachment': ['file_path'],
+    'core.commentattachment': ['file_path'],
+    'recruitment_agent.cvrecord': ['s3_key'],
+    'recruitment_agent.careerapplication': ['resume_path'],
+    'marketing_agent.marketingdocument': ['file_path'],
+    'Frontline_agent.document': ['file_path'],
+    'Frontline_agent.ticketattachment': ['storage_path'],
+    'hr_agent.hrdocument': ['file_path'],
+    'data_analyst_agent.datasource': ['file_path'],
+}
+
+
+def _file_fields(model):
+    names = [f.name for f in model._meta.concrete_fields if isinstance(f, models.FileField)]
+    return names + [n for n in COMPANY_PATH_FIELDS.get(model._meta.label_lower, []) if n not in names]
+
+
+def _media_name(value, media_root: Path):
+    """The file's name under MEDIA_ROOT (as in the zip's media/), or None for a path outside it."""
+    value = str(value or '').strip().replace('\\', '/')
+    if not value:
+        return None
+    path = Path(value)
+    if path.is_absolute() or (len(value) > 1 and value[1] == ':'):
+        try:
+            value = path.resolve().relative_to(media_root).as_posix()
+        except (ValueError, OSError):
+            return None
+    value = value.lstrip('/')
+    return None if '..' in Path(value).parts else value
+
+
+def _is_secret(model, field) -> bool:
+    return (field.name in COMPANY_SECRET_FIELDS.get(model._meta.label_lower, ())
+            or type(field).__name__.startswith('Encrypted'))
+
+
+def company_querysets(company_id):
+    """[(model, queryset of the company's rows)] for every table that leads to the company.
+
+    A table belongs to it through its foreign keys, one step at a time: the company, then each table with a key to
+    it (its logins, tickets, employees...), then each table with a key to one of those (a ticket's messages), and
+    so on. A row is the company's when any of its keys points at a row already found to be. Only then the logins
+    (auth.User) of the company, its dashboard logins and its employees, are a way in, for the tables that have no
+    other (Marketing, whose campaigns and leads belong to a login): a key to a login is the weakest link, as a
+    person can be in two companies. Querysets, not lists of ids, so no database's limit on parameters is reached."""
+    from django.contrib.auth.models import User
+    from django.db.models import Q
+    from core.models import Company, CompanyUser, UserProfile
+
+    skip = set(EXCLUDED_MODELS) | COMPANY_EXCLUDED_MODELS
+    candidates = [m for m in _included_models() if m._meta.label_lower not in skip]
+    found = {Company: Company._base_manager.filter(pk=company_id)}
+    pending = [m for m in candidates if m is not Company and m is not User]
+
+    def keys(model):
+        return [f for f in model._meta.concrete_fields
+                if f.is_relation and (f.many_to_one or f.one_to_one) and f.related_model not in (None, model)]
+
+    users_added = False
+    while pending:
+        # One step: what has a key to a table found in an earlier step (never this one, so no loop).
+        reached = {}
+        for model in pending:
+            links = [f for f in keys(model) if f.related_model in found]
+            if links:
+                q = Q()
+                for f in links:
+                    q |= Q(**{f'{f.attname}__in': found[f.related_model].values(f.target_field.attname)})
+                reached[model] = model._base_manager.filter(q)
+        if not reached:
+            if users_added:
+                break
+            found[User] = User._base_manager.filter(
+                Q(pk__in=CompanyUser._base_manager.filter(company_id=company_id, login_user__isnull=False)
+                  .values('login_user_id'))
+                | Q(pk__in=UserProfile._base_manager.filter(company_id=company_id).values('user_id')))
+            users_added = True
+            continue
+        found.update(reached)
+        pending = [m for m in pending if m not in reached]
+    return [(m, found[m]) for m in candidates if m in found]
+
+
+class _CompanySerializer(JSONSerializer):
+    """Django's JSON serializer, leaving out the secret fields (COMPANY_SECRET_FIELDS)."""
+
+    def handle_field(self, obj, field):
+        if not _is_secret(type(obj), field):
+            super().handle_field(obj, field)
+
+
+def build_company_zip(path: Path, company, created_by: str = '') -> dict:
+    """Write one company's backup to `path`; returns what went in."""
+    scope = company_querysets(company.pk)
+    counts = {}
+
+    def rows():
+        for model, qs in scope:
+            label = model._meta.label_lower
+            for obj in qs.order_by('pk').iterator():
+                counts[label] = counts.get(label, 0) + 1
+                yield obj
+
+    with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+        with zf.open('database.json', 'w', force_zip64=True) as raw:
+            out = io.TextIOWrapper(raw, encoding='utf-8')
+            _CompanySerializer().serialize(rows(), stream=out, use_natural_foreign_keys=True, indent=None)
+            out.flush()
+            out.detach()
+
+        # The company's uploads are the files its rows point at, wherever they are stored.
+        added = set()
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        for model, qs in scope:
+            for field in _file_fields(model):
+                for value in qs.exclude(**{field: ''}).exclude(**{f'{field}__isnull': True}).values_list(
+                        field, flat=True).iterator():
+                    name = _media_name(value, media_root)
+                    arcname = f'media/{name}'
+                    if not name or arcname in added or name.split('/', 1)[0] in SKIPPED_MEDIA_DIRS:
+                        continue
+                    try:
+                        local = media_root / name
+                        src = open(local, 'rb') if local.is_file() else default_storage.open(name, 'rb')
+                        with src, zf.open(arcname, 'w', force_zip64=True) as dst:
+                            shutil.copyfileobj(src, dst)
+                        added.add(arcname)
+                    except Exception as exc:  # noqa: BLE001 - one missing upload must not lose the whole backup
+                        logger.warning('Company %s backup: could not read uploaded file %s: %s', company.pk, name, exc)
+
+        exports = {}
+        folder = _company_folders().get(company.pk)
+        for file_name, header, by_company in _lead_exports(company_id=company.pk):
+            exports[file_name] = _write_csv(zf, f'exports/{file_name}', header, by_company.get(folder, []))
+
+        summary = {'records': sum(counts.values()), 'files': len(added),
+                   'models': {k: v for k, v in sorted(counts.items())},
+                   'exported_leads': sum(exports.values())}
+        zf.writestr('manifest.json', json.dumps({
+            'kind': 'company',
+            'company': {'id': company.pk, 'name': company.name},
+            'created_at': timezone.now().isoformat(),
+            'created_by': created_by,
+            'records': summary['records'],
+            'files': summary['files'],
+            'models': summary['models'],
+            'exports': exports,
+            'left_out': {
+                'models': sorted(set(EXCLUDED_MODELS) | COMPANY_EXCLUDED_MODELS),
+                'fields': {k: sorted(v) for k, v in sorted(COMPANY_SECRET_FIELDS.items())},
+                'note': 'Passwords, API keys, mailbox and CRM credentials and sign-in links are not in this backup.',
+            },
+            'about': ('This company\'s data on its own, to keep and to read: database.json has its rows, media/ the '
+                      'files they point at, and exports/ its leads as CSVs that open in Excel. It is not loaded '
+                      'with restore_backup, which puts back a whole server from the super admin\'s backups.'),
+        }, indent=2))
+    return summary
+
+
 def run_backup(backup_id):
     from core.models import SystemBackup
-    backup = SystemBackup.objects.select_related('created_by').get(pk=backup_id)
+    backup = SystemBackup.objects.select_related('created_by', 'company', 'company_user').get(pk=backup_id)
     final = backup_path(backup)
     part = final.with_name(final.name + '.part')
     try:
-        backup_root().mkdir(parents=True, exist_ok=True)
-        summary = build_zip(part, created_by=backup.created_by.username if backup.created_by else '')
+        final.parent.mkdir(parents=True, exist_ok=True)
+        if backup.company_id:
+            who = backup.company_user.email if backup.company_user else ''
+            summary = build_company_zip(part, backup.company, created_by=who)
+        else:
+            summary = build_zip(part, created_by=backup.created_by.username if backup.created_by else '')
         os.replace(part, final)
         backup.status, backup.summary, backup.size_bytes = 'done', summary, final.stat().st_size
     except Exception as exc:  # noqa: BLE001 - shown to the admin on the backup's row
@@ -377,6 +594,11 @@ def restore(zip_path, media=True) -> dict:
     zip_path = Path(zip_path)
     if not zip_path.is_file():
         raise RestoreError(f'No file at {zip_path}.')
+    with zipfile.ZipFile(zip_path) as zf:
+        if 'manifest.json' in zf.namelist() and json.loads(zf.read('manifest.json')).get('kind') == 'company':
+            raise RestoreError('This is one company\'s backup (Company dashboard → Backups), with its passwords and '
+                               'keys left out. restore_backup puts back a whole server, from a backup in Admin → '
+                               'Backups. Nothing was changed.')
     if not database_is_new():
         raise RestoreError('This database already has logins or companies. A backup goes into a new, migrated, empty '
                            'database; it never merges into one in use. Nothing was changed.')

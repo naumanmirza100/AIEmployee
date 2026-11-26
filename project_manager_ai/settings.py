@@ -1239,6 +1239,14 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 3600}
     },
 
+    # Each company's own nightly backup (core/backups.py, Company dashboard → Backups, 27 Nov 2026), at 02:00 in
+    # Pakistan, the time cron makes the whole-system one (scripts/ppp-full-backup.sh). The newest 7 of each are kept.
+    'make-company-backups': {
+        'task': 'core.tasks.make_company_backups',
+        'schedule': _crontab(hour=21, minute=0),     # daily, 21:00 UTC
+        'options': {'expires': 6 * 3600},
+    },
+
     # Auto-expire module purchases - runs every hour
     # Checks active purchases whose expires_at has passed and marks them expired
     'expire-module-purchases': {

@@ -44,6 +44,7 @@ from api.views import module_purchase
 from api.views import company_api_keys
 from api.views import admin_api_keys
 from api.views import admin_backups
+from api.views import company_backups
 from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
@@ -788,6 +789,11 @@ urlpatterns = [
     re_path(r'^admin/backups/(?P<backup_id>\d+)/?$', admin_backups.backup_delete, name='admin_backup_delete'),  # DELETE
     re_path(r'^admin/backups/(?P<backup_id>\d+)/link/?$', admin_backups.backup_download_link, name='admin_backup_link'),  # POST
     re_path(r'^admin/backups/(?P<backup_id>\d+)/download/?$', admin_backups.backup_download, name='admin_backup_download'),  # GET (signed ticket)
+    # A company's own backups, for its owners and admins (api/views/company_backups.py)
+    re_path(r'^company/backups/?$', company_backups.company_backups, name='company_backups'),  # GET, POST
+    re_path(r'^company/backups/(?P<backup_id>\d+)/?$', company_backups.company_backup_delete, name='company_backup_delete'),  # DELETE
+    re_path(r'^company/backups/(?P<backup_id>\d+)/link/?$', company_backups.company_backup_download_link, name='company_backup_link'),  # POST
+    re_path(r'^company/backups/(?P<backup_id>\d+)/download/?$', company_backups.company_backup_download, name='company_backup_download'),  # GET (signed ticket)
 
     # Super Admin — API keys, pricing, quotas, requests
     re_path(r'^admin/api-keys/overview/?$', admin_api_keys.admin_overview, name='admin_overview'),  # GET

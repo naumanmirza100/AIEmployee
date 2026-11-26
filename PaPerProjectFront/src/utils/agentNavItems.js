@@ -26,6 +26,7 @@ import {
   FileCode,
   MailX,
   UserCog,
+  DatabaseBackup,
   RefreshCw,
   MessageSquare,
   Monitor,
@@ -343,6 +344,7 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
     { label: 'AI Agents',       icon: BrainCircuit, path: '/company/dashboard/ai-agents' },
     { label: 'Billing',         icon: CreditCard,   path: '/company/dashboard/billing' },
     { label: 'API Keys',        icon: KeyRound,     path: '/company/settings/api-keys' },
+    { label: 'Backups',         icon: DatabaseBackup, path: '/company/settings/backups' },
     { label: 'Notifications',   icon: Bell,         path: '/notifications' },
   ];
 
