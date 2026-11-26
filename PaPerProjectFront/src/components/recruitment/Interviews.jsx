@@ -653,7 +653,7 @@ const Interviews = ({ onUpdate }) => {
                       data-testid={`REC-interviews-reschedule-btn-${interview.id}`}
                       type="button"
                       onClick={() => openRescheduleModal(interview)}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-amber-800 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-900/50 transition-colors"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 dark:border-amber-800 dark:bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-500/15 dark:hover:bg-amber-900/50 transition-colors"
                     >
                       <CalendarClock className="h-3.5 w-3.5 text-amber-400" />
                       Reschedule

@@ -157,7 +157,7 @@ function SetupGuideContent({ which, copiedKey, setCopiedKey }) {
             {s.link && <a href={s.link} target="_blank" rel="noreferrer" style={{ color: accent, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}><ExternalLink size={11} />{s.linkLabel}</a>}
             {s.note && <div style={{ marginTop: 4, padding: '4px 8px', borderRadius: 6, background: 'hsl(var(--surface-invert) / 0.04)', color: 'hsl(var(--muted-foreground))', fontSize: 11, fontFamily: 'monospace' }}>{s.note}</div>}
             {s.code && (
-              <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'var(--inset-40)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <code style={{ color: accent, fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
                 <button
                   onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step); setTimeout(() => setCopiedKey(null), 2000); }}

@@ -79,22 +79,22 @@ const DOCUMENT_TYPES = [
 ];
 
 const TYPE_BADGE_CLASS = {
-  strategy: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200 dark:border-blue-800',
-  proposal: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
-  report: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-  brief: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+  strategy: 'bg-blue-500/10 text-blue-700 hover:bg-blue-500/10 dark:bg-blue-900/30 dark:text-blue-300 border-blue-500/25 dark:border-blue-800',
+  proposal: 'bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/10 dark:bg-emerald-900/30 dark:text-emerald-300 border-emerald-500/25 dark:border-emerald-800',
+  report: 'bg-amber-500/10 text-amber-700 hover:bg-amber-500/10 dark:bg-amber-900/30 dark:text-amber-300 border-amber-500/25 dark:border-amber-800',
+  brief: 'bg-purple-500/10 text-purple-700 hover:bg-purple-500/10 dark:bg-purple-900/30 dark:text-purple-300 border-purple-500/25 dark:border-purple-800',
   presentation: 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300 border-rose-200 dark:border-rose-800',
-  social_posts: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300 border-pink-200 dark:border-pink-800',
-  ad_copy: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 border-orange-200 dark:border-orange-800',
+  social_posts: 'bg-pink-500/10 text-pink-700 hover:bg-pink-500/10 dark:bg-pink-900/30 dark:text-pink-300 border-pink-500/25 dark:border-pink-800',
+  ad_copy: 'bg-orange-500/10 text-orange-700 hover:bg-orange-500/10 dark:bg-orange-900/30 dark:text-orange-300 border-orange-500/25 dark:border-orange-800',
 };
 
 const CAMPAIGN_STATUS_BADGE = {
-  draft: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700',
+  draft: 'bg-gray-500/10 text-gray-700 hover:bg-gray-500/10 dark:bg-gray-800 dark:text-gray-300 border-gray-500/25 dark:border-gray-700',
   scheduled: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300 border-sky-200 dark:border-sky-800',
-  active: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border-green-200 dark:border-green-800',
-  paused: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-  completed: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700',
-  cancelled: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 border-red-200 dark:border-red-800',
+  active: 'bg-green-500/10 text-green-700 hover:bg-green-500/10 dark:bg-green-900/30 dark:text-green-300 border-green-500/25 dark:border-green-800',
+  paused: 'bg-amber-500/10 text-amber-700 hover:bg-amber-500/10 dark:bg-amber-900/30 dark:text-amber-300 border-amber-500/25 dark:border-amber-800',
+  completed: 'bg-slate-500/10 text-slate-700 hover:bg-slate-500/10 dark:bg-slate-800 dark:text-slate-300 border-slate-500/25 dark:border-slate-700',
+  cancelled: 'bg-red-500/10 text-red-700 hover:bg-red-500/10 dark:bg-red-900/30 dark:text-red-300 border-red-500/25 dark:border-red-800',
 };
 
 const formatDate = (iso) => {

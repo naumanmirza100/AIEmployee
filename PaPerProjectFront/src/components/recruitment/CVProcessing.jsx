@@ -458,7 +458,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                   data-testid="REC-cvprocessing-job-select-trigger"
                   type="button"
                   onClick={() => { setJobSearchOpen(!jobSearchOpen); setJobSearchQuery(''); }}
-                  className="w-full flex items-center justify-between text-sm bg-black/30 border border-white/20 text-white rounded-md px-3 py-2 hover:bg-black/40 transition-colors"
+                  className="w-full flex items-center justify-between text-sm bg-card/80 dark:bg-black/30 border border-white/20 text-white rounded-md px-3 py-2 hover:bg-muted dark:hover:bg-black/40 transition-colors"
                 >
                   <span className={selectedJobTitle ? 'text-white' : 'text-white/50'}>
                     {selectedJobTitle || 'Select a job (required)'}

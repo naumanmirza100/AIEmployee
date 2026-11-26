@@ -851,7 +851,7 @@ const KnowledgeQA = () => {
           <div className="border-t border-white/10 px-6 py-4 bg-muted/50 dark:bg-black/25">
             <form id="OPS-qa-composer-form" data-testid="OPS-qa-composer-form" onSubmit={handleSend} className="max-w-4xl mx-auto">
               <div
-                className="rounded-2xl border bg-black/50 overflow-hidden transition-all focus-within:border-primary/40 focus-within:shadow-[0_0_0_3px_hsl(var(--primary)/0.08)]"
+                className="rounded-2xl border bg-card dark:bg-black/50 overflow-hidden transition-all focus-within:border-primary/40 focus-within:shadow-[0_0_0_3px_hsl(var(--primary)/0.08)]"
                 style={{ borderColor: 'hsl(var(--surface-invert) / 0.1)' }}
               >
                 <Textarea

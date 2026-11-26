@@ -76,12 +76,12 @@ const STATUS_LABELS = {
 };
 
 const STATUS_BADGE_CLASS = {
-  draft: 'bg-gray-100 text-gray-800',
-  active: 'bg-green-100 text-green-800',
-  paused: 'bg-yellow-100 text-yellow-800',
-  completed: 'bg-blue-100 text-blue-800',
-  scheduled: 'bg-indigo-100 text-indigo-800',
-  cancelled: 'bg-red-100 text-red-800',
+  draft: 'bg-gray-500/10 text-gray-700 hover:bg-gray-500/10 dark:bg-gray-100 dark:text-gray-800 dark:hover:bg-gray-100',
+  active: 'bg-green-500/10 text-green-700 hover:bg-green-500/10 dark:bg-green-100 dark:text-green-800 dark:hover:bg-green-100',
+  paused: 'bg-yellow-500/10 text-yellow-700 hover:bg-yellow-500/10 dark:bg-yellow-100 dark:text-yellow-800 dark:hover:bg-yellow-100',
+  completed: 'bg-blue-500/10 text-blue-700 hover:bg-blue-500/10 dark:bg-blue-100 dark:text-blue-800 dark:hover:bg-blue-100',
+  scheduled: 'bg-indigo-500/10 text-indigo-700 hover:bg-indigo-500/10 dark:bg-indigo-100 dark:text-indigo-800 dark:hover:bg-indigo-100',
+  cancelled: 'bg-red-500/10 text-red-700 hover:bg-red-500/10 dark:bg-red-100 dark:text-red-800 dark:hover:bg-red-100',
 };
 
 const EMAIL_SEND_STATUS_LABELS = {
@@ -906,7 +906,7 @@ const CampaignDetail = () => {
               <CardContent className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Status</span>
-                  <Badge variant="secondary" className={STATUS_BADGE_CLASS[campaign.status] || 'bg-gray-100 text-gray-800'}>
+                  <Badge variant="secondary" className={STATUS_BADGE_CLASS[campaign.status] || 'bg-gray-500/10 text-gray-700 hover:bg-gray-500/10 dark:bg-gray-100 dark:text-gray-800 dark:hover:bg-gray-100'}>
                     {STATUS_LABELS[campaign.status] || campaign.status}
                   </Badge>
                 </div>

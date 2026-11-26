@@ -131,8 +131,8 @@ export const fmtUtc = (isoStr) => {
 
 // ── Style constants ─────────────────────────────────────────────────────────
 export const CARD_STYLE = {
-  background: 'rgba(0,0,0,0.25)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'var(--inset-25)',
+  border: '1px solid hsl(var(--surface-invert) / 0.08)',
   backdropFilter: 'blur(8px)',
 };
 
