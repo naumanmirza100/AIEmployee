@@ -1,13 +1,80 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Key, ShieldCheck, AlertTriangle, Gauge, Inbox, Building2, Globe } from 'lucide-react';
+import { Key, ShieldCheck, AlertTriangle, Gauge, Inbox, Building2, Globe, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { CARD_CLASS, ProviderLogo, formatTokens, StatCard } from './apiKeysShared';
 import AISpendCard from './AISpendCard';
 
+// What waits on the super admin, most urgent first (UI refresh, 26 Nov 2026), from the overview's own counts.
+const NeedsYouNow = ({ stats }) => {
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning.' : hour < 18 ? 'Good afternoon.' : 'Good evening.';
+  const exhausted = (stats.exhausted_quotas || 0) + (stats.exhausted_managed_quotas || 0);
+  const rows = [
+    { key: 'requests', n: stats.pending_requests || 0, title: 'Agent and token requests', sub: 'Companies waiting for your decision',
+      act: 'Decide', to: '/admin/api-keys?tab=requests', dot: 'bg-red-500' },
+    { key: 'quotas', n: exhausted, title: 'Used-up quotas',
+      sub: `${stats.exhausted_quotas ?? 0} free · ${stats.exhausted_managed_quotas ?? 0} managed`, act: 'Top up', to: '/admin/api-keys?tab=quotas', dot: 'bg-orange-400' },
+    { key: 'platform', n: stats.platform_keys_configured ?? 0, title: 'Platform keys set',
+      sub: stats.platform_keys_configured > 0 ? 'The agents can run on the platform\'s keys' : 'No platform key: free tokens can\'t be used',
+      act: stats.platform_keys_configured > 0 ? 'All good' : 'Add a key', to: '/admin/api-keys?tab=platform',
+      dot: stats.platform_keys_configured > 0 ? 'bg-emerald-500' : 'bg-red-500', ok: stats.platform_keys_configured > 0 },
+  ];
+  const waiting = rows.filter((r) => !r.ok && r.n > 0);
+  return (
+    <Card className="h-full flex flex-col">
+      <CardContent className="p-6 sm:p-8 flex-1 flex flex-col">
+        <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]" />
+          {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+        </p>
+        <h2 className="font-heading font-semibold tracking-tight text-5xl leading-none mt-5 text-foreground">{greeting}</h2>
+        <p className="mt-4 text-base text-foreground/80">
+          {waiting.length
+            ? <>Waiting for you: <b className="text-foreground">{waiting.map((r) => `${r.n} ${r.title.toLowerCase()}`).join(' and ')}</b>.</>
+            : 'Nothing is waiting for you.'}
+        </p>
+        <div className="h-px bg-border my-5" />
+        <div className="divide-y divide-border">
+          {rows.map((r) => (
+            <div key={r.key} className="py-1">
+            <Link to={r.to} className="flex items-center gap-4 py-2.5 px-2 -mx-2 rounded-xl hover:bg-muted/40 transition-colors">
+              <span className={`h-2 w-2 rounded-full shrink-0 ${r.n > 0 || !r.ok ? r.dot : 'bg-muted-foreground/40'}`} />
+              <span className="flex-1 min-w-0">
+                <span className="block text-[15px] font-semibold text-foreground">{r.title}</span>
+                <span className="block text-xs text-muted-foreground mt-0.5 truncate">{r.sub}</span>
+              </span>
+              <span className="text-right">
+                <span className="block font-heading font-semibold text-2xl leading-none text-foreground tabular-nums">{r.n}</span>
+                <span className={`block text-[11px] font-semibold mt-1 ${r.n > 0 && !r.ok ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>{r.act}</span>
+              </span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+            </Link>
+            </div>
+          ))}
+        </div>
+        <div className="flex-1 min-h-6" />
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2.5">Shortcuts</p>
+        <div className="flex flex-wrap gap-2">
+          {[['Pricing', '/admin/api-keys?tab=pricing'], ['Per-company keys', '/admin/api-keys?tab=keys'],
+            ['Reset logs', '/admin/api-keys?tab=reset-logs'], ['Backups', '/admin/backups']].map(([label, to]) => (
+            <Link key={to} to={to} className="rounded-full border border-border/70 bg-card/70 px-3.5 py-1.5 text-xs font-medium text-foreground hover:border-primary/40 hover:text-primary transition-colors">
+              {label}
+            </Link>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 export const OverviewTab = ({ stats }) => (
   <div className="space-y-6">
-    {/* The platform's AI bill in dollars, first: the credit running out stops every agent (22 Nov 2026). */}
-    <AISpendCard />
+    {/* What waits on you, beside the platform's AI bill in dollars: the credit running out stops every agent. */}
+    <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 items-stretch">
+      <div className="xl:col-span-2"><NeedsYouNow stats={stats} /></div>
+      <div className="xl:col-span-3"><AISpendCard /></div>
+    </div>
     {/* Row 1: Company & request health */}
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <StatCard icon={Building2} label="Companies" value={stats.total_companies ?? '—'} accent="bg-violet-500/15 text-violet-300" />
