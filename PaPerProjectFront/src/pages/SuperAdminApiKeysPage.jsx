@@ -354,15 +354,18 @@ const SuperAdminApiKeysPage = () => {
   const savePricing = async (agentName, draft) => {
     setSavingAgent(agentName);
     try {
-      await adminApiKeysService.updatePricing(agentName, {
+      const saved = await adminApiKeysService.updatePricing(agentName, {
         monthly_flat_usd: draft.monthly_flat_usd,
         service_charge_usd: draft.service_charge_usd,
         free_tokens_on_purchase: Number(draft.free_tokens_on_purchase),
         managed_key_tokens: Number(draft.managed_key_tokens),
         yearly_discount_pct: Number(draft.yearly_discount_pct),
         monthly_discount_pct: Number(draft.monthly_discount_pct),
+        daily_free_tokens: Number(draft.daily_free_tokens) || 0,
+        apply_to_existing: !!draft.apply_to_existing,
       });
-      toast({ title: 'Pricing saved' });
+      const applied = saved?.applied_to_existing || 0;
+      toast({ title: 'Pricing saved', description: applied ? `The new free allowance was given to ${applied} existing ${applied === 1 ? 'company' : 'companies'}.` : undefined });
       const p = await adminApiKeysService.listPricing();
       setPricing(p.pricing || []);
     } catch (e) {

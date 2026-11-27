@@ -493,6 +493,7 @@ def _serialize_pricing(p: AdminPricingConfig):
         'service_charge_usd': str(p.service_charge_usd),
         'free_tokens_on_purchase': p.free_tokens_on_purchase,
         'managed_key_tokens': p.managed_key_tokens,
+        'daily_free_tokens': p.daily_free_tokens,
         'yearly_discount_pct': str(p.yearly_discount_pct),
         'monthly_discount_pct': str(p.monthly_discount_pct),
         # Pre-calculated for the UI
@@ -532,6 +533,11 @@ def update_pricing(request, agent_name):
             p.free_tokens_on_purchase = int(request.data['free_tokens_on_purchase'])
         if 'managed_key_tokens' in request.data:
             p.managed_key_tokens = int(request.data['managed_key_tokens'])
+        if 'daily_free_tokens' in request.data:
+            daily = int(request.data['daily_free_tokens'])
+            if daily < 0:
+                raise ValueError("daily_free_tokens can't be negative")
+            p.daily_free_tokens = daily
         if 'yearly_discount_pct' in request.data:
             val = float(request.data['yearly_discount_pct'])
             if not (0 <= val <= 100):
@@ -548,14 +554,17 @@ def update_pricing(request, agent_name):
     p.updated_by = request.user
     p.save()
 
-    # Propagate free_tokens_on_purchase change to all existing quotas for this agent
-    if p.free_tokens_on_purchase != old_free_tokens:
+    # A new free allowance is for new purchases (27 Nov 2026). Saving it used to overwrite every company's
+    # allowance for the agent, the ones an admin had raised by hand too. Existing companies change only when the
+    # admin asks for it.
+    applied = 0
+    if p.free_tokens_on_purchase != old_free_tokens and str(request.data.get('apply_to_existing', '')).lower() in ('1', 'true', 'yes'):
         from core.models import AgentTokenQuota
-        AgentTokenQuota.objects.filter(agent_name=agent_name).update(
+        applied = AgentTokenQuota.objects.filter(agent_name=agent_name).update(
             included_tokens=p.free_tokens_on_purchase
         )
 
-    return Response({'status': 'success', 'pricing': _serialize_pricing(p)})
+    return Response({'status': 'success', 'pricing': _serialize_pricing(p), 'applied_to_existing': applied})
 
 
 # ----------------------------------------------------------------------------
