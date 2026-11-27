@@ -7,7 +7,7 @@ export const aiMlOutsourcing = {
   description: "Unlock the power of AI without the massive overhead. Learn how to hire elite AI developers and manage complex data science projects through strategic, managed outsourcing.",
   image: "https://images.unsplash.com/photo-1599059813005-3623545e2023",
   category: "AI & Machine Learning",
-  author: "Dr. Evelyn Reed, Head of AI",
+  author: 'Pay Per Project Team',
   date: "2025-10-23",
   tags: ['AI development outsourcing', 'hire AI developer', 'machine learning freelancer', 'data science freelance projects', 'AI MVP development'],
   content: <AiMlOutsourcingContent />,

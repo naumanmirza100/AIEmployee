@@ -43,8 +43,8 @@ const AgenticAiModelsPage = () => {
     return (
         <>
             <Helmet>
-                <title>78% of Projects are AI-Driven | Pay Per Project</title>
-                <meta name="description" content="Discover how our proprietary Agentic AI models drive over 78% of our projects, delivering unparalleled speed, efficiency, and quality. This is the engine behind our execution." />
+                <title>AI-Driven Projects | Pay Per Project</title>
+                <meta name="description" content="Discover how our proprietary Agentic AI models drive our projects, delivering unparalleled speed, efficiency, and quality. This is the engine behind our execution." />
             </Helmet>
 
             <div className="bg-background text-foreground">
@@ -58,10 +58,9 @@ const AgenticAiModelsPage = () => {
                         >
                             <div className="relative inline-block">
                                 <BrainCircuit className="mx-auto h-12 w-12 text-primary" />
-                                <div className="absolute -top-2 -right-4 text-3xl font-bold text-gradient font-heading">78%</div>
                             </div>
                             <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-6xl font-heading">
-                                78% of Our Projects are AI-Driven
+                                Our Projects are AI-Driven
                             </h1>
                             <p className="mt-6 text-lg leading-8 text-muted-foreground max-w-3xl mx-auto">
                                 We've moved beyond traditional development. Discover the powerful Agentic AI ecosystem that allows us to build faster, smarter, and more reliably than ever before.

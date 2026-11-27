@@ -20,7 +20,7 @@ const itemVariants = {
 const WhyItWorksSection = () => {
   const { t } = useTranslation();
   const whyItWorksFeatures = [
-    { icon: Users, title: "Elite Vetted Teams", description: "Our 2% acceptance rate means you only work with proven, high-performing development companies." },
+    { icon: Users, title: "Elite Vetted Teams", description: "Rigorous vetting means you only work with proven, high-performing development companies." },
     { icon: Rocket, title: "Proactive Management", description: "We don't just solve problems—we prevent them from happening with dedicated oversight." },
     { icon: HeartHandshake, title: "Total Accountability", description: "We are your single point of contact and responsibility. The buck stops with us, always." },
     { icon: Scale, title: "Fixed, Fair Pricing", description: "The price we quote is the price you pay. No hidden fees, no scope creep, no surprises." },

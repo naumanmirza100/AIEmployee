@@ -7,7 +7,7 @@ export const gameDevelopmentOutsourcing = {
   description: "From mobile hits to immersive Meta Quest experiences, learn how to hire a top-tier game development company in the US, UK, or Europe and bring your vision to life.",
   image: "https://images.unsplash.com/photo-1555864503-4c91a3c57564",
   category: "Game Development",
-  author: "Kevin Lee, Head of Gaming",
+  author: 'Pay Per Project Team',
   date: "2025-10-18",
   tags: ['game development outsourcing', 'hire game developer company', 'unity game development', 'AR/VR/XR game development', 'hire game developers USA'],
   content: <GameDevOutsourcingContent />,

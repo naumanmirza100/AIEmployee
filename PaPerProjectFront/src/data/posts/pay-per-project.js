@@ -7,7 +7,7 @@ export const payPerProject = {
   description: "Tired of budget surprises? Learn how the 'pay per project' model provides cost certainty and aligns incentives for better freelance outcomes.",
   image: "https://images.unsplash.com/photo-1554224155-1696413565d3",
   category: "Project Management",
-  author: "John Smith, COO",
+  author: 'Pay Per Project Team',
   date: "July 17, 2025",
   tags: ['pay per project', 'pay per project jobs', 'fixed price freelance model', 'pay per project vs hourly'],
   content: <PayPerProjectContent />,

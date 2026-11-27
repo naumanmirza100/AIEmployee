@@ -7,7 +7,7 @@ export const b2bSoftwareSaaSOutsourcing = {
   description: "Discover how a pay-per-project model and secure outsourcing to global talent pools can accelerate your B2B software and SaaS development.",
   image: "https://images.unsplash.com/photo-1550751827-4bd37537e5f1",
   category: "B2B Software",
-  author: "Marcus Thorne, Head of B2B Solutions",
+  author: 'Pay Per Project Team',
   date: "2025-08-03",
   tags: ['SaaS development pay per project', 'software dev outsourcing UK, US, QATAR, EUROPE', 'B2B software outsourcing platforms', 'custom SaaS project cost', 'hire developers per project SaaS', 'secure outsourcing for tech startups'],
   content: <B2BSoftwareSaaSOutsourcingContent />,

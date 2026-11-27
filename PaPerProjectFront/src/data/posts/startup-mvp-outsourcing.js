@@ -7,7 +7,7 @@ export const startupMvpOutsourcing = {
   description: "Your roadmap to building an MVP with a freelance team. Learn about development costs, hiring a fractional CTO, and finding a founder-friendly dev studio.",
   image: "https://images.unsplash.com/photo-1521737711867-e3b97375f902",
   category: "Startup Strategy",
-  author: "Alex Chen, Startup Advisor",
+  author: 'Pay Per Project Team',
   date: "2025-08-05",
   tags: ['build MVP with freelance team', 'MVP development cost UK, US, QATAR, EUROPE', 'startups outsource product team', 'early-stage product development', 'hire startup CTO per project', 'founder-friendly dev studio'],
   content: <StartupMvpOutsourcingContent />,

@@ -4,7 +4,6 @@ import { Helmet } from 'react-helmet';
 import HeroSection from '@/components/how-it-works/HeroSection';
 import ProblemSection from '@/components/how-it-works/ProblemSection';
 import HowItWorksProcess from '@/components/how-it-works/HowItWorksProcess';
-import ProjectShowcase from '@/components/how-it-works/ProjectShowcase';
 import WhyItWorksSection from '@/components/how-it-works/WhyItWorksSection';
 import ComparisonTable from '@/components/how-it-works/ComparisonTable';
 import FaqSection from '@/components/how-it-works/FaqSection';
@@ -27,7 +26,6 @@ const HowItWorksPage = () => {
       <WhyItWorksSection />
       <ResultsTeamSection />
       <ComparisonTable />
-      <ProjectShowcase />
       <FaqSection />
       <FinalCTASection />
     </div>

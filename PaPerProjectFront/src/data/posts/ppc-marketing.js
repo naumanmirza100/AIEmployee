@@ -7,7 +7,7 @@ export const ppcMarketing = {
   description: "Boost your online presence by learning how to outsource PPC campaigns and build a powerful freelance digital marketing team for optimal results.",
   image: "https://images.unsplash.com/photo-1557804506-669a67965da0",
   category: "Digital Marketing",
-  author: "Mark Johnson, Marketing Director",
+  author: 'Pay Per Project Team',
   date: "July 30, 2025",
   tags: ['outsource PPC campaign', 'hire freelance PPC expert', 'freelance digital marketing team', 'SEO freelancer vs agency', 'digital marketing project freelance'],
   content: <PPCMarketingContent />,

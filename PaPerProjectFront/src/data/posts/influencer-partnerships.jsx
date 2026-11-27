@@ -5,7 +5,7 @@ export const influencerPartnerships = {
   title: 'Beyond Sponsorships: How Influencers Can Build Real Equity with Tech Partnerships',
   slug: 'influencer-partnerships-tech-equity',
   date: '2025-10-27',
-  author: 'Alex Chen, Partnerships Lead',
+  author: 'Pay Per Project Team',
   category: 'Influencers',
   description: 'Move beyond one-off sponsorships. Learn how you can leverage your audience to build long-term, scalable revenue streams and even gain equity by partnering with innovative tech platforms.',
   content: <InfluencerPartnershipsContent />,

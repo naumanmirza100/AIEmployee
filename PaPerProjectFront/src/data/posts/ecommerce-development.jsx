@@ -7,7 +7,7 @@ export const ecommerceDevelopment = {
   description: "Learn how to build a high-converting e-commerce site, from choosing platforms like Shopify and Magento to hiring the right freelance developer in the UK or globally.",
   image: "https://images.unsplash.com/photo-1563013544-824ae1b70bbd",
   category: "E-commerce",
-  author: "Sarah Lee, E-commerce Strategist",
+  author: 'Pay Per Project Team',
   date: "2025-10-21",
   tags: ['ecommerce developer UK', 'Shopify freelance expert', 'Magento development outsourcing', 'build ecommerce site freelance', 'headless commerce'],
   content: <EcommerceDevContent />,

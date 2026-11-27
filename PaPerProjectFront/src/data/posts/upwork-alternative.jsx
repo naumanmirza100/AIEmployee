@@ -7,7 +7,7 @@ export const upworkAlternative = {
   description: "Escape the 20% fees and find elite, vetted talent. Learn why zero-commission freelance platforms with project management are the best choice for serious projects.",
   image: "https://images.unsplash.com/photo-1556761175-5973dc0f32e7",
   category: "Freelance Tips",
-  author: "Jane Doe, CEO",
+  author: 'Pay Per Project Team',
   date: "2025-10-28",
   tags: ['Upwork alternative', 'Fiverr alternative', 'zero commission freelance platforms', 'freelancer sites with no fees', 'managed freelance projects'],
   content: <UpworkAlternativeContent />,

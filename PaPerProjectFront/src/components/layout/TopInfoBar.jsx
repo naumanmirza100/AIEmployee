@@ -83,7 +83,7 @@ const TopInfoBar = () => {
       },
       {
         icon: Cpu,
-        text: t('top_bar_ai_driven', '78% Projects are AI Driven'),
+        text: t('top_bar_ai_driven', 'AI-Driven Projects'),
         link: '/agentic-ai-models',
         color: 'text-pink-500',
         bg: 'bg-pink-500/10',

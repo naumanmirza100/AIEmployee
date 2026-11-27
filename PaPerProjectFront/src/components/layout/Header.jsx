@@ -70,9 +70,8 @@ const solutions = [
 const resources = {
   learn: [
     // Only pages that exist (26 Nov 2026): Featured Videos and Academy only said "Coming Soon", so they're out
-    // until they're written; Customer Stories shows the reviews page.
+    // until they're written; Customer Stories went with the generated reviews (27 Nov 2026).
     { to: '/blog', title: 'Blog', icon: BookOpen },
-    { to: '/reviews', title: 'Customer Stories', icon: Users },
   ],
   agenticAI: [
     { to: '/resources/agentic-ai-explained#what-is-agentic-ai', title: 'What is agentic AI', icon: Lightbulb },
