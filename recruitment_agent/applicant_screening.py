@@ -138,6 +138,7 @@ def screen(job, applications, actor, agents) -> list:
     # The job owner's screening thresholds and email timings
     settings_owner = sharing.owner(job, actor)
     interview_threshold, hold_threshold = sharing.thresholds(settings_owner)
+    min_fit_score = sharing.min_fit(settings_owner)
     interview_settings = sharing.job_interview_settings(job)
     auto_interview_type = getattr(interview_settings, 'default_interview_type', None) or 'ONLINE'
     email_settings = sharing.email_settings(settings_owner)
@@ -184,7 +185,8 @@ def screen(job, applications, actor, agents) -> list:
             if not isinstance(enriched, dict):
                 enriched = enriched[0] if isinstance(enriched, list) and enriched else {}
 
-            qualified = qualify_agent.qualify(parsed, summary, job_kw_list, enriched, interview_threshold, hold_threshold)
+            qualified = qualify_agent.qualify(parsed, summary, job_kw_list, enriched, interview_threshold, hold_threshold,
+                                              min_fit_score=min_fit_score)
             if not isinstance(qualified, dict):
                 qualified = qualified[0] if isinstance(qualified, list) and qualified else {}
 
