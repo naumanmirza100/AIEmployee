@@ -1,11 +1,13 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from '@/components/ui/card';
 
 const ZeroFees = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   return (
     <section className="py-16 md:py-24 bg-background">
       <div className="container mx-auto px-4 md:px-6 text-center">
@@ -25,7 +27,7 @@ const ZeroFees = () => {
             </Card>
           </div>
           <div className="mt-8">
-              <Button onClick={() => document.querySelector('form')?.scrollIntoView({ behavior: 'smooth' })} size="lg">
+              <Button onClick={() => navigate('/start-project')} size="lg">
                   {t('zero_fees_button')}
                   <ArrowRight className="ml-2 h-5 w-5" />
               </Button>

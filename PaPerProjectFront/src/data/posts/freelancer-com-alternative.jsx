@@ -7,7 +7,7 @@ export const freelancerComAlternative = {
   description: "Tired of endless bidding wars and high platform fees? Discover a managed outsourcing platform where you can hire elite, pre-vetted developers with zero commission.",
   image: "https://images.unsplash.com/photo-1516321497487-e288fb19713f",
   category: "Freelance Tips",
-  author: "Jane Doe, CEO",
+  author: 'Pay Per Project Team',
   date: "2025-10-17",
   tags: ['alternative to Freelancer.com', 'Upwork competitor UK', 'hire vetted developers no commission', 'managed outsourcing platform', 'pay per project freelance model'],
   content: <FreelancerComAlternativeContent />,

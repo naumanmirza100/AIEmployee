@@ -1,13 +1,13 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { useToast } from "@/components/ui/use-toast";
-import { ArrowRight, ShieldCheck, Users, ClipboardCheck, BarChart, PlayCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowRight, ShieldCheck, Users, ClipboardCheck, BarChart } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/card';
 
 const CompanyPitch = () => {
   const { t } = useTranslation();
-  const { toast } = useToast();
+  const navigate = useNavigate();
 
   const pitchFeatures = [
     {
@@ -70,18 +70,15 @@ const CompanyPitch = () => {
             </div>
 
             <div className="pt-4">
-              <Button onClick={() => toast({ title: "Let's find your match! Start by submitting your project above. 🚀" })} size="lg">
+              <Button onClick={() => navigate('/start-project')} size="lg">
                 {t('company_pitch_button')}
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </div>
           </div>
           <div className="flex justify-center items-center">
-            <Card className="relative group w-full overflow-hidden card-border-glow">
+            <Card className="relative w-full overflow-hidden card-border-glow">
                 <img class="w-full rounded-xl shadow-xl" alt="A thumbnail showing a professional team presenting project work on a screen" src="https://images.unsplash.com/photo-1665659964378-cbccc8a6d429" />
-                <div className="absolute inset-0 bg-black/30 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 cursor-pointer" onClick={() => toast({ title: "🚧 Feature coming soon!", description: "You'll soon be able to watch sample intros from our top companies." })}>
-                    <PlayCircle className="h-20 w-20 text-white drop-shadow-lg" />
-                </div>
             </Card>
           </div>
         </div>

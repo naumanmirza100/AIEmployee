@@ -160,6 +160,14 @@ def thresholds(person):
     return None, None
 
 
+def min_fit(person):
+    """The minimum fit score for INTERVIEW `person` set, or None for the default (Q3, 27 Nov 2026). Unlike the
+    thresholds it applies whether or not custom thresholds are switched on."""
+    from recruitment_agent.models import RecruiterQualificationSettings
+    found = RecruiterQualificationSettings.objects.filter(company_user=person).first() if person else None
+    return found.min_fit_score if found is not None else None
+
+
 def owner_payload(job, viewer):
     """Who a job belongs to, as the dashboard shows it."""
     cu = job.company_user if job.company_user_id else None

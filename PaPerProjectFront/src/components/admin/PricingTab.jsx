@@ -24,6 +24,8 @@ const PricingRow = ({ row, onSave, saving }) => {
     managed_key_tokens: isUnconfigured ? PRICING_SEED.managed_key_tokens : (row.managed_key_tokens ?? 0),
     yearly_discount_pct: row.yearly_discount_pct ?? '0',
     monthly_discount_pct: row.monthly_discount_pct ?? '0',
+    daily_free_tokens: row.daily_free_tokens ?? 0,
+    apply_to_existing: false,
   });
   const dirty = useMemo(() =>
     String(draft.monthly_flat_usd) !== String(row.monthly_flat_usd) ||
@@ -31,7 +33,8 @@ const PricingRow = ({ row, onSave, saving }) => {
     Number(draft.free_tokens_on_purchase) !== Number(row.free_tokens_on_purchase) ||
     Number(draft.managed_key_tokens) !== Number(row.managed_key_tokens ?? 0) ||
     String(draft.yearly_discount_pct) !== String(row.yearly_discount_pct ?? '0') ||
-    String(draft.monthly_discount_pct) !== String(row.monthly_discount_pct ?? '0'),
+    String(draft.monthly_discount_pct) !== String(row.monthly_discount_pct ?? '0') ||
+    Number(draft.daily_free_tokens) !== Number(row.daily_free_tokens ?? 0),
     [draft, row]
   );
 
@@ -150,7 +153,34 @@ const PricingRow = ({ row, onSave, saving }) => {
             value={draft.free_tokens_on_purchase}
             onChange={(e) => setDraft({ ...draft, free_tokens_on_purchase: e.target.value })}
           />
-          <p className="text-[10px] text-white/40 mt-1">{formatTokens(Number(draft.free_tokens_on_purchase))} — updates all existing quotas on save</p>
+          <p className="text-[10px] text-white/40 mt-1">{formatTokens(Number(draft.free_tokens_on_purchase))} — for new purchases</p>
+          {/* Saving used to overwrite every company's allowance, ones raised by hand too (27 Nov 2026). */}
+          {Number(draft.free_tokens_on_purchase) !== Number(row.free_tokens_on_purchase) && (
+            <label className="mt-2 flex items-start gap-2 text-[11px] text-white/70 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={!!draft.apply_to_existing}
+                onChange={(e) => setDraft({ ...draft, apply_to_existing: e.target.checked })}
+              />
+              Also give this allowance to the companies that already have this agent (it replaces theirs)
+            </label>
+          )}
+        </div>
+        <div>
+          <Label className="text-white/60 text-xs">Daily free tokens <span className="text-white/30">— per company, per day (UTC)</span></Label>
+          <Input
+            type="number"
+            min="0"
+            className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"
+            value={draft.daily_free_tokens}
+            onChange={(e) => setDraft({ ...draft, daily_free_tokens: e.target.value })}
+          />
+          <p className="text-[10px] text-white/40 mt-1">
+            {Number(draft.daily_free_tokens) > 0
+              ? `${formatTokens(Number(draft.daily_free_tokens))} a day per company; a company's own key is never limited`
+              : 'No daily limit'}
+          </p>
         </div>
       {/* Live price calculator */}
       {monthlyTotal > 0 && (

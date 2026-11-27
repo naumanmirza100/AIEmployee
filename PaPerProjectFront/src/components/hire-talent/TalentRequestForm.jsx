@@ -52,7 +52,7 @@ const TalentRequestForm = () => {
   return (
     <Card className="w-full max-w-4xl mx-auto shadow-2xl rounded-2xl overflow-hidden">
       <CardHeader className="bg-secondary/30 p-6">
-        <CardTitle className="text-2xl font-bold text-foreground">Request Top 1% Talent</CardTitle>
+        <CardTitle className="text-2xl font-bold text-foreground">Request Vetted Talent</CardTitle>
         <CardDescription>Fill out the form below, and our AI will instantly start shortlisting the perfect team for your project.</CardDescription>
       </CardHeader>
       <CardContent className="p-6 sm:p-8">

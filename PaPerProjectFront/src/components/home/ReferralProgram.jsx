@@ -1,20 +1,15 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { useToast } from "@/components/ui/use-toast";
+import { useNavigate } from 'react-router-dom';
 import { Gift, ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 const ReferralProgram = () => {
   const { t } = useTranslation();
-  const { toast } = useToast();
+  const navigate = useNavigate();
 
-  const handleReferralClick = () => {
-    toast({
-      title: "🚀 Get Ready to Earn!",
-      description: "Our referral program is launching soon. You'll be able to share and earn with just one click!",
-    });
-  };
+  const handleReferralClick = () => navigate('/referrals');
 
   return (
     <section id="referral-program" className="py-16 md:py-24 bg-secondary/30">

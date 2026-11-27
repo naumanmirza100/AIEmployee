@@ -7,6 +7,10 @@ from recruitment_agent.skill_equivalences import (contains_term, is_exact_match,
                                                   skill_matches_keyword)
 
 
+# Below this fit score an INTERVIEW becomes HOLD unless the recruiter set their own (Q3, 27 Nov 2026).
+DEFAULT_MIN_FIT_SCORE = 50
+
+
 class LeadQualificationAgent:
     """
     Senior technical recruiter-style evaluation agent.
@@ -30,6 +34,7 @@ class LeadQualificationAgent:
         enriched_data: Optional[Dict[str, Any]] = None,
         interview_threshold: Optional[int] = None,
         hold_threshold: Optional[int] = None,
+        min_fit_score: Optional[int] = None,
     ) -> Dict[str, Any]:
         self._log_step("qualification_start", {"has_keywords": bool(job_keywords), "has_enriched": bool(enriched_data)})
 
@@ -68,12 +73,28 @@ class LeadQualificationAgent:
         decision, confidence, confidence_breakdown = self._recruiter_decide(
             all_skills, inferred_skills, matched, missing, exact_matched, related_matched, role_fit_score, total_exp_years, parsed_cv, candidate_insights, enriched_data, job_keywords, interview_threshold, hold_threshold
         )
+        # Fit first, then confidence (client decision Q3, 27 Nov 2026). The confidence score starts from the fit score
+        # and adds up to 68 for skills and experience, so a fit of 35 reached 82 and INTERVIEW, which invites the
+        # candidate by itself. Below the minimum fit an INTERVIEW becomes HOLD, for a person to look at; HOLD and
+        # REJECT are left alone, and a CV the AI gave no fit score is decided on confidence as before.
+        fit_floor = DEFAULT_MIN_FIT_SCORE if min_fit_score is None else int(min_fit_score)
+        held_by_fit = (decision == "INTERVIEW" and role_fit_score is not None and fit_floor > 0
+                       and role_fit_score < fit_floor)
+        if held_by_fit:
+            decision = "HOLD"
+        confidence_breakdown = {**(confidence_breakdown or {}), "min_fit_score": fit_floor, "held_by_fit": held_by_fit}
         priority = self._assign_priority(decision, confidence, total_exp_years, matched, inferred_skills, enriched_data)
         
         reasoning = self._build_recruiter_reasoning(
             decision, confidence, exact_matched, related_matched, inferred_skills, missing, role_fit_score, total_exp_years, parsed_cv, candidate_insights, enriched_data
         )
         
+        if held_by_fit:
+            why = (f"HOLD rather than INTERVIEW: the fit score {role_fit_score} is below the minimum {fit_floor} "
+                   f"(confidence {confidence}).")
+            # The reasoning is a list of points (a string in older callers): the why goes first.
+            reasoning = [why, *reasoning] if isinstance(reasoning, list) else f"{why} {reasoning or ''}".strip()
+
         # Calculate match percentage for ranking visibility
         matched_count = len(matched) if matched else 0
         missing_count = len(missing) if missing else 0

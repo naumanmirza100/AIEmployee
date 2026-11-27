@@ -55,6 +55,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
     interview_threshold: 65,
     hold_threshold: 45,
     use_custom_thresholds: false,
+    min_fit_score: 50,
   });
   const [scheduleFromDate, setScheduleFromDate] = useState(null);
   const [scheduleToDate, setScheduleToDate] = useState(null);
@@ -153,7 +154,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
       setLoading(true);
       const [emailRes, qualificationRes] = await Promise.all([
         getEmailSettings(),
-        getQualificationSettings().catch(() => ({ status: 'success', data: { interview_threshold: 65, hold_threshold: 45, use_custom_thresholds: false } })),
+        getQualificationSettings().catch(() => ({ status: 'success', data: { interview_threshold: 65, hold_threshold: 45, use_custom_thresholds: false, min_fit_score: 50 } })),
       ]);
 
       if (emailRes.status === 'success') {
@@ -1438,6 +1439,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                         <li>Score &gt;= {qualificationSettings.interview_threshold} → <span className="text-green-500 font-medium">INTERVIEW</span></li>
                         <li>Score &gt;= {qualificationSettings.hold_threshold} and &lt; {qualificationSettings.interview_threshold} → <span className="text-yellow-500 font-medium">HOLD</span></li>
                         <li>Score &lt; {qualificationSettings.hold_threshold} → <span className="text-red-500 font-medium">REJECT</span></li>
+                        <li>Fit score below {qualificationSettings.min_fit_score ?? 50} → never <span className="text-green-500 font-medium">INTERVIEW</span>; <span className="text-yellow-500 font-medium">HOLD</span> instead</li>
                       </ul>
                       {qualificationSettings.interview_threshold <= qualificationSettings.hold_threshold && (
                         <p className="text-xs text-red-500 mt-2">
@@ -1455,9 +1457,36 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       <li>Score &gt;= 65 → <span className="text-green-500 font-medium">INTERVIEW</span></li>
                       <li>Score &gt;= 45 and &lt; 65 → <span className="text-yellow-500 font-medium">HOLD</span></li>
                       <li>Score &lt; 45 → <span className="text-red-500 font-medium">REJECT</span></li>
+                        <li>Fit score below {qualificationSettings.min_fit_score ?? 50} → never <span className="text-green-500 font-medium">INTERVIEW</span>; <span className="text-yellow-500 font-medium">HOLD</span> instead</li>
                     </ul>
                   </div>
                 )}
+
+                {/* Fit first, then confidence (client decision Q3, 27 Nov 2026): applies with or without custom
+                    thresholds, so it sits outside them. */}
+                <div className="space-y-2">
+                  <Label htmlFor="REC-settings-min-fit-input">Minimum fit score for INTERVIEW (0-100)</Label>
+                  <Input
+                    id="REC-settings-min-fit-input"
+                    data-testid="REC-settings-min-fit-input"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={qualificationSettings.min_fit_score ?? 50}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value, 10);
+                      setQualificationSettings({
+                        ...qualificationSettings,
+                        min_fit_score: Number.isNaN(value) ? 0 : Math.max(0, Math.min(100, value)),
+                      });
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    The fit score is the AI's reading of how well the CV fits the role. A candidate below this is never
+                    marked INTERVIEW (and so never invited automatically), however high the confidence score: they go to
+                    HOLD for you to look at. 0 switches this off.
+                  </p>
+                </div>
               </div>
 
               <Button id="REC-settings-qualification-save-btn" data-testid="REC-settings-qualification-save-btn" onClick={handleSaveQualificationSettings} disabled={saving || (qualificationSettings.use_custom_thresholds && qualificationSettings.interview_threshold <= qualificationSettings.hold_threshold)}>

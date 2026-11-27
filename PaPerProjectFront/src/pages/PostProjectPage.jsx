@@ -116,7 +116,7 @@ const PostProjectPage = () => {
                 How to Post a Project
               </h1>
               <p className="mt-6 text-lg leading-8 text-muted-foreground max-w-3xl mx-auto">
-                Tell us what you need. We'll connect you with the world's top 2% of managed teams and experts to bring your vision to life—guaranteed.
+                Tell us what you need. We'll connect you with vetted managed teams and experts to bring your vision to life—guaranteed.
               </p>
               <div className="mt-10 flex items-center justify-center gap-x-6">
                 <Button size="lg" asChild>

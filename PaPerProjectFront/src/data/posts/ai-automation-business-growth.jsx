@@ -5,7 +5,7 @@ export const aiAutomationBusinessGrowth = {
   title: 'AI & Automation: The Secret Weapon for Exponential Business Growth',
   slug: 'ai-automation-business-growth',
   date: '2025-10-26',
-  author: 'Dr. Eva Rostova, AI Strategist',
+  author: 'Pay Per Project Team',
   category: 'AI & Automation',
   description: 'Discover how integrating AI and automation into your operations can slash costs, boost productivity, and unlock new revenue streams. This is your guide to the new industrial revolution.',
   content: <AiAutomationBusinessGrowthContent />,

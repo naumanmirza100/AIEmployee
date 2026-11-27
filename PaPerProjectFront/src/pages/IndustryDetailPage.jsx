@@ -111,7 +111,6 @@ import React, { useState } from 'react';
           </Helmet>
     
           <div className="relative isolate overflow-hidden pt-24 pb-16 md:pt-40 md:pb-24">
-            <img-replace src={details.image} alt={name} class="absolute inset-0 -z-10 h-full w-full object-cover" />
             <div className="absolute inset-0 -z-10 bg-gradient-to-t from-background via-background/80 to-transparent"></div>
             <div className="absolute inset-0 -z-10 bg-black/30"></div>
     

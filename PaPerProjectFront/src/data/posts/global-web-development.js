@@ -7,7 +7,7 @@ export const globalWebDevelopment = {
   description: "Your ultimate guide to software development outsourcing. Learn how to hire freelance web developers in the US, UK, and Europe for your custom web app and freelance software projects.",
   image: "https://images.unsplash.com/photo-1542831371-29b0f74f9713",
   category: "Web Development",
-  author: "Chris Taylor, Head of Talent",
+  author: 'Pay Per Project Team',
   date: "July 26, 2025",
   tags: ['web developer US', 'software development outsourcing', 'hire freelance web developer', 'outsourcing web design'],
   content: <GlobalWebDevContent />,

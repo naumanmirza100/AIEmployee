@@ -544,8 +544,8 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           // The other way, off until switched on: corrections made in the CRM come back every 15 minutes.
           { key: 'sync_back', icon: RefreshCw, label: `Changes from ${cfg.label}`,
             title: integration.sync_back
-              ? `Names, phones, job titles and companies corrected in ${cfg.label} are copied to your agents every 15 minutes. Click to stop.`
-              : `Click to copy names, phones, job titles and companies corrected in ${cfg.label} back to your agents, every 15 minutes.` },
+              ? `Phones, job titles and companies corrected in ${cfg.label} are copied to your agents every 15 minutes, and a name where your agent has none. Click to stop.`
+              : `Click to copy phones, job titles and companies corrected in ${cfg.label} back to your agents every 15 minutes, and a name where your agent has none.` },
         ].map(({ key, icon: Icon, label, title }) => (
           <button key={key} type="button" data-testid={`crm-toggle-${key}`} disabled={!canManageCrm()}
             onClick={() => canManageCrm() && handleToggle(key, label)}

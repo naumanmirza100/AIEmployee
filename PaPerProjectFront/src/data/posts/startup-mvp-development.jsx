@@ -7,7 +7,7 @@ export const startupMvpDevelopment = {
   description: "Learn how to build your Minimum Viable Product (MVP) quickly and cost-effectively, leveraging managed outsourcing for rapid startup tech execution and investor traction.",
   image: "https://images.unsplash.com/photo-1556740738-b6760e28c309",
   category: "Startup Strategy",
-  author: "Alex Chen, Startup Advisor",
+  author: 'Pay Per Project Team',
   date: "2025-10-22",
   tags: ['startup MVP development', 'build MVP fast', 'outsourcing startup product', 'minimum viable product freelance', 'hire MVP developer', 'startup tech execution'],
   content: <StartupMvpContent />,

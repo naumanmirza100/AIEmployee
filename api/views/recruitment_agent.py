@@ -374,6 +374,7 @@ def _process_files(company_user, job_desc, job_kw_list, files, top_n=None, parse
         # The job owner's screening thresholds (fetch once, use for all CVs)
         settings_owner = sharing.owner(job_desc, company_user)
         interview_threshold, hold_threshold = sharing.thresholds(settings_owner)
+        min_fit_score = sharing.min_fit(settings_owner)
 
         # Summarize, enrich, and qualify
         all_results = []
@@ -396,7 +397,8 @@ def _process_files(company_user, job_desc, job_kw_list, files, top_n=None, parse
             if not isinstance(enriched, dict):
                 enriched = enriched[0] if isinstance(enriched, list) and len(enriched) > 0 else {}
 
-            qualified = qualify_agent.qualify(parsed, summary, job_kw_list, enriched, interview_threshold, hold_threshold)
+            qualified = qualify_agent.qualify(parsed, summary, job_kw_list, enriched, interview_threshold, hold_threshold,
+                                              min_fit_score=min_fit_score)
             if not isinstance(qualified, dict):
                 qualified = qualified[0] if isinstance(qualified, list) and len(qualified) > 0 else {}
 
@@ -3045,6 +3047,7 @@ def qualification_settings(request):
                     'interview_threshold': settings.interview_threshold,
                     'hold_threshold': settings.hold_threshold,
                     'use_custom_thresholds': settings.use_custom_thresholds,
+                    'min_fit_score': settings.min_fit_score,
                 }
             })
         
@@ -3087,6 +3090,19 @@ def qualification_settings(request):
             
             if 'use_custom_thresholds' in request.data:
                 settings.use_custom_thresholds = bool(request.data['use_custom_thresholds'])
+
+            # The minimum fit score for INTERVIEW (Q3, 27 Nov 2026); 0 switches the rule off.
+            if 'min_fit_score' in request.data:
+                try:
+                    min_fit = int(request.data['min_fit_score'])
+                except (TypeError, ValueError):
+                    min_fit = -1
+                if min_fit < 0 or min_fit > 100:
+                    return Response({
+                        'status': 'error',
+                        'message': 'min_fit_score must be between 0 and 100'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                settings.min_fit_score = min_fit
             
             # Validate thresholds
             if settings.interview_threshold <= settings.hold_threshold:
@@ -3104,6 +3120,7 @@ def qualification_settings(request):
                     'interview_threshold': settings.interview_threshold,
                     'hold_threshold': settings.hold_threshold,
                     'use_custom_thresholds': settings.use_custom_thresholds,
+                    'min_fit_score': settings.min_fit_score,
                 }
             })
     
@@ -4195,9 +4212,10 @@ def api_cv_qualify(request):
                 interview_threshold = 65
             if hold_threshold is None:
                 hold_threshold = 45
+        min_fit_score = sharing.min_fit(sharing.owner(record.job_description if record else None, company_user))
         qualification = qualify_agent.qualify(
             parsed, insights, job_keywords=job_keywords, enriched_data=enriched,
-            interview_threshold=interview_threshold, hold_threshold=hold_threshold,
+            interview_threshold=interview_threshold, hold_threshold=hold_threshold, min_fit_score=min_fit_score,
         )
         return Response({'status': 'success', 'qualification': qualification})
     except KeyServiceError:

@@ -126,6 +126,28 @@ class QuotaExhausted(KeyServiceError):
             )
 
 
+class DailyQuotaReached(QuotaExhausted):
+    """Today's free tokens for this agent are used (AdminPricingConfig.daily_free_tokens, 27 Nov 2026). A kind of
+    QuotaExhausted, so every place that handles a used-up allowance handles this too; its own reason and words."""
+    reason = "daily_quota_reached"
+
+    def __init__(self, agent_name=None, daily_tokens=None):
+        super().__init__(agent_name)
+        label = dict(AGENT_CHOICES).get(agent_name, agent_name) if agent_name else 'This agent'
+        allowance = f" ({daily_tokens:,} tokens)" if daily_tokens else ''
+        self.user_message = (
+            f"Your {label} has used today's free AI allowance{allowance}. It starts again at midnight UTC "
+            "(5 am Pakistan time). To carry on now, add your own OpenAI or Groq key in Settings → API Keys."
+        )
+
+
+def daily_free_tokens(agent_name) -> int:
+    """The daily cap on free tokens for `agent_name`, 0 for none."""
+    from core.models import AdminPricingConfig
+    return int(AdminPricingConfig.objects.filter(agent_name=agent_name)
+               .values_list('daily_free_tokens', flat=True).first() or 0)
+
+
 class ManagedQuotaExhausted(KeyServiceError):
     reason = "managed_quota_exhausted"
     user_message = (
@@ -731,6 +753,9 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
         quota = _ensure_quota(company, agent_name)
     if quota.is_exhausted:
         raise QuotaExhausted(agent_name, quota.included_tokens)
+    cap = daily_free_tokens(agent_name)
+    if cap and quota.day_date == timezone.now().date() and quota.day_used_tokens >= cap:
+        raise DailyQuotaReached(agent_name, cap)
 
     # Step 4 — platform default key (the "free tokens" path)
     # Try the agent's default provider first, then fall back to any other active
@@ -889,6 +914,7 @@ def record_usage(ctx: CallContext, total_tokens: int) -> None:
         AgentTokenQuota.objects.filter(pk=ctx.quota_id).update(
             used_tokens=F('used_tokens') + total_tokens
         )
+        _count_today(ctx.quota_id, total_tokens)
         # Per-provider breakdown — atomic upsert
         updated = AgentProviderUsage.objects.filter(
             quota_id=ctx.quota_id, provider=ctx.provider
@@ -918,6 +944,18 @@ def record_usage(ctx: CallContext, total_tokens: int) -> None:
             company_id=ctx.company_id, agent_name=ctx.agent_name
         ).update(byok_tokens_info=F('byok_tokens_info') + total_tokens)
         _check_byok_quota_notifications(ctx.company_id, ctx.agent_name)
+
+
+def _count_today(quota_id, tokens) -> None:
+    """Add `tokens` to today's free-token count (UTC), starting the count again on a new day."""
+    today = timezone.now().date()
+    if AgentTokenQuota.objects.filter(pk=quota_id, day_date=today).update(
+            day_used_tokens=F('day_used_tokens') + tokens):
+        return
+    if AgentTokenQuota.objects.filter(pk=quota_id).exclude(day_date=today).update(day_date=today, day_used_tokens=tokens):
+        return
+    # Another call started the day between the two: add ours to it.
+    AgentTokenQuota.objects.filter(pk=quota_id, day_date=today).update(day_used_tokens=F('day_used_tokens') + tokens)
 
 
 @transaction.atomic

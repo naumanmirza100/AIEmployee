@@ -7,7 +7,7 @@ export const webSoftwareDevelopment = {
   description: "From custom web apps to complex software, learn how to leverage outsourcing to build high-quality digital products with vetted, expert developers.",
   image: "https://images.unsplash.com/photo-1519389950473-47ba0277781c",
   category: "Web Development",
-  author: "John Smith, COO",
+  author: 'Pay Per Project Team',
   date: "July 15, 2025",
   tags: ['web & software development', 'freelance web developer UK', 'custom web app development', 'freelance software projects', 'software development outsourcing'],
   content: <WebSoftwareDevContent />,

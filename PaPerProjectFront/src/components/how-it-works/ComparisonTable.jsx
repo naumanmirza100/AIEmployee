@@ -43,7 +43,7 @@ const comparisonData = [
   },
   {
     feature: "Vetting",
-    payPerProject: "Rigorous 2% acceptance rate for teams",
+    payPerProject: "Rigorous vetting for every team",
     freelancers: "Client's responsibility to vet",
     marketplaces: "Basic identity checks, skill tests optional",
   },

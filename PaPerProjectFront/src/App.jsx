@@ -5,7 +5,6 @@ import React from 'react';
     import { BackgroundUploadProvider } from '@/components/shared/BackgroundUploadManager';
     import HomePage from '@/pages/HomePage';
     import HowItWorksPage from '@/pages/HowItWorksPage';
-    import ReviewsPage from '@/pages/ReviewsPage';
     import IndustriesPage from '@/pages/IndustriesPage';
     import IndustryDetailPage from '@/pages/IndustryDetailPage';
     import ContactPage from '@/pages/ContactPage';
@@ -320,7 +319,8 @@ import { useTranslation } from 'react-i18next';
             <Route path="/how-it-works" element={<PublicLayout><HowItWorksPage /></PublicLayout>} />
             <Route path="/industries" element={<PublicLayout><IndustriesPage /></PublicLayout>} />
             <Route path="/industries/:slug" element={<PublicLayout><IndustryDetailPage /></PublicLayout>} />
-            <Route path="/reviews" element={<PublicLayout><ReviewsPage /></PublicLayout>} />
+            {/* The reviews were generated from random names (27 Nov 2026): the page is gone, old links go home. */}
+            <Route path="/reviews" element={<Navigate to="/" replace />} />
             <Route path="/contact" element={<PublicLayout><ContactPage /></PublicLayout>} />
             <Route path="/consultation" element={<PublicLayout><ConsultationPage /></PublicLayout>} />
             <Route path="/features" element={<PublicLayout><FeaturesPage /></PublicLayout>} />

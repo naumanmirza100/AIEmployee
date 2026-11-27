@@ -5,7 +5,7 @@ export const fintechInnovationOutsourcing = {
   title: 'The FinTech Revolution: How to Innovate Faster with Outsourced Dev Teams',
   slug: 'fintech-innovation-outsourcing',
   date: '2025-10-25',
-  author: 'David Chen, FinTech Specialist',
+  author: 'Pay Per Project Team',
   category: 'FinTech',
   description: 'In the fast-paced world of FinTech, speed and security are everything. Learn how outsourcing to specialized, managed development teams can help you build, launch, and scale your FinTech product securely and ahead of the competition.',
   content: <FintechInnovationOutsourcingContent />,

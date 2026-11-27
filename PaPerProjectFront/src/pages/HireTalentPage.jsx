@@ -104,7 +104,7 @@ const SourcingModelsSection = () => {
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">Flexible Sourcing for Your Needs</h2>
           <p className="mt-4 max-w-3xl mx-auto text-lg leading-8 text-muted-foreground">
-            We provide the world's top 1% of talent, structured to fit your project's unique requirements for speed, budget, and collaboration.
+            We provide vetted talent, structured to fit your project's unique requirements for speed, budget, and collaboration.
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -213,7 +213,7 @@ const VettingProcessSection = () => {
     { icon: Microscope, title: "2. Elite Technical Assessment", description: "Candidates face rigorous, domain-specific tests and live problem-solving challenges designed by industry leaders. This validates their expertise and ensures they can handle complex, real-world scenarios." },
     { icon: BrainCircuit, title: "3. Architectural & Systems Design", description: "We assess their ability to design scalable, secure, and maintainable systems. This crucial step ensures the solutions they build are robust and future-proof, not just functional for today." },
     { icon: Users, title: "4. Professionalism & Communication", description: "Technical skill means nothing without clear communication. We conduct in-depth interviews to evaluate professionalism, proactivity, and collaborative mindset, ensuring they integrate seamlessly as part of your team." },
-    { icon: Star, title: "5. The 1% Final Review", description: "Our most senior architects and project leads conduct a final, holistic review. Only teams demonstrating world-class excellence across all stages are invited to join our exclusive, top 1% global network." },
+    { icon: Star, title: "5. Final Review", description: "Our most senior architects and project leads conduct a final, holistic review. Only teams demonstrating world-class excellence across all stages are invited to join our network." },
   ];
 
   return (
@@ -222,7 +222,7 @@ const VettingProcessSection = () => {
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">Our Uncompromising 5-Step Vetting Process</h2>
           <p className="mt-4 max-w-3xl mx-auto text-lg leading-8 text-muted-foreground">
-            We're obsessed with quality. This is how we ensure you only work with the absolute best. Only the top 1% of applicants make it through.
+            We're obsessed with quality. This is how we ensure you only work with the absolute best.
           </p>
         </div>
         <div className="max-w-4xl mx-auto">
@@ -252,7 +252,7 @@ const VettingProcessSection = () => {
 
 const GuaranteeSection = () => {
   const guarantees = [
-    { icon: Award, title: "The Top 1% Guarantee", description: "We are relentlessly selective. Less than 1% of teams that apply pass our 5-step vetting process. This means you are only working with the absolute best in the world, eliminating the risk of a bad hire." },
+    { icon: Award, title: "The Quality Guarantee", description: "We are relentlessly selective: every team passes our 5-step vetting process. This means you are only working with the absolute best in the world, eliminating the risk of a bad hire." },
     { icon: ShieldCheck, title: "Project Success Guarantee", description: "We are so confident in our talent that we financially guarantee your project's success. If deliverables don't meet the agreed-upon standards, we will fix it on our dime. Your success is our only metric." },
     { icon: Users, title: "Seamless Integration", description: "Our teams are more than contractors; they are trained to be a seamless, accountable extension of your company. They adopt your tools, provide proactive updates, and take true ownership of the project's success." },
   ];
@@ -290,7 +290,7 @@ const GuaranteeSection = () => {
 const FaqSection = () => {
   const faqs1 = [
     {
-      question: "How do you vet your talent to find the top 1%?",
+      question: "How do you vet your talent?",
       answer: "Our 5-step vetting process is exhaustive. It includes portfolio review, technical skill assessments, live coding challenges, system design interviews, and cultural fit evaluations. We only accept development agencies with a proven track record, which is why our acceptance rate is under 1%."
     },
     {
@@ -375,8 +375,8 @@ const HireTalentPage = ({ scrollToForm = false }) => {
   return (
     <>
       <Helmet>
-        <title>Hire Top 1% Vetted Talent & Teams | Pay Per Project</title>
-        <meta name="description" content="Access the world's top 1% of pre-vetted development teams and industry experts. Onshore, nearshore, or offshore. Start building in 48 hours with our project success guarantee." />
+        <title>Hire Vetted Talent & Teams | Pay Per Project</title>
+        <meta name="description" content="Access pre-vetted development teams and industry experts. Onshore, nearshore, or offshore. Start building in 48 hours with our project success guarantee." />
       </Helmet>
       <div className="bg-background">
         <div className="relative isolate overflow-hidden bg-gradient-to-b from-primary/5 to-transparent pt-24 sm:pt-32 pb-16">
@@ -388,7 +388,7 @@ const HireTalentPage = ({ scrollToForm = false }) => {
             >
               <Award className="mx-auto h-12 w-12 text-primary" />
               <h1 className="mt-4 text-4xl font-bold tracking-tight text-foreground sm:text-6xl">
-                Hire the World's Top 1% of Talent
+                Hire Vetted Talent & Teams
               </h1>
               <p className="mt-6 text-lg leading-8 text-muted-foreground max-w-3xl mx-auto">
                 Stop searching, start building. We provide elite, managed teams and industry experts—vetted for excellence and ready to deliver from day one.

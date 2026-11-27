@@ -5,7 +5,7 @@ export const startupGrowthOutsourcing = {
   title: 'The Startup Founder\'s Guide to Scaling with Outsourcing',
   slug: 'startup-growth-outsourcing',
   date: '2025-10-28',
-  author: 'Jane Doe, Startup Advisor',
+  author: 'Pay Per Project Team',
   category: 'Startups',
   description: 'Learn how to leverage strategic outsourcing to build your MVP, find product-market fit, and scale your startup faster and more efficiently than your competitors.',
   content: <StartupGrowthOutsourcingContent />,
