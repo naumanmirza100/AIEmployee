@@ -16,7 +16,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from api.views import admin_backups as views
 from core import backups
-from core.models import Company, CompanyUser, SystemBackup, UserToken
+from core.models import Company, CompanyUser, CompanyUserToken, SystemBackup, UserToken
 
 
 class BackupBase(TestCase):
@@ -57,6 +57,8 @@ class WhatGoesInTests(BackupBase):
         self.write('hr_vector_indexes/7/index.faiss')
         self.write('cvs/worker.log')
         UserToken.objects.create(user=self.admin, key='k' * 40)
+        dashboard = CompanyUser.objects.create(company=self.company, email='o@acme.test', role='owner')
+        CompanyUserToken.objects.create(company_user=dashboard)
         backup = self.made_backup()
         self.assertEqual(backup.status, 'done', backup.error)
 
@@ -69,7 +71,8 @@ class WhatGoesInTests(BackupBase):
         models = {r['model'] for r in rows}
         self.assertIn('core.company', models)
         self.assertIn('auth.user', models)
-        self.assertFalse(models & {'core.usertoken', 'core.systembackup', 'contenttypes.contenttype', 'auth.permission'})
+        self.assertFalse(models & {'core.usertoken', 'core.companyusertoken', 'core.systembackup',
+                                   'contenttypes.contenttype', 'auth.permission'})
         self.assertEqual(manifest['files'], 2)
         self.assertEqual((backup.summary['files'], backup.size_bytes > 0), (2, True))
         self.assertEqual(backup.summary['models']['core.company'], 1)

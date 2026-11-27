@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 # Not data: sessions and login tokens, Django's bookkeeping, and the backup list itself.
 EXCLUDED_MODELS = [
     'contenttypes.contenttype', 'auth.permission', 'sessions.session', 'admin.logentry',
-    'authtoken.token', 'core.usertoken', 'core.usersession', 'core.systembackup',
+    'authtoken.token', 'core.usertoken', 'core.usersession', 'core.companyusertoken', 'core.systembackup',
 ]
 EXCLUDED_APPS = ['django_celery_beat']
 # Folders under MEDIA_ROOT that are rebuilt from the documents, files that are logs or crash dumps, and CVs waiting to
@@ -133,7 +133,9 @@ def make_nightly_company_backups(keep: int = 7):
     or is already being made, does not stop the others, and keeps its older nightly ones until one succeeds."""
     from core.models import Company
     results = []
-    for company in Company.objects.filter(is_active=True).order_by('pk').iterator():
+    # A list, not .iterator(): each run_backup ends with close_old_connections(), which would close the connection
+    # under the iterator's open cursor and stop the loop after the first company.
+    for company in list(Company.objects.filter(is_active=True).order_by('pk')):
         try:
             backup = make_nightly_backup(keep=keep, company=company)
         except Exception as exc:  # noqa: BLE001 - one company must not stop the others
