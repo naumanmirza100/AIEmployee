@@ -208,6 +208,21 @@ class SweepTests(DemoDataBase):
         self.assertTrue(Agent.objects.filter(slug='project_manager_agent').exists())
         self.assertTrue(DemoSnapshot.objects.filter(pk=snap.pk).exists())
 
+    def test_a_company_can_be_kept(self):
+        from ai_sdr_agent.models import SDRLead
+        other_login = CompanyUser.objects.create(company=self.other, email='sales@real.test', full_name='Sales',
+                                                 role='owner', password_hash=make_password('x'))
+        lead = SDRLead.objects.create(company_user=other_login, email='lead@prospect.test')
+        demo_data.sweep(commit=True, keep_companies=[self.other])
+        self.assertFalse(Company.objects.filter(pk=self.demo.pk).exists())
+        self.assertFalse(User.objects.filter(pk=self.employee.pk).exists())
+        self.assertTrue(Company.objects.filter(pk=self.other.pk).exists())
+        self.assertTrue(Project.objects.filter(pk=self.other_project.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.other_user.pk).exists())
+        self.assertEqual(UserProfile.objects.get(user=self.other_user).company_id, self.other.pk)
+        self.assertTrue(CompanyUser.objects.filter(pk=other_login.pk).exists())
+        self.assertTrue(SDRLead.objects.filter(pk=lead.pk).exists())
+
     def test_the_demo_can_be_added_after_a_sweep(self):
         demo_data.make_snapshot(self.demo, key='margalla', label='Demo')
         demo_data.sweep(commit=True)
