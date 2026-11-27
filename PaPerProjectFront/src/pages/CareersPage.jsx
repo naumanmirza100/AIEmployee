@@ -28,7 +28,7 @@ const fade = {
 const benefits = [
   { icon: MapPin,       title: 'Work From Anywhere',        description: 'We are a remote-first company. Enjoy the flexibility to work from wherever you are most productive and creative.' },
   { icon: BrainCircuit, title: 'Solve Challenging Problems', description: 'Work on cutting-edge projects for industry-leading clients. Your code will make a real-world impact.' },
-  { icon: Users,        title: 'Collaborate with the Best',  description: 'Join a team of top 1% global talent. Learn from and grow with the most brilliant minds in the industry.' },
+  { icon: Users,        title: 'Collaborate with the Best',  description: 'Join a team of skilled, vetted professionals. Learn from and grow with the most brilliant minds in the industry.' },
   { icon: Sparkles,     title: 'Competitive Compensation',   description: 'We offer top-tier compensation packages to attract and retain the best talent in the world.' },
 ];
 

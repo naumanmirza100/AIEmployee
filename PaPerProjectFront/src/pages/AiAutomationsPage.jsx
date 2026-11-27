@@ -703,7 +703,7 @@ import React from 'react';
         <>
           <Helmet>
             <title>Agentic AI & Automation | Pay Per Project</title>
-            <meta name="description" content="Discover how our autonomous Agentic AI solutions are revolutionizing industries with an 89% success rate. We solve your biggest challenges." />
+            <meta name="description" content="Discover how our autonomous Agentic AI solutions are revolutionizing industries. We solve your biggest challenges." />
           </Helmet>
           <div className="bg-background text-foreground">
             <section className="relative isolate overflow-hidden pt-32 pb-24 md:pt-48 md:pb-32">
@@ -721,7 +721,7 @@ import React from 'react';
                     Welcome to the Agentic AI Revolution
                   </h1>
                   <p className="mt-6 max-w-3xl mx-auto text-lg text-muted-foreground">
-                    We build autonomous AI agents that go beyond simple automation. They think, learn, and execute complex tasks to solve your biggest business challenges, achieving an <strong className="text-primary font-bold">89% success rate</strong> in process optimization.
+                    We build autonomous AI agents that go beyond simple automation. They think, learn, and execute complex tasks to solve your biggest business challenges.
                   </p>
                   <div className="mt-10 flex items-center justify-center gap-x-6">
                     <Button asChild size="lg" className="text-lg">

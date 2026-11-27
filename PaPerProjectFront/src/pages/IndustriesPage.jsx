@@ -235,7 +235,7 @@ const IndustriesPage = () => {
 
       <section className="py-16 md:py-24 bg-secondary/40">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
+          <div className="max-w-3xl mx-auto">
             <motion.div initial={{ opacity: 0, x: -50 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.7 }}>
               <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-foreground mb-4 font-heading">{t('industries_why_us_title', 'Your Industry, Our Expertise')}</h2>
               <p className="text-lg text-muted-foreground mb-6">{t('industries_why_us_subtitle', 'We don\'t just build software; we architect solutions that understand the nuances of your industry. Our pay-per-project model ensures you get specialized expertise focused on delivering results.')}</p>
@@ -244,13 +244,6 @@ const IndustriesPage = () => {
                 <div className="flex items-start gap-3"><Target className="h-6 w-6 text-primary mt-1 flex-shrink-0" /> <p><strong className="text-foreground">{t('industries_why_us_point2_title', 'Goal-Oriented Delivery:')}</strong> {t('industries_why_us_point2_desc', 'Projects are scoped and delivered to meet specific industry challenges and goals.')}</p></div>
                 <div className="flex items-start gap-3"><Lightbulb className="h-6 w-6 text-primary mt-1 flex-shrink-0" /> <p><strong className="text-foreground">{t('industries_why_us_point3_title', 'Innovative Solutions:')}</strong> {t('industries_why_us_point3_desc', 'Leverage the latest technology to gain a competitive edge in your market.')}</p></div>
               </div>
-            </motion.div>
-            <motion.div initial={{ opacity: 0, scale: 0.8 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.7 }} className="relative h-96 rounded-2xl overflow-hidden shadow-2xl">
-                <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
-                <div className="absolute bottom-0 left-0 p-8 text-white">
-                    <p className="text-5xl font-bold">10,000+</p>
-                    <p className="text-xl font-medium">{t('industries_why_us_stat', 'Vetted Industry Experts')}</p>
-                </div>
             </motion.div>
           </div>
         </div>

@@ -14,7 +14,7 @@ const ValueAndPricingPage = () => {
     {
       icon: Users,
       title: "Elite Managed Teams",
-      description: "You get a cohesive, managed team from the top 1% of global talent. No hiring, no HR, no management overhead."
+      description: "You get a cohesive, managed team of vetted global talent. No hiring, no HR, no management overhead."
     },
     {
       icon: ShieldCheck,
@@ -34,7 +34,7 @@ const ValueAndPricingPage = () => {
   ];
 
   const comparisonData = [
-      { feature: 'Talent Quality', us: 'Top 1% Vetted', agency: 'Variable', hiring: 'High Effort & Risk' },
+      { feature: 'Talent Quality', us: 'Vetted', agency: 'Variable', hiring: 'High Effort & Risk' },
       { feature: 'Management', us: 'Fully Included', agency: 'Extra Cost', hiring: 'Your Full-Time Job' },
       { feature: 'Speed', us: '24/7 Workflow', agency: 'Standard Hours', hiring: 'Standard Hours' },
       { feature: 'Accountability', us: 'Success Guarantee', agency: 'Best Effort', hiring: 'On You' },
@@ -42,26 +42,9 @@ const ValueAndPricingPage = () => {
       { feature: 'AI Integration', us: 'Core to Process', agency: 'Add-on Service', hiring: 'DIY / Specialist' },
   ];
 
-  const roiSpotlights = [
-      {
-          stat: "50% Faster",
-          description: "A FinTech startup launched their MVP in 3 months instead of 6 by leveraging our 24/7 team and AI-assisted coding.",
-          icon: TrendingUp
-      },
-      {
-          stat: "£60k Saved",
-          description: "An e-commerce brand saved over £60,000 in annual salary and recruitment costs for a 2-person dev team.",
-          icon: Scale
-      },
-      {
-          stat: "Zero Overhead",
-          description: "A non-technical founder was able to focus entirely on marketing and sales while we handled 100% of the tech delivery.",
-          icon: Users
-      }
-  ]
 
   const valueProps = [
-    'Dedicated Project Manager', 'Top 1% Global Talent', 'Full QA & Testing Team',
+    'Dedicated Project Manager', 'Vetted Global Talent', 'Full QA & Testing Team',
     '24/7 Operations & Support', 'IP & NDA Protection', 'Project Success Guarantee',
     'Scalable On-Demand Teams', 'Transparent Reporting'
   ];
@@ -154,35 +137,6 @@ const ValueAndPricingPage = () => {
             </div>
         </section>
 
-        <section className="py-16 sm:py-20">
-            <div className="mx-auto max-w-7xl px-6 lg:px-8">
-                <div className="text-center mb-12">
-                    <h2 className="text-3xl md:text-4xl font-bold tracking-tight font-heading">Real-World ROI</h2>
-                     <p className="mt-4 max-w-2xl mx-auto text-lg leading-8 text-muted-foreground">
-                        Our model doesn't just save money—it accelerates growth.
-                    </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    {roiSpotlights.map((item, index) => (
-                        <motion.div
-                            key={index}
-                            initial={{ opacity: 0, y: 20 }}
-                            whileInView={{ opacity: 1, y: 0 }}
-                            viewport={{ once: true }}
-                            transition={{ delay: index * 0.15, duration: 0.5 }}
-                        >
-                        <Card className="h-full text-center p-6 bg-card border shadow-lg hover:shadow-primary/20 hover:-translate-y-2 transition-all duration-300 rounded-2xl">
-                             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-6">
-                                <item.icon className="h-8 w-8 text-primary"/>
-                            </div>
-                            <p className="text-4xl font-bold text-gradient">{item.stat}</p>
-                            <p className="mt-2 text-muted-foreground">{item.description}</p>
-                        </Card>
-                        </motion.div>
-                    ))}
-                </div>
-            </div>
-        </section>
 
         <BenchmarkSlider />
 
