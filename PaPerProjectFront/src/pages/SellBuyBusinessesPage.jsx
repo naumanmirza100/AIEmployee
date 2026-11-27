@@ -1,7 +1,7 @@
 import React from 'react';
     import { Helmet } from 'react-helmet';
     import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
-    import { Link } from 'react-router-dom';
+    import { Link, useNavigate } from 'react-router-dom';
     import { HeartHandshake as Handshake, ArrowRight, TrendingUp, ShieldCheck, Search, Gavel, Rocket, Sparkles, BarChart, Layers, Zap } from 'lucide-react';
     import { Button } from '@/components/ui/button';
     import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -98,11 +98,9 @@ import React from 'react';
     const SellBuyBusinessesPage = () => {
       const { toast } = useToast();
     
-      const handleNotImplemented = () => {
-        toast({
-          title: "🚧 This feature isn't implemented yet—but don't worry! You can request it in your next prompt! 🚀",
-        });
-      };
+      // Selling, pitching and buying start with a conversation (27 Nov 2026: the buttons said "not implemented").
+      const navigate = useNavigate();
+      const toContact = () => navigate('/contact');
     
       const features = [
         {
@@ -256,13 +254,9 @@ import React from 'react';
                     A fully managed platform for buying and selling profitable online businesses. We handle the valuation, vetting, and technical handover, so you can focus on the deal.
                   </p>
                   <div className="mt-10 flex items-center justify-center gap-x-6">
-                    <Button onClick={handleNotImplemented} size="lg" className="text-lg">
+                    <Button onClick={toContact} size="lg" className="text-lg">
                       Sell Your Business
                       <ArrowRight className="ml-2 h-5 w-5" />
-                    </Button>
-                    <Button onClick={handleNotImplemented} size="lg" variant="outline" className="text-lg">
-                      Browse Listings
-                      <Search className="ml-2 h-5 w-5" />
                     </Button>
                   </div>
                 </motion.div>
@@ -337,32 +331,7 @@ import React from 'react';
               </div>
             </section>
     
-            <section className="py-24 bg-secondary/40">
-              <div className="container mx-auto px-4">
-                <div className="text-center mb-16">
-                  <h2 className="fluid-text-h2 font-extrabold tracking-tight">Featured Listings</h2>
-                  <p className="mt-4 max-w-2xl mx-auto text-lg text-muted-foreground">
-                    A selection of high-growth digital businesses currently available on our marketplace.
-                  </p>
-                </div>
-                <motion.div variants={containerVariants} initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }}>
-                  <Masonry
-                    breakpointCols={breakpointColumnsObj}
-                    className="my-masonry-grid"
-                    columnClassName="my-masonry-grid_column"
-                  >
-                    {listings.map((listing, index) => (
-                      <ListingCard key={index} listing={listing} onClick={handleNotImplemented} />
-                    ))}
-                  </Masonry>
-                </motion.div>
-                <div className="text-center mt-12">
-                  <Button onClick={handleNotImplemented} size="lg" variant="outline">
-                    View All Listings <ArrowRight className="ml-2 h-5 w-5" />
-                  </Button>
-                </div>
-              </div>
-            </section>
+            {/* The "Featured Listings" were made-up businesses with revenues and asking prices (removed 27 Nov 2026). */}
     
             <section className="py-24">
               <div className="container mx-auto px-4">
@@ -381,7 +350,7 @@ import React from 'react';
                     <p className="max-w-2xl mx-auto text-lg text-gray-300 mb-8">
                       Have a promising business but not ready to sell? Pitch your business to us. We invest in high-potential digital assets, offering capital and our managed project teams to fuel your growth in exchange for equity.
                     </p>
-                    <Button onClick={handleNotImplemented} size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg px-8 py-6 rounded-full shadow-lg transition-transform hover:scale-105">
+                    <Button onClick={toContact} size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg px-8 py-6 rounded-full shadow-lg transition-transform hover:scale-105">
                       Pitch Your Business <Layers className="ml-2 h-5 w-5" />
                     </Button>
                   </motion.div>

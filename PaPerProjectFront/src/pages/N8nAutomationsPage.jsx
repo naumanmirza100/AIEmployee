@@ -2,11 +2,7 @@
 import React from 'react';
     import { Helmet } from 'react-helmet';
     import { motion } from 'framer-motion';
-    import { 
-        BrainCircuit, Zap, Bot, ArrowRight, CheckCircle, Target, Sparkles, Users,
-        HeartPulse, Home, School, ShoppingCart, BarChart3, Briefcase, DollarSign, Store,
-        Headphones, Server, Truck, Scale, Plane, Landmark, Ship
-    } from 'lucide-react';
+    import { BrainCircuit, Zap, Bot, ArrowRight, CheckCircle, Target, Sparkles, Users, HeartPulse, Home, School, ShoppingCart, BarChart3, Briefcase, DollarSign, Store, Headphones, Server, Truck, Scale, Plane, Landmark, Ship, Workflow } from 'lucide-react';
     import { Button } from '@/components/ui/button';
     import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
     import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -239,7 +235,7 @@ import React from 'react';
               <div className="container mx-auto px-4 text-center">
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.2 }}>
                   <div className="inline-flex items-center justify-center rounded-full bg-primary/10 px-4 py-2 text-sm font-semibold text-primary mb-4">
-                    <img-replace alt="n8n logo" className="h-5 w-5 mr-2" />
+                    <Workflow className="h-5 w-5 mr-2" aria-hidden="true" />
                     Powered by n8n & AI
                   </div>
                   <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-glow">
@@ -330,7 +326,6 @@ import React from 'react';
               <div className="container mx-auto px-4">
                 <div className="bg-gradient-to-r from-gray-900 to-black rounded-2xl p-8 md:p-16 text-center text-pure-white shadow-2xl relative overflow-hidden">
                     <div className="absolute inset-0 -z-10 opacity-10">
-                        <img-replace alt="Abstract workflow visualization" className="w-full h-full object-cover" />
                     </div>
                   <motion.div
                     initial={{ opacity: 0, scale: 0.9 }}

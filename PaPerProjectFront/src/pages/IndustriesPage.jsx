@@ -110,7 +110,6 @@ const IndustryCard = ({ industry, t }) => {
               }}
               className="absolute inset-0"
             >
-              <img-replace alt={industry.image} class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-in-out"/>
             </motion.div>
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent opacity-100 transition-opacity duration-300"></div>
             <motion.div
@@ -247,9 +246,6 @@ const IndustriesPage = () => {
               </div>
             </motion.div>
             <motion.div initial={{ opacity: 0, scale: 0.8 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.7 }} className="relative h-96 rounded-2xl overflow-hidden shadow-2xl">
-               <img-replace
-                  alt="Team of experts collaborating"
-                  class="w-full h-full object-cover"/>
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
                 <div className="absolute bottom-0 left-0 p-8 text-white">
                     <p className="text-5xl font-bold">10,000+</p>

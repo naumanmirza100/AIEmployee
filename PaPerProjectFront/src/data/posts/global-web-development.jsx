@@ -7,7 +7,7 @@ export const globalWebDevelopment = {
   description: "Your ultimate guide to software development outsourcing. Learn the pros and cons of hiring freelance web developers in the US, UK, and Europe for your custom web app projects.",
   image: "https://images.unsplash.com/photo-1542831371-29b0f74f9713",
   category: "Web Development",
-  author: "Chris Taylor, Head of Talent",
+  author: 'Pay Per Project Team',
   date: "2025-10-24",
   tags: ['web developer US', 'software development outsourcing', 'hire freelance web developer', 'outsourcing web design', 'global talent'],
   content: <GlobalWebDevContent />,

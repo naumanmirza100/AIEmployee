@@ -7,7 +7,7 @@ export const projectGuarantee = {
   description: "Learn how a comprehensive freelance project guarantee, backed by insurance, ironclad NDAs, and absolute IP protection, creates a secure and successful outsourcing experience.",
   image: "https://images.unsplash.com/photo-1556742502-ec7c0e9f34b1",
   category: "Outsourcing Strategy",
-  author: "Jane Doe, CEO",
+  author: 'Pay Per Project Team',
   date: "2025-10-25",
   tags: ['freelance project guarantee', 'IP protection freelance', 'freelance project insurance', 'NDA for outsourcing', 'risk-free outsourcing'],
   content: <ProjectGuaranteeContent />,

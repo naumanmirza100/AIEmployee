@@ -45,7 +45,6 @@ const Footer = () => {
                 <li><Link to="/careers" className="text-muted-foreground transition hover:text-primary">{t('footer_careers')}</Link></li>
                 <li><Link to="/contact" className="text-muted-foreground transition hover:text-primary">{t('footer_contact')}</Link></li>
                 <li><Link to="/blog" className="text-muted-foreground transition hover:text-primary">{t('footer_blog', 'Blog')}</Link></li>
-                <li><Link to="/reviews" className="text-muted-foreground transition hover:text-primary">{t('footer_reviews', 'Reviews')}</Link></li>
               </ul>
             </div>
             <div className="text-center sm:text-left">

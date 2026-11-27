@@ -7,7 +7,7 @@ export const aiMachineLearningOutsourcing = {
   description: "Leverage global expertise to accelerate your AI initiatives. Learn how to hire elite ML experts and manage AI teams on a secure, pay-per-project basis.",
   image: "https://images.unsplash.com/photo-1577561877478-f739679f2913",
   category: "AI & Machine Learning",
-  author: "Dr. Anya Sharma, AI Ethicist",
+  author: 'Pay Per Project Team',
   date: "2025-10-15",
   tags: ['AI project outsourcing company', 'hire ML experts per project', 'managed AI teams Europe, US, UK, QATAR', 'pay per project machine learning', 'data science project outsourcing'],
   content: <AIMachineLearningOutsourcingContent />,

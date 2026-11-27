@@ -7,7 +7,7 @@ export const upworkFiverrCompetitors = {
   description: "A comprehensive list of the best Upwork and Fiverr alternatives. Compare top platforms and discover why a managed, pay-per-project model is superior for serious projects.",
   image: "https://images.unsplash.com/photo-1517048676732-d65bc937f952",
   category: "Freelance Tips",
-  author: "Jane Doe, CEO",
+  author: 'Pay Per Project Team',
   date: "2025-10-12",
   tags: ['Upwork competitors list', 'Fiverr alternatives UK, US, QATAR, EUROPE', 'platforms like Upwork without commission', 'freelancer alternatives for enterprises', 'pay per project vs hourly model'],
   content: <UpworkFiverrCompetitorsContent />,

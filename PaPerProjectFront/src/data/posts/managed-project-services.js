@@ -7,7 +7,7 @@ export const managedProjectServices = {
   description: "Learn how project insurance, guaranteed delivery, and IP protection from fully managed remote teams can eliminate outsourcing risks.",
   image: "https://images.unsplash.com/photo-1581093450021-4a7360aa9a2f",
   category: "Outsourcing Strategy",
-  author: "John Smith, COO",
+  author: 'Pay Per Project Team',
   date: "2025-08-06",
   tags: ['project insurance for outsourcing', 'guaranteed project delivery outsourcing', 'IP protected development team', 'NDA outsourcing software', 'fully managed remote teams'],
   content: <ManagedProjectServicesContent />,

@@ -7,7 +7,7 @@ export const enterpriseB2BOutsourcing = {
   description: "Learn how large corporations can leverage secure project outsourcing and managed enterprise freelance teams for complex B2B software development in the UK, US, and Europe.",
   image: "https://images.unsplash.com/photo-1522071820081-009f0129c71c",
   category: "Enterprise Solutions",
-  author: "David Chen, Enterprise Solutions Architect",
+  author: 'Pay Per Project Team',
   date: "2025-10-19",
   tags: ['enterprise software outsourcing', 'IT outsourcing UK, US, EUROPE', 'secure project outsourcing', 'B2B software development freelance', 'enterprise freelance team', 'freelance outsourcing for corporations'],
   content: <EnterpriseB2BOutsourcingContent />,

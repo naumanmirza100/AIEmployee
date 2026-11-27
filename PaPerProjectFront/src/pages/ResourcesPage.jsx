@@ -1,7 +1,7 @@
 import React from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { BookOpen, Users, Video, GraduationCap, LifeBuoy, FileText, Sparkles, Cpu, Lightbulb, ArrowRight, Briefcase, Layers, Wrench, BrainCircuit, HeartHandshake as Handshake } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -12,41 +12,36 @@ const resourceCategories = [
     category: 'Learn',
     items: [
       { to: '/blog', title: 'Blog', icon: BookOpen, description: 'Insights, trends, and stories from our experts.' },
-      { to: '/resources/customer-stories', title: 'Customer Stories', icon: Users, description: 'See how we\'ve helped businesses like yours succeed.' },
-      { to: '/resources/featured-videos', title: 'Featured Videos', icon: Video, description: 'Watch tutorials, case studies, and webinars.' },
-      { to: '/resources/academy', title: 'Academy', icon: GraduationCap, description: 'Level up your skills with our courses and guides.' },
     ]
   },
   {
     category: 'Agentic AI',
     items: [
-      { to: '/resources/what-is-agentic-ai', title: 'What is agentic AI', icon: Lightbulb, description: 'Understand the core concepts of autonomous AI.' },
-      { to: '/resources/ai-agent-vs-agentic-ai', title: 'AI Agent vs Agentic AI', icon: Cpu, description: 'Learn the key differences and capabilities.' },
-      { to: '/resources/agentic-ai-business-use-cases', title: 'Business Use Cases', icon: BrainCircuit, description: 'Explore real-world applications of Agentic AI.' },
-      { to: '/resources/how-to-build-an-ai-agent', title: 'Build an AI Agent', icon: Wrench, description: 'A guide to creating your first autonomous agent.' },
+      { to: '/resources/agentic-ai-explained#what-is-agentic-ai', title: 'What is agentic AI', icon: Lightbulb, description: 'Understand the core concepts of autonomous AI.' },
+      { to: '/resources/agentic-ai-explained#ai-vs-agentic-ai', title: 'AI Agent vs Agentic AI', icon: Cpu, description: 'Learn the key differences and capabilities.' },
+      { to: '/resources/agentic-ai-explained#use-cases', title: 'Business Use Cases', icon: BrainCircuit, description: 'Explore real-world applications of Agentic AI.' },
+      { to: '/resources/agentic-ai-explained#how-to-build', title: 'Build an AI Agent', icon: Wrench, description: 'A guide to creating your first autonomous agent.' },
     ]
   },
   {
     category: 'Connect',
     items: [
-      { to: '/resources/help-docs', title: 'Help Docs', icon: FileText, description: 'Find answers and guides in our knowledge base.' },
-      { to: '/resources/partners', title: 'Partners', icon: Handshake, description: 'Discover our ecosystem of technology partners.' },
-      { to: '/resources/community', title: 'Community', icon: Users, description: 'Join the conversation with other builders and innovators.' },
       { to: '/contact', title: 'Support', icon: LifeBuoy, description: 'Get in touch with our team for assistance.' },
     ]
   }
 ];
 
 const ResourceCard = ({ to, title, icon: Icon, description }) => {
-  const { toast } = useToast();
+  const navigate = useNavigate();
 
+  // Every card is a real page now (27 Nov 2026: six said "Coming Soon"). An article section opens the article,
+  // then scrolls to the section, as the header's Resources menu does.
   const handleClick = (e) => {
-    if (to.startsWith('/resources/')) {
+    if (to.includes('#')) {
       e.preventDefault();
-      toast({
-        title: "🚧 Coming Soon!",
-        description: "This resource page is under construction. Check back soon!",
-      });
+      const [path, hash] = to.split('#');
+      navigate(path);
+      setTimeout(() => document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400);
     }
   };
 

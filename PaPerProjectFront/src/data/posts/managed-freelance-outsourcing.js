@@ -7,7 +7,7 @@ export const managedFreelanceOutsourcing = {
   description: "Discover how a managed freelance team with project insurance, NDAs, and IP protection can de-risk your outsourcing and guarantee success.",
   image: "https://images.unsplash.com/photo-1542744173-8e7e53415bb0",
   category: "Outsourcing Strategy",
-  author: "Emily White, Head of Projects",
+  author: 'Pay Per Project Team',
   date: "July 16, 2025",
   tags: ['managed freelance team', 'outsourcing with project manager', 'freelance project insurance', 'NDA for outsourcing'],
   content: <ManagedOutsourcingContent />,
