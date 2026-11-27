@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-    import { Link } from 'react-router-dom';
+    import { Link, useNavigate } from 'react-router-dom';
     import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
     import { Slider } from '@/components/ui/slider';
     import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ import React, { useState } from 'react';
     import { FaStripeS, FaCcPaypal, FaCcStripe } from "react-icons/fa";
     
     const BenchmarkSlider = () => {
+      const navigate = useNavigate();
       const { t } = useTranslation();
       const [budget, setBudget] = useState(25000);
       const { toast } = useToast();
@@ -42,10 +43,8 @@ import React, { useState } from 'react';
             setTimeout(() => inputElement.focus(), 500);
           }
         } else {
-           toast({
-            title: "Let's build your quote! 📝",
-            description: "Submit your project details in the form at the top of the page to get started.",
-          });
+          // The project form lives on its own page (26 Nov 2026: the button only showed a message).
+          navigate('/start-project');
         }
       };
     

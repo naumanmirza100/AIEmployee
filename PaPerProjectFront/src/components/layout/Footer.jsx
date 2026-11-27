@@ -1,22 +1,14 @@
 
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Twitter, Github, Linkedin } from 'lucide-react';
-import { useToast } from '@/components/ui/use-toast';
+import { Twitter, Instagram, Linkedin } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import Logo from '@/components/layout/Logo';
 
 const Footer = () => {
   const { t } = useTranslation();
-  const { toast } = useToast();
   const year = new Date().getFullYear();
 
-  const handleSocialClick = () => {
-    toast({
-      title: "🚧 Feature in Progress!",
-      description: "Our social media pages are coming soon. Follow us for updates! 🚀",
-    });
-  };
 
   return (
     <footer className="border-t bg-card">
@@ -30,9 +22,9 @@ const Footer = () => {
               {t('footer_platform_description')}
             </p>
             <div className="mt-8 flex gap-6">
-              <button onClick={handleSocialClick} className="text-muted-foreground transition hover:text-primary"><span className="sr-only">Twitter</span><Twitter className="h-6 w-6" /></button>
-              <button onClick={handleSocialClick} className="text-muted-foreground transition hover:text-primary"><span className="sr-only">GitHub</span><Github className="h-6 w-6" /></button>
-              <button onClick={handleSocialClick} className="text-muted-foreground transition hover:text-primary"><span className="sr-only">LinkedIn</span><Linkedin className="h-6 w-6" /></button>
+              <a href="https://x.com/laskon_tech" target="_blank" rel="noopener noreferrer" className="text-muted-foreground transition hover:text-primary"><span className="sr-only">X (Twitter)</span><Twitter className="h-6 w-6" /></a>
+              <a href="https://www.instagram.com/laskon_technologies/" target="_blank" rel="noopener noreferrer" className="text-muted-foreground transition hover:text-primary"><span className="sr-only">Instagram</span><Instagram className="h-6 w-6" /></a>
+              <a href="https://www.linkedin.com/company/laskon-technologies/" target="_blank" rel="noopener noreferrer" className="text-muted-foreground transition hover:text-primary"><span className="sr-only">LinkedIn</span><Linkedin className="h-6 w-6" /></a>
             </div>
           </div>
 
@@ -49,8 +41,8 @@ const Footer = () => {
             <div className="text-center sm:text-left">
               <p className="text-lg font-medium text-foreground">{t('footer_company')}</p>
               <ul className="mt-8 space-y-4 text-sm">
-                <li><button onClick={() => toast({ title: 'Coming Soon!' })} className="text-muted-foreground transition hover:text-primary">{t('footer_about_us')}</button></li>
-                <li><button onClick={() => toast({ title: 'Coming Soon!' })} className="text-muted-foreground transition hover:text-primary">{t('footer_careers')}</button></li>
+                <li><a href="https://www.laskontech.com/about-us" target="_blank" rel="noopener noreferrer" className="text-muted-foreground transition hover:text-primary">{t('footer_about_us')}</a></li>
+                <li><Link to="/careers" className="text-muted-foreground transition hover:text-primary">{t('footer_careers')}</Link></li>
                 <li><Link to="/contact" className="text-muted-foreground transition hover:text-primary">{t('footer_contact')}</Link></li>
                 <li><Link to="/blog" className="text-muted-foreground transition hover:text-primary">{t('footer_blog', 'Blog')}</Link></li>
                 <li><Link to="/reviews" className="text-muted-foreground transition hover:text-primary">{t('footer_reviews', 'Reviews')}</Link></li>
@@ -61,7 +53,6 @@ const Footer = () => {
               <ul className="mt-8 space-y-4 text-sm">
                 <li><Link to="/terms-of-service" className="text-muted-foreground transition hover:text-primary">{t('footer_terms')}</Link></li>
                 <li><Link to="/privacy-policy" className="text-muted-foreground transition hover:text-primary">{t('footer_privacy')}</Link></li>
-                <li><button onClick={() => toast({ title: 'Coming Soon!' })} className="text-muted-foreground transition hover:text-primary">{t('footer_cookies')}</button></li>
               </ul>
             </div>
           </div>
