@@ -17,26 +17,19 @@ const ContactInfoBar = () => {
             className="bg-card border-t border-b"
         >
             <div className="container mx-auto px-4 md:px-6 py-12">
-                <div className="grid md:grid-cols-3 gap-8 text-center">
+                <div className="grid md:grid-cols-2 gap-8 text-center max-w-3xl mx-auto">
                     <div className="flex flex-col items-center gap-3">
                         <div className="p-3 bg-primary/10 rounded-full"><Mail className="h-6 w-6 text-primary" /></div>
                         <div>
                             <p className="font-semibold text-foreground">{t('contact_info_inquiries', 'General Inquiries')}</p>
-                            <a href="mailto:info@payperproject.com" className="text-muted-foreground hover:text-primary transition-colors">info@payperproject.com</a>
+                            <a href="mailto:sales@laskontech.com" className="text-muted-foreground hover:text-primary transition-colors">sales@laskontech.com</a>
                         </div>
                     </div>
                     <div className="flex flex-col items-center gap-3">
                         <div className="p-3 bg-primary/10 rounded-full"><Phone className="h-6 w-6 text-primary" /></div>
                         <div>
                             <p className="font-semibold text-foreground">{t('contact_info_phone', 'Call Us')}</p>
-                            <a href="tel:+1234567890" className="text-muted-foreground hover:text-primary transition-colors">+1 (234) 567-890</a>
-                        </div>
-                    </div>
-                    <div className="flex flex-col items-center gap-3">
-                        <div className="p-3 bg-primary/10 rounded-full"><MapPin className="h-6 w-6 text-primary" /></div>
-                        <div>
-                            <p className="font-semibold text-foreground">{t('contact_info_office', 'Our Office')}</p>
-                            <p className="text-muted-foreground">123 Innovation Drive, Tech City, 54321</p>
+                            <a href="tel:+447466436417" className="text-muted-foreground hover:text-primary transition-colors">+44 7466 436417</a>
                         </div>
                     </div>
                 </div>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import BackToHome from '@/components/auth/BackToHome';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -444,6 +445,7 @@ const CompanyLoginPage = () => {
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md"
         >
+          <BackToHome />
           <Card>
             {mode === 'login' ? renderLogin() : renderForgot()}
           </Card>
