@@ -2492,6 +2492,9 @@ class AgentTokenQuota(models.Model):
         default=0,
         help_text='Info-only counter of tokens spent via BYOK (not billable).',
     )
+    # Free tokens used on `day_date` (UTC), for the daily cap (AdminPricingConfig.daily_free_tokens, 27 Nov 2026).
+    day_used_tokens = models.BigIntegerField(default=0)
+    day_date = models.DateField(null=True, blank=True)
     # Notification dedup flags — reset to False when quota is reset/topped-up
     notified_80pct = models.BooleanField(default=False)
     notified_90pct = models.BooleanField(default=False)
@@ -2770,6 +2773,12 @@ class AdminPricingConfig(models.Model):
     managed_key_tokens = models.BigIntegerField(
         default=0,
         help_text='Default tokens per weekly reset cycle when admin assigns a managed key.',
+    )
+    # A company could use its whole free allowance in one day (27 Nov 2026): at most this many free tokens a day
+    # per company on this agent, the day in UTC. 0 = no daily limit. A company's own key is never limited by it.
+    daily_free_tokens = models.BigIntegerField(
+        default=0,
+        help_text='Most free tokens one company may use on this agent in a day (UTC). 0 = no daily limit.',
     )
     # Monthly discount percentage — e.g. 10 means 10% off the monthly price
     monthly_discount_pct = models.DecimalField(

@@ -326,7 +326,7 @@ const DocumentAuthoring = () => {
             setStreamingContent('');
             setStreamingTitle('');
             setView('create');
-            const HARD_BLOCK_CODES = ['quota_exhausted', 'managed_quota_exhausted', 'byok_cap_reached', 'no_key', 'bad_api_key'];
+            const HARD_BLOCK_CODES = ['quota_exhausted', 'daily_quota_reached', 'managed_quota_exhausted', 'byok_cap_reached', 'no_key', 'bad_api_key'];
             const isHardBlock = meta?.status === 402 || meta?.status === 403 || meta?.hard_block || HARD_BLOCK_CODES.includes(meta?.error_code);
             toast({
               title: isHardBlock ? 'Generation blocked' : 'Generation failed',

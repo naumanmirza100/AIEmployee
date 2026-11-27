@@ -512,6 +512,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             toast({
               // The AI was refused (allowance used up, no key): not a crash. The message says what to do.
               title: data.error_code === 'quota_exhausted' ? 'Free AI allowance used up'
+                : data.error_code === 'daily_quota_reached' ? "Today's free AI allowance used up"
                 : data.error_code ? 'The AI is not available' : 'Processing failed',
               description: data.error || 'The document could not be processed.',
               variant: 'destructive',

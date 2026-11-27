@@ -86,6 +86,14 @@ class RecruiterQualificationSettings(models.Model):
         default=45,
         help_text="Minimum confidence score (0-100) to mark candidate as HOLD. Default: 45. Scores below this are REJECTED."
     )
+    # Fit first, then confidence (client decision Q3, 27 Nov 2026). The confidence score starts from the fit score
+    # and adds up to 68 for skills and experience, so a poor fit (35) could reach 82 and be invited automatically.
+    # Below this fit score an INTERVIEW becomes HOLD, for a person to look at. Applies whatever
+    # use_custom_thresholds says; 0 switches it off.
+    min_fit_score = models.IntegerField(
+        default=50,
+        help_text="Minimum fit score (0-100) for INTERVIEW. Below it an INTERVIEW becomes HOLD. 0 = off. Default: 50"
+    )
     
     # Use custom thresholds flag
     use_custom_thresholds = models.BooleanField(
