@@ -33,14 +33,25 @@ const sections = [
             https://www.googleapis.com/auth/calendar
           </p>
           <p className="mt-4">
-            We use it only to create calendar events and Google Meet links on your behalf — for
-            interviews your Recruitment agent schedules, and meetings your Sales agent schedules.
+            We use it to create calendar events and Google Meet links on your behalf — for
+            interviews your Recruitment agent schedules, and meetings your agents book — and, if you
+            connect your own calendar in My Space, to see when you are busy so that nothing is booked
+            over your other commitments.
           </p>
           <p className="mt-3">
-            <strong>We never read, change, or delete your existing events.</strong> We only add
-            events that you or your agents start from inside the platform.
+            For your own calendar we read only the start and end times of your events. We do not
+            keep their titles, descriptions, locations or attendees.
+          </p>
+          <p className="mt-3">
+            <strong>We never change or delete events we did not create.</strong> We add, update and
+            remove only the events the platform itself put in your calendar, for meetings booked
+            through it.
           </p>
         </ScopeCallout>
+        <p>
+          The same applies if you connect an Outlook / Microsoft 365 calendar instead: we read only
+          when you are busy, and change only the events we created.
+        </p>
         <p>
           Data we receive from Google is used for that scheduling feature and nothing else. We do
           not sell it, share it for advertising, or use it to train models.
