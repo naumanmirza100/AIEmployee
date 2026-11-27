@@ -22,6 +22,11 @@
  *   * Clicking the pill expands a panel with per-upload progress bars.
  *   * Toast fires again when each upload finishes (or fails).
  *   * Provider owns the upload lifecycle so navigating away doesn't cancel it.
+ *
+ * Server jobs with no file (the admin's Test data page) use the same pill: pass `kind: 'job'` and `labels`
+ * ({ startedTitle, startedText, doneTitle, doneText, failedTitle, pill, progress: (u) => text }); `upload` then
+ * just starts the job and resolves with `{ data: { id } }`, and `poll` reads its progress. `quiet: true` skips
+ * the "started" toast (for following a job that was already running).
  */
 import React, { createContext, useContext, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -87,7 +92,7 @@ export function BackgroundUploadProvider({ children }) {
    * @param {(result:object) => void} [args.onDone]  — called after ready.
    * @returns {number} upload id (for callers that need to track).
    */
-  const startUpload = useCallback(({ title, agent, upload, poll, onDone }) => {
+  const startUpload = useCallback(({ title, agent, upload, poll, onDone, kind = 'upload', labels = {}, quiet = false }) => {
     const id = _nextId++;
     setUploads((prev) => ({
       ...prev,
@@ -101,6 +106,9 @@ export function BackgroundUploadProvider({ children }) {
         indexStatus: 'idle',
         indexDone: 0,
         indexTotal: 0,
+        step: '',
+        kind,
+        labels,
         error: '',
         done: false,
         addedAt: Date.now(),
@@ -109,10 +117,12 @@ export function BackgroundUploadProvider({ children }) {
 
     // Immediate toast so the user knows the work has been kicked off and
     // they can close the dialog / navigate away safely.
-    toast({
-      title: 'Upload started',
-      description: `${title || 'Document'} is uploading in the background.`,
-    });
+    if (!quiet) {
+      toast({
+        title: labels.startedTitle || 'Upload started',
+        description: labels.startedText || `${title || 'Document'} is uploading in the background.`,
+      });
+    }
 
     // Fire-and-forget async runner. Errors are caught and surfaced via
     // toast + the widget's failed-state UI.
@@ -146,8 +156,8 @@ export function BackgroundUploadProvider({ children }) {
             status: 'ready', indexStatus: 'ready', indexPercent: 100, done: true,
           });
           toast({
-            title: 'Upload complete',
-            description: `"${title}" is ready.`,
+            title: labels.doneTitle || 'Upload complete',
+            description: labels.doneText || `"${title}" is ready.`,
           });
           try { onDone?.(res); } catch (_) { /* swallow */ }
           _autoDismiss(id);
@@ -175,6 +185,7 @@ export function BackgroundUploadProvider({ children }) {
               indexPercent: Math.round(pct),
               indexDone: Number(s.chunks_processed || 0),
               indexTotal: Number(s.chunks_total || 0),
+              step: s.step || '',
               error: errMsg,
             });
             if (s.processing_status === 'ready') {
@@ -184,10 +195,10 @@ export function BackgroundUploadProvider({ children }) {
               // just say the upload is complete — the caller's onDone can
               // fire a more descriptive toast if it wants to.
               toast({
-                title: 'Upload complete',
+                title: labels.doneTitle || 'Upload complete',
                 // It said "N chunk(s) embedded" even when no part got a vector and search could only match words
                 // (CO-70). HR and Frontline now say how many parts can be found by meaning.
-                description: s.chunks_total > 0
+                description: labels.doneText ? labels.doneText : s.chunks_total > 0 && kind === 'upload'
                   ? (s.chunks_with_vectors == null
                     ? `"${title}" — ${s.chunks_total} part(s) indexed.`
                     : s.chunks_with_vectors >= s.chunks_total
@@ -207,8 +218,8 @@ export function BackgroundUploadProvider({ children }) {
                 error: errMsg || 'Processing failed.',
               });
               toast({
-                title: 'Processing failed',
-                description: `"${title}": ${errMsg || 'The document could not be processed.'}`,
+                title: labels.failedTitle || 'Processing failed',
+                description: `"${title}": ${errMsg || (kind === 'job' ? 'It could not be finished.' : 'The document could not be processed.')}`,
                 variant: 'destructive',
               });
               // Fire onDone with the failed status so the caller can react
@@ -225,16 +236,16 @@ export function BackgroundUploadProvider({ children }) {
         // Timed out but likely still running server-side.
         patch(id, { status: 'ready', done: true, indexPercent: Math.max(0, uploadsRef.current[id]?.indexPercent || 0) });
         toast({
-          title: 'Still processing',
+          title: kind === 'job' ? 'Still running' : 'Still processing',
           description: `"${title}" is taking a while — it will finish in the background.`,
         });
         try { onDone?.(null); } catch (_) { /* swallow */ }
         _autoDismiss(id);
       } catch (err) {
         console.error('BackgroundUpload failed:', err);
-        patch(id, { status: 'failed', done: true, error: err?.message || 'Upload failed.' });
+        patch(id, { status: 'failed', done: true, error: err?.message || (kind === 'job' ? 'Could not start.' : 'Upload failed.') });
         toast({
-          title: 'Upload failed',
+          title: labels.failedTitle || 'Upload failed',
           description: `"${title}": ${err?.message || 'Unknown error'}`,
           variant: 'destructive',
         });
@@ -287,8 +298,13 @@ function BackgroundUploadWidget({ uploads, expanded, setExpanded, dismiss, dismi
   const failed = items.filter((u) => u.status === 'failed');
   const anyActive = active.length > 0;
 
+  const onlyUploads = (list) => list.every((u) => u.kind !== 'job');
   const pillLabel = anyActive
-    ? `Uploading ${active.length}`
+    ? (onlyUploads(active)
+      ? `Uploading ${active.length}`
+      : active.length === 1
+        ? `${active[0].labels?.pill || 'Working'} ${active[0].status === 'indexing' ? `${active[0].indexPercent}%` : ''}`.trim()
+        : `${active.length} in progress`)
     : failed.length > 0
       ? `${failed.length} failed`
       : `${items.length} ready`;
@@ -298,7 +314,7 @@ function BackgroundUploadWidget({ uploads, expanded, setExpanded, dismiss, dismi
       {expanded && (
         <div className="pointer-events-auto w-[340px] max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-[var(--sfc-12121a)] shadow-2xl">
           <div className="sticky top-0 flex items-center justify-between px-3 py-2 border-b border-white/10 bg-[var(--sfc-12121a)]">
-            <div className="text-xs font-semibold text-white/80">Document uploads</div>
+            <div className="text-xs font-semibold text-white/80">{onlyUploads(items) ? 'Document uploads' : 'In the background'}</div>
             <div className="flex items-center gap-1">
               {items.some((u) => u.done) && (
                 <button
@@ -359,11 +375,14 @@ function UploadRow({ u, onDismiss }) {
   const isFailed = u.status === 'failed';
 
   const primaryPct = isUploading ? u.uploadPercent : (isIndexing ? u.indexPercent : 100);
+  const isJob = u.kind === 'job';
   const primaryLabel = isFailed
     ? 'Failed'
     : isReady
       ? 'Complete'
-      : isIndexing
+      : isJob
+        ? (isIndexing && u.labels?.progress ? u.labels.progress(u) : isIndexing ? 'Working…' : 'Starting…')
+        : isIndexing
         // Chunk-embed pipelines (HR / Frontline) know how many chunks are
         // done vs total. Single-LLM-call flows (Project Pilot) don't — show
         // a generic "Processing…" so the wording matches the actual work.
@@ -422,6 +441,9 @@ function UploadRow({ u, onDismiss }) {
           style={{ width: `${primaryPct}%` }}
         />
       </div>
+      {isJob && isIndexing && u.step && (
+        <div className="text-[10px] text-white/45 truncate" title={u.step}>{u.step}</div>
+      )}
       {isFailed && u.error && (
         <div className="text-[10px] text-red-300/90 pt-1">{u.error}</div>
       )}

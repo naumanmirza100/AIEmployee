@@ -46,6 +46,7 @@ import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
 import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
 import NotificationsPage from '@/pages/NotificationsPage';
 import AdminBackupsPage from '@/pages/AdminBackupsPage';
+import AdminTestDataPage from '@/pages/AdminTestDataPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
 import UserDashboardPage from '@/pages/UserDashboardPage';
 import UserDashboardRedirect from '@/pages/UserDashboardRedirect';
@@ -134,6 +135,14 @@ import { useTranslation } from 'react-i18next';
               element={
                 <ProtectedRoute requireAdmin={true}>
                   <AdminBackupsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/test-data"
+              element={
+                <ProtectedRoute requireAdmin={true}>
+                  <AdminTestDataPage />
                 </ProtectedRoute>
               }
             />

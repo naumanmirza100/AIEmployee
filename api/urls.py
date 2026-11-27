@@ -45,6 +45,7 @@ from api.views import company_api_keys
 from api.views import admin_api_keys
 from api.views import admin_backups
 from api.views import company_backups
+from api.views import admin_test_data
 from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
@@ -786,6 +787,10 @@ urlpatterns = [
 
     # Super Admin — whole-system backups
     re_path(r'^admin/backups/?$', admin_backups.backups_list, name='admin_backups'),  # GET, POST
+    # The super admin's Test data page (27 Nov 2026): add or remove the demo companies in the background.
+    re_path(r'^admin/test-data/?$', admin_test_data.test_data_overview, name='admin_test_data'),  # GET
+    re_path(r'^admin/test-data/(?P<action>load|remove)/?$', admin_test_data.test_data_start, name='admin_test_data_start'),  # POST
+    re_path(r'^admin/test-data/runs/(?P<run_id>\d+)/?$', admin_test_data.test_data_run, name='admin_test_data_run'),  # GET
     re_path(r'^admin/backups/(?P<backup_id>\d+)/?$', admin_backups.backup_delete, name='admin_backup_delete'),  # DELETE
     re_path(r'^admin/backups/(?P<backup_id>\d+)/link/?$', admin_backups.backup_download_link, name='admin_backup_link'),  # POST
     re_path(r'^admin/backups/(?P<backup_id>\d+)/download/?$', admin_backups.backup_download, name='admin_backup_download'),  # GET (signed ticket)

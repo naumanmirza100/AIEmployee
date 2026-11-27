@@ -1,4 +1,5 @@
 import {
+  FlaskConical,
   MessageSquare,
   BrainCircuit,
   FileCheck,
@@ -73,6 +74,14 @@ export const getAdminNavItems = (navigate, { pendingRequests = 0 } = {}) => [
     section: 'admin-backups',
     basePath: '/admin/backups',
     onClick: () => navigate('/admin/backups'),
+  },
+  {
+    // The demo companies (Margalla Software, Crestline Technologies): add or remove them, see their logins.
+    label: 'Test data',
+    icon: FlaskConical,
+    section: 'admin-test-data',
+    basePath: '/admin/test-data',
+    onClick: () => navigate('/admin/test-data'),
   },
   {
     label: 'Notifications',

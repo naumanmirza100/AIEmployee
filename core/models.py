@@ -3038,3 +3038,45 @@ class SystemBackup(models.Model):
 
     def __str__(self):
         return f"Backup {self.pk} ({self.status})"
+
+
+class DemoSnapshot(models.Model):
+    """A demo company kept for the super admin's Test data page (core/demo_data.py, 27 Nov 2026): every row that
+    belongs to it, secrets blanked, zlib-compressed JSON. Part of the platform's setup: the sweep keeps it."""
+    key = models.SlugField(max_length=40, unique=True)
+    label = models.CharField(max_length=200)
+    company_pk = models.IntegerField(help_text='The company id the rows were taken with; loading keeps it.')
+    company_name = models.CharField(max_length=255)
+    data = models.BinaryField()
+    rows = models.IntegerField(default=0)
+    made_at = models.DateTimeField()
+    # While loaded: the one password every login of the company was given (encrypted), and when.
+    password = models.TextField(blank=True, default='')
+    loaded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Demo snapshot'
+
+    def __str__(self):
+        return f'{self.key}: {self.company_name} ({self.rows} rows)'
+
+
+class DemoDataRun(models.Model):
+    """One press of Add or Remove on the Test data page, done in the background; the page polls it."""
+    ACTION_CHOICES = [('load', 'Add test data'), ('remove', 'Remove test data')]
+    STATUS_CHOICES = [('queued', 'Queued'), ('running', 'Running'), ('done', 'Done'), ('failed', 'Failed')]
+    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    keys = models.JSONField(default=list, blank=True, help_text='Snapshot keys; empty = all.')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='queued')
+    done_rows = models.IntegerField(default=0)
+    total_rows = models.IntegerField(default=0)
+    step = models.CharField(max_length=200, blank=True, default='')
+    error = models.TextField(blank=True, default='')
+    started_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Demo data run'
