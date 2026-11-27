@@ -459,25 +459,39 @@ def _is_kept_table(model) -> bool:
     return bool(opts.auto_created) and _is_platform(opts.auto_created)
 
 
-def sweep_plan() -> list:
-    """[(model, queryset, rows)] the sweep deletes: every customer's data; the kept logins and the setup stay."""
+def _kept_rows(keep_companies) -> dict:
+    """{label: [pk, ...]}: the companies the sweep is told to keep, each with everything that belongs to it."""
+    rows: dict = {}
+    for company in keep_companies:
+        for label, pk in company_graph(company):
+            rows.setdefault(label, set()).add(pk)
+    return {label: sorted(pks) for label, pks in rows.items()}
+
+
+def sweep_plan(keep_companies=()) -> list:
+    """[(model, queryset, rows)] the sweep deletes: every customer's data; the kept logins, the setup and any company
+    in `keep_companies` stay."""
     keep = kept_users()
+    kept_rows = _kept_rows(keep_companies)
     plan = []
     for model in apps.get_models(include_auto_created=True):
         if _is_kept_table(model):
             continue
-        qs = _not_kept(model, keep) if model._meta.label_lower in SUPERUSER_OWNED else model._base_manager.all()
+        label = model._meta.label_lower
+        qs = _not_kept(model, keep) if label in SUPERUSER_OWNED else model._base_manager.all()
+        if label in kept_rows:
+            qs = qs.exclude(pk__in=kept_rows[label])
         n = qs.count()
         if n:
             plan.append((model, qs, n))
     return plan
 
 
-def sweep(*, commit: bool) -> dict:
+def sweep(*, commit: bool, keep_companies=()) -> dict:
     """{label: rows} the sweep deletes (or would, with commit=False)."""
     from core.models import DemoSnapshot, UserProfile
     keep = kept_users()
-    plan = sweep_plan()
+    plan = sweep_plan(keep_companies)
     report = {m._meta.label: n for m, _, n in plan}
     if commit:
         connection.disable_constraint_checking()
