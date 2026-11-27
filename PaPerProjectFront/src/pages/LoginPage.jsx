@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { takeReturnTo } from '@/utils/returnTo';
 import { Lock, Mail, Loader2, Shield, Eye, EyeOff } from 'lucide-react';
 import LoginSwitch from '@/components/auth/LoginSwitch';
+import BackToHome from '@/components/auth/BackToHome';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -94,6 +95,7 @@ const LoginPage = () => {
           transition={{ duration: 0.5 }}
           className="w-full max-w-md"
         >
+          <BackToHome />
           <Card className="border-2 shadow-xl">
             <CardHeader className="space-y-1 text-center px-4 sm:px-6 pt-6 sm:pt-6">
               <div className="mx-auto mb-3 sm:mb-4 flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-primary/10">

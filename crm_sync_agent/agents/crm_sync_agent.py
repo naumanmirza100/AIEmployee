@@ -307,10 +307,11 @@ class CRMSyncAgent:
     PULL_MAX_CONTACTS = 5000
 
     def pull_changes(self, integration: CRMIntegration) -> dict:
-        """Names, phone, job title and company corrected in the CRM, copied to the records CRM Sync linked to those
-        contacts. The CRM's value wins where it has one; a field it has empty never empties ours. Written with
-        update(), so nothing is sent back to the CRM for it (and the CRM, which is only ever filled where blank,
-        keeps its own values either way)."""
+        """Phone, job title and company corrected in the CRM, copied to the records CRM Sync linked to those
+        contacts. The CRM's value wins where it has one; a field it has empty never empties ours. A name is taken
+        only by a record that has none: the CRM's name replaced the one the support team knew ("Zara Form" became
+        "Zara Siddiqui"), and the client chose to keep ours (Q4, 27 Nov 2026). Written with update(), so nothing is
+        sent back to the CRM for it (and the CRM, which is only ever filled where blank, keeps its own values)."""
         from django.apps import apps
         started = timezone.now()
         since = (integration.last_pulled_at or integration.created_at) - self.PULL_OVERLAP
@@ -335,13 +336,17 @@ class CRMSyncAgent:
                 continue
             row = by_id[mapping.crm_contact_id]
             changes = {}
+            # The name counts as one: any part of ours kept means none of the CRM's is taken.
+            has_name = any((getattr(record, f, '') or '').strip() for f in ('first_name', 'last_name', 'full_name', 'name'))
             for theirs, ours in fields.items():
+                if ours in ('first_name', 'last_name') and has_name:
+                    continue
                 value = (row.get(theirs) or '').strip()
                 if value and value != (getattr(record, ours, '') or ''):
                     changes[ours] = value[:model._meta.get_field(ours).max_length or None]
             if mapping.source_type == CRMContactMapping.SOURCE_FRONTLINE:
                 name = f"{(row.get('first_name') or '').strip()} {(row.get('last_name') or '').strip()}".strip()
-                if name and name != (record.name or ''):
+                if name and not has_name:
                     changes['name'] = name[:255]
             elif mapping.source_type == CRMContactMapping.SOURCE_SDR_LEAD and ({'first_name', 'last_name'} & set(changes)):
                 changes['full_name'] = f"{changes.get('first_name', record.first_name)} {changes.get('last_name', record.last_name)}".strip()[:255]

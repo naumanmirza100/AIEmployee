@@ -27,7 +27,7 @@ const Chatbot = () => {
       setSentTo(form.email.trim());
       setForm({ fullName: '', email: '', message: '' });
     } catch (err) {
-      setError("Your message couldn't be sent. Please try again, or email info@payperproject.com.");
+      setError("Your message couldn't be sent. Please try again, or email sales@laskontech.com.");
     } finally {
       setSending(false);
     }

@@ -58,7 +58,7 @@ const ComplaintsForm = () => {
     } catch (err) {
       toast({
         title: "Your complaint couldn't be sent",
-        description: "Please try again, or email complaints@payperproject.com.",
+        description: "Please try again, or email sales@laskontech.com.",
         variant: "destructive",
       });
     } finally {
@@ -81,7 +81,7 @@ const ComplaintsForm = () => {
           </div>
           <CardDescription>
             <Trans i18nKey="complaints_desc">
-              Please use this form to submit a complaint. Your message will be sent to <a href="mailto:complaints@payperproject.com" className="font-semibold text-destructive hover:underline">complaints@payperproject.com</a>.
+              Please use this form to submit a complaint, or email <a href="mailto:sales@laskontech.com" className="font-semibold text-destructive hover:underline">sales@laskontech.com</a>.
             </Trans>
           </CardDescription>
         </CardHeader>

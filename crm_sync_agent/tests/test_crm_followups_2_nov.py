@@ -16,6 +16,7 @@ from crm_sync_agent.connectors.salesforce import SalesforceConnector, _host
 from crm_sync_agent.models import CRMContactMapping, CRMIntegration, CRMSyncQueue
 from crm_sync_agent.tasks import queue_support
 from Frontline_agent.models import Contact, Ticket
+from ai_sdr_agent.models import SDRLead
 from hr_agent.tests.base import HRTestCase
 
 
@@ -434,14 +435,31 @@ class ChangesFromTheCRM(SupportBase):
             {'id': '999', 'email': 'stranger@x.test', 'first_name': 'Not', 'last_name': 'Ours', 'phone': '',
              'job_title': '', 'company': ''},
         ])
-        self.assertEqual(counts, {'read': 3, 'updated': 2})
+        # The lead's phone, title and company change; the customer has only a new name, which isn't taken.
+        self.assertEqual(counts, {'read': 3, 'updated': 1})
         self.lead.refresh_from_db()
+        # Q4 (27 Nov 2026): a name we have is kept; the CRM's replaces it nowhere.
         self.assertEqual((self.lead.first_name, self.lead.last_name, self.lead.full_name, self.lead.phone,
                           self.lead.job_title, self.lead.company_name),
-                         ('Robert', 'Khan', 'Robert Khan', '+92 333 1234567', 'CTO', 'Acme Ltd'))
+                         ('Bob', '', 'Bob B', '+92 333 1234567', 'CTO', 'Acme Ltd'))
         self.customer.refresh_from_db()
         # A field the CRM has empty never empties ours.
-        self.assertEqual((self.customer.name, self.customer.phone), ('Kiran Shah-Ali', '+92 300 1112233'))
+        self.assertEqual((self.customer.name, self.customer.phone), ('Kiran Shah', '+92 300 1112233'))
+
+    def test_a_record_with_no_name_takes_the_crms(self):
+        SDRLead.objects.filter(pk=self.lead.pk).update(first_name='', last_name='', full_name='')
+        Contact.objects.filter(pk=self.customer.pk).update(name='')
+        counts, _ = self.pull([
+            {'id': '901', 'email': 'bob@acme.com', 'first_name': 'Robert', 'last_name': 'Khan', 'phone': '',
+             'job_title': '', 'company': ''},
+            {'id': '902', 'email': 'kiran.shah@shahtraders.test', 'first_name': 'Kiran', 'last_name': 'Shah-Ali',
+             'phone': '', 'job_title': '', 'company': ''},
+        ])
+        self.assertEqual(counts, {'read': 2, 'updated': 2})
+        self.lead.refresh_from_db()
+        self.assertEqual((self.lead.first_name, self.lead.last_name, self.lead.full_name), ('Robert', 'Khan', 'Robert Khan'))
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.name, 'Kiran Shah-Ali')
 
     def test_copying_back_sends_nothing_to_the_crm(self):
         CRMSyncQueue.objects.all().delete()
