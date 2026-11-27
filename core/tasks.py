@@ -277,3 +277,10 @@ def sync_personal_calendars():
     meetings the agents booked for that person into it (core/personal_calendars.py)."""
     from core.personal_calendars import sync_all
     return sync_all()
+
+
+@shared_task(name='core.tasks.run_test_data_job')
+def run_test_data_job(run_id):
+    """Add or remove the demo companies for the super admin's Test data page (core/demo_data.py)."""
+    from core.demo_data import run_job
+    run_job(run_id)
